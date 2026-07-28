@@ -83,6 +83,13 @@ elaboration inherits the setup's audience, so a second caption or statistic does
 not transform a collectively human-owned setup into an open ensemble beat. A
 later genuinely unowned message can still reopen the floor.
 
+When the first live bubble is an unaddressed personal artifact and its audience
+is not yet clear, use the existing brief foreground watch before committing to a
+reply or reaction, then reread the beat. This protects a same-sender caption that
+arrives while the turn is active. Do not add that wait to a direct Murph ask,
+immediate safety, a clear factual or task request, or a catch-up turn whose timing
+does not show a live beat.
+
 This is not an addressed-only rule. An open factual or task request such as
 "does anyone know...?" remains available to Murph when no human has claimed it.
 
@@ -347,8 +354,11 @@ Regression coverage should represent both restraint and initiative:
 22. "does anyone know...?" asks for a factual or task answer -> one brief answer
     remains eligible when no human has claimed it;
 23. the same artifact is then directly handed to Murph -> one reply is earned.
+24. an unaddressed personal artifact lands in a live room before its audience is
+    clear -> Murph watches briefly before composing, and a same-sender collective
+    caption that arrives during that watch leaves no reply or reaction to send.
 
-Items 11 through 23 are judgment calls that a string assertion cannot settle;
+Items 11 through 24 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.
 
 Product research should observe ordinary rooms rather than teach people an exact

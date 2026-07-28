@@ -180,6 +180,9 @@ describe('assistant execution prompt contract', () => {
       'Read immediate same-sender elaborations as one beat.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'use the existing brief watch before composing or reacting',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
       'This does not suppress open factual or task requests',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
@@ -208,6 +211,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'Human ownership can be collective.',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'use the existing brief watch before composing or reacting',
     )
   })
 
