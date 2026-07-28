@@ -40,7 +40,11 @@ import {
   resolveAssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
-import { createAssistantTurnId } from './turns.js'
+import {
+  assistantTurnReceiptMatchesResponse,
+  createAssistantTurnId,
+  listRecentAssistantTurnReceiptsForSession,
+} from './turns.js'
 import {
   normalizeAssistantDeliverySubject,
   selectedAssistantEmailDeliveryIsThreadReply,
@@ -88,6 +92,7 @@ import {
   resolveAssistantStatePaths,
 } from './store/paths.js'
 import {
+  ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
   ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
 } from './store/persistence.js'
 import {
@@ -355,20 +360,34 @@ export async function sendAssistantNotificationLocal(
         })
       }
 
-      if (
-        isAssistantNotificationOnboardingGoalCheckin(input) &&
-        await hasRecentUnansweredAssistantQuestion({
-          now: new Date(),
-          sessionId: resolved.session.sessionId,
-          vault: input.vault,
+      const unansweredQuestionDelivery =
+        isAssistantNotificationOnboardingGoalCheckin(input)
+          ? await resolveRecentUnansweredAssistantQuestionDelivery({
+              now: new Date(),
+              sessionId: resolved.session.sessionId,
+              vault: input.vault,
+            })
+          : null
+      if (unansweredQuestionDelivery === 'pending') {
+        throw new VaultCliError(
+          'ASSISTANT_NOTIFICATION_PRIOR_QUESTION_DELIVERY_PENDING',
+          'A recent assistant question is still awaiting terminal delivery.',
+          { retryable: true },
+        )
+      }
+      if (unansweredQuestionDelivery === 'sent') {
+        const decision: AssistantNotificationDecision = {
+          kind: 'skip',
+          privateSummary:
+            'A recent assistant question is still unanswered.',
+        }
+        await runAssistantNotificationBeforeCommit(input, {
+          decision,
+          deliveryOutcome: null,
+          response: null,
         })
-      ) {
         return withPostTurnDeliveryExpectations({
-          decision: {
-            kind: 'skip',
-            privateSummary:
-              'A recent assistant question is still unanswered.',
-          },
+          decision,
           response: null,
           session: resolved.session,
         })
@@ -1506,16 +1525,28 @@ function isAssistantNotificationOnboardingGoalCheckin(
   return input.turnPolicy?.kind === 'onboarding-goal-checkin'
 }
 
-async function hasRecentUnansweredAssistantQuestion(input: {
+type RecentUnansweredAssistantQuestionDelivery = 'pending' | 'sent'
+
+async function resolveRecentUnansweredAssistantQuestionDelivery(input: {
   now: Date
   sessionId: string
   vault: string
-}): Promise<boolean> {
+}): Promise<RecentUnansweredAssistantQuestionDelivery | null> {
   let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+  let receipts: Awaited<
+    ReturnType<typeof listRecentAssistantTurnReceiptsForSession>
+  >
   try {
-    entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
+    [entries, receipts] = await Promise.all([
+      listAssistantTranscriptEntries(input.vault, input.sessionId),
+      listRecentAssistantTurnReceiptsForSession(
+        input.vault,
+        input.sessionId,
+        ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
+      ),
+    ])
   } catch {
-    return false
+    return null
   }
 
   let latestUserIndex = -1
@@ -1525,7 +1556,7 @@ async function hasRecentUnansweredAssistantQuestion(input: {
     }
   }
   if (latestUserIndex === -1) {
-    return false
+    return null
   }
 
   const latestUser = entries[latestUserIndex]
@@ -1539,13 +1570,44 @@ async function hasRecentUnansweredAssistantQuestion(input: {
     contentReceivedAtMs <= nowMs &&
     contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS > nowMs
   if (!userContentIsCurrent) {
-    return false
+    return null
   }
 
-  return entries.slice(latestUserIndex + 1).some((entry) =>
-    entry.kind === 'assistant' &&
-    /[?؟？]/u.test(entry.text),
-  )
+  let deliveryPending = false
+  for (const entry of entries.slice(latestUserIndex + 1)) {
+    if (entry.kind !== 'assistant' || !/[?؟？]/u.test(entry.text)) {
+      continue
+    }
+    const entryCreatedAtMs = Date.parse(entry.createdAt)
+    if (!Number.isFinite(entryCreatedAtMs)) {
+      continue
+    }
+    for (const receipt of receipts) {
+      const receiptStartedAtMs = Date.parse(receipt.startedAt)
+      const receiptCompletedAtMs = Date.parse(
+        receipt.completedAt ?? receipt.updatedAt,
+      )
+      if (
+        !assistantTurnReceiptMatchesResponse(receipt, entry.text) ||
+        !Number.isFinite(receiptStartedAtMs) ||
+        !Number.isFinite(receiptCompletedAtMs) ||
+        receiptStartedAtMs > entryCreatedAtMs ||
+        receiptCompletedAtMs < entryCreatedAtMs
+      ) {
+        continue
+      }
+      if (receipt.deliveryDisposition === 'sent') {
+        return 'sent'
+      }
+      if (
+        receipt.deliveryDisposition === 'queued' ||
+        receipt.deliveryDisposition === 'retryable'
+      ) {
+        deliveryPending = true
+      }
+    }
+  }
+  return deliveryPending ? 'pending' : null
 }
 
 function assistantNotificationUsesRestrictedToolProfile(

@@ -34,11 +34,15 @@ Last verified: 2026-07-26
   deadline from the entries that remain. The actual Codex `turn/start`
   request drops all bounded history at or after that deadline, including after
   asynchronous one-shot startup. Before provider work, the notification owner
-  derives only a transient unanswered-question boolean from transcript order
-  and current member receipt authority; a positive result consumes a quiet
-  skip without exposing assistant text to the provider. The dedicated system
-  prompt owns the evidence and no-mutation contract above untrusted
-  conversation, goal, and task text. `member`
+  derives only a transient unanswered-question result from transcript order,
+  current member receipt authority, and a same-session assistant turn receipt
+  whose redacted response fingerprint and time envelope match the assistant
+  entry. Only a `sent` disposition authorizes a quiet skip, and the ordinary
+  commit authority gate still runs before that skip is returned. Queued or
+  retryable delivery defers the occurrence; failed or unreceipted assistant
+  text grants no suppression authority. Assistant text is not exposed to the
+  provider. The dedicated system prompt owns the evidence and no-mutation
+  contract above untrusted conversation, goal, and task text. `member`
   identities require a personal/direct route;
   `authenticated-group` identities require a live exact non-direct
   Linq/iMessage or Telegram route, and group email is excluded. The runtime

@@ -118,13 +118,18 @@ Last verified: 2026-07-27
   retained receipt deadline. The one-shot provider rechecks that deadline when
   constructing the actual `turn/start` request after process and thread
   startup, so expiry during cold startup falls back to the history-free prompt.
-  Before provider work, the notification owner derives only a transient boolean
-  when a recent assistant question follows the latest receipt-authorized member
-  entry with no later member reply. That boolean consumes the one-shot through
-  the existing quiet-skip path; assistant text is never added back to provider
-  evidence. The final outbox provider-entry gate repeats the onboarding
-  precondition after deferred delivery or restart even when the automation
-  revision itself is unchanged.
+  Before provider work, the notification owner may derive only a transient
+  unanswered-question result when a recent assistant question follows the
+  latest receipt-authorized member entry with no later member reply. The
+  assistant entry must match a same-session turn receipt by redacted response
+  fingerprint and turn-time envelope. Only a `sent` disposition consumes the
+  one-shot through the existing quiet-skip path, after the ordinary commit
+  precondition runs. A matching queued or retryable disposition defers the
+  claimed occurrence through the existing cron failure/backoff owner; a failed
+  disposition or missing receipt allows normal provider planning. Assistant
+  text is never added back to provider evidence. The final outbox provider-entry
+  gate repeats the onboarding precondition after deferred delivery or restart
+  even when the automation revision itself is unchanged.
   A skip consumes the one-shot normally and creates no retrying outreach loop.
   Engine and runtime support ship in one runner bundle. Once that bundle writes
   the stable choice-point record, it is the hard rollback floor because an
