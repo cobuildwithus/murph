@@ -92,12 +92,16 @@ describe("murph.group dynamic tool", () => {
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
+      "ask_current_sender",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",
       "read_shared",
       "read_current",
       "read_usage",
+      "read_usage_referral",
+      "arm_usage_referral",
+      "cancel_usage_referral",
       "list_memberships",
       "leave_membership",
       "update_display_name",
@@ -246,6 +250,31 @@ describe("murph.group dynamic tool", () => {
     }))).toEqual({
       kind: "group",
       request: { action: "read_usage" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage_referral",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_usage_referral" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "active_group_v1",
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "cancel_usage_referral",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "cancel_usage_referral" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -463,7 +492,7 @@ describe("murph.group dynamic tool", () => {
         participants: [
           {
             handle: "+15551110003",
-            hasOwnMurph: false,
+            hasOwnMurph: true,
             ownerAdvisoryName: "Alex R.",
           },
         ],
@@ -492,7 +521,7 @@ describe("murph.group dynamic tool", () => {
       result: {
         participants: [{
           handle: "+15551110003",
-          hasOwnMurph: false,
+          hasOwnMurph: true,
           unverifiedOwnerContactLabel: "Alex R.",
         }],
         status: "ok",
@@ -1933,6 +1962,7 @@ describe("murph.group dynamic tool", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok" as const,
         truncated: false,

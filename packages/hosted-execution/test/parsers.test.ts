@@ -592,6 +592,7 @@ describe("parseHostedExecutionEvent", () => {
     expect(
       parseHostedExecutionEvent({
         connectionId: "connection-1",
+        expectedConnectedAt: "2026-04-09T00:00:00.000Z",
         hint: {
           eventType: "sleep.updated",
           jobs: [
@@ -624,6 +625,7 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toEqual({
       connectionId: "connection-1",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         eventType: "sleep.updated",
         jobs: [
@@ -722,6 +724,7 @@ describe("parseHostedExecutionEvent", () => {
     expect(
       parseHostedExecutionEvent({
         connectionId: "connection-1",
+        expectedConnectedAt: "2026-04-09T00:00:00.000Z",
         hint: {
           nextReconcileAt: "2026-04-09T01:00:00Z",
           occurredAt: "2026-04-09T00:00:00Z",
@@ -734,6 +737,7 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toEqual({
       connectionId: "connection-1",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         nextReconcileAt: "2026-04-09T01:00:00.000Z",
         occurredAt: "2026-04-09T00:00:00.000Z",
@@ -1230,6 +1234,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           memberCount: 7,
           membershipId: "hgm_self_123",
           permissionsUrl: "https://example.com/groups/join/abc123",
+          sponsorshipUrl: "https://example.com/groups/fund/funding-locator",
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
             { projectionKind: "hrv-days.v0" },
@@ -1246,6 +1251,30 @@ describe("parseHostedRuntimeGroupTool", () => {
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      sponsorshipUrl: _omittedSponsorshipUrl,
+      ...legacyMembershipWithoutSponsorship
+    } = response.result.memberships[0];
+    void _omittedSponsorshipUrl;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutSponsorship],
+        status: "ok",
+        truncated: false,
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        disclosureGrants: [],
+        memberships: [{
+          ...legacyMembershipWithoutSponsorship,
+          sponsorshipUrl: null,
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",
       result: {
@@ -1772,6 +1801,66 @@ describe("parseHostedRuntimeGroupTool", () => {
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
       shareId: "share_private",
     })).toThrow(/not allowed/u);
+  });
+
+  it("parses referral requests with channel-qualified trusted sender evidence", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      linqSenderHandles: [" +15551110001 "],
+    })).toEqual({
+      action: "read_usage_referral",
+      linqSenderHandles: ["+15551110001"],
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      telegramSenderHandles: [" 1234567890 "],
+    })).toEqual({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      telegramSenderHandles: ["1234567890"],
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "cancel_usage_referral",
+    })).toEqual({ action: "cancel_usage_referral" });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCode: "future_policy",
+    })).toThrow(/not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      linqSenderHandles: ["+15551110001"],
+      telegramSenderHandles: ["1234567890"],
+    })).toThrow(/more than one channel/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: "raw-provider-thread",
+        threadIsDirect: true,
+      },
+    })).toThrow(/threadId is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        identityId: `hid_${"b".repeat(32)}`,
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/identityId is not allowed/u);
   });
 
   it("parses a closed, canonical read_shared roster and status matrix", () => {
@@ -2387,6 +2476,64 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: null,
       },
     });
+  });
+
+  it("parses referral responses without exposing accounting or identity state", () => {
+    const response = {
+      action: "read_usage_referral" as const,
+      result: {
+        outcome: "read" as const,
+        referral: {
+          active: {
+            destinationKind: "group" as const,
+            expiresAt: "2026-08-02T12:00:00.000Z",
+            policyCode: "active_group_v1" as const,
+            rewardLabel: "$3.50 of Murph usage",
+            state: "armed" as const,
+          },
+          availablePolicies: [{
+            code: "new_person_activation_v1" as const,
+            requirementsLabel: "Introduce one new person.",
+            rewardLabel: "$2 of Murph usage",
+          }],
+          trialCreditNotice: null,
+        },
+        status: "ok" as const,
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_referrer_required",
+      },
+    })).toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_referrer_required",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          rewardUsdMicros: "3500000",
+        },
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "arm_usage_referral",
+      result: {
+        ...response.result,
+        outcome: "read",
+      },
+    })).toThrow(/does not match/u);
   });
 
   it("parses share_contact_card responses", () => {

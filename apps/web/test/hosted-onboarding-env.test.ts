@@ -12,6 +12,7 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_usage_5_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_usage_10_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD: "price_usage_20_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_usage_25_123",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
@@ -27,6 +28,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.6-terra");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
+    expect(environment.linqInstantStartPhonePrefixes).toEqual(["+1"]);
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
@@ -34,6 +36,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.stripeUsageCreditPriceIdsByOffer).toEqual({
       usage_5_usd: "price_usage_5_123",
       usage_10_usd: "price_usage_10_123",
+      usage_20_usd: "price_usage_20_123",
       usage_25_usd: "price_usage_25_123",
     });
   });
@@ -49,6 +52,7 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY: "first-contact-openai-key",
+      HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+1, +44,+1",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
@@ -67,6 +71,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionMode).toBe("enforce");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.4-mini");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("first-contact-openai-key");
+    expect(environment.linqInstantStartPhonePrefixes).toEqual(["+44", "+1"]);
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
@@ -138,6 +143,14 @@ describe("readHostedOnboardingEnvironment", () => {
         HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "shadow",
       })),
     ).toThrow(/FIRST_CONTACT_ADMISSION_MODE/u);
+  });
+
+  it("rejects malformed Linq instant-start phone prefixes", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "US,+44",
+      })),
+    ).toThrow(/LINQ_INSTANT_START_PHONE_PREFIXES/u);
   });
 
   it("falls back to OPENAI_API_KEY for Linq first-contact admission", () => {

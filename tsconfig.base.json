@@ -240,6 +240,9 @@
       "@murphai/importers/device-providers/junction-origin": [
         "./packages/importers/src/device-providers/junction-origin.ts"
       ],
+      "@murphai/importers/device-providers/junction": [
+        "./packages/importers/src/device-providers/junction.ts"
+      ],
       "@murphai/importers/device-providers/junction-resources": [
         "./packages/importers/src/device-providers/junction-resources.ts"
       ],

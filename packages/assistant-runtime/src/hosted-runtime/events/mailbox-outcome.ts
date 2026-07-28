@@ -12,6 +12,7 @@ export type HostedMailboxOutcome = HostedMailboxEffect & {
 
 export function createNoopMailboxEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
+  deliveryIntentIds?: readonly string[] | null;
   mailboxLane: HostedMailboxLane;
   nextWakeAt?: HostedMailboxOutcome["nextWakeAt"];
   nextWakeReason?: HostedMailboxOutcome["nextWakeReason"];
@@ -20,6 +21,9 @@ export function createNoopMailboxEffect(input: {
 }): HostedMailboxOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
+    ...(input.deliveryIntentIds === undefined
+      ? {}
+      : { deliveryIntentIds: input.deliveryIntentIds }),
     nextWakeAt: input.nextWakeAt ?? null,
     ...(input.nextWakeReason === undefined
       ? {}
@@ -29,4 +33,3 @@ export function createNoopMailboxEffect(input: {
     redactedLogEntries: input.redactedLogEntries ?? [],
   };
 }
-

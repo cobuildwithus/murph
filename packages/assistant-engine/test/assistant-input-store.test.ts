@@ -13,11 +13,13 @@ import {
 import {
   type AssistantInputCursor,
   type AssistantInputEventRecord,
+  type UpsertAssistantInputEventInput,
   compareAssistantInputCursors,
   createAssistantInputEventId,
   listAssistantInputEvents,
   readAssistantInputEvent,
   readLatestAssistantInputCursor,
+  retireAssistantInputEventContent,
   resolveAssistantInputEventPath,
   resolveAssistantInputEventsDirectory,
   updateAssistantInputProjection,
@@ -231,6 +233,90 @@ describe('assistant input event store', () => {
       paths: resolveAssistantStatePaths(vaultRoot),
     })
     expect((await stat(inputPath)).mode & 0o077).toBe(0)
+  })
+
+  it('keeps retired content redacted when the original event replays', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-retired-replay-',
+    )
+    const sourceRef = createHostedMailboxSourceRef({
+      eventId: 'evt_retired_replay',
+      itemId: 'item_retired_replay',
+      laneSeq: '42',
+    })
+    const originalEvent: UpsertAssistantInputEventInput = {
+      content: {
+        text: 'private original text',
+        transcriptText: 'private original transcript',
+        userMessageContent: [
+          {
+            text: 'private original text',
+            type: 'text',
+          },
+        ],
+      },
+      occurredAt: '2026-04-01T10:00:00.000Z',
+      receivedAt: '2026-04-01T10:00:01.000Z',
+      sourceMetadata: {
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: 'private quoted context',
+      },
+      sourceRef,
+    }
+    const stored = await upsertAssistantInputEvent({
+      event: originalEvent,
+      vault: vaultRoot,
+    })
+
+    const retirement = await retireAssistantInputEventContent({
+      inputId: stored.inputId,
+      now: new Date('2026-04-15T10:00:01.000Z'),
+      vault: vaultRoot,
+    })
+    expect(retirement).toMatchObject({
+      event: {
+        content: {
+          text: null,
+          transcriptText: null,
+          userMessageContent: null,
+        },
+        contentRetiredAt: '2026-04-15T10:00:01.000Z',
+        sourceMetadata: {
+          replyContext: null,
+        },
+      },
+      retired: true,
+    })
+
+    const replay = await upsertAssistantInputEvent({
+      event: originalEvent,
+      now: new Date('2026-04-16T10:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(replay).toEqual(retirement.event)
+    expect(replay).toMatchObject({
+      content: {
+        text: null,
+        transcriptText: null,
+        userMessageContent: null,
+      },
+      sourceMetadata: {
+        replyContext: null,
+      },
+    })
+    await expect(
+      upsertAssistantInputEvent({
+        event: {
+          ...originalEvent,
+          occurredAt: '2026-04-01T10:00:02.000Z',
+        },
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_INPUT_EVENT_CONFLICT',
+    })
   })
 
   it('treats safe descriptor filename additions as compatible with old staged input', async () => {

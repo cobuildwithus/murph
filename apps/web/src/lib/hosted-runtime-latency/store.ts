@@ -388,9 +388,11 @@ export async function recordHostedIngressAssistantMilestone(input: {
   assistantInputIds: readonly string[];
   at?: Date | string | null;
   authenticatedUserId: string;
+  checkpointPublicationExpectedBy?: Date | string | null;
   milestone: HostedRuntimeAssistantMilestone;
   prisma?: HostedIngressLatencyPrismaClient;
   runtimeAttemptId?: string | null;
+  runtimeLeaseGeneration: string;
   source: HostedIngressLatencySource | string;
 }): Promise<HostedIngressLatencyWriteResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -402,6 +404,21 @@ export async function recordHostedIngressAssistantMilestone(input: {
     )),
   ];
   const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
+  const runtimeLeaseGeneration = normalizeHostedRuntimeLeaseGeneration(
+    input.runtimeLeaseGeneration,
+  );
+  const checkpointPublicationExpectedBy = normalizeOptionalDate(
+    input.checkpointPublicationExpectedBy,
+    "Hosted ingress latency checkpoint publication expected by",
+  );
+  if (
+    checkpointPublicationExpectedBy
+    && input.milestone !== "terminal_non_reply_committed"
+  ) {
+    throw new TypeError(
+      "Hosted ingress latency checkpoint publication expectation requires terminal_non_reply_committed.",
+    );
+  }
 
   if (assistantInputIds.length === 0 || !runtimeAttemptId) {
     return { matchedCount: 0, recorded: false, unmatchedCount: assistantInputIds.length };
@@ -422,7 +439,9 @@ export async function recordHostedIngressAssistantMilestone(input: {
   });
   const phaseBreakdown = buildHostedRuntimeAssistantMilestonePhaseBreakdown({
     at,
+    checkpointPublicationExpectedBy,
     milestone: input.milestone,
+    runtimeLeaseGeneration,
   });
   // Sequential on purpose: each locked update opens its own transaction, so
   // running rows in parallel pins one pooled connection per matched trace.
@@ -431,8 +450,11 @@ export async function recordHostedIngressAssistantMilestone(input: {
     rowMatches.push({
       assistantInputId: row.assistantInputId,
       matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
+        terminalNonReplyProjection:
+          input.milestone === "terminal_non_reply_committed",
         phaseBreakdown,
         runtimeAttemptId,
+        runtimeLeaseGeneration,
         traceId: row.id,
       }),
     });
@@ -455,12 +477,16 @@ export async function recordHostedIngressRuntimeMilestone(input: {
   milestone: HostedRuntimeLatencyTraceMilestone;
   prisma?: HostedIngressLatencyPrismaClient;
   runtimeAttemptId?: string | null;
+  runtimeLeaseGeneration: string;
   source: HostedIngressLatencySource | string;
 }): Promise<HostedIngressLatencyWriteResult> {
   const prisma = input.prisma ?? getPrisma();
   const source = normalizeHostedIngressLatencySource(input.source);
   const at = normalizeDate(input.at, "Hosted ingress latency runtime milestone at");
   const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
+  const runtimeLeaseGeneration = normalizeHostedRuntimeLeaseGeneration(
+    input.runtimeLeaseGeneration,
+  );
   const userId = requireSafeLatencyIdentifier(
     input.authenticatedUserId,
     "Hosted ingress latency userId",
@@ -478,6 +504,7 @@ export async function recordHostedIngressRuntimeMilestone(input: {
     at,
     milestone: input.milestone,
     runtimeAttemptId,
+    runtimeLeaseGeneration,
     source,
     userId,
   });
@@ -1420,16 +1447,44 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     at: Date;
     milestone: HostedRuntimeLatencyTraceMilestone;
     runtimeAttemptId: string;
+    runtimeLeaseGeneration: string;
     source: HostedIngressLatencySource;
     userId: string;
   },
 ): Promise<number> {
+  if (input.milestone === "checkpoint_publication_expected_by") {
+    const rows = await prisma.hostedIngressLatencyTrace.findMany({
+      select: { id: true },
+      where: {
+        assistantInputId: { not: null },
+        mailboxItem: {
+          consumedAt: null,
+        },
+        source: input.source,
+        userId: input.userId,
+      },
+    });
+    let matchedCount = 0;
+    for (const row of rows) {
+      if (
+        await updateHostedIngressCheckpointPublicationExpectedByLocked(prisma, {
+          expectedBy: input.at,
+          runtimeAttemptId: input.runtimeAttemptId,
+          runtimeLeaseGeneration: input.runtimeLeaseGeneration,
+          traceId: row.id,
+        })
+      ) {
+        matchedCount += 1;
+      }
+    }
+    return matchedCount;
+  }
+
   const baseWhere = {
     runtimeAttemptId: input.runtimeAttemptId,
     source: input.source,
     userId: input.userId,
   };
-
   const field = readHostedIngressLatencyRuntimeMilestoneField(input.milestone);
   const result = await prisma.hostedIngressLatencyTrace.updateMany({
     data: {
@@ -1446,7 +1501,10 @@ async function updateHostedIngressLatencyRuntimeMilestone(
 }
 
 function readHostedIngressLatencyRuntimeMilestoneField(
-  milestone: HostedRuntimeLatencyTraceMilestone,
+  milestone: Exclude<
+    HostedRuntimeLatencyTraceMilestone,
+    "checkpoint_publication_expected_by"
+  >,
 ): HostedIngressLatencyRuntimeMilestoneField {
   switch (milestone) {
     case "runner_job_accepted":
@@ -1689,26 +1747,72 @@ async function updateHostedIngressAssistantMilestoneLocked(
   input: {
     phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
     runtimeAttemptId: string;
+    runtimeLeaseGeneration: string;
+    terminalNonReplyProjection: boolean;
     traceId: string;
   },
 ): Promise<boolean> {
   return await prisma.$transaction(async (tx) => {
     const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
-    if (!trace || trace.runtimeAttemptId !== input.runtimeAttemptId) {
+    if (
+      !trace
+      || (
+        !input.terminalNonReplyProjection
+        && trace.runtimeAttemptId !== input.runtimeAttemptId
+      )
+    ) {
       return false;
     }
 
-    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
-      trace.phaseBreakdownJson,
-      input.phaseBreakdown,
-      ["assistant"],
-    );
-    if (Object.keys(phaseBreakdownUpdate).length === 0) {
+    const storedRuntimeLeaseGeneration =
+      readHostedRuntimeLatencyLeaseGeneration(trace.phaseBreakdownJson);
+    const leaseGenerationComparison = storedRuntimeLeaseGeneration === null
+      ? 1
+      : compareHostedRuntimeLeaseGenerations(
+          input.runtimeLeaseGeneration,
+          storedRuntimeLeaseGeneration,
+        );
+    if (
+      input.terminalNonReplyProjection
+      && (
+        leaseGenerationComparison < 0
+        || (
+          leaseGenerationComparison === 0
+          && trace.runtimeAttemptId !== input.runtimeAttemptId
+        )
+      )
+    ) {
+      return true;
+    }
+
+    const phaseBreakdownUpdate = input.terminalNonReplyProjection
+      ? readTerminalNonReplyPhaseBreakdownMergeUpdate(
+          trace.phaseBreakdownJson,
+          input.phaseBreakdown,
+        )
+      : readPhaseBreakdownMergeUpdate(
+          trace.phaseBreakdownJson,
+          input.phaseBreakdown,
+          ["assistant"],
+        );
+    const shouldTransferRuntimeAttempt =
+      input.terminalNonReplyProjection
+      && leaseGenerationComparison > 0
+      && trace.runtimeAttemptId !== input.runtimeAttemptId;
+    if (
+      !shouldTransferRuntimeAttempt
+      && Object.keys(phaseBreakdownUpdate).length === 0
+    ) {
       return true;
     }
 
     await tx.hostedIngressLatencyTrace.update({
-      data: phaseBreakdownUpdate,
+      data: {
+        ...phaseBreakdownUpdate,
+        ...(shouldTransferRuntimeAttempt
+          ? { runtimeAttemptId: input.runtimeAttemptId }
+          : {}),
+      },
       where: {
         id: trace.id,
       },
@@ -1717,9 +1821,85 @@ async function updateHostedIngressAssistantMilestoneLocked(
   });
 }
 
+async function updateHostedIngressCheckpointPublicationExpectedByLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    expectedBy: Date;
+    runtimeAttemptId: string;
+    runtimeLeaseGeneration: string;
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return false;
+    }
+    const hasTerminalNonReplyEvidence =
+      readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
+        trace.phaseBreakdownJson,
+      ) !== null;
+    if (
+      !hasTerminalNonReplyEvidence
+      && trace.runtimeAttemptId !== input.runtimeAttemptId
+    ) {
+      return false;
+    }
+
+    const storedRuntimeLeaseGeneration =
+      readHostedRuntimeLatencyLeaseGeneration(trace.phaseBreakdownJson);
+    const leaseGenerationComparison = storedRuntimeLeaseGeneration === null
+      ? 1
+      : compareHostedRuntimeLeaseGenerations(
+          input.runtimeLeaseGeneration,
+          storedRuntimeLeaseGeneration,
+        );
+    if (
+      leaseGenerationComparison < 0
+      || (
+        leaseGenerationComparison === 0
+        && trace.runtimeAttemptId !== input.runtimeAttemptId
+      )
+    ) {
+      return false;
+    }
+
+    const phaseBreakdownUpdate = readTerminalNonReplyPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      {
+        schemaVersion: 1,
+        assistant: {
+          checkpointPublicationExpectedByEpochMs: input.expectedBy.getTime(),
+          runtimeLeaseGeneration: input.runtimeLeaseGeneration,
+        },
+      },
+    );
+    const shouldTransferRuntimeAttempt =
+      leaseGenerationComparison > 0
+      && trace.runtimeAttemptId !== input.runtimeAttemptId;
+    if (
+      shouldTransferRuntimeAttempt
+      || Object.keys(phaseBreakdownUpdate).length > 0
+    ) {
+      await tx.hostedIngressLatencyTrace.update({
+        data: {
+          ...phaseBreakdownUpdate,
+          ...(shouldTransferRuntimeAttempt
+            ? { runtimeAttemptId: input.runtimeAttemptId }
+            : {}),
+        },
+        where: { id: trace.id },
+      });
+    }
+    return true;
+  });
+}
+
 function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
   at: Date;
+  checkpointPublicationExpectedBy: Date | null;
   milestone: HostedRuntimeAssistantMilestone;
+  runtimeLeaseGeneration: string;
 }): HostedRuntimeLatencyPhaseBreakdown {
   const atEpochMs = input.at.getTime();
   switch (input.milestone) {
@@ -1731,6 +1911,20 @@ function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
       return { schemaVersion: 1, assistant: { firstCodexOutputObservedAtEpochMs: atEpochMs } };
     case "first_codex_text_observed":
       return { schemaVersion: 1, assistant: { firstCodexTextObservedAtEpochMs: atEpochMs } };
+    case "terminal_non_reply_committed":
+      return {
+        schemaVersion: 1,
+        assistant: {
+          terminalNonReplyCommittedAtEpochMs: atEpochMs,
+          ...(input.checkpointPublicationExpectedBy
+            ? {
+                checkpointPublicationExpectedByEpochMs:
+                  input.checkpointPublicationExpectedBy.getTime(),
+              }
+            : {}),
+          runtimeLeaseGeneration: input.runtimeLeaseGeneration,
+        },
+      };
   }
 }
 
@@ -1801,6 +1995,138 @@ function readPhaseBreakdownMergeUpdate(
     return {};
   }
   return { phaseBreakdownJson: merged.value };
+}
+
+// Terminal suppression may be recomputed after crash recovery, and the live
+// runtime may extend its checkpoint-publication expectation when new dirty work
+// restarts the idle window. Max-merge only those two leaves; all other
+// diagnostic leaves retain assign-once semantics.
+function readTerminalNonReplyPhaseBreakdownMergeUpdate(
+  existingValue: unknown,
+  incoming: HostedRuntimeLatencyPhaseBreakdown,
+): { phaseBreakdownJson?: Prisma.InputJsonValue } {
+  const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+    existing: existingValue,
+    incoming,
+    phases: ["assistant"],
+  });
+  const assistant =
+    typeof merged.value.assistant === "object"
+    && merged.value.assistant !== null
+    && !Array.isArray(merged.value.assistant)
+      ? merged.value.assistant
+      : {};
+  let changed = merged.changed;
+  const nextAssistant = { ...assistant };
+  for (
+    const leaf of [
+      "terminalNonReplyCommittedAtEpochMs",
+      "checkpointPublicationExpectedByEpochMs",
+    ] as const
+  ) {
+    const incomingValue = incoming.assistant?.[leaf];
+    const storedValue = assistant[leaf];
+    if (
+      incomingValue !== undefined
+      && typeof storedValue === "number"
+      && incomingValue > storedValue
+    ) {
+      nextAssistant[leaf] = incomingValue;
+      changed = true;
+    }
+  }
+  const incomingRuntimeLeaseGeneration =
+    incoming.assistant?.runtimeLeaseGeneration;
+  const storedRuntimeLeaseGeneration =
+    readHostedRuntimeLatencyLeaseGeneration(merged.value);
+  if (
+    incomingRuntimeLeaseGeneration !== undefined
+    && (
+      storedRuntimeLeaseGeneration === null
+      || compareHostedRuntimeLeaseGenerations(
+        incomingRuntimeLeaseGeneration,
+        storedRuntimeLeaseGeneration,
+      ) > 0
+    )
+  ) {
+    nextAssistant.runtimeLeaseGeneration =
+      incomingRuntimeLeaseGeneration;
+    changed = true;
+  }
+  if (changed) {
+    return {
+      phaseBreakdownJson: {
+        ...merged.value,
+        assistant: nextAssistant,
+      },
+    };
+  }
+  return {};
+}
+
+function readHostedRuntimeLatencyLeaseGeneration(
+  value: unknown,
+): string | null {
+  const assistant = readHostedRuntimeLatencyAssistantRecord(value);
+  const generation = assistant?.runtimeLeaseGeneration;
+  return typeof generation === "string"
+    && /^(?:0|[1-9]\d{0,19})$/u.test(generation)
+    ? generation
+    : null;
+}
+
+function readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
+  value: unknown,
+): number | null {
+  const assistant = readHostedRuntimeLatencyAssistantRecord(value);
+  const epochMs = assistant?.terminalNonReplyCommittedAtEpochMs;
+  return typeof epochMs === "number"
+    && Number.isSafeInteger(epochMs)
+    && epochMs >= 0
+    ? epochMs
+    : null;
+}
+
+function readHostedRuntimeLatencyAssistantRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const assistant = Reflect.get(value, "assistant");
+  return typeof assistant === "object"
+    && assistant !== null
+    && !Array.isArray(assistant)
+    ? assistant as Record<string, unknown>
+    : null;
+}
+
+function compareHostedRuntimeLeaseGenerations(
+  left: string,
+  right: string,
+): number {
+  const leftGeneration = BigInt(left);
+  const rightGeneration = BigInt(right);
+  return leftGeneration < rightGeneration
+    ? -1
+    : leftGeneration > rightGeneration
+      ? 1
+      : 0;
+}
+
+function normalizeHostedRuntimeLeaseGeneration(value: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(
+      "Hosted ingress latency runtime lease generation must be a string.",
+    );
+  }
+  const normalized = value.trim();
+  if (!/^(?:0|[1-9]\d{0,19})$/u.test(normalized)) {
+    throw new TypeError(
+      "Hosted ingress latency runtime lease generation is invalid.",
+    );
+  }
+  return normalized;
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

@@ -23,7 +23,7 @@ import {
   normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
 } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
@@ -273,10 +273,10 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     });
   }
   assertHostedMemberNotSuspended(owner);
-  if (!(await readActiveHostedMemberAccess({
+  if (!(await readHostedRuntimeAiAccessDecision({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
-  }))) {
+  })).allowed) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
       httpStatus: 403,

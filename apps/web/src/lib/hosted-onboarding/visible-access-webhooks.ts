@@ -7,6 +7,7 @@ import {
   resolveHostedMemberRoutingByTelegramUserId,
 } from "./hosted-member-routing-store";
 import {
+  buildHostedGroupChatAccessRecoveryMessage,
   resolveHostedRecognizedInboundAccess,
   type HostedRecognizedInboundAccessResolution,
 } from "./recognized-inbound-access";
@@ -39,8 +40,7 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
   const summary = await summarizeHostedTelegramWebhook(update);
   const message = buildHostedTelegramMessagePayload(update);
   if (
-    !summary?.isDirect
-    || !summary.senderTelegramUserId
+    !summary?.senderTelegramUserId
     || !message
   ) {
     return response;
@@ -77,18 +77,32 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
   const delivery = await sendHostedTelegramAccessNotice({
     authorizedTelegramUserId: summary.senderTelegramUserId,
     memberId: memberResolution.lookup.core.id,
-    message: access.message,
+    message: summary.isDirect
+      ? access.message
+      : buildHostedGroupChatAccessRecoveryMessage(access.message),
     noticeCode: readHostedRecognizedInboundNoticeCode(access),
     prisma,
-    replyToMessageId: message.messageId,
+    replyToMessageId: summary.isDirect ? message.messageId : null,
     sourceEventId: eventId,
-    target: message.threadId,
+    target: summary.isDirect
+      ? message.threadId
+      : summary.senderTelegramUserId,
   });
   if (delivery.status === "sent" || delivery.status === "already_notified") {
     return {
       ignored: false,
       ok: true,
       reason: access.responseReason,
+    };
+  }
+  if (delivery.status === "definite_failure" && !summary.isDirect) {
+    // The private Telegram send was provider-confirmed as unsent. Hand the
+    // authenticated group event back to the outer account-neutral response
+    // adapter rather than losing the accepted inbound message.
+    return {
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
     };
   }
 

@@ -25,6 +25,7 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
+  runHostedPendingAssistantInputContentRetention,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
@@ -165,6 +166,10 @@ export function createHostedAssistantInputSource(input: {
           reason: "no_new_input",
         };
       }
+      await runHostedPendingAssistantInputContentRetention({
+        signal: refreshInput?.signal,
+        vaultRoot: input.vaultRoot,
+      });
       const pendingInputIds = await compactHostedPendingAssistantInputIds({
         vaultRoot: input.vaultRoot,
       });
@@ -289,6 +294,9 @@ export async function selectHostedAssistantInputIds(
       },
 ): Promise<HostedAssistantInputSelection> {
   if (input.mode === "background") {
+    await runHostedPendingAssistantInputContentRetention({
+      vaultRoot: input.vaultRoot,
+    });
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
       vaultRoot: input.vaultRoot,
     });
@@ -469,6 +477,9 @@ async function createHostedAssistantInputCandidates(input: {
           : {}),
         ...(hostedMailboxItem?.groupReactionContext
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
+          : {}),
+        ...(hostedMailboxItem?.groupRunningBit
+          ? { groupRunningBit: hostedMailboxItem.groupRunningBit }
           : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
         ...(hostedMailboxItem?.usageRunningLow === true

@@ -25,8 +25,10 @@ import {
   requireHostedUsageCreditLookupKey,
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
-import { HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION } from
-  "./usage-credit-offers";
+import {
+  isHostedUsageCreditSavedCardPolicyVersion,
+  type HostedUsageCreditCheckoutRequestPolicyVersion,
+} from "./usage-credit-offers";
 import {
   assertHostedUsageCreditBoundPaymentIntentMatchesPurchase,
   assertHostedUsageCreditPaymentIntentMatchesPurchase,
@@ -48,6 +50,7 @@ type HostedUsageCreditDirectPaymentBinding =
 export async function tryChargeHostedUsageCreditSavedCard(input: {
   checkoutRequest: Stripe.Checkout.SessionCreateParams;
   now: Date;
+  policyVersion: HostedUsageCreditCheckoutRequestPolicyVersion;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
@@ -88,8 +91,8 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
   } else {
     if (
       current.status !== HostedUsageCreditPurchaseStatus.created ||
-      current.checkoutRequestPolicyVersion !==
-        HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      current.checkoutRequestPolicyVersion !== input.policyVersion ||
+      !isHostedUsageCreditSavedCardPolicyVersion(input.policyVersion)
     ) {
       return current.status === HostedUsageCreditPurchaseStatus.created
         ? null
@@ -106,6 +109,7 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     paymentIntent = await createOrRecoverHostedUsageCreditPaymentIntent({
       customerId,
       paymentMethodId,
+      policyVersion: input.policyVersion,
       purchase: current,
       stripe: input.stripe,
     });
@@ -401,6 +405,7 @@ async function retrieveBoundHostedUsageCreditPaymentIntent(input: {
 async function createOrRecoverHostedUsageCreditPaymentIntent(input: {
   customerId: string;
   paymentMethodId: string;
+  policyVersion: HostedUsageCreditCheckoutRequestPolicyVersion;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
 }): Promise<Stripe.PaymentIntent> {
@@ -414,7 +419,10 @@ async function createOrRecoverHostedUsageCreditPaymentIntent(input: {
       currency: input.purchase.cashCurrency,
       customer: input.customerId,
       expand: ["latest_charge"],
-      metadata: buildHostedUsageCreditSavedCardMetadata(input.purchase.id),
+      metadata: buildHostedUsageCreditSavedCardMetadata(
+        input.purchase.id,
+        input.policyVersion,
+      ),
       payment_method: input.paymentMethodId,
       payment_method_types: ["card"],
       setup_future_usage: "off_session",

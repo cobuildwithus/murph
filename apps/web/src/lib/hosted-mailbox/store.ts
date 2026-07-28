@@ -830,7 +830,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at >= ${retainedAt}
+          AND mailbox_item.created_at > ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq ASC
         LIMIT 1
@@ -840,7 +840,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
-          AND mailbox_item.created_at >= ${retainedAt}
+          AND mailbox_item.created_at > ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq DESC
         LIMIT 1
@@ -880,7 +880,7 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
             THEN lane_projection.imported_seq
           ELSE LEAST(lane_projection.imported_seq, lane_projection.consumed_seq)
         END
-        AND mailbox_item.created_at >= ${retainedAt}
+        AND mailbox_item.created_at > ${retainedAt}
         AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
       ORDER BY mailbox_item.lane_seq ASC
       LIMIT ${limitPerLane}
@@ -2238,7 +2238,13 @@ export function resolveHostedMailboxPayloadRef(payloadRef: string): string {
 }
 
 const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
-const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+// The read filter below and the retention DELETE in hosted-retention/cleanup.ts
+// must apply the same window: a read that still surfaces rows the sweep has
+// already deleted (or hides rows it has not) desynchronizes the consumed
+// watermark. Exported so cleanup.ts consumes this value rather than restating
+// it. Retention direction is one-way — cleanup depends on the mailbox, never
+// the reverse — so this stays the single definition.
+export const HOSTED_MAILBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function fetchHostedMailboxItemRowsAfterSeq(input: {
   afterSeq: bigint;
@@ -2304,17 +2310,17 @@ function isHostedMailboxItemExpired(
 ): boolean {
   return (
     (item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime())
-    || item.createdAt.getTime() < at.getTime() - HOSTED_MAILBOX_RETENTION_MS
+    || item.createdAt.getTime() <= at.getTime() - HOSTED_MAILBOX_RETENTION_MS
   );
 }
 
 export function buildHostedMailboxLiveItemWhere(at: Date): {
-  createdAt: { gte: Date };
+  createdAt: { gt: Date };
   OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
 } {
   return {
     createdAt: {
-      gte: new Date(at.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+      gt: new Date(at.getTime() - HOSTED_MAILBOX_RETENTION_MS),
     },
     OR: [
       {

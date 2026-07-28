@@ -39,6 +39,75 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it("injects the exact current sender into referral actions", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "arm_usage_referral",
+      result: { outcome: "armed", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-group-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"f".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "linq",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+    });
+  });
+
+  it("denies referral actions on group email where the human sender is not authoritative", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      emailDeliveryContexts: [
+        buildEmailDeliveryContext({ senderHandle: "person@example.test" }),
+      ],
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({
+      action: "read_usage_referral",
+    })).resolves.toEqual({
+      action: "read_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",
@@ -614,6 +683,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).not.toHaveBeenCalled();
 
     for (const actionRequest of [
+      {
+        action: "ask_current_sender" as const,
+        origin: {
+          assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+          kind: "accepted_input" as const,
+          sessionId: "session_group",
+        },
+      },
       {
         action: "ask_member" as const,
         grantId: "hdg_calendar",

@@ -51,6 +51,8 @@ export {
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY =
+  "hosted_runtime_log_user_id_fkey";
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
@@ -986,11 +988,53 @@ export async function recordHostedRuntimeLogs(input: {
     return 0;
   }
 
-  const result = await prisma.hostedRuntimeLog.createMany({
-    data: rows,
-  });
+  try {
+    const result = await prisma.hostedRuntimeLog.createMany({
+      data: rows,
+    });
 
-  return result.count;
+    return result.count;
+  } catch (error) {
+    // A runtime can finish draining a best-effort diagnostic batch after
+    // account deletion committed. The member row is authoritative; diagnostics
+    // must neither recreate it nor turn this expected race into a retrying 500.
+    if (isMissingHostedRuntimeLogMember(error)) {
+      return 0;
+    }
+    throw error;
+  }
+}
+
+function isMissingHostedRuntimeLogMember(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError)
+    || error.code !== "P2003"
+  ) {
+    return false;
+  }
+
+  const directConstraint = error.meta?.constraint;
+  if (directConstraint === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY) {
+    return true;
+  }
+
+  const driverAdapterError = error.meta?.driverAdapterError;
+  if (!isUnknownRecord(driverAdapterError)) {
+    return false;
+  }
+  const cause = driverAdapterError.cause;
+  if (!isUnknownRecord(cause)) {
+    return false;
+  }
+  const constraint = cause.constraint;
+  return (
+    isUnknownRecord(constraint)
+    && constraint.index === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY
+  );
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export async function listHostedRuntimeLogs(input: {
