@@ -4014,7 +4014,7 @@ describe("ComputerUseService", () => {
           timeoutMs: 15000,
           values: ["2"],
         },
-        expectedCode: 'await __murphTarget.selectOption(["2"]',
+        expectedCode: 'await __murphSelectHandle.selectOption(["2"]',
       },
       {
         request: {
@@ -4175,13 +4175,18 @@ describe("ComputerUseService", () => {
     expect(injected).toBe(false);
   });
 
-  it("fails closed before filling a sensitive browser field", async () => {
+  it.each([
+    "Password",
+    "Card number",
+    "Verification code",
+  ])("fails closed on label-only sensitive browser fields: %s", async (label) => {
     const now = new Date("2026-06-17T12:00:00.000Z");
+    const compiledPage = createCompiledComputerActPage({
+      control: createCompiledComputerActControl({ label }),
+    });
     const kernel = createFakeKernel({
-      executeResult: {
-        reason: "password_type",
-        sensitive: true,
-      },
+      executeResultForCall: ({ code }) =>
+        executeCompiledComputerActCode(code, compiledPage.page),
     });
     const service = new ComputerUseService({
       kernel,
@@ -4198,7 +4203,7 @@ describe("ComputerUseService", () => {
       target: {
         exact: true,
         kind: "label",
-        label: "Password",
+        label,
         pick: { kind: "only" },
       },
       text: "not-sent-to-the-field",
@@ -4210,85 +4215,126 @@ describe("ComputerUseService", () => {
 
     expect(kernel.executePlaywrightCalls).toBe(1);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("__murphClassifySensitiveInput(__murphTarget)");
-    expect(code).not.toContain("not-sent-to-the-field");
-    expect(code).not.toContain("__murphTarget.fill(");
-
-    let fillCalls = 0;
-    class FakeHTMLElement {
-      readonly isContentEditable = false;
-      readonly tagName = "INPUT";
-
-      getAttribute(name: string): string | null {
-        return name === "type" ? "password" : null;
-      }
-    }
-    const target = {
-      async boundingBox() {
-        return { height: 20, width: 100, x: 10, y: 20 };
-      },
-      async count() {
-        return 1;
-      },
-      filter() {
-        return this;
-      },
-      async evaluate(
-        callback: (element: FakeHTMLElement) => unknown,
-      ) {
-        return callback(new FakeHTMLElement());
-      },
-      async fill() {
-        fillCalls += 1;
-      },
-      async innerText() {
-        return "";
-      },
-      async isChecked() {
-        return false;
-      },
-      async isEnabled() {
-        return true;
-      },
-      async isVisible() {
-        return true;
-      },
-      async waitFor() {},
-    };
-    const body = {
-      async innerText() {
-        return "Password form";
-      },
-    };
-    const fakePage = {
-      getByLabel() {
-        return target;
-      },
-      locator(value: string) {
-        return value === "body" ? body : target;
-      },
-      async title() {
-        return "Sign in";
-      },
-      url() {
-        return "https://example.test/sign-in";
-      },
-    };
-    const execute = new Function(
-      "page",
-      "HTMLElement",
-      `return (async () => {\n${code}\n})();`,
-    ) as (
-      page: typeof fakePage,
-      htmlElement: typeof FakeHTMLElement,
-    ) => Promise<unknown>;
-
-    await expect(execute(fakePage, FakeHTMLElement)).resolves.toMatchObject({
-      reason: "password_type",
-      sensitive: true,
-    });
-    expect(fillCalls).toBe(0);
+    expect(code).toContain("__murphClassifySensitiveElement(__murphFillHandle)");
+    expect(code).toContain("element.labels");
+    expect(code).toContain("element.ownerDocument?.getElementById");
+    expect(code).toContain("__murphFillTargetStillSelected");
+    expect(code).toContain("__murphFillHandle.fill(");
+    expect(compiledPage.stats.fillCalls).toBe(0);
   });
+
+  it("fails closed when the selected fill element changes after inspection", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const compiledPage = createCompiledComputerActPage({
+      control: createCompiledComputerActControl({ label: "Search" }),
+      replaceAfterFirstWait: createCompiledComputerActControl({
+        label: "Card number",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResultForCall: ({ code }) =>
+        executeCompiledComputerActCode(code, compiledPage.page),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "fill",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      target: createComputerLabelTarget("Search"),
+      text: "dentist",
+      timeoutMs: 15000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+      httpStatus: 400,
+    });
+    expect(compiledPage.stats.fillCalls).toBe(0);
+  });
+
+  it.each([
+    { reactive: false, valueMatchesRequested: true },
+    { reactive: true, valueMatchesRequested: false },
+  ])(
+    "returns non-secret fill proof when reactive=$reactive",
+    async ({ reactive, valueMatchesRequested }) => {
+      const now = new Date("2026-06-17T12:00:00.000Z");
+      const compiledPage = createCompiledComputerActPage({
+        clearValueAfterFill: reactive,
+        control: createCompiledComputerActControl({ label: "Search" }),
+      });
+      const kernel = createFakeKernel({
+        executeResultForCall: ({ code }) =>
+          executeCompiledComputerActCode(code, compiledPage.page),
+      });
+      const service = new ComputerUseService({
+        kernel,
+        now: () => now,
+        store: new FakeComputerUseStore({
+          run: createRunRecord({ updatedAt: now }),
+        }),
+      });
+
+      const result = await service.act({
+        action: "fill",
+        memberId: "member_123",
+        runId: "hcr_run123",
+        target: createComputerLabelTarget("Search"),
+        text: "dentist",
+        timeoutMs: 15000,
+      });
+
+      expect(result.target).toMatchObject({ valueMatchesRequested });
+      expect(JSON.stringify(result)).not.toContain('"value":"dentist"');
+      expect(compiledPage.stats.fillCalls).toBe(1);
+    },
+  );
+
+  it.each([
+    { reactive: false, selectedValuesMatchRequested: true },
+    { reactive: true, selectedValuesMatchRequested: false },
+  ])(
+    "returns non-secret select proof when reactive=$reactive",
+    async ({ reactive, selectedValuesMatchRequested }) => {
+      const now = new Date("2026-06-17T12:00:00.000Z");
+      const compiledPage = createCompiledComputerActPage({
+        changeSelectionAfterSelect: reactive,
+        control: createCompiledComputerActControl({
+          label: "Quantity",
+          tagName: "SELECT",
+        }),
+      });
+      const kernel = createFakeKernel({
+        executeResultForCall: ({ code }) =>
+          executeCompiledComputerActCode(code, compiledPage.page),
+      });
+      const service = new ComputerUseService({
+        kernel,
+        now: () => now,
+        store: new FakeComputerUseStore({
+          run: createRunRecord({ updatedAt: now }),
+        }),
+      });
+
+      const result = await service.act({
+        action: "selectOption",
+        memberId: "member_123",
+        runId: "hcr_run123",
+        target: createComputerLabelTarget("Quantity"),
+        timeoutMs: 15000,
+        values: ["2"],
+      });
+
+      expect(result.target).toMatchObject({ selectedValuesMatchRequested });
+      expect(JSON.stringify(result)).not.toContain('"selectedValues"');
+      expect(compiledPage.stats.selectCalls).toBe(1);
+    },
+  );
 
   it("rejects malformed browser action state results as unknown outcomes", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
@@ -4423,12 +4469,12 @@ describe("ComputerUseService", () => {
           title: "Appointments",
           url: "https://appointments.example.test",
         }),
-        {
-          sensitive: false,
-        },
         createComputerActExecutionResult({
           action: "fill",
-          target,
+          target: {
+            ...target,
+            valueMatchesRequested: true,
+          },
           title: "Appointments",
           url: "https://appointments.example.test",
         }),
@@ -4512,13 +4558,12 @@ describe("ComputerUseService", () => {
       visibleText: "Results",
     });
 
-    expect(kernel.executePlaywrightCalls).toBe(6);
+    expect(kernel.executePlaywrightCalls).toBe(5);
     expect(kernel.executePlaywrightInputs[2]?.code).toContain(
-      "__murphClassifySensitiveInput(__murphTarget)",
+      "__murphClassifySensitiveElement(__murphFillHandle)",
     );
-    expect(kernel.executePlaywrightInputs[2]?.code).not.toContain("dentist near me");
-    expect(kernel.executePlaywrightInputs[3]?.code).toContain(
-      'await __murphTarget.fill("dentist near me"',
+    expect(kernel.executePlaywrightInputs[2]?.code).toContain(
+      'await __murphFillHandle.fill("dentist near me"',
     );
     expect(kernel.executePlaywrightInputs.every((entry) =>
       entry.sessionId === "kernel-session-1"
@@ -9960,6 +10005,211 @@ class FakeComputerUseStore implements ComputerUseStore {
 
 const fakeKernel = createFakeKernel();
 
+interface CompiledComputerActControl {
+  disabled: boolean;
+  getAttribute(name: string): string | null;
+  isConnected: boolean;
+  isContentEditable: boolean;
+  labels: Array<{ textContent: string }>;
+  ownerDocument: {
+    getElementById(id: string): { textContent: string } | null;
+  };
+  readOnly: boolean;
+  selectedOptions: Array<{ value: string }>;
+  tagName: string;
+  textContent: string;
+  value: string;
+  closest(selector: string): { textContent: string } | null;
+}
+
+interface CompiledComputerActHandle {
+  readonly compiledControl: CompiledComputerActControl;
+  evaluate(
+    callback: (element: CompiledComputerActControl, argument?: unknown) => unknown,
+    argument?: unknown,
+  ): Promise<unknown>;
+  fill(text: string): Promise<void>;
+  selectOption(values: string[]): Promise<void>;
+}
+
+function createCompiledComputerActControl(input: {
+  label: string;
+  tagName?: "INPUT" | "SELECT" | "TEXTAREA";
+}): CompiledComputerActControl {
+  const attributes: Record<string, string> = {
+    type: "text",
+  };
+  const label = { textContent: input.label };
+  return {
+    disabled: false,
+    getAttribute(name) {
+      return attributes[name] ?? null;
+    },
+    isConnected: true,
+    isContentEditable: false,
+    labels: [label],
+    ownerDocument: {
+      getElementById() {
+        return null;
+      },
+    },
+    readOnly: false,
+    selectedOptions: [],
+    tagName: input.tagName ?? "INPUT",
+    textContent: "",
+    value: "",
+    closest(selector) {
+      return selector === "label" ? label : null;
+    },
+  };
+}
+
+function createCompiledComputerActPage(input: {
+  changeSelectionAfterSelect?: boolean;
+  clearValueAfterFill?: boolean;
+  control: CompiledComputerActControl;
+  replaceAfterFirstWait?: CompiledComputerActControl;
+}) {
+  let currentControl = input.control;
+  let waitCalls = 0;
+  const stats = {
+    fillCalls: 0,
+    selectCalls: 0,
+  };
+  const unwrapArgument = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(unwrapArgument);
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+    if ("compiledControl" in value) {
+      const handle = value as CompiledComputerActHandle;
+      return handle.compiledControl;
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        unwrapArgument(entry),
+      ]),
+    );
+  };
+  const createHandle = (
+    control: CompiledComputerActControl,
+  ): CompiledComputerActHandle => ({
+    compiledControl: control,
+    async evaluate(callback, argument) {
+      return callback(control, unwrapArgument(argument));
+    },
+    async fill(text) {
+      stats.fillCalls += 1;
+      control.value = text;
+      if (input.clearValueAfterFill) {
+        control.value = "";
+      }
+    },
+    async selectOption(values) {
+      stats.selectCalls += 1;
+      control.selectedOptions = (
+        input.changeSelectionAfterSelect ? ["unexpected"] : values
+      ).map((value) => ({ value }));
+    },
+  });
+  const locator = {
+    async boundingBox() {
+      return { height: 20, width: 100, x: 10, y: 20 };
+    },
+    async count() {
+      return currentControl.isConnected ? 1 : 0;
+    },
+    async elementHandle() {
+      return currentControl.isConnected ? createHandle(currentControl) : null;
+    },
+    async evaluate(
+      callback: (
+        element: CompiledComputerActControl,
+        argument?: unknown,
+      ) => unknown,
+      argument?: unknown,
+    ) {
+      return callback(currentControl, unwrapArgument(argument));
+    },
+    filter() {
+      return this;
+    },
+    first() {
+      return this;
+    },
+    async innerText() {
+      return currentControl.textContent;
+    },
+    async isChecked() {
+      return false;
+    },
+    async isEnabled() {
+      return !currentControl.disabled;
+    },
+    async isVisible() {
+      return currentControl.isConnected;
+    },
+    last() {
+      return this;
+    },
+    nth() {
+      return this;
+    },
+  };
+  const body = {
+    async innerText() {
+      return "Page text";
+    },
+  };
+  const page = {
+    getByLabel() {
+      return locator;
+    },
+    getByPlaceholder() {
+      return locator;
+    },
+    getByRole() {
+      return locator;
+    },
+    getByTestId() {
+      return locator;
+    },
+    getByText() {
+      return locator;
+    },
+    locator(value: string) {
+      return value === "body" ? body : locator;
+    },
+    async title() {
+      return "Page";
+    },
+    url() {
+      return "https://example.test";
+    },
+    async waitForTimeout() {
+      waitCalls += 1;
+      if (waitCalls === 1 && input.replaceAfterFirstWait) {
+        currentControl = input.replaceAfterFirstWait;
+      }
+    },
+  };
+  return { page, stats };
+}
+
+async function executeCompiledComputerActCode(
+  code: string,
+  page: unknown,
+): Promise<unknown> {
+  const execute = new Function(
+    "page",
+    `return (async () => {\n${code}\n})();`,
+  ) as (inputPage: unknown) => Promise<unknown>;
+  return await execute(page);
+}
+
 function createComputerRoleTarget(name: string) {
   return {
     exact: true as const,
@@ -9980,14 +10230,22 @@ function createComputerLabelTarget(label: string) {
 }
 
 function createComputerActTargetState(input: {
+  selectedValuesMatchRequested?: boolean;
   text?: string | null;
+  valueMatchesRequested?: boolean;
 } = {}) {
   return {
     box: { height: 30, width: 120, x: 40, y: 50 },
     checked: null,
     enabled: true,
     matchCount: 1,
+    ...(typeof input.selectedValuesMatchRequested === "boolean"
+      ? { selectedValuesMatchRequested: input.selectedValuesMatchRequested }
+      : {}),
     text: input.text ?? null,
+    ...(typeof input.valueMatchesRequested === "boolean"
+      ? { valueMatchesRequested: input.valueMatchesRequested }
+      : {}),
     visible: true,
   };
 }
@@ -10101,15 +10359,16 @@ function createFakeKernel(input: {
       this.executePlaywrightCalls += 1;
       this.executePlaywrightInputs.push(executeInput);
       await input.onExecutePlaywright?.(executeInput, callIndex);
-      return {
-        result: input.executeResultForCall?.(executeInput, callIndex)
-          ?? executeResults.shift()
-          ?? input.executeResult
-          ?? {
+      const result = input.executeResultForCall?.(executeInput, callIndex)
+        ?? executeResults.shift()
+        ?? input.executeResult
+        ?? {
           title: "Page",
           url: "https://example.test",
           visibleText: "Page text",
-        },
+        };
+      return {
+        result: await Promise.resolve(result),
       };
     },
     async osControl() {},

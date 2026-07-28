@@ -96,7 +96,9 @@ export interface ComputerActTargetState {
   checked: boolean | null;
   enabled: boolean | null;
   matchCount: number;
+  selectedValuesMatchRequested?: boolean;
   text: string | null;
+  valueMatchesRequested?: boolean;
   visible: boolean | null;
 }
 
@@ -560,18 +562,15 @@ export class ComputerUseService {
     const sessionId = requireKernelSessionId(run);
     let result: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
     try {
-      if (input.action === "fill") {
-        await requireNonSensitiveComputerActFillTarget({
-          action: input,
-          kernel,
-          sessionId,
-        });
-      }
       result = await kernel.executePlaywright({
         code: buildComputerActCode(input),
         sessionId,
         timeoutMs: computerActKernelTimeoutMs(input),
       });
+      const fillGuardFailure = readComputerActFillGuardFailure(result.result);
+      if (fillGuardFailure !== null) {
+        throw sensitiveInputRequiresHandoffError();
+      }
     } catch (error) {
       throw addComputerActFailureContext(error, input);
     }
@@ -3931,6 +3930,8 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
     ? buildComputerActTargetCode(input.target)
     : null;
   const requireOnlyTarget = "target" in input && input.target.pick.kind === "only";
+  const operationReturnsResult =
+    input.action === "fill" || input.action === "selectOption";
 
   return [
     target ? `const __murphMatches = ${target.matches};` : "",
@@ -3940,8 +3941,11 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
       hasTarget: target !== null,
       requireOnlyTarget,
     }),
+    input.action === "fill"
+      ? buildComputerSensitiveInputClassifierCode()
+      : "",
     buildComputerActOperationCode(input),
-    "return await __murphFinish();",
+    operationReturnsResult ? "" : "return await __murphFinish();",
   ].filter(Boolean).join("\n");
 }
 
@@ -3993,9 +3997,9 @@ function buildComputerActOperationCode(input: HostedComputerActRequest): string 
     case "click":
       return `await __murphTarget.click({ timeout: ${input.timeoutMs} });`;
     case "fill":
-      return `await __murphTarget.fill(${JSON.stringify(input.text)}, { timeout: ${input.timeoutMs} });`;
+      return buildComputerGuardedFillOperationCode(input);
     case "selectOption":
-      return `await __murphTarget.selectOption(${JSON.stringify(input.values)}, { timeout: ${input.timeoutMs} });`;
+      return buildComputerVerifiedSelectOperationCode(input);
     case "setChecked":
       return input.checked
         ? `await __murphTarget.check({ timeout: ${input.timeoutMs} });`
@@ -4015,7 +4019,7 @@ function buildComputerActProjectionCode(input: {
   requireOnlyTarget: boolean;
 }): string {
   const targetProjection = input.hasTarget
-    ? `await __murphReadTargetState(__murphMatches, __murphTarget, ${input.requireOnlyTarget})`
+    ? `await __murphReadTargetState(__murphMatches, __murphTarget, ${input.requireOnlyTarget}, actionProof)`
     : "null";
 
   return `
@@ -4029,7 +4033,7 @@ async function __murphReadPageState() {
   }
   return { title, url, visibleText };
 }
-async function __murphReadTargetState(matches, target, requireOnly) {
+async function __murphReadTargetState(matches, target, requireOnly, actionProof) {
   const matchCount = await matches.count().catch(() => 0);
   const selectedCount = await target.count().catch(() => 0);
   if (selectedCount !== 1 || (requireOnly && matchCount !== 1)) {
@@ -4040,6 +4044,7 @@ async function __murphReadTargetState(matches, target, requireOnly) {
       matchCount,
       text: null,
       visible: null,
+      ...actionProof,
     };
   }
   const visible = await target.isVisible().catch(() => null);
@@ -4067,9 +4072,9 @@ async function __murphReadTargetState(matches, target, requireOnly) {
         y: rawBox.y,
       }
     : null;
-  return { box, checked, enabled, matchCount, text, visible };
+  return { box, checked, enabled, matchCount, text, visible, ...actionProof };
 }
-async function __murphFinish() {
+async function __murphFinish(actionProof = {}) {
   const pageState = await __murphReadPageState();
   return {
     action: ${JSON.stringify(input.action)},
@@ -4082,35 +4087,72 @@ async function __murphFinish() {
 
 function buildComputerSensitiveInputClassifierCode(): string {
   return `
-async function __murphClassifySensitiveInput(target) {
-  const targetCount = await target.count().catch(() => 0);
-  if (targetCount !== 1) {
+async function __murphClassifySensitiveElement(handle) {
+  if (!handle) {
     return { sensitive: true, reason: "target_uninspectable" };
   }
-  const metadata = await target.evaluate((element) => {
+  const metadata = await handle.evaluate((element) => {
     const attr = (name) => String(element.getAttribute(name) || "").toLowerCase();
-    return {
+    const text = (node) => String(node?.textContent || "").trim().toLowerCase();
+    const referencedText = (name) => attr(name)
+      .split(/\\s+/u)
+      .filter(Boolean)
+      .map((id) => text(element.ownerDocument?.getElementById(id)))
+      .filter(Boolean);
+    const labelTexts = Array.from(element.labels || [], (label) => text(label))
+      .filter(Boolean);
+    const wrappingLabel = typeof element.closest === "function"
+      ? text(element.closest("label"))
+      : "";
+    if (wrappingLabel) labelTexts.push(wrappingLabel);
+    const attributes = {
       autocomplete: attr("autocomplete"),
-      hints: [
-        attr("type"),
-        attr("inputmode"),
-        attr("name"),
-        attr("id"),
-        attr("aria-label"),
-        attr("aria-description"),
-        attr("aria-describedby"),
-        attr("aria-labelledby"),
-        attr("placeholder"),
-        attr("title"),
-        attr("data-testid"),
-        attr("data-test"),
-        attr("data-qa"),
-      ].join(" "),
+      ariaDescription: attr("aria-description"),
+      ariaDescribedBy: attr("aria-describedby"),
+      ariaLabel: attr("aria-label"),
+      ariaLabelledBy: attr("aria-labelledby"),
+      dataQa: attr("data-qa"),
+      dataTest: attr("data-test"),
+      dataTestId: attr("data-testid"),
+      id: attr("id"),
       inputMode: attr("inputmode"),
-      isContentEditable: element instanceof HTMLElement && element.isContentEditable,
       maxLength: attr("maxlength"),
-      tagName: String(element.tagName || "").toLowerCase(),
+      name: attr("name"),
+      placeholder: attr("placeholder"),
+      title: attr("title"),
       type: attr("type"),
+    };
+    const accessibilityText = [
+      attributes.ariaLabel,
+      attributes.ariaDescription,
+      ...referencedText("aria-labelledby"),
+      ...referencedText("aria-describedby"),
+      ...labelTexts,
+    ].filter(Boolean);
+    return {
+      autocomplete: attributes.autocomplete,
+      disabled: element.disabled === true,
+      hints: [
+        ...Object.values(attributes),
+        ...accessibilityText,
+      ].join(" "),
+      inputMode: attributes.inputMode,
+      isConnected: element.isConnected !== false,
+      isContentEditable: element.isContentEditable === true,
+      maxLength: attributes.maxLength,
+      readOnly: element.readOnly === true,
+      signature: JSON.stringify({
+        accessibilityText,
+        attributes,
+        disabled: element.disabled === true,
+        isConnected: element.isConnected !== false,
+        isContentEditable: element.isContentEditable === true,
+        labelTexts,
+        readOnly: element.readOnly === true,
+        tagName: String(element.tagName || "").toLowerCase(),
+      }),
+      tagName: String(element.tagName || "").toLowerCase(),
+      type: attributes.type,
     };
   }).catch(() => null);
   if (!metadata || typeof metadata !== "object") {
@@ -4133,7 +4175,12 @@ async function __murphClassifySensitiveInput(target) {
     tagName === "textarea" ||
     metadata.isContentEditable === true ||
     (tagName === "input" && editableInputTypes.has(type));
-  if (!isEditableTextTarget) {
+  if (
+    !isEditableTextTarget ||
+    metadata.disabled === true ||
+    metadata.isConnected !== true ||
+    metadata.readOnly === true
+  ) {
     return { sensitive: true, reason: "target_not_editable" };
   }
   if (type === "password") {
@@ -4171,8 +4218,118 @@ async function __murphClassifySensitiveInput(target) {
   return {
     sensitive: shortCodeField,
     reason: shortCodeField ? "short_code" : undefined,
+    signature: typeof metadata.signature === "string"
+      ? metadata.signature
+      : "",
   };
 }
+`.trim();
+}
+
+function buildComputerGuardedFillOperationCode(
+  input: Extract<HostedComputerActRequest, { action: "fill" }>,
+): string {
+  return `
+const __murphFillFailure = (reason) => ({
+  __murphComputerActFailure: "fill_guard",
+  reason,
+});
+const __murphFillHandle = await __murphTarget.elementHandle({
+  timeout: ${Math.min(input.timeoutMs, 1_000)},
+}).catch(() => null);
+const __murphInitialClassification =
+  await __murphClassifySensitiveElement(__murphFillHandle);
+if (__murphInitialClassification.sensitive === true) {
+  return __murphFillFailure(
+    __murphInitialClassification.reason === "target_uninspectable"
+      || __murphInitialClassification.reason === "target_not_editable"
+      ? "target_changed_or_uninspectable"
+      : "sensitive_input"
+  );
+}
+await page.waitForTimeout(0);
+const __murphFillTargetStillSelected = __murphFillHandle !== null
+  && await __murphTarget.evaluate(
+    (element, pinnedElement) => element === pinnedElement,
+    __murphFillHandle
+  ).catch(() => false);
+const __murphFinalClassification =
+  await __murphClassifySensitiveElement(__murphFillHandle);
+if (
+  !__murphFillTargetStillSelected
+  || __murphFinalClassification.sensitive === true
+  || __murphFinalClassification.signature !== __murphInitialClassification.signature
+) {
+  return __murphFillFailure(
+    __murphFinalClassification.sensitive === true
+      && __murphFinalClassification.reason !== "target_uninspectable"
+      && __murphFinalClassification.reason !== "target_not_editable"
+      ? "sensitive_input"
+      : "target_changed_or_uninspectable"
+  );
+}
+await __murphFillHandle.fill(${JSON.stringify(input.text)}, {
+  timeout: ${input.timeoutMs},
+});
+await page.waitForTimeout(0);
+const __murphValueMatchesRequested = await __murphTarget.evaluate(
+  (element, proof) => {
+    if (element !== proof.pinnedElement || element.isConnected === false) {
+      return false;
+    }
+    if ("value" in element) {
+      return String(element.value) === proof.requestedValue;
+    }
+    return element.isContentEditable === true
+      && String(element.textContent || "") === proof.requestedValue;
+  },
+  {
+    pinnedElement: __murphFillHandle,
+    requestedValue: ${JSON.stringify(input.text)},
+  }
+).catch(() => false);
+return await __murphFinish({
+  valueMatchesRequested: __murphValueMatchesRequested,
+});
+`.trim();
+}
+
+function buildComputerVerifiedSelectOperationCode(
+  input: Extract<HostedComputerActRequest, { action: "selectOption" }>,
+): string {
+  return `
+const __murphSelectHandle = await __murphTarget.elementHandle({
+  timeout: ${Math.min(input.timeoutMs, 1_000)},
+});
+await __murphSelectHandle.selectOption(${JSON.stringify(input.values)}, {
+  timeout: ${input.timeoutMs},
+});
+await page.waitForTimeout(0);
+const __murphSelectedValuesMatchRequested = await __murphTarget.evaluate(
+  (element, proof) => {
+    if (
+      element !== proof.pinnedElement
+      || element.isConnected === false
+      || String(element.tagName || "").toLowerCase() !== "select"
+    ) {
+      return false;
+    }
+    const selectedValues = Array.from(
+      element.selectedOptions || [],
+      (option) => String(option.value),
+    ).sort();
+    const requestedValues = [...proof.requestedValues].sort();
+    return selectedValues.length === requestedValues.length
+      && selectedValues.every((value, index) => value === requestedValues[index]);
+  },
+  {
+    pinnedElement: __murphSelectHandle,
+    requestedValues: ${JSON.stringify(input.values)},
+  }
+).catch(() => false);
+return await __murphFinish({
+  selectedValuesMatchRequested: __murphSelectedValuesMatchRequested,
+});
 `.trim();
 }
 
@@ -4243,27 +4400,6 @@ function readComputerUseErrorDetails(value: unknown): Record<string, unknown> {
     : {};
 }
 
-async function requireNonSensitiveComputerActFillTarget(input: {
-  action: Extract<HostedComputerActRequest, { action: "fill" }>;
-  kernel: ComputerKernelClient;
-  sessionId: string;
-}): Promise<void> {
-  const result = await input.kernel.executePlaywright({
-    code: buildComputerActFillSensitiveInputProbeCode(input.action),
-    sessionId: input.sessionId,
-    timeoutMs: Math.min(
-      input.action.timeoutMs,
-      COMPUTER_SENSITIVE_INPUT_PREFLIGHT_TIMEOUT_MS,
-    ),
-  });
-  const preflight = readComputerSensitiveInputPreflightResult(result.result);
-  if (!preflight.sensitive) {
-    return;
-  }
-
-  throw sensitiveInputRequiresHandoffError();
-}
-
 async function requireNonSensitiveComputerOsTextTarget(input: {
   action: HostedComputerOsControlRequest;
   kernel: ComputerKernelClient;
@@ -4294,32 +4430,13 @@ function sensitiveInputRequiresHandoffError(): Error {
   });
 }
 
-function buildComputerActFillSensitiveInputProbeCode(
-  input: Extract<HostedComputerActRequest, { action: "fill" }>,
-): string {
-  const target = buildComputerActTargetCode(input.target);
-  return [
-    `const __murphTarget = ${target.selected};`,
-    buildComputerSensitiveInputClassifierCode(),
-    `await __murphTarget.waitFor({ state: "attached", timeout: ${Math.min(
-      input.timeoutMs,
-      1_000,
-    )} });`,
-    "const __murphInputClassification = await __murphClassifySensitiveInput(__murphTarget);",
-    'if (__murphInputClassification.reason === "target_uninspectable" || __murphInputClassification.reason === "target_not_editable") {',
-    '  throw new Error("Structured fill target could not be inspected safely.");',
-    "}",
-    "return __murphInputClassification;",
-  ].join("\n");
-}
-
 function buildComputerActiveElementSensitiveInputProbeCode(): string {
   return [
     buildComputerSensitiveInputClassifierCode(),
     `
 const target = page.locator(":focus");
-await target.waitFor({ state: "attached", timeout: 1000 }).catch(() => {});
-return await __murphClassifySensitiveInput(target);
+const handle = await target.elementHandle({ timeout: 1000 }).catch(() => null);
+return await __murphClassifySensitiveElement(handle);
 `.trim(),
   ].join("\n");
 }
@@ -4436,6 +4553,21 @@ function readRequiredBrowserActionStateResult(input: {
   };
 }
 
+function readComputerActFillGuardFailure(
+  value: unknown,
+): "sensitive_input" | "target_changed_or_uninspectable" | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.__murphComputerActFailure !== "fill_guard") {
+    return null;
+  }
+  return record.reason === "sensitive_input"
+    ? "sensitive_input"
+    : "target_changed_or_uninspectable";
+}
+
 function computerActActionExpectsTarget(
   action: HostedComputerActRequest["action"],
 ): boolean {
@@ -4452,7 +4584,9 @@ function readComputerActTargetState(value: unknown): ComputerActTargetState | nu
   const visible = record.visible;
   const enabled = record.enabled;
   const checked = record.checked;
+  const selectedValuesMatchRequested = record.selectedValuesMatchRequested;
   const text = record.text;
+  const valueMatchesRequested = record.valueMatchesRequested;
   if (
     typeof matchCount !== "number" ||
     !Number.isInteger(matchCount) ||
@@ -4460,7 +4594,15 @@ function readComputerActTargetState(value: unknown): ComputerActTargetState | nu
     !isBooleanOrNull(visible) ||
     !isBooleanOrNull(enabled) ||
     !isBooleanOrNull(checked) ||
-    !isStringOrNull(text)
+    !isStringOrNull(text) ||
+    (
+      selectedValuesMatchRequested !== undefined &&
+      typeof selectedValuesMatchRequested !== "boolean"
+    ) ||
+    (
+      valueMatchesRequested !== undefined &&
+      typeof valueMatchesRequested !== "boolean"
+    )
   ) {
     return null;
   }
@@ -4475,9 +4617,15 @@ function readComputerActTargetState(value: unknown): ComputerActTargetState | nu
     checked,
     enabled,
     matchCount,
+    ...(typeof selectedValuesMatchRequested === "boolean"
+      ? { selectedValuesMatchRequested }
+      : {}),
     text: typeof text === "string"
       ? text.slice(0, COMPUTER_ACT_TARGET_TEXT_LIMIT)
       : null,
+    ...(typeof valueMatchesRequested === "boolean"
+      ? { valueMatchesRequested }
+      : {}),
     visible,
   };
 }

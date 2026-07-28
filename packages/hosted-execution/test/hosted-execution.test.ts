@@ -898,6 +898,34 @@ describe("hosted execution coverage gaps", () => {
       durationMs: HOSTED_COMPUTER_ACT_WAIT_MAX_MS,
       timeoutMs: 15000,
     });
+    expect(parseHostedComputerActRequest({
+      action: "waitFor",
+      state: "hidden",
+      target: {
+        kind: "text",
+        text: "Loading",
+      },
+    })).toEqual({
+      action: "waitFor",
+      state: "hidden",
+      target: {
+        exact: true,
+        kind: "text",
+        pick: { kind: "only" },
+        text: "Loading",
+      },
+      timeoutMs: 15000,
+    });
+    for (const state of ["attached", "detached"]) {
+      expect(() => parseHostedComputerActRequest({
+        action: "waitFor",
+        state,
+        target: {
+          kind: "text",
+          text: "Loading",
+        },
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
     expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",
     })).toEqual({

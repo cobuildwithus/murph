@@ -4981,6 +4981,8 @@ function readSanitizedComputerActTarget(
     ...readBooleanOrNullField(record, 'visible'),
     ...readBooleanOrNullField(record, 'enabled'),
     ...readBooleanOrNullField(record, 'checked'),
+    ...readBooleanField(record, 'valueMatchesRequested'),
+    ...readBooleanField(record, 'selectedValuesMatchRequested'),
     ...readStringOrNullFieldWithLimit(
       record,
       'text',

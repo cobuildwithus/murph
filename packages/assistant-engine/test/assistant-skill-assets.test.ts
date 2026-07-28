@@ -1150,7 +1150,12 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /\*\*CAPTCHA or bot check:\*\* first verify it is a real challenge rather than an\s+ordinary cookie banner, modal, or unfamiliar control\. If it is real, pause\s+for takeover\. Do not bypass it\./u,
     )
-    expect(raw).toMatch(/refresh\s+the current page as a last resort/)
+    expect(raw).toContain('has no exact reload operation')
+    expect(raw).toMatch(/Do not approximate a reload with `navigate`/u)
+    expect(raw).toMatch(/`press` only for its enumerated activation and navigation keys/u)
+    expect(raw).toMatch(/cannot\s+enter ordinary text and is not a substitute when `fill` is rejected/u)
+    expect(raw).not.toMatch(/refresh\s+the current page as a last resort/u)
+    expect(raw).not.toMatch(/Use `press` for masked/u)
     expect(raw).toContain('references/health-browser-playbook.md')
     expect(raw).toContain('reordering supplements or products')
     expect(raw).toContain('vault-cli memory show --vault "$VAULT" --format json')

@@ -308,7 +308,7 @@ export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("waitFor"),
-      state: z.enum(["attached", "detached", "visible", "hidden"]),
+      state: z.enum(["visible", "hidden"]),
       target: hostedComputerActTargetSchema,
       ...hostedComputerActBaseShape,
     })

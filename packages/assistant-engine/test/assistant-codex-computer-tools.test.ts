@@ -77,6 +77,9 @@ describe("murph computer dynamic tools", () => {
     expect(actToolSchema).toContain(
       `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
     );
+    expect(actToolSchema).toContain('"enum":["visible","hidden"]');
+    expect(actToolSchema).not.toContain('"attached"');
+    expect(actToolSchema).not.toContain('"detached"');
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
@@ -550,6 +553,68 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("must-not-return");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
+  });
+
+  it("returns form-match proof without returning form values", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({
+        action: "fill",
+        target: {
+          box: null,
+          checked: null,
+          enabled: true,
+          matchCount: 1,
+          rawValue: "must-not-return",
+          selectedValues: ["must-not-return"],
+          selectedValuesMatchRequested: false,
+          text: null,
+          valueMatchesRequested: true,
+          visible: true,
+        },
+        title: "Search",
+        url: "https://shop.example.test/search",
+        visibleText: "Ready",
+      })
+    );
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          action: "fill",
+          runId: "run_123",
+          target: {
+            exact: true,
+            kind: "label",
+            label: "Search",
+            pick: { kind: "only" },
+          },
+          text: "dentist",
+          timeoutMs: 1000,
+        },
+        kind: "computer-act",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
+      action: "fill",
+      target: {
+        selectedValuesMatchRequested: false,
+        valueMatchesRequested: true,
+      },
+    });
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain(
+      "must-not-return",
+    );
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("rawValue");
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain(
+      '"selectedValues":',
+    );
   });
 
   it("sends finish-run compatibility fields only to the finish endpoint", async () => {

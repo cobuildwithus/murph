@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -125,6 +125,16 @@ Updated: 2026-07-27
   oracle over hidden DOM values. The finite contract now keeps only role,
   label, visible-text, placeholder, and test-id locators, and Web filters every
   server-compiled locator to visible matches before selection or projection.
+- Accepted all four preliminary specialist findings. Ordinary fill now resolves
+  and classifies one pinned element handle, includes associated label and
+  accessibility text, rechecks identity and security-relevant state, and fills
+  only that handle in one server-owned evaluation. Fill and select return
+  boolean requested-value match proof without raw values. Unsupported reload
+  and printable-`press` tactics were deleted from the skill, and visible-only
+  targeting now exposes only visible/hidden waits.
+- Kept the correction inside the existing Web compiler, shared schema, and
+  assistant sanitizer owners. No new browser lifecycle, queue, state manager,
+  or generalized operation language was added.
 
 ## Verification
 
@@ -174,6 +184,31 @@ Updated: 2026-07-27
     cleanly as `badbaaf965`. The exact refreshed head then passed Hosted
     Execution (40 tests), Assistant Engine (286 tests), Web (184 tests), and
     all three affected typechecks.
+  - The preliminary completion-specialists pass found four issues: a
+    non-atomic sensitive-fill guard, unsupported reload/press prompt tactics,
+    missing non-secret form-control result proof, and attachment wait states
+    incompatible with visible-only locator filtering. All four are remediated;
+    the preliminary pass will not be rerun.
+  - The correction-focused Web computer-use file passes all 186 tests,
+    including executable label-only password/card/code guards, target
+    replacement, and stable/reactive fill and select proof. The full Hosted
+    Execution suite passes 422 tests. The full Assistant Engine suite passes
+    2,779 tests with 8 skipped, and Web plus every affected package typecheck
+    passed.
+  - The local canonical diff dispatcher passed dependency, boundary, stale
+    runtime, Temporal, crypto, logging, and affected-package typecheck gates,
+    then passed Assistant Engine, Assistant CLI, Assistant Runtime, and
+    Assistantd tests. Its CLI phase reproduced the already documented eight
+    unchanged 60-second subprocess timeouts while children re-entered the outer
+    artifact lock; after several additional minutes with no progress, the
+    parent stopped only that exact session-owned verification tree.
+  - Doc drift, doc gardening, and diff whitespace checks pass after updating
+    the live architecture/security truth and index.
+  - Canonical acceptance correctly escalated after the local admission wait but
+    failed before provisioning or code sync because the installed direct
+    Blacksmith provider rejects the dispatcher's obsolete `--stop-after` flag.
+    Current `origin/main` contains repository fix `f4ae336a6d`; reconcile that
+    ordinary history before retrying the unchanged candidate.
 - Remaining:
-  - Canonical diff-aware verification and acceptance.
-  - Preliminary specialist, final ReviewGPT, and CI gates.
+  - Reconcile current main and rerun canonical acceptance through Crabbox.
+  - Parent final review, plan closure, final ReviewGPT, and CI gates.

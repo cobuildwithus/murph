@@ -416,10 +416,15 @@ compiles fixed Playwright snippets and returns only fixed page and target state.
 Raw model-authored JavaScript, arbitrary result projection, and direct
 `page`/`context`/`browser` authority are absent from the persistent-profile
 boundary. Locator matching is limited to visible elements and exposes no raw
-CSS selector oracle over hidden DOM attributes. Ordinary text entry performs a
-text-free server-owned
-sensitive-field probe before the value is sent to Kernel and routes blocked
-input to the existing durable handoff.
+CSS selector oracle over hidden DOM attributes. Ordinary text entry resolves
+one concrete visible element handle, classifies its attributes plus associated
+label and accessibility text, then revalidates that same handle and its
+security-relevant state immediately before filling it in the same server-owned
+Kernel evaluation. Detachment, locator replacement, state drift, or sensitive
+classification routes to the existing durable handoff without filling. Fill
+and select operations return only action-specific boolean match proof, never
+raw control values. Visible-only targeting exposes only `visible` and `hidden`
+wait states; DOM attachment state is not part of the model contract.
 
 ## Hosted Phone Calls
 
