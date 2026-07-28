@@ -68,6 +68,15 @@ Done:
   and termination during Git reconstruction. Focused runner/dispatcher/workspace
   coverage passed 69 tests, and canonical local `pnpm test:diff` passed 30
   repo-tool files and 457 tests.
+- The targeted ReviewGPT correction check confirmed the readiness/Git cleanup
+  mechanism and found one nested-group edge case: install and verification used
+  one-shot forwarding listeners, so a graceful child could consume the first
+  signal and a surviving descendant would not receive the same signal again.
+  Those listeners now remain installed until the owned process group is empty.
+  Repeated-identical-signal regressions cover both install and verification,
+  including a leader that exits before its descendant; focused coverage passed
+  71 tests, and canonical local `pnpm test:diff` passed 30 repo-tool files and
+  459 tests.
 
 Now:
 - Make `zstd` available in the dedicated account's non-interactive `PATH`, then

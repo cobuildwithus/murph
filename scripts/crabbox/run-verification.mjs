@@ -203,9 +203,9 @@ function runChild(command, args, options) {
     const onSighup = () => {
       signalChild(child, useDetachedProcessGroup, "SIGHUP");
     };
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
-    process.once("SIGHUP", onSighup);
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
+    process.on("SIGHUP", onSighup);
 
     const cleanup = () => {
       process.off("SIGINT", onSigint);

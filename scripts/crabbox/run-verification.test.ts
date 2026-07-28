@@ -911,6 +911,157 @@ describe("Crabbox verification environment", () => {
     }
   });
 
+  it.each([
+    { blockingCommand: "corepack", phase: "installation" },
+    { blockingCommand: "bash", phase: "verification" },
+  ])(
+    "forwards repeated SIGTERM to a surviving $phase descendant before exact cleanup",
+    async ({ blockingCommand }) => {
+      const tempRoot = makeTempRoot();
+      const { runDirectory, workspaceRoot } =
+        createStaticRunnerWorkspace(tempRoot);
+      const siblingRunDirectory = path.join(
+        path.dirname(runDirectory),
+        "fedcba9876543210-0123456789abcdef",
+      );
+      const siblingMarkerPath = path.join(siblingRunDirectory, "keep");
+      const binDir = path.join(tempRoot, "bin");
+      const descendantReadyPath = path.join(tempRoot, "descendant-ready");
+      const descendantPidPath = path.join(tempRoot, "descendant-pid");
+      const descendantSignalsPath = path.join(
+        tempRoot,
+        "descendant-signals",
+      );
+      const leaderTermPath = path.join(tempRoot, "leader-term");
+      const verificationStartedPath = path.join(
+        tempRoot,
+        "verification-started",
+      );
+      mkdirSync(siblingRunDirectory, { recursive: true });
+      writeFileSync(siblingMarkerPath, "keep\n");
+      writeStaticArchiveCapabilityTools(binDir);
+      writeExecutable(
+        path.join(binDir, "stubborn-verifier-descendant"),
+        [
+          "#!/bin/sh",
+          "signal_count=0",
+          `printf "%s\\n" "$$" > ${shellQuote(descendantPidPath)}`,
+          `trap 'signal_count=$((signal_count + 1)); printf "%s\\n" "$signal_count" >> ${shellQuote(descendantSignalsPath)}; if [ "$signal_count" -ge 2 ]; then exit 143; fi' TERM`,
+          `: > ${shellQuote(descendantReadyPath)}`,
+          "while :; do /bin/sleep 0.05; done",
+        ].join("\n"),
+      );
+      writeExecutable(
+        path.join(binDir, blockingCommand),
+        [
+          "#!/bin/sh",
+          `trap ': > ${shellQuote(leaderTermPath)}; exit 143' TERM`,
+          ...(blockingCommand === "bash"
+            ? [`: > ${shellQuote(verificationStartedPath)}`]
+            : []),
+          "stubborn-verifier-descendant &",
+          "wait",
+        ].join("\n"),
+      );
+      if (blockingCommand === "corepack") {
+        writeExecutable(
+          path.join(binDir, "bash"),
+          [
+            "#!/bin/sh",
+            `: > ${shellQuote(verificationStartedPath)}`,
+            "exit 0",
+          ].join("\n"),
+        );
+      } else {
+        writeExecutable(path.join(binDir, "corepack"), "#!/bin/sh\nexit 0");
+      }
+
+      runGit(workspaceRoot, ["init", "--quiet"]);
+      runGit(workspaceRoot, ["add", "--all", "--force"]);
+      runGit(workspaceRoot, [
+        "-c",
+        "user.name=Crabbox Test",
+        "-c",
+        "user.email=crabbox-test@users.noreply.github.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "base",
+      ]);
+      const baseTree = readGit(workspaceRoot, ["rev-parse", "HEAD^{tree}"]);
+      expect(callModule(
+        "writeStaticGitSnapshotMetadata",
+        {
+          baseTree,
+          candidateTree: baseTree,
+          snapshotRoot: workspaceRoot,
+        },
+        dispatcherPath,
+      )).toBeNull();
+      rmSync(path.join(workspaceRoot, ".git"), {
+        force: true,
+        recursive: true,
+      });
+
+      const runner = spawn(
+        process.execPath,
+        [
+          path.join(
+            workspaceRoot,
+            "scripts",
+            "crabbox",
+            "run-ssh-verification.mjs",
+          ),
+          "--cleanup-static-workspace",
+          "verify:acceptance",
+        ],
+        {
+          cwd: workspaceRoot,
+          env: {
+            HOME: path.join(tempRoot, "home"),
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: "ignore",
+        },
+      );
+      try {
+        await waitForFile(descendantReadyPath);
+        const descendantPid = Number.parseInt(
+          readFileSync(descendantPidPath, "utf8").trim(),
+          10,
+        );
+        expect(Number.isInteger(descendantPid)).toBe(true);
+
+        runner.kill("SIGTERM");
+        await waitForFile(leaderTermPath);
+        await waitForFile(descendantSignalsPath);
+        expect(readFileSync(descendantSignalsPath, "utf8")).toBe("1\n");
+        expect(runner.exitCode).toBeNull();
+
+        runner.kill("SIGTERM");
+        expect(await waitForChild(runner)).toEqual({
+          code: 143,
+          signal: null,
+        });
+        await waitForCondition(
+          () => !isProcessRunning(descendantPid),
+          "the surviving verifier descendant to exit",
+        );
+        expect(readFileSync(descendantSignalsPath, "utf8")).toBe("1\n2\n");
+        expect(existsSync(runDirectory)).toBe(false);
+        expect(existsSync(siblingMarkerPath)).toBe(true);
+        expect(existsSync(verificationStartedPath)).toBe(
+          blockingCommand === "bash",
+        );
+      } finally {
+        if (runner.exitCode === null && runner.signalCode === null) {
+          runner.kill("SIGTERM");
+        }
+        await Promise.allSettled([waitForChild(runner)]);
+      }
+    },
+  );
+
   it("rejects direct candidate execution outside the trusted Testbox entrypoint", () => {
     expect(callModuleFailure(
       "assertTrustedEntrypoint",
