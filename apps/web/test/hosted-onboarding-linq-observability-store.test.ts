@@ -1735,14 +1735,14 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("does not reclaim failed Telegram usage notice rows", async () => {
+  it("does not reclaim an ambiguous non-rate-limit Telegram response", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
-      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRejectedError",
+      failureCode: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
       id: "hld_failed_telegram_notice",
       lastReceiptAt: null,
@@ -1757,18 +1757,33 @@ describe("hosted Linq observability stores", () => {
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt,
-      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      idempotencyKey: "telegram-access-notice:event-ambiguous",
       prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      returnExistingFailureCode: true,
       source: "hosted_runtime_ai_usage_limit_notice",
-      sourceRef: "telegram_event_runtime_denied",
+      sourceRef: "telegram:update:ambiguous",
       targetKind: "telegram_thread",
-      template: "ai_usage_quota",
+      template: "access_notice",
     })).resolves.toEqual({
       claimed: false,
+      failureCode: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
       id: "hld_failed_telegram_notice",
     });
 
-    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_failed_telegram_notice",
+          OR: [{
+            attemptedAt: {
+              lte: new Date("2026-03-26T12:15:00.000Z"),
+            },
+            status: "attempted",
+          }],
+        }),
+      }),
+    );
   });
 
   it("returns a persisted Telegram failure code only when the caller requests it", async () => {

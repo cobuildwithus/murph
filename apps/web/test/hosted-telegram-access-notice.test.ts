@@ -372,6 +372,52 @@ describe("Telegram access notice delivery", () => {
     expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledOnce();
   });
 
+  it("terminalizes a non-rate-limit provider failure instead of reopening private delivery", async () => {
+    mocks.sendHostedTelegramTextMessage.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        details: { status: 502 },
+        httpStatus: 502,
+        message: "Telegram sendMessage failed with HTTP 502.",
+        retryable: false,
+      }),
+    );
+
+    const input = {
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:provider-ambiguous",
+      target: "456",
+    };
+    await expect(sendHostedTelegramAccessNotice(input)).resolves.toEqual({
+      status: "already_notified",
+    });
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+      }),
+    );
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        retryAfterAt: expect.any(Date),
+      }),
+    );
+
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: false,
+      failureCode: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+      id: "delivery_123",
+    });
+    await expect(sendHostedTelegramAccessNotice(input)).resolves.toEqual({
+      status: "already_notified",
+    });
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledOnce();
+  });
+
   it("retries a provider-confirmed rate limit after its persisted delay", async () => {
     const sentAt = new Date("2026-07-25T12:00:00.000Z");
     const retryAt = new Date("2026-07-25T12:00:45.000Z");
@@ -425,6 +471,7 @@ describe("Telegram access notice delivery", () => {
     mocks.sendHostedTelegramTextMessage.mockRejectedValue(
       hostedOnboardingError({
         code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        details: { status: 403 },
         httpStatus: 502,
         message: "Telegram sendMessage failed with HTTP 403.",
         retryable: false,

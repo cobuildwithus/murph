@@ -267,7 +267,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
     if (
       isHostedOnboardingError(error)
       && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
-      && error.retryable
+      && readHostedTelegramResponseStatus(error) === 429
     ) {
       return await markHostedTelegramAccessNoticeRetryable({
         attemptedAt: claim.attemptedAt,
@@ -282,9 +282,9 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
     if (
       isHostedOnboardingError(error)
       && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
-      && !error.retryable
+      && isHostedTelegramPermanentResponseRejection(error)
     ) {
-      // Telegram returned a non-retryable rejection, so the private message
+      // Telegram permanently rejected the request, so the private message
       // definitely did not land. Preserve the terminal provider-effect record
       // and let the webhook adapter use its account-neutral room fallback.
       await markHostedLinqDeliverySendFailedTx({
@@ -446,6 +446,25 @@ function readHostedTelegramRetryAfterSeconds(
     && retryAfterSeconds > 0
     ? retryAfterSeconds
     : undefined;
+}
+
+function readHostedTelegramResponseStatus(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): number | undefined {
+  const status = error.details?.status;
+  return typeof status === "number"
+    && Number.isSafeInteger(status)
+    && status >= 100
+    && status <= 599
+    ? status
+    : undefined;
+}
+
+function isHostedTelegramPermanentResponseRejection(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): boolean {
+  const status = readHostedTelegramResponseStatus(error);
+  return status !== undefined && status >= 400 && status < 500 && status !== 429;
 }
 
 function isHostedTelegramControlPreProviderFailure(

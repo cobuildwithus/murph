@@ -213,6 +213,50 @@ describe("visible access webhook recovery", () => {
     });
   });
 
+  it("accepts an ambiguous private-send replay without sending neutral room guidance", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+    const update = { update_id: 324 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: false,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "10",
+      threadId: "group:456",
+    });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_telegram", suspendedAt: null },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({
+      status: "already_notified",
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toEqual({
+      ignored: false,
+      ok: true,
+      reason: "sent-billing-inactive-notice",
+    });
+  });
+
   it("hands a definitely rejected private group recovery to the neutral room fallback", async () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ignored: true,

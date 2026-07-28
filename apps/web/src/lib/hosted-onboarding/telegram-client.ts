@@ -75,7 +75,7 @@ async function callHostedTelegramApi(input: {
         },
         httpStatus: 502,
         message: `Telegram ${input.method} failed with HTTP ${response.status}.`,
-        retryable: response.status === 429 || response.status >= 500,
+        retryable: response.status === 429,
       });
     }
   } finally {

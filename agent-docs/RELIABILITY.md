@@ -63,11 +63,11 @@ Last verified: 2026-07-27
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
 - Group-origin Telegram recovery retains three outcomes in the existing
-  delivery owner. Provider-confirmed rate limits persist a retry time;
-  provider-confirmed permanent rejection persists a recognizable definitely
+  delivery owner. Explicit Telegram rate limits persist a retry time;
+  provider-confirmed permanent 4xx rejection persists a recognizable definitely
   unsent result so replay retries only the neutral room response; and ambiguous
-  no-response dispatch remains terminal and at-most-once for the private
-  message.
+  no-response or non-rate-limit 5xx dispatch remains terminal and at-most-once
+  for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
