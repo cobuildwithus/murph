@@ -2122,6 +2122,10 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
+        postDeliveryReconciliationWake:
+          assistantCronWakeAfterPass?.available === true
+            ? assistantCronWakeAfterPass.wake
+            : null,
         providerCleanupPlan,
         redactedStatus: null,
         shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,

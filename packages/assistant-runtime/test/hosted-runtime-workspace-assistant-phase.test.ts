@@ -9215,6 +9215,100 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      cronStatus: {
+        dueJobs: 2,
+        enabledJobs: 7,
+        nextRunAt: "2026-05-08T16:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 7,
+      },
+      expectedNextWakeAt: "2026-05-08T16:00:00.000Z",
+      label: "available due work",
+    },
+    {
+      cronStatus: {
+        dueJobs: 0,
+        enabledJobs: 7,
+        nextRunAt: "2026-05-08T17:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 7,
+      },
+      expectedNextWakeAt: "2026-05-08T17:00:00.000Z",
+      label: "available future work",
+    },
+    {
+      cronStatus: {
+        dueJobs: 0,
+        enabledJobs: 0,
+        nextRunAt: null,
+        runningJobs: 0,
+        totalJobs: 0,
+      },
+      expectedNextWakeAt: null,
+      label: "available empty state",
+    },
+    {
+      cronStatus: null,
+      expectedNextWakeAt: null,
+      label: "unavailable status",
+    },
+  ])(
+    "reconciles live post-scan cron status through clean fast dispatch: $label",
+    async ({ cronStatus, expectedNextWakeAt }) => {
+      const now = "2026-05-08T16:00:00.000Z";
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+        createSentDeliveryOutcome(),
+      ]);
+      mocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 7,
+        nextRunAt: now,
+        runningJobs: 0,
+        totalJobs: 7,
+      });
+      if (cronStatus) {
+        mocks.getAssistantCronStatus.mockResolvedValueOnce(cronStatus);
+      } else {
+        mocks.getAssistantCronStatus.mockRejectedValueOnce(
+          new Error("synthetic cron status unavailable"),
+        );
+      }
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 1,
+        now: () => now,
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: now,
+        }),
+      }));
+
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: expectedNextWakeAt,
+        progressed: true,
+      }));
+    },
+  );
+
   it("returns a fast-dispatch foreground reply without starting a stalled cron read", async () => {
     const cronStatusPromise = new Promise<never>(() => undefined);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

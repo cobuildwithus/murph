@@ -378,12 +378,13 @@ gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
 in the maintenance lane rather than extending reply ownership.
 
 After a bounded background automation pass, the live post-pass cron status is
-the assistant cron owner's authoritative continuation. A post-checkpoint
-delivery or provider-cleanup drain may consume the workspace wake that admitted
-the pass, but it must carry the independently recomputed cron candidate through
-the existing post-delivery reconciliation wake. The later `idle_shutdown`
-snapshot therefore persists remaining due or future canonical occurrences
-instead of treating successful cleanup as authority to disarm them.
+the assistant cron owner's authoritative continuation. A fast pre-checkpoint
+delivery or a deferred post-checkpoint delivery/provider-cleanup drain may
+consume the workspace wake that admitted the pass, but each path must carry the
+independently recomputed cron candidate through the existing post-delivery
+reconciliation wake. The later `idle_shutdown` snapshot therefore persists
+remaining due or future canonical occurrences instead of treating successful
+delivery or cleanup as authority to disarm them.
 
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
