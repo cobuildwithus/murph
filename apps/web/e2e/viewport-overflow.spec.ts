@@ -246,7 +246,7 @@ for (const width of [768, 1280] as const) {
       '[data-design-state="active-with-credit"]',
     );
     const card = activeState.locator(
-      '[aria-label="Pulse included AI usage"]',
+      '[aria-label="Pulse AI usage"]',
     );
     const trigger = card.getByRole("button", { name: "Add usage" });
     await expect(study.locator("[inert]")).toHaveCount(3);
@@ -254,7 +254,7 @@ for (const width of [768, 1280] as const) {
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(
-        '[data-design-state="active-with-credit"] [aria-label="Pulse included AI usage"]',
+        '[data-design-state="active-with-credit"] [aria-label="Pulse AI usage"]',
       );
       const button = Array.from(owner?.querySelectorAll("button") ?? []).find(
         (candidate) => candidate.textContent?.trim() === "Add usage",

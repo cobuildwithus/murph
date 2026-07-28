@@ -18,6 +18,15 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant configuration tool", () => {
+  it("describes the usage-saving option against overall AI usage", () => {
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain(
+      "a less capable model that uses less AI usage",
+    );
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain(
+      "less of your included usage",
+    );
+  });
+
   it("exposes the dynamic tool only when hosted configuration is available", () => {
     expect(resolveMurphDynamicTools({
       assistantConfigurationAvailable: true,

@@ -103,11 +103,18 @@ The only consumer is the existing route-authorized
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
 2. Select at most 16 canonical phone handles while retaining each handle's
    durable activation result independently.
-3. Resolve only the human group owner's active projection.
+3. Resolve only the human group owner's enabled projection.
 4. Omit ambiguous labels and return each remaining label as
    `unverifiedOwnerContactLabel`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
    optional overlay; never degrade the truthful roster.
+
+Before KMS or token lookup, the advisory read must confirm that the owner still
+exists, is unsuspended, holds current launch consent, and has an enabled
+projection. It does not rerun the active member access check that gates
+replacement: the route-authorized live group read is the access boundary for an
+already-enabled projection, regardless of the owner's current personal or
+sponsored billing access.
 
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
