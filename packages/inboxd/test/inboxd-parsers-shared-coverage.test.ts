@@ -560,6 +560,7 @@ function createRuntimeStoreStub(): InboxRuntimeStore & { close: ReturnType<typeo
     listAttachmentParseJobs: vi.fn(() => []),
     listCaptures: vi.fn(() => []),
     searchCaptures: vi.fn(() => []),
+    redactCaptureText: vi.fn(() => false),
     getCapture: vi.fn((captureId: string): ContractInboxCaptureRecord | null => ({
       captureId,
       eventId: "evt_123",

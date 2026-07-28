@@ -95,6 +95,34 @@ export async function readHostedMailboxAssistantInputItemDetails(input: {
   return items
 }
 
+export async function retireHostedMailboxAssistantInputItemContentAtPaths(input: {
+  inputId: string
+  paths: AssistantStatePaths
+  signal?: AbortSignal | null
+}): Promise<boolean> {
+  input.signal?.throwIfAborted()
+  const item = await readHostedMailboxAssistantInputItemAtPaths(input)
+  input.signal?.throwIfAborted()
+  if (!item?.groupReactionContext) {
+    return false
+  }
+  const {
+    groupReactionContext: _retiredGroupReactionContext,
+    ...retired
+  } = item
+  await writeAssistantStateVersionedJson({
+    filePath: resolveHostedMailboxAssistantInputItemPath({
+      inputId: item.inputId,
+      paths: input.paths,
+    }),
+    schema: ASSISTANT_HOSTED_MAILBOX_INPUT_ITEM_SCHEMA,
+    schemaVersion: ASSISTANT_HOSTED_MAILBOX_INPUT_ITEM_SCHEMA_VERSION,
+    value: retired,
+  })
+  input.signal?.throwIfAborted()
+  return true
+}
+
 export async function readHostedMailboxAssistantInputItemInventory(
   paths: AssistantStatePaths,
   signal?: AbortSignal | null,

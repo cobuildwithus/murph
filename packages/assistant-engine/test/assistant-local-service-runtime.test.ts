@@ -1248,6 +1248,15 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
   expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
     deliveryReplyToMessageId: '987654321',
   })
+  expect(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.calls
+      .flatMap((call) => call[2])
+      .find((entry) =>
+        entry.kind === 'user' && entry.text === 'Reply to the selected message.'
+      ),
+  ).toMatchObject({
+    contentReceivedAt: '2026-04-22T10:00:00.000Z',
+  })
 })
 
 test('sendAssistantMessageLocal fails closed before reply delivery when second-pass target authority is lost', async () => {
