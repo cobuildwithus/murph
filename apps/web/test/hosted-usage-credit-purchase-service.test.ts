@@ -560,7 +560,7 @@ describe("createHostedUsageCreditCheckout", () => {
     "personal",
     "family",
   ] as const)(
-    "rejects a fresh %s amount before provider I/O while another offer is unfinished",
+    "returns the frozen %s purchase without provider I/O when a fresh amount conflicts",
     async (targetKind) => {
       const fake = createFakePrisma();
       mocks.stripeCheckoutCreate.mockRejectedValueOnce(
@@ -596,14 +596,19 @@ describe("createHostedUsageCreditCheckout", () => {
       });
       clearStripeProviderMockHistory();
 
-      await expect(createCheckout(
+      const conflict = await createCheckout(
         "fresh_amount_key_1234",
         "usage_5_usd",
         new Date(NOW.getTime() + 1_000),
-      )).rejects.toMatchObject({
-        code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
-        httpStatus: 409,
+      );
+
+      expect(conflict).toMatchObject({
+        offerConflict: true,
+        recovered: true,
+        status: "reconciling",
       });
+      expect(conflict).not.toHaveProperty("retryAllowed");
+      expect(conflict).not.toHaveProperty("url");
 
       expect(onlyPurchase(fake.purchases)).toMatchObject({
         clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1392,9 +1397,10 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_5_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
-      httpStatus: 409,
+    })).resolves.toMatchObject({
+      offerConflict: true,
+      recovered: true,
+      status: "payment_pending",
     });
 
     await expect(createHostedGroupUsageCreditCheckout({
@@ -1482,9 +1488,10 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_5_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
-      httpStatus: 409,
+    })).resolves.toMatchObject({
+      offerConflict: true,
+      recovered: true,
+      status: "checkout_open",
     });
 
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({

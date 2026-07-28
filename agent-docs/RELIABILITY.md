@@ -94,8 +94,10 @@ Last verified: 2026-07-27
   confirmation keeps the purchase `payment_pending`; exact request replay
   retrieves and continues only that intent. A fresh request for the same
   target may recover a nonterminal purchase only when its offer matches the
-  frozen offer; a different amount fails closed, and the client keeps the
-  original amount and request key locked while the outcome is uncertain.
+  frozen offer. A different amount receives only the frozen purchase's status
+  and cancellation capability; the rejected amount and fresh request key are
+  not retained as a retry. The frozen offer and original request key remain the
+  only payable recovery path while the outcome is uncertain.
   Authentication or card failure
   may fall back to Checkout only after the exact intent is verified canceled
   and its binding is cleared under the same reconciliation fence. Direct

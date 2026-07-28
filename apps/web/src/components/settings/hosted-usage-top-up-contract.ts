@@ -53,6 +53,7 @@ interface HostedUsageTopUpDialogProps {
 
 interface HostedUsageTopUpPurchaseResponse {
   cancelAllowed: boolean;
+  offerConflict: boolean;
   purchaseId: string;
   recovered: boolean;
   restartAt: string | null;
@@ -70,6 +71,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     value.purchaseId.length > 200 ||
     !isPurchaseStatus(value.status) ||
     (value.cancelAllowed !== undefined && value.cancelAllowed !== true) ||
+    (value.offerConflict !== undefined && value.offerConflict !== true) ||
     (value.recovered !== undefined && value.recovered !== true) ||
     (value.restartAt !== undefined &&
       (value.status !== "reconciling" ||
@@ -78,13 +80,18 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     (value.targetConflict !== undefined && value.targetConflict !== true) ||
     (value.url !== undefined &&
       value.url !== null &&
-      typeof value.url !== "string")
+      typeof value.url !== "string") ||
+    (value.offerConflict === true &&
+      (value.retryAllowed === true ||
+        value.targetConflict === true ||
+        typeof value.url === "string"))
   ) {
     throw new Error("Checkout didn’t open. Try again.");
   }
 
   return {
     cancelAllowed: value.cancelAllowed === true,
+    offerConflict: value.offerConflict === true,
     purchaseId: value.purchaseId,
     recovered: value.recovered === true,
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
@@ -131,6 +138,7 @@ function isCanonicalIsoTimestamp(value: unknown): value is string {
 function readStatusContent(input: {
   canResumeCheckout: boolean;
   canRetryCheckout: boolean;
+  offerConflict?: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
   scope?: "family" | "group" | "personal";
@@ -138,6 +146,17 @@ function readStatusContent(input: {
   targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
+  if (
+    input.offerConflict &&
+    input.pollKind !== "failed" &&
+    input.status === "checkout_open"
+  ) {
+    return content(
+      "Another amount is already in progress",
+      "Cancel the unfinished checkout before choosing another amount.",
+    );
+  }
+
   if (input.targetConflict) {
     if (input.pollKind === "failed") {
       return content(

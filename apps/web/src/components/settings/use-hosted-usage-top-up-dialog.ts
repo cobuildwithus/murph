@@ -409,6 +409,7 @@ function useHostedUsageTopUpDialog({
         response.recovered
         && response.status === "checkout_open"
         && !resolvedCheckoutUrl
+        && !response.offerConflict
         && !response.targetConflict
       ) {
         throw new Error("Checkout didn’t open. Try again.");

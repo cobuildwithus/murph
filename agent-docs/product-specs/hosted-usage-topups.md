@@ -381,10 +381,11 @@ the same payer/request-key/offer and funding target continues the same purchase
 with the same purchase-derived Stripe idempotency key; using the key for a
 different offer or target conflicts. Replay must not reinterpret the purchase
 against the mutable catalog, mint a replacement attempt, or require a second
-browser authorization. While a group purchase is nonterminal, a fresh request
+browser authorization. While a purchase is nonterminal, a fresh request
 key for that same target may recover it only when the submitted offer still
-matches the frozen offer; a different amount conflicts instead of continuing
-the earlier payment under new button copy. Account deletion suspends new
+matches the frozen offer. A different amount returns the earlier purchase's
+status/cancel-only projection instead of continuing it under new button copy;
+the rejected fresh key is not retained as a payment retry. Account deletion suspends new
 payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The

@@ -34,6 +34,7 @@ interface HostedUsageTopUpPurchaseScreen {
   checkoutError: string | null;
   checkoutUrl: string | null;
   kind: "purchase";
+  offerConflict: boolean;
   operation: "idle" | "opening_checkout" | "canceling_checkout";
   poll: HostedUsageTopUpPoll;
   purchaseId: string;
@@ -395,7 +396,9 @@ function screenFromResponse(
     ...createPurchaseScreen(response.purchaseId),
     cancelAllowed: response.cancelAllowed,
     checkoutUrl:
-      !response.targetConflict && response.status === "checkout_open"
+      !response.offerConflict &&
+      !response.targetConflict &&
+      response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
         : null,
     poll:
@@ -405,10 +408,15 @@ function screenFromResponse(
           ? previousPoll
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
-    retryOfferCode: response.targetConflict ? null : retryOfferCode,
+    retryOfferCode:
+      response.offerConflict || response.targetConflict ? null : retryOfferCode,
     retryRequestKey:
-      response.targetConflict || !retryOfferCode ? null : retryRequestKey,
+      response.offerConflict || response.targetConflict || !retryOfferCode
+        ? null
+        : retryRequestKey,
     status: response.status,
+    offerConflict:
+      response.offerConflict || previous?.offerConflict === true,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };
 }
@@ -429,6 +437,7 @@ function createPurchaseScreen(
     checkoutError: null,
     checkoutUrl: null,
     kind: "purchase",
+    offerConflict: false,
     operation: "idle",
     poll: createPoll(),
     purchaseId,

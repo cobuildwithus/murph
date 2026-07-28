@@ -1379,6 +1379,134 @@ test("asks before resuming a recovered Checkout from a fresh browser request", a
   }
 });
 
+test.each([
+  ["personal", "reconciling"],
+  ["personal", "checkout_open"],
+  ["personal", "payment_pending"],
+  ["family", "reconciling"],
+  ["family", "checkout_open"],
+  ["family", "payment_pending"],
+] as const)(
+  "shows the frozen %s %s purchase instead of retaining a stale amount retry",
+  async (scope, status) => {
+    let resolveStatus!: (value: unknown) => void;
+    const statusRead = new Promise<unknown>((resolve) => {
+      resolveStatus = resolve;
+    });
+    const purchaseId = `hucp_${scope}_${status}`;
+    const checkoutUrl = scope === "family"
+      ? "/api/settings/billing/family/members/member_b/usage-credit/checkout"
+      : "/api/settings/billing/usage-credit/checkout";
+    mocks.requestHostedOnboardingJson.mockImplementation(
+      (request: { method: string; url: string }) => {
+        if (request.method === "POST" && request.url === checkoutUrl) {
+          return Promise.resolve({
+            ...(status === "payment_pending" ? { cancelAllowed: true } : {}),
+            offerConflict: true,
+            purchaseId,
+            recovered: true,
+            status,
+          });
+        }
+        return statusRead;
+      },
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        scope,
+        ...(scope === "family" ? { targetLabel: "Member B" } : {}),
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, "Add usage · $5");
+
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /We couldn’t confirm this payment yet/,
+      );
+      assert.match(
+        rendered.container.textContent ?? "",
+        status === "checkout_open"
+          ? /Another amount is already in progress/
+          : status === "reconciling"
+            ? /Checkout not open yet/
+            : /Confirming payment/,
+      );
+      assert.equal(hasButton(rendered.container, "Retry payment · $5"), false);
+      assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+      assert.equal(hasButton(rendered.container, "Change amount"), false);
+      if (status === "checkout_open") {
+        assert.equal(
+          buttonByText(rendered.container, "Cancel checkout").disabled,
+          false,
+        );
+      } else if (status === "payment_pending") {
+        assert.equal(
+          buttonByText(rendered.container, "Cancel payment").disabled,
+          false,
+        );
+      }
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [{
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_500",
+      }]);
+
+      await act(async () => {
+        resolveStatus({ purchaseId, status: "fulfilled" });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Usage added/,
+      );
+      assert.equal(hasButton(rendered.container, "Retry payment · $5"), false);
+      assert.equal(
+        mocks.requestHostedOnboardingJson.mock.calls.filter(
+          ([request]) => request.method === "POST",
+        ).length,
+        1,
+      );
+
+      await clickButton(rendered.container, rendered.window, "Close");
+      await clickButton(rendered.container, rendered.window, "Add usage");
+      assert.equal(
+        rendered.container
+          .querySelector('[role="radiogroup"]')
+          ?.getAttribute("data-value"),
+        "",
+      );
+      assert.equal(
+        mocks.requestHostedOnboardingJson.mock.calls.filter(
+          ([request]) => request.method === "POST",
+        ).length,
+        1,
+      );
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
 test("cancels a recovered open Checkout through the existing expire route", async () => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson.mockImplementation(

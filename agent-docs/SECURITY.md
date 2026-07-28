@@ -127,8 +127,10 @@ Last verified: 2026-07-26
   confirmation remains bound and
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
-  to its frozen offer and original client request; a different submitted amount
-  fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
+  to its frozen offer and original client request. A different submitted amount
+  returns the frozen purchase's status/cancel-only projection and discards the
+  rejected fresh request key; it cannot become a later retry. Choosing an amount
+  has no payment effect, and each
   explicit **Add usage** or **Add messages** click authorizes only the selected
   one-time charge. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.

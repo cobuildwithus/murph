@@ -310,6 +310,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           currentTarget.groupId !== frozenTarget.familyGroupId
         ) {
           return {
+            offerConflict: false,
             purchase: racedExisting,
             recovered: true,
             targetConflict: true,
@@ -317,6 +318,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         }
       }
       return {
+        offerConflict: false,
         purchase: racedExisting,
         recovered: false,
         targetConflict: false,
@@ -360,20 +362,22 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         target,
       })) {
         if (existingActive.offerCode !== input.offerCode) {
-          throw hostedOnboardingError({
-            code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
-            httpStatus: 409,
-            message:
-              "Finish the unfinished usage-credit payment before choosing another amount.",
-          });
+          return {
+            offerConflict: true,
+            purchase: existingActive,
+            recovered: true,
+            targetConflict: false,
+          };
         }
         return {
+          offerConflict: false,
           purchase: existingActive,
           recovered: true,
           targetConflict: false,
         };
       }
       return {
+        offerConflict: false,
         purchase: existingActive,
         recovered: true,
         targetConflict: true,
@@ -520,6 +524,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       },
     });
     return {
+      offerConflict: false,
       purchase: created,
       recovered: false,
       targetConflict: false,
@@ -536,6 +541,14 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       ...(projected.restartAt ? { restartAt: projected.restartAt } : {}),
       status: projected.status,
       targetConflict: true,
+    };
+  }
+
+  if (resolution.offerConflict) {
+    return {
+      ...projectHostedUsageCreditPurchaseStatusResult(resolution.purchase),
+      offerConflict: true,
+      recovered: true,
     };
   }
 

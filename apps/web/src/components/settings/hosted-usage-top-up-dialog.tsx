@@ -143,6 +143,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     ? readStatusContent({
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
+        offerConflict: purchase.offerConflict,
         pollKind: purchase.poll.kind,
         returnedFromSuccessfulCheckout,
         scope: props.scope,

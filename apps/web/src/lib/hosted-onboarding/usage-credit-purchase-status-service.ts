@@ -50,6 +50,7 @@ export type HostedUsageCreditPublicPurchaseStatus =
 
 export interface HostedUsageCreditCheckoutResult {
   cancelAllowed?: true;
+  offerConflict?: true;
   purchaseId: string;
   recovered?: true;
   restartAt?: string;
