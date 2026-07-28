@@ -50,6 +50,10 @@ Updated: 2026-07-27
 - Treat terminal-evidence reads as fail-closed cleanup: retain queued state on a
   transient read error, retry retained completion IDs before the next phase,
   and release exact proven completions from the phase `finally` path.
+- Trust image-completion contents only when the durable input has the exact
+  system-lane schema and deterministic completion identity. Parse that envelope
+  into a typed projection, remove its raw body from ordinary message text, and
+  expose the normalized result only through trusted turn context.
 - Avoid the blocked Cloudflare image E2E file and prove the exact exchange at the engine/runtime owner boundaries.
 
 ## Verification
@@ -60,6 +64,15 @@ Updated: 2026-07-27
   The checksum matched, the patch applied cleanly, and its focused changes are
   included in this head.
 - After the ReviewGPT remediation, focused engine tests passed 67/67, focused
+  runtime/workspace tests passed 241/241, and both owning package typechecks
+  passed.
+- Preliminary completion-specialists ReviewGPT found and resolved a prompt
+  provenance gap plus missing live-runtime cleanup coverage. Its coverage patch
+  checksum matched
+  `4248b748b7db4f30d7e3913a7f8c745f9f67bf7d555f5685af750d71a4f7ce25`;
+  the parent narrowed one global mock-call assertion after the executable suite
+  proved unrelated terminal-evidence checks are expected.
+- After preliminary remediation, focused engine tests passed 104/104, focused
   runtime/workspace tests passed 241/241, and both owning package typechecks
   passed.
 - The exact-head `pnpm test:diff <changed paths>` passed repository guards,
