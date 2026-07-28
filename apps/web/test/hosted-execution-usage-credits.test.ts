@@ -54,6 +54,10 @@ describe("hosted usage credits", () => {
 
   it("grants a paid purchase under beneficiary-before-purchase locking", async () => {
     const events: string[] = [];
+    const grantCreate = vi.fn(async (input: unknown) => {
+      events.push("grant-create");
+      return input;
+    });
     const entryCreate = vi.fn(async (input: unknown) => {
       events.push("entry-create");
       return input;
@@ -98,6 +102,10 @@ describe("hosted usage credits", () => {
       hostedUsageCreditEntry: {
         create: entryCreate,
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedUsageCreditGrant: {
+        create: grantCreate,
       },
       hostedUsageCreditPurchase: {
         findUnique: vi.fn().mockImplementation(async () => {
@@ -127,8 +135,9 @@ describe("hosted usage credits", () => {
       "purchase-lock",
       "projection-update",
       "entry-create",
-      "purchase-update",
+      "grant-create",
       "period-unblock",
+      "purchase-update",
     ]);
     expect(entryCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
@@ -140,6 +149,12 @@ describe("hosted usage credits", () => {
         purchaseId: "purchase_1",
         semanticSourceKey:
           "hosted-usage-credit:purchase:purchase_1:grant:v1",
+      }),
+    });
+    expect(grantCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        entryId: expect.stringMatching(/^huce_/u),
+        remainingUsdMicros: 5_000_000n,
       }),
     });
     expect(purchaseUpdateMany).toHaveBeenCalledExactlyOnceWith({
@@ -190,6 +205,8 @@ describe("hosted usage credits", () => {
           findFirst: vi.fn().mockResolvedValue({
             amountUsdMicros: 5_000_000n,
             beneficiaryMemberId: BENEFICIARY_ID,
+            effectiveAt: PAID_AT,
+            grant: { remainingUsdMicros: 3_000_000n },
             id: "grant_1",
             semanticSourceKey:
               "hosted-usage-credit:purchase:purchase_1:grant:v1",
@@ -238,19 +255,19 @@ describe("hosted usage credits", () => {
       }
       if (sql.includes('FROM "hosted_usage_credit_entry" AS entry')) {
         expect(sql).toContain('ORDER BY entry."beneficiary_sequence" ASC');
-        expect(sql).toContain("FOR UPDATE OF entry, purchase");
+        expect(sql).toContain("FOR UPDATE OF entry, grant_projection");
         return [
           {
-            beneficiarySequence: 1n,
             entryId: "grant_1",
             purchaseId: "purchase_1",
-            remainingCreditUsdMicros: 5_000_000n,
+            referralId: null,
+            remainingUsdMicros: 5_000_000n,
           },
           {
-            beneficiarySequence: 2n,
             entryId: "grant_2",
-            purchaseId: "purchase_2",
-            remainingCreditUsdMicros: 7_000_000n,
+            purchaseId: null,
+            referralId: "referral_1",
+            remainingUsdMicros: 7_000_000n,
           },
         ];
       }
@@ -261,6 +278,7 @@ describe("hosted usage credits", () => {
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     });
+    const grantUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const purchaseUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const entryCreate = vi.fn(async (input: { data: Record<string, unknown> }) => {
       createdEntries.push(input);
@@ -277,6 +295,9 @@ describe("hosted usage credits", () => {
         hostedUsageCreditEntry: {
           create: entryCreate,
           findMany: vi.fn().mockResolvedValue([]),
+        },
+        hostedUsageCreditGrant: {
+          updateMany: grantUpdateMany,
         },
         hostedUsageCreditPurchase: {
           updateMany: purchaseUpdateMany,
@@ -297,12 +318,19 @@ describe("hosted usage credits", () => {
         remainingCreditUsdMicros: 5_000_000n,
       },
     });
-    expect(purchaseUpdateMany).toHaveBeenNthCalledWith(2, {
-      data: { remainingCreditUsdMicros: 0n },
+    expect(purchaseUpdateMany).toHaveBeenCalledTimes(1);
+    expect(grantUpdateMany).toHaveBeenNthCalledWith(1, {
+      data: { remainingUsdMicros: 0n },
       where: {
-        beneficiaryMemberId: BENEFICIARY_ID,
-        id: "purchase_2",
-        remainingCreditUsdMicros: 7_000_000n,
+        entryId: "grant_1",
+        remainingUsdMicros: 5_000_000n,
+      },
+    });
+    expect(grantUpdateMany).toHaveBeenNthCalledWith(2, {
+      data: { remainingUsdMicros: 0n },
+      where: {
+        entryId: "grant_2",
+        remainingUsdMicros: 7_000_000n,
       },
     });
     expect(createdEntries.map((entry) => entry.data)).toEqual([
@@ -321,7 +349,7 @@ describe("hosted usage credits", () => {
         beneficiarySequence: 4n,
         kind: "usage_debit",
         parentGrantEntryId: "grant_2",
-        purchaseId: "purchase_2",
+        referralId: "referral_1",
         semanticSourceKey:
           "hosted-usage-credit:usage:usage_1:grant:grant_2:debit:v1",
         sourceUsageId: "usage_1",
@@ -364,6 +392,9 @@ describe("hosted usage credits", () => {
               parentGrantEntryId: "grant_2",
             },
           ]),
+        },
+        hostedUsageCreditGrant: {
+          updateMany: vi.fn(),
         },
         hostedUsageCreditPurchase: {
           updateMany: purchaseUpdateMany,
@@ -1056,6 +1087,7 @@ function createFinancialCreditFixture(input: {
   });
   const entryCreate = vi.fn(async (value: unknown) => value);
   const entryFindMany = vi.fn().mockResolvedValue([]);
+  const grantUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const purchaseUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const executeRaw = vi.fn().mockResolvedValue(1);
 
@@ -1063,6 +1095,7 @@ function createFinancialCreditFixture(input: {
     entryCreate,
     entryFindMany,
     executeRaw,
+    grantUpdateMany,
     purchaseUpdateMany,
     tx: {
       $executeRaw: executeRaw,
@@ -1075,6 +1108,12 @@ function createFinancialCreditFixture(input: {
           id: "grant_1",
         }),
         findMany: entryFindMany,
+      },
+      hostedUsageCreditGrant: {
+        findUnique: vi.fn().mockResolvedValue({
+          remainingUsdMicros: input.remainingCreditUsdMicros,
+        }),
+        updateMany: grantUpdateMany,
       },
       hostedUsageCreditPurchase: {
         findUnique: vi.fn().mockResolvedValue({
@@ -1128,6 +1167,7 @@ function createStatefulFinancialCreditFixture(input: {
   let balanceUsdMicros = input.balanceUsdMicros;
   let ledgerVersion = input.ledgerVersion;
   let remainingCreditUsdMicros = input.remainingCreditUsdMicros;
+  let remainingGrantUsdMicros = input.remainingCreditUsdMicros;
   const entries = [...input.entries];
   const queryRaw = createTaggedSqlMock(({ sql, values }) => {
     if (sql.includes('FROM "hosted_member"')) {
@@ -1216,6 +1256,16 @@ function createStatefulFinancialCreditFixture(input: {
     remainingCreditUsdMicros = value.data.remainingCreditUsdMicros;
     return { count: 1 };
   });
+  const grantUpdateMany = vi.fn(async (value: {
+    data: { remainingUsdMicros: bigint };
+    where: { remainingUsdMicros: bigint };
+  }) => {
+    if (value.where.remainingUsdMicros !== remainingGrantUsdMicros) {
+      return { count: 0 };
+    }
+    remainingGrantUsdMicros = value.data.remainingUsdMicros;
+    return { count: 1 };
+  });
 
   return {
     entryCreate,
@@ -1230,6 +1280,12 @@ function createStatefulFinancialCreditFixture(input: {
           id: "grant_1",
         }),
         findMany: entryFindMany,
+      },
+      hostedUsageCreditGrant: {
+        findUnique: vi.fn(async () => ({
+          remainingUsdMicros: remainingGrantUsdMicros,
+        })),
+        updateMany: grantUpdateMany,
       },
       hostedUsageCreditPurchase: {
         findUnique: vi.fn().mockResolvedValue({

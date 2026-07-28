@@ -22,6 +22,8 @@ import {
   persistCanonicalInboxCapture,
 } from "@murphai/inboxd";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -32,6 +34,7 @@ import {
   getAssistantCronStatus,
   listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  listAssistantOutboxIntents,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
@@ -252,6 +255,12 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  runHostedWorkspaceAssistantPhase,
+} from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import {
+  prepareHostedWakeContext,
+} from "../src/hosted-runtime/context.ts";
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceSnapshotArchiveBuilder,
@@ -5849,6 +5858,506 @@ describe("hosted workspace runtime entrypoint", () => {
       await removeTempRoot(vaultRoot);
     }
   });
+
+  for (const completion of [
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_synthetic",
+      label: "phone-call result",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_synthetic",
+      label: "usage-referral reward",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:generic:notification_synthetic",
+      label: "generic notification",
+      preCheckpointSafe: false,
+    },
+  ] as const) {
+    test(`${completion.preCheckpointSafe ? "runs" : "keeps"} a ${
+      completion.label
+    } ${completion.preCheckpointSafe ? "before" : "behind"} the dirty idle checkpoint`, async () => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      let assistantPhaseCalls = 0;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_synthetic_external_completion_${
+                completion.preCheckpointSafe ? "safe" : "gated"
+              }`,
+              idleCheckpointDelayMs: 200,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "f".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "external-completion-dirty-wake.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              if (assistantPhaseCalls === 1) {
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey: completion.dedupeKey,
+                    id: "mailbox_item_entrypoint_external_completion",
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        );
+
+        const result = await withRealTimeout(
+          resultPromise,
+          2_000,
+          () => events.join(","),
+        );
+        const importIndex = requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_external_completion",
+        );
+        const idleCheckpointIndex = requireEventIndex(
+          events,
+          "snapshot:idle_shutdown",
+        );
+
+        if (completion.preCheckpointSafe) {
+          assert.ok(importIndex < idleCheckpointIndex, events.join(","));
+        } else {
+          assert.ok(idleCheckpointIndex < importIndex, events.join(","));
+        }
+        assert.equal(result.status, "idle");
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
+
+  const externalCompletionDeliveryScenarios = [
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_real_path",
+      label: "phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_real_path",
+      label: "usage-referral reward",
+    },
+  ].flatMap((completion) =>
+    ([
+      {
+        channel: "linq" as const,
+        identityId: "hbidx:phone:v1:test",
+        label: "Linq",
+        target: "linq_source_thread",
+        threadIsDirect: false,
+      },
+      {
+        channel: "telegram" as const,
+        identityId: "telegram-bot",
+        label: "Telegram",
+        target: "123456789",
+        threadIsDirect: true,
+      },
+    ] as const).map((transport) => ({ completion, transport }))
+  );
+  for (const {
+    completion,
+    transport,
+  } of externalCompletionDeliveryScenarios) {
+    test(`${transport.label} handles a ${completion.label} through the real causal mailbox and outbox boundary`, async () => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const deliveryKey = completion.dedupeKey.replace(
+        "assistant.notification.requested:",
+        "",
+      );
+      let activeVaultRoot = vaultRoot;
+      let assistantPhaseCalls = 0;
+      let currentPhaseIsForegroundCausal = false;
+      let providerDispatchWasForegroundCausal: boolean | null = null;
+      const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+        const method =
+          init?.method
+          ?? (request instanceof Request ? request.method : "GET");
+        const url =
+          request instanceof Request
+            ? request.url
+            : String(request);
+        if (
+          method === "POST"
+          && (
+            (transport.channel === "linq" && url.includes("/messages"))
+            || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
+          )
+        ) {
+          providerDispatchWasForegroundCausal =
+            currentPhaseIsForegroundCausal;
+          events.push(`provider.send:${deliveryKey}`);
+          if (transport.channel === "telegram") {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                result: {
+                  message_id: 123,
+                },
+              }),
+              {
+                headers: { "content-type": "application/json" },
+                status: 200,
+              },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              message: {
+                id: `provider_${deliveryKey.replaceAll(":", "_")}`,
+              },
+            }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            },
+          );
+        }
+        return new Response(null, { status: 204 });
+      });
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            forwardedEnv: {
+              LINQ_API_TOKEN: "synthetic-linq-token",
+            },
+            platformEnv: {
+              TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+            },
+            resolvedConfig: {
+              channelCapabilities: {
+                emailSendReady: false,
+                telegramBotConfigured: true,
+              },
+              deviceSync: null,
+              managedAutoReplyChannels: [
+                {
+                  capabilityReady: true,
+                  channel: "linq",
+                  memberChannel: "linq",
+                },
+                {
+                  capabilityReady: true,
+                  channel: "telegram",
+                  memberChannel: "telegram",
+                },
+              ],
+            },
+            request: {
+              attemptId:
+                `attempt_synthetic_external_completion_real_${
+                  completion.label === "phone-call result" ? "phone" : "referral"
+                }_${transport.channel}`,
+              idleCheckpointDelayMs: 200,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash:
+                    snapshotInput.reason === "idle_shutdown"
+                      ? "e".repeat(64)
+                      : "d".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `${completion.label.replaceAll(" ", "-")}-${transport.channel}-real-path.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              const outcome = await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot: activeVaultRoot,
+                wake: buildHostedExecutionAssistantNotificationRequestedWake({
+                  eventId: completion.dedupeKey,
+                  memberId: TEST_USER_ID,
+                  notification: {
+                    deliveryDispatchMode: "queue-only",
+                    deliveryDedupeToken: deliveryKey,
+                    deliveryIdempotencyKey: deliveryKey,
+                    ...(transport.channel === "linq"
+                      ? {
+                          externalThreadRouteAuthority: {
+                            accountLookupKey: "linq-account-key",
+                            channel: "linq" as const,
+                            containerMemberId: TEST_USER_ID,
+                            threadId: transport.target,
+                          },
+                        }
+                      : {}),
+                    instructions: "Send the fixed completion text.",
+                    responsePolicy: {
+                      kind: "require_send_exact_text",
+                      text: "Mission complete.",
+                    },
+                    route: {
+                      actorId: null,
+                      channel: transport.channel,
+                      delivery: {
+                        kind: "thread",
+                        target: transport.target,
+                      },
+                      identityId: transport.identityId,
+                      threadId: transport.target,
+                      threadIsDirect: transport.threadIsDirect,
+                    },
+                  },
+                  occurredAt: TEST_NOW,
+                }),
+              });
+              return outcome;
+            },
+            platform: {
+              ...createPlatform({
+                mailboxPort: createMailboxPort({
+                  events,
+                  items: mailboxItems,
+                }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({ version: "0" }),
+                }),
+              }),
+              effectsPort: {
+                async assertExternalThreadRouteAuthority(authority) {
+                  assert.equal(authority.threadId, transport.target);
+                },
+                async assertLinqRecentInboundEngagement(request) {
+                  assert.equal(request.target, transport.target);
+                  return { providerDispatchClaimed: true };
+                },
+                async readRawEmailMessage() {
+                  return null;
+                },
+                async recordLinqDeliveryOutcome(request) {
+                  events.push(
+                    `provider.record:${request.providerThreadId ?? request.target}`,
+                  );
+                },
+                async sendEmail() {},
+              },
+              providerFetch,
+            },
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              currentPhaseIsForegroundCausal =
+                input.foregroundCausalOnly === true;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                activeVaultRoot = input.restored.vaultRoot;
+                await prepareHostedWakeContext(
+                  activeVaultRoot,
+                  buildHostedExecutionMemberActivatedWake({
+                    eventId: "member.activated:external-completion-real-path",
+                    memberChannels: {
+                      email: false,
+                      linq: transport.channel === "linq",
+                      telegram: transport.channel === "telegram",
+                    },
+                    memberId: TEST_USER_ID,
+                    occurredAt: TEST_NOW,
+                    timeZone: "UTC",
+                  }),
+                  input.runtimeEnv,
+                  input.runtime.resolvedConfig,
+                  {
+                    operatorHomeRoot: input.restored.operatorHomeRoot,
+                  },
+                );
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey: completion.dedupeKey,
+                    id: `mailbox_item_${deliveryKey.replaceAll(":", "_")}`,
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              if (assistantPhaseCalls === 2) {
+                assert.equal(input.foregroundCausalOnly, true);
+              }
+              if (assistantPhaseCalls === 2) {
+                const pendingSystemMailbox =
+                  (await readHostedSystemMailboxState(activeVaultRoot)).pending;
+                assert.deepEqual(
+                  pendingSystemMailbox.map((item) => ({
+                    mailboxDedupeKey: item.mailboxDedupeKey,
+                    routeAction: item.routeAction,
+                    wakeKind: item.wake.kind,
+                  })),
+                  [{
+                    mailboxDedupeKey: completion.dedupeKey,
+                    routeAction: "dispatch-assistant-notification",
+                    wakeKind: "assistant.notification.requested",
+                  }],
+                  events.join(","),
+                );
+                assert.equal(
+                  await resolveHostedPendingAssistantInputWakeAt({
+                    vaultRoot: activeVaultRoot,
+                  }),
+                  null,
+                );
+              }
+              const phaseResult = await runHostedWorkspaceAssistantPhase(input);
+              events.push(
+                `outbox.after-phase:${
+                  (await listAssistantOutboxIntents(activeVaultRoot))
+                    .map((intent) => intent.status)
+                    .join("|")
+                }`,
+              );
+              return phaseResult;
+            },
+            vaultRoot,
+          },
+        );
+
+        const result = await withRealTimeout(
+          resultPromise,
+          5_000,
+          () => events.join(","),
+        );
+        const providerEvent = `provider.send:${deliveryKey}`;
+
+        if (transport.channel === "telegram") {
+          const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
+          const telegramDiagnostics = JSON.stringify(
+            finalIntents.map((intent) => ({
+              lastErrorCode: intent.lastError?.code ?? null,
+              status: intent.status,
+            })),
+          );
+          assert.equal(
+            events.filter((event) => event === providerEvent).length,
+            1,
+            `${events.join(",")};${telegramDiagnostics}`,
+          );
+          assert.equal(providerDispatchWasForegroundCausal, false);
+          assert.ok(
+            requireEventIndex(events, "outbox.after-phase:pending")
+              < requireEventIndex(events, "snapshot:idle_shutdown"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, "snapshot:idle_shutdown")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.equal(finalIntents[0]?.status, "sent");
+          assert.equal(result.status, "idle");
+          assert.ok(assistantPhaseCalls >= 3);
+          return;
+        }
+
+        assert.equal(providerDispatchWasForegroundCausal, true);
+        assert.equal(
+          events.filter((event) => event === providerEvent).length,
+          1,
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "outbox.after-phase:sending")
+            < requireEventIndex(events, providerEvent),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, providerEvent)
+            < requireEventIndex(events, "outbox.after-phase:sent"),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, providerEvent)
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+          events.join(","),
+        );
+        assert.ok(assistantPhaseCalls >= 3);
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
 
   test("runs a joined-group completion before the dirty idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(
@@ -26952,6 +27461,7 @@ function createWorkspaceRunRequest(
 function createWorkspaceRuntimeJobInput(input: {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   request?: Partial<HostedWorkspaceInvocationRequest>;
 } = {}): HostedAssistantWorkspaceRuntimeJobInput {
@@ -26963,6 +27473,9 @@ function createWorkspaceRuntimeJobInput(input: {
         ...TEST_HOSTED_CODEX_FORWARDED_ENV,
         ...(input.forwardedEnv ?? {}),
       },
+      ...(input.platformEnv === undefined
+        ? {}
+        : { platformEnv: input.platformEnv }),
       ...(input.resolvedConfig === undefined ? {} : { resolvedConfig: input.resolvedConfig }),
     },
   };

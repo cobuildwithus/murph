@@ -95,14 +95,13 @@ their stored limit.
 Usage is cost-weighted capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
 sum to 100. Their denominator is current-period spend plus every unit of
-effective capacity still available from the plan and purchased credit. A
+effective capacity still available from the plan and generic usage credit. A
 fulfilled top-up can therefore move the percentage backward immediately.
-Settings still exposes neither the exact purchased-credit balance nor the
-internal included-allowance value. At a monthly reset, period spend returns to
-zero, the plan allowance replenishes, and unused purchased credit remains
-available. The operation that crosses effective capacity may finish, but
-subsequent usage-bearing work blocks and accepted conversation input remains
-pending.
+Settings still exposes neither the exact usage-credit balance nor the internal
+included-allowance value. At a monthly reset, period spend returns to zero, the
+plan allowance replenishes, and unused usage credit remains available. The
+operation that crosses effective capacity may finish, but subsequent
+usage-bearing work blocks and accepted conversation input remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct

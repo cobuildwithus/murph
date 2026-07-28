@@ -293,6 +293,16 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs through the existing one-shot App Server process path so its restrictive launch config cannot rotate the resident ordinary-turn process or terminate valid detached enrichment. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
 
+Detached phone-call results and usage-referral celebrations are the only
+notification families admitted through the dirty runtime's pre-checkpoint
+system prefix. Their server-generated event identities and idempotent delivery
+make that latency shortcut replay-safe; generic notifications still wait for
+the idle checkpoint. A referral celebration recomputes its current-model
+capacity label and receives only a server-resolved tone, Humor, and Unhinged
+band, never transcript history. The existing minute recovery pass re-signals
+the exact oldest unconsumed celebration mailbox items after a failed Temporal
+signal, so mailbox state remains the only durable wake owner.
+
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
 ### Canonical Automation Support Lifecycles
@@ -607,7 +617,95 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/gateway-core`: published transport-neutral gateway boundary package that owns the shared gateway contracts, route helpers, projection/snapshot logic, opaque ids, and event-log helpers used by hosted and future transport adapters
 - `packages/assistantd`: workspace-private local assistant daemon package with a bearer-authenticated loopback-only control plane bound to one vault; it fronts steady-state local assistant session/message/status/automation entrypoints directly through `@murphai/assistant-engine` and no longer exposes a local gateway projection/control API
 - `packages/assistant-runtime`: workspace-private headless hosted assistant execution surface that exposes one-shot inbox/bootstrap/assistant/outbox/device-sync runtime behavior behind explicit runtime context, owns the canonical hosted runtime launch spec for semantic env splitting, forwarded env profiles, platform-only runtime config, typed resolved config, typed parser toolchain validation, commit timeout, runtime-env projection, and hosted runner executable PATH entries, consumes `@murphai/assistant-engine` and explicit `@murphai/operator-config/*` owner subpaths instead of the umbrella config root, now treats the durable operator `hostedAssistant` config as the only persisted hosted assistant source of truth, consumes shared messaging ingress contracts from `@murphai/messaging-ingress` rather than defining provider semantics itself, stages hosted conversation mailbox input into `AssistantInputEvent` records, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor without publishing a snapshot, and keeps dirty hosted runtime state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, exports sanitized pending assistant-runtime issue records through the injected runtime platform instead of persisting raw hosted diagnostics in Cloudflare, and expects hosted semantic behavior such as channel readiness and device-sync enablement to arrive as typed runtime config rather than being rediscovered from ambient env in lower layers while Cloudflare's container runner binds image-owned native parser paths inside the container
-- `apps/web`: hosted Next.js integration control plane for Vercel-style deployments, backed by Postgres/Prisma for device OAuth sessions, short-lived hosted device connect intents, opaque public device-connection ids plus blind-index ownership mapping, typed durable connection summaries, sparse sync signals, token-audit history, hosted member core/identity/routing/billing/email-authorization slices, hosted legal consent event/grant state, hosted onboarding webhook receipts, hosted Stripe receipt/retry state, the canonical hosted AI usage ledger plus monthly allowance aggregate, append-only purchased usage-credit entries plus their bounded member projection, an anonymized hosted assistant-runtime issue sink with retention metadata and no member relation, hosted product-feedback rows for explicit assistant-captured structured product feedback, encrypted hosted mailbox rows, signed hosted user crypto root-envelope rows/audit events, hosted workspace checkpoint metadata, hosted computer runs/handoffs with one member-scoped Kernel profile name for browser automation, and redacted hosted runtime logs/status; `apps/web` is the canonical owner of hosted product and control facts, including legal consent, product-feedback intake, device-sync control-plane authority, and hosted computer-use browser lifecycle/checkpoint state, while Temporal owns hosted execution wake orchestration and the app-local Vercel OIDC adapter remains for browser/session/status/deletion calls into Cloudflare. Nullable hosted-member model and reasoning preferences are web-owned, billing-gated control facts: active personal members may select Luna or Terra, only an active paid Edge personal member may select Sol, the common reasoning set is `low`/`medium`/`high`/`xhigh`, and Terra plus low are represented by absent overrides. Synthetic thread-container members remain non-configurable and derive a Sol invocation override from the existing thread-container relation without persisting a preference or changing the reasoning default. The signed hosted-workspace read projects eligible personal-member non-default values or that derived thread-container Sol override to Cloudflare for the next invocation; the running Codex turn keeps the target it started with, and neither the vault nor the hosted workspace snapshot stores a second preference. Monthly and valid in-window trial allowance remain measured and noticed, with requested-model and served-model attribution retained in the usage ledger. Subsequent usage-bearing work is denied when included capacity and purchased credit are both exhausted; the crossing operation may finish, and its accepted input remains durable and pending. Included capacity is consumed before carryover credit. Credit grants, usage debits, and the compact balance/version projection serialize under the beneficiary member while base allowance stays separate. Web derives the Settings view and read-only `murph.plan_usage` result from that same owner without persisting a forecast or granting the runtime billing authority; synthetic thread containers return a bounded unavailable result instead of exposing personal plan facts. The personal top-up producer permits only active direct paid Pulse or Edge members to buy the server-owned $5, $10, or $25 offer for themselves through one-time Stripe Checkout. The same purchase owner supports authenticated Family-member and hosted-group funding while keeping payer and beneficiary separate. Group funding first attempts one canonical card attached to the payer's Stripe Customer, persists the unconfirmed PaymentIntent on the purchase, and then confirms it; only verified cancellation may release that binding before Checkout fallback. Only verified Stripe-event reconciliation can grant credit; a browser return or synchronous PaymentIntent response cannot. A new grant clears the current block when capacity becomes positive and requests the normal runtime recheck through the durable event owner so pending accepted work can resume. Inactive, suspended, malformed or expired trial entitlement, and separate daily Linq anti-abuse gates remain enforceable. The app-local GCP KMS adapter owns web-side root wrapping plus authority signing. Hosted billing may store an encrypted unverified Stripe checkout email on the email-authorization slice for settings prefill plus transactional welcome and cancellation-feedback delivery, but it must not use that fact for account lookup, direct-public sender authorization, or email-linked channel state until Privy verifies the email. Hosted signup activation, settings email sync for members less than two weeks old, or first paid activation with a stored Stripe checkout email may send a best-effort plain-text-only Resend welcome email using env-only sender/API-key configuration and a per-member idempotency key; Stripe reconciliation may also send a best-effort plain-text-only internal signup notification to env-configured recipients using the same Resend API key/sender, a separate durable per-member attempt marker, and a separate per-member provider idempotency key. Stripe subscription cancellation reconciliation may send a retryable plain-text-only Resend feedback/refund email to the verified or Stripe checkout email recipient after a cancellation billing write, with retry ownership held by the existing Stripe event receipt until completion, a receipt-local sent marker suppressing provider resends after success, and provider replay defense held by a subscription-scoped Resend idempotency key. Later successful payments must not re-run activation welcome side effects, and email send paths must not persist provider payloads or expose recipients in logs. Inbound hosted conversation traffic should append one canonical `conversation.message` mailbox item, with provider/channel detail carried inside the payload instead of minting provider-branded top-level message kinds. Its hosted device-sync persistence stays provider-generic, and the signed device-sync scheduled wake sweep command selects due-reconcile candidates and appends bounded `device-sync.wake` mailbox handoffs for the Temporal global reconciler. Dirty webhook freshness is not scheduler input: web persists dirty state, appends one bounded `device-sync.wake` mailbox handoff when a connection moves clean-to-dirty, and the runner drains and acks dirty-pending rows through signed runtime callbacks when device-sync work runs. Hosted provider registration should reuse the shared `device-syncd` provider-manifest assembly path instead of maintaining an app-local provider list.
+- `apps/web`: hosted Next.js integration control plane for Vercel-style
+  deployments, backed by Postgres/Prisma for device OAuth sessions, short-lived
+  hosted device connect intents, opaque public device-connection ids plus
+  blind-index ownership mapping, typed durable connection summaries, sparse
+  sync signals, token-audit history, hosted member
+  core/identity/routing/billing/email-authorization slices, hosted legal
+  consent event/grant state, hosted onboarding webhook receipts, hosted Stripe
+  receipt/retry state, the canonical hosted AI usage ledger plus monthly
+  allowance aggregate, immutable purchase/referral usage-credit entries with
+  entry-keyed remaining projections plus their bounded member projection,
+  conversational usage-referral state, an anonymized hosted assistant-runtime
+  issue sink with retention metadata and no member relation, hosted
+  product-feedback rows, encrypted hosted mailbox rows, signed hosted user
+  crypto root-envelope rows/audit events, hosted workspace checkpoint
+  metadata, hosted computer runs/handoffs with one member-scoped Kernel profile
+  name, and redacted hosted runtime logs/status. It is the canonical owner of
+  hosted product and control facts, including legal consent, product-feedback
+  intake, device-sync authority, referral
+  attribution/qualification/reward authority, and hosted computer-use browser
+  lifecycle/checkpoint state. Temporal owns execution wake orchestration, and
+  the app-local Vercel OIDC adapter remains for browser/session/status/deletion
+  calls into Cloudflare.
+
+  Nullable hosted-member model and reasoning preferences are web-owned,
+  billing-gated control facts. Active personal members may select Luna or
+  Terra; only an active paid Edge personal member may select Sol. The common
+  reasoning set is `low`/`medium`/`high`/`xhigh`, with Terra and low represented
+  by absent overrides. Synthetic thread-container members remain
+  non-configurable and derive a Sol invocation override from their existing
+  relation. The signed hosted-workspace read projects eligible non-default
+  values or that derived override to Cloudflare for the next invocation; a
+  running turn keeps the target it started with, and neither the vault nor the
+  hosted workspace snapshot stores a second preference.
+
+  Monthly and valid in-window trial allowance remain measured and noticed,
+  retaining requested-model and served-model attribution. Subsequent
+  usage-bearing work is denied only when included capacity and generic usage
+  credit are both exhausted; the crossing operation may finish, and accepted
+  input remains durable and pending. Included capacity is consumed before
+  carryover credit. Credit entries, their remaining projections, and the
+  compact balance/version projection serialize under the beneficiary member
+  while base allowance stays separate. Purchase and referral producers share
+  that immutable ledger; only purchase-backed entries participate in Stripe
+  refund/dispute reversal, while earned referral rewards are final. Web derives
+  Settings and read-only `murph.plan_usage` from that same owner without
+  persisting a forecast or granting runtime billing authority; synthetic
+  thread containers receive a bounded unavailable result rather than personal
+  plan facts.
+
+  Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
+  one-time Stripe Checkout offers. The same purchase owner supports
+  authenticated hosted-group funding while keeping payer and beneficiary
+  separate. Group funding first attempts one canonical card attached to the
+  payer's Stripe Customer, persists the unconfirmed PaymentIntent on the
+  purchase, and then confirms it; only verified cancellation may release that
+  binding before Checkout fallback. Only verified Stripe-event reconciliation
+  can grant purchased credit; a browser return or synchronous PaymentIntent
+  response cannot. Conversational referrals instead require explicit arming by
+  one trusted current sender, reserve both rolling caps under the beneficiary
+  serialization boundary, bind only to that referrer's next newly created
+  thread container, normalize Linq and Telegram evidence into one
+  provider-neutral qualifier, freeze pre-expiry qualification in the ingress
+  transaction, and converge immediate plus bounded minute recovery on one
+  fixed server-catalog grant and one source-mailbox celebration fence. A new
+  grant clears the current block when capacity becomes positive and requests
+  the normal runtime recheck through the durable event owner so pending
+  accepted work can resume. Inactive, suspended, malformed or expired trial
+  entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
+
+  The app-local GCP KMS adapter owns web-side root wrapping plus authority
+  signing. Hosted billing may store an encrypted unverified Stripe checkout
+  email for Settings prefill and transactional welcome or cancellation-feedback
+  delivery, but never for account lookup, direct-public sender authorization,
+  or email-linked channel state until Privy verifies it. Welcome, internal
+  signup, and cancellation-feedback mail retain their existing bounded,
+  idempotent Resend ownership; later successful payments must not repeat
+  activation side effects, and email paths must not persist provider payloads
+  or expose recipients in logs.
+
+  Inbound hosted conversation traffic appends one canonical
+  `conversation.message` mailbox item with provider/channel detail inside its
+  payload. Hosted device-sync persistence stays provider-generic; the signed
+  scheduled wake sweep selects due-reconcile candidates and appends bounded
+  `device-sync.wake` mailbox handoffs for the Temporal global reconciler.
+  Webhook freshness is not scheduler input: Web persists dirty state, appends
+  one bounded wake on a clean-to-dirty transition, and the runner drains and
+  acknowledges dirty-pending rows through signed callbacks. Hosted provider
+  registration reuses the shared `device-syncd` provider-manifest assembly path
+  rather than maintaining an app-local provider list.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
@@ -641,9 +739,11 @@ permission-loss deletion after the companion next reconciles in the foreground,
 and account deletion use that one lifecycle. An enabled projection remains
 active until one of those deletion paths runs. The only consumer is the existing
 route-authorized group participant read. It consults the human group owner's
-projection for at most 16 unregistered phone handles and exposes a match only
-as current-turn `unverifiedOwnerContactLabel` presentation text. It is never
-identity, membership, consent, routing, profile, invite, or signup authority.
+projection for at most 16 canonical phone participant handles, independently
+of each participant's durable `hasOwnMurph` activation result, and exposes a
+match only as current-turn `unverifiedOwnerContactLabel` presentation text. It
+is never identity, membership, consent, routing, profile, invite, or signup
+authority, and it cannot override a registered participant's Murph identity.
 Failures omit the optional overlay without changing the truthful live roster.
 The full boundary and rollout contract is
 `agent-docs/product-specs/ios-address-book-advisory-names.md`.
