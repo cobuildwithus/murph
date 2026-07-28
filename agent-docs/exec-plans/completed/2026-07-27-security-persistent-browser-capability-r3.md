@@ -1,6 +1,6 @@
 # Remove raw model code from persistent browser sessions
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-28
 
@@ -73,17 +73,18 @@ Updated: 2026-07-28
 
 ## Tasks
 
-1. Ask the existing security discovery thread for one complete,
+1. [x] Ask the existing security discovery thread for one complete,
    deletion-first patch for the accepted finding.
-2. Inspect and simplify the returned patch; reject any new lifecycle owner,
+2. [x] Inspect and simplify the returned patch; reject any new lifecycle owner,
    JavaScript denylist, or speculative abstraction.
-3. Implement the smallest complete structured action contract and focused
+3. [x] Implement the smallest complete structured action contract and focused
    security/product regression tests.
-4. Update the current computer-use security, architecture, skill, and testing
+4. [x] Update the current computer-use security, architecture, skill, and testing
    truth.
-5. Run focused verification, typechecks, canonical acceptance, preliminary
-   specialists, parent review, and final exact-head ReviewGPT/CI.
-6. Commit, push, and open one separate draft, unmerged PR.
+5. [x] Run focused verification, typechecks, canonical acceptance, preliminary
+   specialists, and parent review. Final exact-head ReviewGPT and CI remain
+   post-closure PR gates.
+6. [x] Commit, push, and open one separate draft, unmerged PR.
 
 ## Decisions
 
@@ -207,8 +208,17 @@ Updated: 2026-07-28
   - Canonical acceptance correctly escalated after the local admission wait but
     failed before provisioning or code sync because the installed direct
     Blacksmith provider rejects the dispatcher's obsolete `--stop-after` flag.
-    Current `origin/main` contains repository fix `f4ae336a6d`; reconcile that
-    ordinary history before retrying the unchanged candidate.
+    The branch then reconciled the repository-owned delegated-lifecycle fix
+    from current `origin/main`.
+  - The one permitted remote acceptance retry passed on Blacksmith Testbox
+    `tbx_01kyktrw6gxrz4wrfz7x1m45c9`: all composed workspace acceptance lanes
+    completed in 5m18s with exit code 0. The backing Actions run is
+    `30339412111`.
+  - Parent final review traced the strict structured schema through the
+    server-owned compiler, visible locator selection, fixed result projection,
+    sensitive-input handoff, and assistant sanitization. It found no remaining
+    raw browser capability, prompt-authored code path, or accepted correctness
+    issue.
 - Remaining:
-  - Reconcile current main and rerun canonical acceptance through Crabbox.
-  - Parent final review, plan closure, final ReviewGPT, and CI gates.
+  - Plan closure, final ReviewGPT, and CI gates.
+Completed: 2026-07-28
