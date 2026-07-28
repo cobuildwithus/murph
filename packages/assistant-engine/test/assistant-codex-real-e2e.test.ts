@@ -926,7 +926,7 @@ function buildGroupPointOfViewCandidateProbe(): string {
   return [
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
-    'A candidate may be a reply or SILENT.',
+    'Each candidate describes the complete action for that transcript.',
     'For transcripts 14-22, choose A or B. For transcripts 23-24, choose A, B, C, or D.',
     'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D>` with no explanation.',
     '',
