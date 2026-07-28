@@ -616,6 +616,33 @@ describe("R2 lifecycle parsing", () => {
   });
 });
 
+describe("R2 migration runbook copy proof", () => {
+  it(
+    "anchors copied bytes to the canonical digest without trusting CopyObject checksum reporting",
+    async () => {
+      const runbook = await readFile(
+        new URL("../R2_BUNDLES_ENAM_MIGRATION.md", import.meta.url),
+        "utf8",
+      );
+
+      expect(runbook).toContain(
+        "a destination `ChecksumSHA256` returned after `CopyObject` is",
+      );
+      expect(runbook).toContain("EXPECTED_ENCRYPTED_SHA256");
+      expect(runbook).toContain(".Metadata.encryptedsha256");
+      expect(runbook).toContain("aws s3api get-object");
+      expect(runbook).toContain("--if-match");
+      expect(runbook).toContain(
+        'test "$SOURCE_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"',
+      );
+      expect(runbook).toContain(
+        'test "$DESTINATION_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"',
+      );
+      expect(runbook).not.toContain('test "$SOURCE_HEAD" = "$DESTINATION_HEAD"');
+    },
+  );
+});
+
 describe("R2 inventory verification", () => {
   it("sorts keys bytewise instead of conflating Unicode normalization forms", () => {
     const entries = parseR2ObjectInventoryJson(inventoryJson([
@@ -749,6 +776,7 @@ describe("R2 migration orchestration", () => {
     for (const copy of copies) {
       expect(copy.args).toContain("--copy-source");
       expect(copy.args).toContain("--copy-source-if-match");
+      expect(copy.args).not.toContain("--checksum-algorithm");
       expect(copy.args).toContain("--key");
       expect(copy.args.slice(
         copy.args.indexOf("--metadata-directive"),
