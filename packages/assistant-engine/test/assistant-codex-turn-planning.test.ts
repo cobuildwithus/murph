@@ -409,8 +409,6 @@ describe('assistant Codex turn planning', () => {
       )
       expect(plan.conversationHistoryMessages).toEqual([
         { content: 'I may want to leave this open for now.', role: 'user' },
-        { content: 'That is completely fine.', role: 'assistant' },
-        { content: 'Should I keep learning for now?', role: 'assistant' },
       ])
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).toContain('No active canonical goal is available.')
@@ -557,10 +555,6 @@ describe('assistant Codex turn planning', () => {
             content: 'A current coherent direction still feels useful.',
             role: 'user',
           },
-          {
-            content: 'We can keep that direction easy.',
-            role: 'assistant',
-          },
         ],
       })
 
@@ -605,15 +599,15 @@ describe('assistant Codex turn planning', () => {
 
   it.each([
     {
-      expectedFirstContent: 'Member message 2.',
-      expectedLength: 23,
-      expectedReceiptOffsetMs: -58 * 60_000,
+      expectedFirstContent: 'Retained member message.',
+      expectedLength: 24,
+      expectedReceiptOffsetMs: -59 * 60_000,
       label: 'the message-count cap',
     },
     {
-      expectedFirstContent: 'Current member message ',
-      expectedLength: 2,
-      expectedReceiptOffsetMs: -60 * 60_000,
+      expectedFirstContent: 'Retained byte-bound member message ',
+      expectedLength: 3,
+      expectedReceiptOffsetMs: -3 * 60 * 60_000,
       label: 'the total-byte cap',
     },
   ])('keeps receipt authority coherent after $label', async ({
@@ -631,27 +625,50 @@ describe('assistant Codex turn planning', () => {
     const session = createSession({ turnCount: 2 })
     const entries =
       label === 'the message-count cap'
-        ? Array.from({ length: 25 }, (_, index) =>
-            index % 2 === 0
-              ? {
-                  contentReceivedAt: new Date(
-                    executionAtMs + (-60 + index) * 60_000,
-                  ).toISOString(),
-                  createdAt: new Date(
-                    executionAtMs + (-60 + index) * 60_000,
-                  ).toISOString(),
-                  kind: 'user' as const,
-                  schema: 'murph.assistant-transcript-entry.v1' as const,
-                  text: `Member message ${index}.`,
-                }
-              : {
-                  createdAt: new Date(
-                    executionAtMs + (-60 + index) * 60_000,
-                  ).toISOString(),
-                  kind: 'assistant' as const,
-                  schema: 'murph.assistant-transcript-entry.v1' as const,
-                  text: `Assistant response ${index}.`,
-                })
+        ? [
+            {
+              contentReceivedAt: new Date(
+                executionAtMs - 2 * 60 * 60_000,
+              ).toISOString(),
+              createdAt: new Date(
+                executionAtMs - 2 * 60 * 60_000,
+              ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: 'Trimmed sensitive member source.',
+            },
+            {
+              contentReceivedAt: new Date(
+                executionAtMs - 59 * 60_000,
+              ).toISOString(),
+              createdAt: new Date(
+                executionAtMs - 59 * 60_000,
+              ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: 'Retained member message.',
+            },
+            {
+              createdAt: new Date(
+                executionAtMs - 58 * 60_000,
+              ).toISOString(),
+              kind: 'assistant' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: 'ASSISTANT_DERIVED_FROM_TRIMMED_MEMBER_SENTINEL',
+            },
+            ...Array.from({ length: 23 }, (_, index) => {
+              const contentReceivedAt = new Date(
+                executionAtMs + (-55 + index) * 60_000,
+              ).toISOString()
+              return {
+                contentReceivedAt,
+                createdAt: contentReceivedAt,
+                kind: 'user' as const,
+                schema: 'murph.assistant-transcript-entry.v1' as const,
+                text: `Later authorized member message ${index}.`,
+              }
+            }),
+          ]
         : [
             {
               contentReceivedAt: new Date(
@@ -662,15 +679,37 @@ describe('assistant Codex turn planning', () => {
               ).toISOString(),
               kind: 'user' as const,
               schema: 'murph.assistant-transcript-entry.v1' as const,
-              text: `Earlier member message ${'u'.repeat(3_850)}`,
+              text: `Trimmed byte-bound member source ${'u'.repeat(4_100)}`,
             },
             {
+              contentReceivedAt: new Date(
+                executionAtMs - 3 * 60 * 60_000,
+              ).toISOString(),
               createdAt: new Date(
                 executionAtMs - 3 * 60 * 60_000,
               ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Retained byte-bound member message ${'v'.repeat(4_100)}`,
+            },
+            {
+              createdAt: new Date(
+                executionAtMs - 2.5 * 60 * 60_000,
+              ).toISOString(),
               kind: 'assistant' as const,
               schema: 'murph.assistant-transcript-entry.v1' as const,
-              text: `Earlier assistant response ${'a'.repeat(3_850)}`,
+              text: 'ASSISTANT_DERIVED_FROM_TRIMMED_MEMBER_SENTINEL',
+            },
+            {
+              contentReceivedAt: new Date(
+                executionAtMs - 2 * 60 * 60_000,
+              ).toISOString(),
+              createdAt: new Date(
+                executionAtMs - 2 * 60 * 60_000,
+              ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Later byte-bound member message ${'w'.repeat(4_100)}`,
             },
             {
               contentReceivedAt: new Date(
@@ -681,15 +720,7 @@ describe('assistant Codex turn planning', () => {
               ).toISOString(),
               kind: 'user' as const,
               schema: 'murph.assistant-transcript-entry.v1' as const,
-              text: `Current member message ${'v'.repeat(3_850)}`,
-            },
-            {
-              createdAt: new Date(
-                executionAtMs - 30 * 60_000,
-              ).toISOString(),
-              kind: 'assistant' as const,
-              schema: 'murph.assistant-transcript-entry.v1' as const,
-              text: `Current assistant response ${'b'.repeat(3_850)}`,
+              text: `Current byte-bound member message ${'x'.repeat(4_100)}`,
             },
           ]
 
@@ -729,6 +760,12 @@ describe('assistant Codex turn planning', () => {
       })
       expect(plan.conversationHistoryMessages?.[0]?.content).toContain(
         expectedFirstContent,
+      )
+      expect(plan.conversationHistoryMessages?.every(
+        (message) => message.role === 'user',
+      )).toBe(true)
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        'ASSISTANT_DERIVED_FROM_TRIMMED_MEMBER_SENTINEL',
       )
       expect(plan.conversationHistoryContentAuthorityExpiresAt).toBe(
         new Date(

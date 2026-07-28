@@ -579,18 +579,19 @@ the conversation is urgent or sensitive, or trustworthy evidence cannot support
 the proposed claim. The turn cannot create, update, complete, or archive goals,
 plans, experiments, regimens, memories, or automations. Those changes remain
 with the normal conversational owner after a reply. The engine enforces that
-boundary with a fresh output-only turn: bounded committed conversation history
+boundary with a fresh output-only turn: bounded recent member messages
 and an engine-projected list of bounded active-goal titles remain available,
 while the memory document, generic CLI contract, shell, hosted dynamic tools,
 broad health-context injection, network fetches, and writable filesystem access
-do not. At actual evidence admission, conversation history requires a valid,
-unexpired `contentReceivedAt` for every included member entry and keeps only
+do not. At actual evidence admission, each member message requires a valid,
+unexpired `contentReceivedAt`, and the planner keeps only
 the coherent suffix beginning with an admissible member entry after the latest
 inadmissible one. It never derives missing receipt authority from transcript
 creation time, so delayed execution, interrupted retention, and retained
 assistant text cannot expose expired member content or create a misleading
-one-sided exchange. Count and byte bounds remove any leading assistant-only
-fragment and recompute authority from the member entries actually retained.
+one-sided exchange. Assistant and status entries are excluded because they
+carry no source-receipt provenance. Count and byte bounds recompute authority
+from the member entries actually retained.
 The route plan carries only that earliest retained receipt deadline; if it
 passes before the actual Codex `turn/start` request, including during one-shot
 process or thread startup, the provider drops the whole bounded history and

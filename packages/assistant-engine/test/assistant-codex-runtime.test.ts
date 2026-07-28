@@ -4958,10 +4958,16 @@ describe('assistant codex runtime', () => {
       executeCodexAssistantTurnAttempt({
         conversationHistoryContentAuthorityExpiresAt:
           new Date(deadlineMs).toISOString(),
-        conversationHistoryMessages: [{
-          content: 'RECEIPT_AUTHORIZED_MEMBER_CONTEXT',
-          role: 'user',
-        }],
+        conversationHistoryMessages: [
+          {
+            content: 'RECEIPT_AUTHORIZED_MEMBER_CONTEXT',
+            role: 'user',
+          },
+          {
+            content: 'ASSISTANT_DERIVED_FROM_EXPIRED_MEMBER_SENTINEL',
+            role: 'assistant',
+          },
+        ],
         developerInstructions: 'Stable Murph instructions.',
         dynamicTools: [],
         env: { PATH: '/custom/bin' },
@@ -4981,9 +4987,22 @@ describe('assistant codex runtime', () => {
     )
     if (historyExpected) {
       expect(prompt).toContain('RECEIPT_AUTHORIZED_MEMBER_CONTEXT')
+      expect(prompt).toContain('Recent member messages for context only')
+      expect(prompt).not.toContain(
+        'ASSISTANT_DERIVED_FROM_EXPIRED_MEMBER_SENTINEL',
+      )
+      expect(prompt).not.toContain(
+        'Recent conversation history for context only',
+      )
     } else {
       expect(prompt).not.toContain('RECEIPT_AUTHORIZED_MEMBER_CONTEXT')
-      expect(prompt).not.toContain('Recent conversation history for context only')
+      expect(prompt).not.toContain(
+        'ASSISTANT_DERIVED_FROM_EXPIRED_MEMBER_SENTINEL',
+      )
+      expect(prompt).not.toContain('Recent member messages for context only')
+      expect(prompt).not.toContain(
+        'Recent conversation history for context only',
+      )
     }
   })
 

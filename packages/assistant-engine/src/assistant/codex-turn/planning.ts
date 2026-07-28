@@ -1076,6 +1076,12 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
     if (
+      input.requireCurrentUserContentAuthority === true &&
+      entry.kind !== 'user'
+    ) {
+      return []
+    }
+    if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
     ) {
@@ -1151,23 +1157,17 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     }
   }
 
-  const firstRetainedUserIndex = retained.findIndex(
-    ({ message }) => message.role === 'user',
-  )
-  if (firstRetainedUserIndex === -1) {
+  if (retained.length === 0) {
     return {
       contentAuthorityExpiresAt: null,
       messages: [],
     }
   }
-  retained = retained.slice(firstRetainedUserIndex)
 
   let contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
   for (const candidate of retained) {
-    if (candidate.message.role !== 'user') {
-      continue
-    }
     if (
+      candidate.message.role !== 'user' ||
       candidate.contentAuthorityExpiresAtMs === null ||
       !Number.isFinite(candidate.contentAuthorityExpiresAtMs)
     ) {

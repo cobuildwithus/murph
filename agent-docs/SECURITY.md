@@ -21,16 +21,17 @@ Last verified: 2026-07-26
   member identity; its execution additionally requires canonical onboarding to
   remain completed with `user_answered` and old enough for the claimed
   occurrence. That exact identity selects an engine-owned output-only one-shot
-  profile: the model receives bounded committed conversation history and an
+  profile: the model receives bounded recent member messages and an
   engine-projected list of bounded active-goal titles, but no memory document,
   generic CLI contract, shell, hosted dynamic tools, broad health-context
   snapshot, network fetch, writable filesystem, or mutation-capable product
   surface. At actual evidence admission, included member transcript text
   requires a valid unexpired receipt timestamp; the planner admits only the
   coherent suffix after the latest inadmissible member entry and never infers a
-  missing receipt from transcript creation time. Count and byte bounds must
-  preserve a leading authorized member entry, then recompute the ephemeral
-  deadline from the member entries that remain. The actual Codex `turn/start`
+  missing receipt from transcript creation time. Assistant and status entries
+  are excluded because they carry no source-receipt provenance. Count and byte
+  bounds retain only authorized member entries and recompute the ephemeral
+  deadline from the entries that remain. The actual Codex `turn/start`
   request drops all bounded history at or after that deadline, including after
   asynchronous one-shot startup. The dedicated system
   prompt owns the evidence and no-mutation contract above untrusted

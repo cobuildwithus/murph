@@ -343,20 +343,30 @@ export async function executeCodexAssistantTurnAttempt(
             conversationHistoryMessages: undefined,
           }
         : input
-    const prompt = resolveAssistantProviderPrompt(primaryInput)
     const conversationHistoryContentAuthorityExpiresAt =
       normalizeNullableString(
         primaryInput.conversationHistoryContentAuthorityExpiresAt,
       )
+    const providerRequestInput =
+      conversationHistoryContentAuthorityExpiresAt
+        ? {
+            ...primaryInput,
+            conversationHistoryMessages:
+              primaryInput.conversationHistoryMessages?.filter(
+                (message) => message.role === 'user',
+              ),
+          }
+        : primaryInput
+    const prompt = resolveAssistantProviderPrompt(providerRequestInput)
     const promptWithoutConversationHistory =
       conversationHistoryContentAuthorityExpiresAt
         ? resolveAssistantProviderPrompt({
-            ...primaryInput,
+            ...providerRequestInput,
             conversationHistoryMessages: undefined,
           })
         : null
     emitAssistantProviderPromptSizeTraceEvent({
-      input: primaryInput,
+      input: providerRequestInput,
       prompt,
     })
     result = await executeCodexAppServerTurn({

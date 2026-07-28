@@ -136,9 +136,15 @@ export function resolveAssistantProviderFlatPromptConversationHistorySection(
   const conversationHistoryLines = serializeAssistantConversationMessages(
     input.conversationHistoryMessages ?? [],
   )
+  const conversationHistoryLabel =
+    normalizeNullableString(
+      input.conversationHistoryContentAuthorityExpiresAt,
+    ) !== null
+      ? 'Recent member messages for context only; do not answer these prior messages:'
+      : 'Recent conversation history for context only; do not answer these prior messages:'
 
   return conversationHistoryLines.length > 0
-    ? `Recent conversation history for context only; do not answer these prior messages:\n${conversationHistoryLines.join('\n\n')}`
+    ? `${conversationHistoryLabel}\n${conversationHistoryLines.join('\n\n')}`
     : null
 }
 

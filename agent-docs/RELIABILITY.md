@@ -105,16 +105,17 @@ Last verified: 2026-07-27
   replaced completion. The cron owner rechecks that fact before model work and
   at every existing provider, tool, delivery, and commit boundary. Its exact
   automation identity also selects a fresh one-shot output-only turn with a
-  bounded transcript and engine-projected active-goal titles but no memory
+  bounded recent member messages and engine-projected active-goal titles but no memory
   document, generic CLI contract, shell, hosted dynamic tools, network fetch,
   writable filesystem, or product-state mutation surface. That isolated turn
   preserves live conversation resume state. At actual evidence admission,
-  transcript history requires unexpired receipt authority for member text and
+  member-message evidence requires unexpired receipt authority and
   keeps only the coherent suffix beginning with an admissible member entry
   after the latest inadmissible one. It never derives a missing receipt from
-  transcript creation time. Count and byte caps retain only a suffix that
-  begins with an authorized member entry and recompute the earliest retained
-  receipt deadline. The one-shot provider rechecks that deadline when
+  transcript creation time. Assistant and status transcript entries are
+  excluded because they carry no source-receipt provenance. Count and byte caps
+  retain only a suffix of authorized member entries and recompute the earliest
+  retained receipt deadline. The one-shot provider rechecks that deadline when
   constructing the actual `turn/start` request after process and thread
   startup, so expiry during cold startup falls back to the history-free prompt.
   The final
