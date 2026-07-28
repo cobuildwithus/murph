@@ -456,6 +456,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
+    case "ask_current_sender":
     case "ask_member":
       return {
         action: request.action,
@@ -1781,6 +1782,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
+            idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
             now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -2102,6 +2104,10 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
+        postDeliveryReconciliationWake:
+          assistantCronWakeAfterPass?.available === true
+            ? assistantCronWakeAfterPass.wake
+            : null,
         providerCleanupPlan,
         redactedStatus: null,
         shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
@@ -2272,6 +2278,10 @@ export async function runHostedWorkspaceAssistantPhase(
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 canConsumeWorkspaceAssistantWake: true,
                 input,
+                postDeliveryReconciliationWake:
+                  assistantCronWakeAfterPass?.available === true
+                    ? assistantCronWakeAfterPass.wake
+                    : null,
                 providerCleanupPlan,
                 redactedStatus: null,
                 shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,

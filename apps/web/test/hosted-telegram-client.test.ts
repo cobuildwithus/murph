@@ -55,14 +55,36 @@ describe("sendHostedTelegramTextMessage", () => {
   });
 
   it("rejects a provider refusal instead of reporting a reply that was never sent", async () => {
-    fetchMock.mockResolvedValue(new Response("{}", { status: 429 }));
+    fetchMock.mockResolvedValue(new Response("{}", {
+      headers: { "retry-after": "45" },
+      status: 429,
+    }));
 
     await expect(sendHostedTelegramTextMessage({
       message: "Try setup again.",
       target: { chatId: "42" },
     })).rejects.toMatchObject({
-      code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+      code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+      details: {
+        retryAfterSeconds: 45,
+        status: 429,
+      },
       retryable: true,
+    });
+  });
+
+  it("keeps a non-rate-limit provider failure terminal after dispatch", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 502 }));
+
+    await expect(sendHostedTelegramTextMessage({
+      message: "Try setup again.",
+      target: { chatId: "42" },
+    })).rejects.toMatchObject({
+      code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+      details: {
+        status: 502,
+      },
+      retryable: false,
     });
   });
 

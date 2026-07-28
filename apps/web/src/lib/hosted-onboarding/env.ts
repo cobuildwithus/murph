@@ -30,6 +30,8 @@ export interface HostedContactPrivacyKeyring {
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
 const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-terra";
+const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = ["+1"] as const;
+const HOSTED_LINQ_INSTANT_START_PHONE_PREFIX_PATTERN = /^\+[1-9]\d{0,5}$/u;
 
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];
@@ -42,6 +44,7 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
   linqFirstContactAdmissionModel: string;
   linqFirstContactAdmissionOpenAiApiKey: string | null;
+  linqInstantStartPhonePrefixes: readonly string[];
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
@@ -90,6 +93,8 @@ export function readHostedOnboardingEnvironment(
     linqFirstContactAdmissionOpenAiApiKey:
       readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
       ?? readEnv(source, "OPENAI_API_KEY"),
+    linqInstantStartPhonePrefixes:
+      readHostedLinqInstantStartPhonePrefixes(source),
     linqLocalAllowedInboundPhoneNumbers:
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
@@ -398,6 +403,46 @@ function readHostedLinqFirstContactAdmissionMode(
 
   throw new TypeError(
     "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE must be either \"off\" or \"enforce\".",
+  );
+}
+
+export function parseHostedLinqInstantStartPhonePrefixes(
+  configured: string | null | undefined,
+): string[] {
+  const values = configured?.trim()
+    ? configured.split(/[\n,]+/u)
+    : [...DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES];
+  const prefixes: string[] = [];
+
+  for (const rawValue of values) {
+    const value = rawValue.trim();
+    if (!value) {
+      continue;
+    }
+    if (!HOSTED_LINQ_INSTANT_START_PHONE_PREFIX_PATTERN.test(value)) {
+      throw new TypeError(
+        "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES must contain comma-separated E.164 phone prefixes.",
+      );
+    }
+    if (!prefixes.includes(value)) {
+      prefixes.push(value);
+    }
+  }
+
+  if (prefixes.length === 0) {
+    return [...DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES];
+  }
+
+  return prefixes.sort((left, right) =>
+    right.length - left.length || left.localeCompare(right)
+  );
+}
+
+function readHostedLinqInstantStartPhonePrefixes(
+  source: HostedOnboardingEnvSource,
+): string[] {
+  return parseHostedLinqInstantStartPhonePrefixes(
+    readEnv(source, "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES"),
   );
 }
 

@@ -65,6 +65,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     let generation: Promise<unknown> | null = null
     const launchedOperations = new Set<string>()
+    const scopeStatuses = new Map<string, 'pending' | 'queued'>()
     let releaseUsage = (): void => undefined
     const usageHeld = new Promise<void>((resolve) => {
       releaseUsage = resolve
@@ -77,17 +78,34 @@ describe('murph.generate_image dynamic tool schema', () => {
       currentAssistantInputId: () => 'input_image_origin',
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['input_image_origin'],
+        conversationId: 'conversation_1',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox_1'],
+        originSessionId: 'session_1',
+        recipientKey: 'recipient_1',
+      }),
       imageGenerationLauncher: {
         launch(input) {
           if (launchedOperations.has(input.operationId)) {
             return 'already-started' as const
           }
+          if (input.scopeId && scopeStatuses.has(input.scopeId)) {
+            return 'already-pending' as const
+          }
           launchedOperations.add(input.operationId)
+          if (input.scopeId) {
+            scopeStatuses.set(input.scopeId, 'pending')
+          }
           generation = input.run(
             new AbortController().signal,
             async (write) => await write(),
           )
           return 'started' as const
+        },
+        readStatus(scopeId) {
+          return scopeStatuses.get(scopeId) ?? null
         },
       },
       recordDetachedUsage,
@@ -130,7 +148,24 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(result.rpcResult).toMatchObject({
       success: true,
       contentItems: [{
-        text: expect.stringContaining('continue without waiting'),
+        text: expect.stringContaining('tell the user it is still generating'),
+      }],
+    })
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('if it succeeds'),
+      }],
+    })
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'later user questions steered into this live turn',
+        ),
+      }],
+    })
+    expect(result.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('will appear'),
       }],
     })
     expect(fetchImpl).toHaveBeenCalledOnce()
@@ -159,7 +194,121 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(duplicate.rpcResult).toMatchObject({
       success: true,
       contentItems: [{
-        text: 'image generation was already started for this operation',
+        text: expect.stringContaining(
+          'this exact image operation was already accepted',
+        ),
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    const sameConversationFollowup = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Restart the same sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+        toolCallId: 'followup-tool-call',
+      },
+      requireHostedGeneratedImageUploader: true,
+    })
+    expect(sameConversationFollowup.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining('new image request was not started'),
+      }],
+    })
+    expect(sameConversationFollowup.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('do not imply the new request was queued'),
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    scopeStatuses.set('session_1', 'queued')
+    const queuedExactDuplicate = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw a calm sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedGeneratedImageUploader: true,
+    })
+    expect(queuedExactDuplicate.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining(
+          'do not infer its current state from another pending or queued image',
+        ),
+      }],
+    })
+    expect(queuedExactDuplicate.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'this exact image operation finished processing',
+        ),
+      }],
+    })
+
+    const queuedConversationFollowup = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      hostedToolContext,
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Try the sunrise again.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+        toolCallId: 'queued-followup-tool-call',
+      },
+      requireHostedGeneratedImageUploader: true,
+    })
+    expect(queuedConversationFollowup.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining('finished processing'),
+      }],
+    })
+    expect(queuedConversationFollowup.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'if trusted turn context includes `Trusted hosted image completion',
+        ),
+      }],
+    })
+    expect(queuedConversationFollowup.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('still in progress'),
       }],
     })
     expect(fetchImpl).toHaveBeenCalledOnce()

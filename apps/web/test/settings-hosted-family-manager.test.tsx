@@ -1104,6 +1104,7 @@ function baseFamilyManagerProps() {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
     },
+    payerMemberId: "member_owner",
     seats: {
       active: 1,
       billed: 2,

@@ -155,6 +155,7 @@ import {
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
+  type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
   type HostedRuntimeGroupSharedProjection,
@@ -382,6 +383,7 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
 const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS = new Set([
   "assistantInputIds",
   "at",
+  "checkpointPublicationExpectedBy",
   "milestone",
   "runtimeAttemptId",
   "source",
@@ -621,6 +623,13 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
               record.conversationUsageStatus,
             ),
         }),
+    ...(record.groupRunningBit === undefined
+      ? {}
+      : {
+          groupRunningBit: record.groupRunningBit === null
+            ? null
+            : parseHostedGroupRunningBitProjection(record.groupRunningBit),
+        }),
     ...(record.consumedSeqByLane === undefined || record.consumedSeqByLane === null
       ? {}
       : {
@@ -643,6 +652,66 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
+  };
+}
+
+function parseHostedGroupRunningBitProjection(
+  value: unknown,
+): NonNullable<HostedMailboxFetchResponse["groupRunningBit"]> {
+  const record = requireObject(
+    value,
+    "Hosted mailbox fetch response groupRunningBit",
+  );
+  const allowedKeys = new Set([
+    "expiresAt",
+    "publicAlias",
+    "requestedBit",
+    "schema",
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit contains unknown fields.",
+    );
+  }
+  if (record.schema !== "murph.group-sponsorship-bit.v1") {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit schema is invalid.",
+    );
+  }
+  const expiresAt = requireString(
+    record.expiresAt,
+    "Hosted mailbox fetch response groupRunningBit expiresAt",
+  );
+  if (
+    !Number.isFinite(new Date(expiresAt).getTime()) ||
+    new Date(expiresAt).toISOString() !== expiresAt
+  ) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit expiresAt must be canonical.",
+    );
+  }
+  const publicAlias = readNullableString(
+    record.publicAlias,
+    "Hosted mailbox fetch response groupRunningBit publicAlias",
+  );
+  const requestedBit = requireString(
+    record.requestedBit,
+    "Hosted mailbox fetch response groupRunningBit requestedBit",
+  );
+  if (
+    (publicAlias && [...publicAlias].length > 80) ||
+    [...requestedBit].length < 1 ||
+    [...requestedBit].length > 240
+  ) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit text is out of bounds.",
+    );
+  }
+  return {
+    expiresAt,
+    publicAlias,
+    requestedBit,
+    schema: "murph.group-sponsorship-bit.v1",
   };
 }
 
@@ -1033,6 +1102,18 @@ export function parseHostedRuntimeGroupToolRequest(
           }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
+  }
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender request";
+    assertAllowedObjectKeys(record, new Set(["action", "origin"]), label);
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return { action, origin };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2143,6 +2224,48 @@ function parseHostedRuntimeGroupSharedProjection(
   };
 }
 
+function parseHostedRuntimeGroupMemberAskResult(
+  value: unknown,
+  action: "ask_current_sender" | "ask_member",
+): HostedRuntimeGroupMemberAskResult {
+  const label = `Hosted runtime group tool ${action} response result`;
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "accepted") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "completed") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["answer", "outcome", "status"]),
+      label,
+    );
+    return {
+      ...parseHostedExecutionAssistantAskResult(
+        { answer: result.answer, outcome: result.outcome },
+        `${label} result`,
+      ),
+      status,
+    };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+        result,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  throw new TypeError(`${label} status is invalid.`);
+}
+
 export function parseHostedRuntimeGroupToolResponse(
   value: unknown,
 ): HostedRuntimeGroupToolResponse {
@@ -2150,7 +2273,13 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "ask" || action === "ask_member") {
+  if (action === "ask_current_sender" || action === "ask_member") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupMemberAskResult(record.result, action),
+    };
+  }
+  if (action === "ask") {
     const result = requireObject(
       record.result,
       "Hosted runtime group tool ask response result",
@@ -2160,14 +2289,6 @@ export function parseHostedRuntimeGroupToolResponse(
       "Hosted runtime group tool ask response status",
     );
     if (status === "accepted") {
-      if (action === "ask_member") {
-        assertAllowedObjectKeys(
-          result,
-          new Set(["status"]),
-          "Hosted runtime group tool ask_member accepted response result",
-        );
-        return { action, result: { status } };
-      }
       assertAllowedObjectKeys(
         result,
         new Set(["status", "targetLabel"]),
@@ -2188,25 +2309,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (action === "ask_member" && status === "completed") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["answer", "outcome", "status"]),
-        "Hosted runtime group tool ask_member completed response result",
-      );
-      const parsedResult = parseHostedExecutionAssistantAskResult(
-        { answer: result.answer, outcome: result.outcome },
-        "Hosted runtime group tool ask_member completed result",
-      );
-      return {
-        action,
-        result: {
-          ...parsedResult,
-          status,
-        },
-      };
-    }
-    if (action === "ask" && status === "clarification_required") {
+    if (status === "clarification_required") {
       assertAllowedObjectKeys(
         result,
         new Set(["groupLabels", "status"]),
@@ -2239,7 +2342,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (action === "ask" && status === "no_groups") {
+    if (status === "no_groups") {
       assertAllowedObjectKeys(
         result,
         new Set(["status"]),
@@ -3326,6 +3429,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
+        "sponsorshipUrl",
       ]),
       `${label} entry`,
     );
@@ -3377,6 +3481,10 @@ function parseHostedRuntimeGroupMembershipSummaries(
       ),
       requestedVaultShareProjectionScopes,
       role: requireString(record.role, `${label} entry role`),
+      sponsorshipUrl: readNullableString(
+        record.sponsorshipUrl,
+        `${label} entry sponsorshipUrl`,
+      ),
     };
   });
 }
@@ -5054,6 +5162,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(assistant, "linqTypingAcceptedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexTextObservedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "terminalNonReplyCommittedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "checkpointPublicationExpectedByEpochMs", assistantLabel),
+      ...(assistant.runtimeLeaseGeneration === undefined
+        ? {}
+        : {
+            runtimeLeaseGeneration: requireCanonicalRuntimeLeaseGeneration(
+              assistant.runtimeLeaseGeneration,
+              `${assistantLabel}.runtimeLeaseGeneration`,
+            ),
+          }),
     };
   }
 
@@ -5131,11 +5249,31 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
     HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS,
     "Hosted runtime latency trace assistant_milestone event",
   );
+  const milestone = parseHostedRuntimeAssistantMilestone(record.milestone);
+  const checkpointPublicationExpectedBy =
+    record.checkpointPublicationExpectedBy === undefined
+      ? undefined
+      : readNullableString(
+          record.checkpointPublicationExpectedBy,
+          "Hosted runtime latency trace checkpointPublicationExpectedBy",
+        );
+  if (
+    checkpointPublicationExpectedBy !== undefined
+    && checkpointPublicationExpectedBy !== null
+    && milestone !== "terminal_non_reply_committed"
+  ) {
+    throw new TypeError(
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+    );
+  }
 
   return {
     assistantInputIds: parseHostedRuntimeLatencyTraceAssistantInputIds(record),
     at: requireString(record.at, "Hosted runtime latency trace at"),
-    milestone: parseHostedRuntimeAssistantMilestone(record.milestone),
+    ...(checkpointPublicationExpectedBy === undefined
+      ? {}
+      : { checkpointPublicationExpectedBy }),
+    milestone,
     ...(record.runtimeAttemptId === undefined
       ? {}
       : {
@@ -6206,6 +6344,17 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
   }
 
+  return text;
+}
+
+function requireCanonicalRuntimeLeaseGeneration(
+  value: unknown,
+  label: string,
+): string {
+  const text = requireString(value, label);
+  if (text.length > 20 || !/^(?:0|[1-9]\d*)$/u.test(text)) {
+    throw new TypeError(`${label} must be a canonical runtime lease generation.`);
+  }
   return text;
 }
 

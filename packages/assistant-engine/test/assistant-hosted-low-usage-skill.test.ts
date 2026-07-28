@@ -81,22 +81,47 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'on that turn when available, even if this heads-up already checked owner status',
     )
+    expect(normalizedSkill).toContain(
+      'a less capable model that uses less AI usage',
+    )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
-    expect(skill).toContain('matches exactly one `members` row')
-    expect(skill).toContain('navigation to Settings > Family')
+    expect(skill).toContain('matches')
+    expect(skill).toContain('exactly one `members` row')
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=true#subscription`',
+    )
+    expect(skill).toContain('Never put a member ID or')
+    expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(skill).toContain('This only offers')
     expect(skill).toContain('does not arm one')
     expect(skill).toContain('include it in the same segment as a plain first-party link')
     expect(skill).toContain("Match the room's energy")
-    expect(skill).toContain('nominating someone to cover it')
+    expect(skill).toContain('without naming or singling out a nonpayer')
+    expect(skill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
     expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(skill).toContain(
+      'returned percentages and forecast as overall available AI usage',
+    )
+    expect(normalizedSkill).toContain(
+      'does not expose how much comes from included allowance or any usage-credit source, including purchase or referral',
+    )
+    expect(normalizedSkill).toContain(
+      'If asked for a source split, say it is unavailable',
+    )
+    expect(normalizedSkill).toContain(
+      'never assign a returned percentage to included allowance, purchased credit, referral credit, or another source',
+    )
+    expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
   })
 
@@ -132,13 +157,12 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('Do not say "sign up your mom"')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
-    expect(skill).toContain(
-      'Never choose an amount, start Checkout, or claim usage was added',
-    )
+    expect(skill).toContain('Never choose an amount, start')
+    expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
       'never reveal who paid, amounts, or',
     )
-    expect(skill).toContain('never claim usage was added when it was not')
+    expect(skill).toContain('never claim messages were sponsored when they were not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })

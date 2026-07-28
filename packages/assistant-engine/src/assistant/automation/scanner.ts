@@ -23,7 +23,7 @@ import {
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
 import {
-  hasCompleteAssistantAutoReplyTerminalEvidence,
+  readCompleteAssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
   applyAssistantAutoReplyProcessResult,
@@ -35,7 +35,9 @@ import {
 import {
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
+  emitAssistantAutoReplyTerminalNonReplyBestEffort,
   normalizeScanLimit,
+  type AssistantAutoReplyTerminalNonReplyHook,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
   type AssistantRunEvent,
@@ -58,6 +60,7 @@ export async function scanAssistantAutomationOnce(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -108,6 +111,7 @@ export async function scanAssistantAutomationOnce(input: {
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
+    onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted,
     signal: input.signal,
     vault: input.vault,
   })
@@ -184,6 +188,7 @@ export async function scanAssistantAutomationOnce(input: {
       onEvent: input.onEvent,
       onProviderEvent: input.onProviderEvent ?? null,
       onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+      onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
       onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
@@ -265,6 +270,7 @@ async function listAssistantReplyCandidates(input: {
   autoReply: AssistantAutomationScanStateProgress['autoReply']
   inputSource: AssistantInputSource
   limit: number
+  onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutomationCandidate[]> {
@@ -272,12 +278,15 @@ async function listAssistantReplyCandidates(input: {
     return []
   }
 
-  const terminalEvidenceCache = new Map<string, Promise<boolean>>()
-  const terminalEvidenceComplete = (candidate: AssistantInputCandidate) => {
+  const terminalEvidenceCache = new Map<
+    string,
+    ReturnType<typeof readCompleteAssistantAutoReplyTerminalEvidence>
+  >()
+  const readCompleteTerminalEvidence = (candidate: AssistantInputCandidate) => {
     const evidenceId = `${candidate.event.inputId}\u0000${candidate.projection.captureId ?? ''}`
     let cached = terminalEvidenceCache.get(evidenceId)
     if (!cached) {
-      cached = hasCompleteAssistantAutoReplyTerminalEvidence({
+      cached = readCompleteAssistantAutoReplyTerminalEvidence({
         captureId: candidate.projection.captureId,
         inputId: candidate.event.inputId,
         vault: input.vault,
@@ -308,7 +317,18 @@ async function listAssistantReplyCandidates(input: {
           if (candidate.event.source !== channelState.channel) {
             continue
           }
-          if (await terminalEvidenceComplete(candidate)) {
+          const terminalEvidence = await readCompleteTerminalEvidence(candidate)
+          if (terminalEvidence) {
+            if (terminalEvidence.terminal.kind === 'suppressed') {
+              emitAssistantAutoReplyTerminalNonReplyBestEffort({
+                event: {
+                  inputIds: [candidate.event.inputId],
+                  recordedAt: terminalEvidence.recordedAt,
+                  source: candidate.event.source,
+                },
+                hook: input.onTerminalNonReplyCommitted,
+              })
+            }
             continue
           }
           channelCandidates.push(assistantAutomationCandidateFromInput(candidate))

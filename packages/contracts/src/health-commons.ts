@@ -805,10 +805,34 @@ export type HealthCommonsProtocolSessionShape = z.infer<
   typeof healthCommonsProtocolSessionShapeSchema
 >;
 
+export const healthCommonsActivitySessionEvidenceSchema = z
+  .object({
+    activityKinds: z
+      .array(nonEmptyStringSchema.max(80))
+      .min(1)
+      .max(16)
+      .meta({ uniqueItems: true })
+      .superRefine((values, context) => {
+        if (new Set(values).size !== values.length) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Expected unique activity kinds.",
+          });
+        }
+      }),
+    minimumDurationMinutes: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type HealthCommonsActivitySessionEvidence = z.infer<
+  typeof healthCommonsActivitySessionEvidenceSchema
+>;
+
 export const healthCommonsProtocolSpecSchema = z
   .object({
     doseSignature: shortStringSchema,
     target: shortStringSchema.optional(),
+    activitySessionEvidence: healthCommonsActivitySessionEvidenceSchema.optional(),
     frequency: z
       .object({
         sessionsPerWeek: z.number().positive().optional(),

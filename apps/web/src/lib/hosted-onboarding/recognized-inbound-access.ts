@@ -10,6 +10,8 @@ import {
 } from "./member-access";
 
 const HOSTED_ACCOUNT_SETTINGS_URL = "https://withmurph.ai/settings";
+const HOSTED_GROUP_CHAT_ACCESS_RETRY_REPLY =
+  "Once that's sorted, send me another message in the group and I'll try again.";
 
 export type HostedRecognizedInboundAccessResolution =
   | { kind: "allowed" }
@@ -28,6 +30,10 @@ export type HostedRecognizedInboundAccessResolution =
       message: string;
       responseReason: "sent-signup-link";
     };
+
+export function buildHostedGroupChatAccessRecoveryMessage(message: string): string {
+  return `${message}\n\n${HOSTED_GROUP_CHAT_ACCESS_RETRY_REPLY}`;
+}
 
 export async function resolveHostedRecognizedInboundAccess(input: {
   allowSignupFallback: boolean;

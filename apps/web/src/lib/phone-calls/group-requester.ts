@@ -12,7 +12,9 @@ import {
   type HostedPhoneCallGroupRequester,
 } from "@murphai/hosted-execution/phone-calls";
 import {
-  lookupHostedGroupParticipantMemberByHandle,
+  resolveHostedGroupMessageSenderMemberId,
+} from "../hosted-groups/group-message-sender";
+import {
   lookupHostedGroupParticipantMemberByProviderEvidence,
 } from "../hosted-groups/participant-member";
 import {
@@ -21,10 +23,7 @@ import {
 } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
-import { resolveHostedMemberRoutingByTelegramUserId } from "../hosted-onboarding/hosted-member-routing-store";
-import type {
-  HostedOnboardingReadClient,
-} from "../hosted-onboarding/shared";
+import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
 export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
@@ -115,7 +114,7 @@ async function assertLegacyHostedGroupPhoneCallRequesterHasOwnMurph(input: {
     input.signal?.throwIfAborted();
     const wake = await readHostedMailboxWakeByItemId({ mailboxItemId, prisma });
     const memberId = wake
-      ? await resolveLegacyHostedGroupPhoneCallRequesterMemberId({
+      ? await resolveHostedGroupMessageSenderMemberId({
           prisma,
           routeAuthority: input.routeAuthority,
           wake,
@@ -245,65 +244,6 @@ async function assertHostedGroupPhoneCallRequesterCurrentMembership(input: {
   ) {
     throwHostedGroupPhoneCallRequesterActivationRequired();
   }
-}
-
-async function resolveLegacyHostedGroupPhoneCallRequesterMemberId(input: {
-  prisma: HostedOnboardingReadClient;
-  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
-  wake: HostedExecutionWake;
-}): Promise<string | null> {
-  if (
-    input.wake.userId !== input.routeAuthority.containerMemberId
-    || !matchesHostedGroupPhoneCallRouteAuthority(
-      readHostedGroupPhoneCallWakeRouteAuthority(input.wake),
-      input.routeAuthority,
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    input.routeAuthority.channel === "linq"
-    && isHostedLinqConversationMessageWake(input.wake)
-  ) {
-    const message = input.wake.message.linqMessage;
-    const senderHandle = normalizeHostedGroupPhoneCallSenderHandle(message.from);
-    if (
-      message.chatId !== input.routeAuthority.threadId
-      || message.threadIsDirect !== false
-      || message.isFromMe !== false
-      || !senderHandle
-    ) {
-      return null;
-    }
-    const lookup = await lookupHostedGroupParticipantMemberByHandle({
-      handle: senderHandle,
-      prisma: input.prisma,
-    });
-    return lookup?.core.id ?? null;
-  }
-
-  if (
-    input.routeAuthority.channel === "telegram"
-    && isHostedTelegramConversationMessageWake(input.wake)
-  ) {
-    const message = input.wake.message.telegramMessage;
-    const telegramUserId =
-      normalizeHostedGroupPhoneCallSenderHandle(message.from);
-    if (
-      message.threadId !== input.routeAuthority.threadId
-      || message.threadIsDirect !== false
-      || !telegramUserId
-    ) {
-      return null;
-    }
-    const resolution = await resolveHostedMemberRoutingByTelegramUserId({
-      prisma: input.prisma,
-      telegramUserId,
-    });
-    return resolution.status === "found" ? resolution.lookup.core.id : null;
-  }
-  return null;
 }
 
 function readHostedGroupPhoneCallWakeRouteAuthority(

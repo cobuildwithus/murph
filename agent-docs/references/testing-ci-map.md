@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-26
+Last verified: 2026-07-28
 
 ## Current Repo Checks
 
@@ -30,6 +30,7 @@ Last verified: 2026-07-26
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for concurrent hosted Telegram routing writes. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | In both writer orders, hosted-member serialization makes identity-only sync and the production webhook planner converge on the exact inbound thread. A completed relink also rejects the stale account before any mailbox write. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, referral grant, cap-reservation, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent purchase-grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, deletion-first ordering cannot append an orphaned grant, a pre-expiry qualification reconciles after expiry into one purchase-free grant that the ordinary FIFO settlement consumes, the replay-safe group celebration resolves its live source route, and different group referrers serialize so only one can reserve the destination's final cap capacity |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-production-500-regressions-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed hosted retention and late-runtime-log production 500 repairs. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Retention deletes an expired, already-consumed sequence-less preference row without updating it under the current `NOT VALID` constraint while retiring current rows in place; a diagnostic batch arriving after member deletion returns a truthful zero persisted count only for the exact runtime-log member foreign key |
 
 The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
 local by default. An explicitly forced Crabbox run executes the same coverage
@@ -206,6 +207,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   invariant visible without replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
+  excludes explicit committed terminal non-replies during bounded checkpoint
+  grace, reopens them when durable consumption does not arrive, keeps normal
+  checkpointed suppression healthy and impossible marker chronology alertable,
   excludes consumed traces with best-effort missing delivery links, and proves
   cron auth, incident claim coalescing, operator-time quiet hours, stable
   wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
@@ -216,6 +220,27 @@ not enter evidence; and attachment-only input fails closed before provider work.
   coalescing until the admitted effect settles. Row-version race cases prove
   stale healthy candidates cannot report recovery or bypass pacing after a
   concurrent incident cycles the singleton back to healthy.
+  `packages/assistant-engine/test/assistant-{automation,outbox}-runtime.test.ts`
+  proves suppression is projected only after terminal evidence succeeds, is
+  re-derived from completed evidence on replay, and a rebatched still-active
+  grouped reply retains every answered mailbox item for the existing
+  accepted-delivery linkage. It also proves provider dispatch freezes the
+  answered-item set, sending or sent replay returns a retryable uncovered result
+  for a later item, and automation writes no terminal evidence or cursor progress
+  for that item. The latency-store test keeps ordinary milestones attempt-scoped
+  while allowing only that terminal evidence projection to converge by assistant
+  input.
+  `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
+  that projection uses the existing nonblocking assistant-milestone port.
+  The latency-store proof also shows that terminal evidence carries an initial
+  publication expectation and later dirty-window resets advance that expectation
+  monotonically across the fenced runtime attempt. A strictly newer authenticated
+  lease generation takes over an unresolved trace's refresh ownership whether
+  its deadline or terminal callback arrives first. Equal-generation callbacks
+  merge only for that owner, while delayed prior-generation evidence and
+  milestone replay cannot reclaim the trace or roll either timestamp back. The
+  current attempt may also persist a reset deadline before its first terminal
+  projection; a different attempt cannot adopt that nonterminal trace.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
@@ -321,13 +346,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
-  and Cloudflare runner-image confinement coverage. The production-like Linux
+  one-time current-sender identity/route/disclosure coverage, and Cloudflare
+  runner-image confinement coverage. The production-like Linux
   proof must show committed group reads succeed while writes, `.runtime/**`,
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
   it does not send a real private-to-group ask, an accepted-input
-  group-to-member ask, or a scheduled same-turn ask/replay
+  grant-bound group-to-member ask, one-time current-sender self-disclosure, or
+  a scheduled same-turn ask/replay
   through deployed Web, Temporal, Cloudflare, a live model provider, and the
   applicable messaging or no-delivery destination.
 

@@ -29,6 +29,7 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     offerCode: checkoutRequest.offerCode,
     prisma: getPrisma(),
+    ...(checkoutRequest.recoveryOnly ? { recoveryOnly: true } : {}),
   });
 
   return jsonOk(checkout);

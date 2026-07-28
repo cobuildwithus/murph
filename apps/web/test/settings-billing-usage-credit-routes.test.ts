@@ -125,6 +125,7 @@ describe("usage-credit checkout route", () => {
     const request = createCheckoutRequest({
       clientRequestKey: "request_key_123456",
       offerCode: "usage_25_usd",
+      recoveryOnly: true,
     }, "https://join.example.test/api/settings/billing/family/members/hbm_familymember1/usage-credit/checkout");
     const response = await familyCheckoutRoute.POST(
       request,
@@ -142,13 +143,20 @@ describe("usage-credit checkout route", () => {
       offerCode: "usage_25_usd",
       payerMemberId: "hbm_member123",
       prisma: { label: "test-prisma" },
+      recoveryOnly: true,
     });
   });
 
   it("resolves the group and payer only on the server", async () => {
     const request = createCheckoutRequest({
       clientRequestKey: "request_key_123456",
-      offerCode: "usage_10_usd",
+      offerCode: "usage_20_usd",
+      recoveryOnly: true,
+      sponsorship: {
+        publicAlias: "Jake’s Lower Back",
+        runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+        sponsorMessage: "Please stop inviting Jake to basketball.",
+      },
     }, "https://join.example.test/api/groups/fund/group_join_code_1234/usage-credit/checkout");
     const response = await groupCheckoutRoute.POST(
       request,
@@ -165,9 +173,15 @@ describe("usage-credit checkout route", () => {
     expect(mocks.createHostedGroupUsageCreditCheckout).toHaveBeenCalledWith({
       clientRequestKey: "request_key_123456",
       joinCode: "group_join_code_1234",
-      offerCode: "usage_10_usd",
+      offerCode: "usage_20_usd",
       payerMemberId: "hbm_member123",
       prisma: { label: "test-prisma" },
+      recoveryOnly: true,
+      sponsorship: {
+        publicAlias: "Jake’s Lower Back",
+        runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+        sponsorMessage: "Please stop inviting Jake to basketball.",
+      },
     });
   });
 
@@ -223,10 +237,38 @@ describe("usage-credit checkout route", () => {
     });
   });
 
+  it("propagates a typed recovery miss without enabling purchase creation", async () => {
+    mocks.createHostedUsageCreditCheckout.mockResolvedValueOnce({
+      recoveryMiss: true,
+    });
+    const request = createCheckoutRequest({
+      clientRequestKey: "recovery_key_123456",
+      offerCode: "usage_5_usd",
+      recoveryOnly: true,
+    });
+
+    const response = await checkoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ recoveryMiss: true });
+    expect(mocks.createHostedUsageCreditCheckout).toHaveBeenCalledWith({
+      clientRequestKey: "recovery_key_123456",
+      memberId: "hbm_member123",
+      offerCode: "usage_5_usd",
+      prisma: { label: "test-prisma" },
+      recoveryOnly: true,
+    });
+  });
+
   it.each([
     [{ clientRequestKey: "request_key_123456", offerCode: "usage_10_usd", amount: 10 }],
     [{ clientRequestKey: "short", offerCode: "usage_10_usd" }],
     [{ clientRequestKey: "request_key_123456", offerCode: "usage_100_usd" }],
+    [{
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+      recoveryOnly: false,
+    }],
   ])("rejects browser authority or malformed checkout input", async (body) => {
     const response = await checkoutRoute.POST(createCheckoutRequest(body));
 

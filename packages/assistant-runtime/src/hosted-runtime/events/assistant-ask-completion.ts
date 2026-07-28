@@ -16,6 +16,7 @@ import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   type HostedExecutionAssistantAskCompletedWake,
+  type HostedExecutionTelegramExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 
 import {
@@ -110,6 +111,22 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     return createOutcome();
   }
 
+  // The accepted input stores only a trusted authority-presence marker.
+  // Rebuild the narrow outbox authority from its bound runtime route.
+  const reviewedTelegramRouteAuthority:
+    HostedExecutionTelegramExternalThreadRouteAuthority | null =
+      reviewedExact
+      && route.channel === "telegram"
+      && route.threadIsDirect === false
+      && origin.sourceMetadata?.kind === "telegram"
+      && origin.sourceMetadata.externalThreadRouteAuthorityPresent === true
+        ? {
+            channel: "telegram",
+            containerMemberId: input.wake.userId,
+            threadId: route.deliveryTarget,
+          }
+        : null;
+
   const cancellation = createHostedBackgroundMaintenanceCancellation({
     signal: input.signal ?? null,
     shouldYield,
@@ -175,6 +192,12 @@ export async function executeHostedAssistantAskCompletedWake(input: {
           ? {
               reviewedAssistantAskCompletionExpiresAt:
                 input.wake.ask.expiresAt,
+            }
+          : {}),
+        ...(reviewedTelegramRouteAuthority
+          ? {
+              outboxExternalThreadRouteAuthority:
+                reviewedTelegramRouteAuthority,
             }
           : {}),
         sandbox: "read-only",

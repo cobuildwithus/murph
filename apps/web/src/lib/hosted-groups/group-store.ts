@@ -114,6 +114,7 @@ export interface HostedGroupMembershipReadSummary {
   ownerJoinCode: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
+  runtimeMemberId: string | null;
 }
 
 export interface HostedGroupMembershipReadResult {
@@ -1214,6 +1215,7 @@ export async function readHostedGroupMembershipsForMember(input: {
         ownerJoinCode: row.role === "owner" ? row.group.joinCode : null,
         requestedVaultShareProjectionScopes: policy.requestedVaultShareProjectionScopes,
         role: row.role,
+        runtimeMemberId: row.group.runtimeMemberId,
       };
     }),
     truncated: rows.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,

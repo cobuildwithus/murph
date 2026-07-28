@@ -49,6 +49,9 @@ import {
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
+  hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
@@ -69,6 +72,10 @@ import {
   runHostedIdleCheckpointMaintenance,
   type HostedIdleMaintenanceOutcome,
 } from "./hosted-runtime/idle-maintenance.ts";
+import {
+  resolveHostedRuntimeCheckpointPublicationExpectedByMs,
+  resolveHostedRuntimeIdleCheckpointDelayMs,
+} from "./hosted-runtime/checkpoint-publication.ts";
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
@@ -1834,6 +1841,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
           runAssistantPhase: async (phaseInput) => {
             currentAssistantInputId = null;
+            const acceptedAssistantInputIds = new Set<string>();
+            const releaseAcceptedImageGenerationInputs = async (
+              inputIds: readonly string[],
+            ) => {
+              await imageGenerationController?.releaseAcceptedInputs(
+                inputIds,
+                async (inputId) =>
+                  await hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+                    inputId,
+                    vault: restored.vaultRoot,
+                  }),
+              );
+            };
+            // Retry any previously accepted completion whose terminal-evidence
+            // read was incomplete or transiently unavailable before planning a
+            // new turn, so stale advisory status cannot block another image.
+            await releaseAcceptedImageGenerationInputs([]);
             try {
               const phaseAssistantTarget = readConfirmedAssistantTarget();
               const confirmedAssistantTargetEnv = phaseAssistantTarget
@@ -1852,7 +1876,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     },
                   }
                 : foregroundRuntime;
-              const phaseResult = await (
+              return await (
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
@@ -1879,6 +1903,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
+                  for (const assistantInputId of assistantInputIds) {
+                    acceptedAssistantInputIds.add(assistantInputId);
+                  }
                   const acceptedInputContext =
                     await resolveHostedCurrentInputIdForAcceptedInputs({
                       assistantInputIds,
@@ -1901,9 +1928,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                 signal: passSignal,
               });
-              return phaseResult;
             } finally {
               currentAssistantInputId = null;
+              // A reply can acquire terminal evidence before a later phase error.
+              // Release invocation-local image status from that durable truth in
+              // both success and failure paths; evidence read errors retain it.
+              await releaseAcceptedImageGenerationInputs(
+                [...acceptedAssistantInputIds],
+              );
             }
           },
           signal: passSignal,
@@ -2021,13 +2053,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         activeWorkspace?.redactedStatus ?? null,
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
-    let idleCheckpointStartByMs: number | null = runtimeStateDirty
-      ? Date.now() + idleCheckpointDelayMs
-      : null;
+    let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
-    const markIdleCheckpointTimerAfterDirtyWork = () => {
-      idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
+    const publishCheckpointPublicationExpectation = (
+      checkpointStartByMs: number,
+    ) => {
+      recordHostedRuntimeLatencyMilestoneBestEffort({
+        at: new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
+          checkpointStartByMs,
+          commitTimeoutMs: runtime.commitTimeoutMs,
+        })).toISOString(),
+        latencyTracePort: runtime.platform.latencyTracePort,
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: input.request.attemptId,
+      });
     };
+    const setIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      idleCheckpointStartByMs = checkpointStartByMs;
+      publishCheckpointPublicationExpectation(checkpointStartByMs);
+    };
+    const ensureIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      if (idleCheckpointStartByMs === null) {
+        setIdleCheckpointStartBy(checkpointStartByMs);
+      }
+    };
+    const markIdleCheckpointTimerAfterDirtyWork = () => {
+      setIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+    };
+    if (runtimeStateDirty) {
+      markIdleCheckpointTimerAfterDirtyWork();
+    }
     const imageGenerationSignal = options.shutdownSignal
       ? AbortSignal.any([
           runtimeAbortController.signal,
@@ -2292,7 +2347,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       invocationLocalProjectedAssistantWakeKey = null;
       durableCheckpointFollowUpPending = true;
       runtimeStateDirty = true;
-      idleCheckpointStartByMs ??= Date.now();
+      ensureIdleCheckpointStartBy(Date.now());
     };
     const reconcilePendingWakeAfterDueAssistantPass = (input: {
       preservedDueAssistantWakeOnNoProgress: boolean;
@@ -2305,7 +2360,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         pendingWake = copyHostedRuntimePendingWake(heldWake.durableWake);
         pendingWakeAfterDueAssistantService = null;
         runtimeStateDirty = true;
-        idleCheckpointStartByMs ??= Date.now();
+        ensureIdleCheckpointStartBy(Date.now());
         return;
       }
       const pendingAssistantWakeMs = pendingWake.nextWakeAt === null
@@ -2338,7 +2393,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingWakeAfterDueAssistantService = null;
       if (wakeChanged) {
         runtimeStateDirty = true;
-        idleCheckpointStartByMs ??= Date.now();
+        ensureIdleCheckpointStartBy(Date.now());
       }
     };
     const drainCleanDurableCheckpointEffects = async (): Promise<boolean> => {
@@ -3134,7 +3189,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (runtimeDirtyAfterForeground) {
         markIdleCheckpointTimerAfterDirtyWork();
       } else if (committedInboxMediaRetentionWakeDue) {
-        idleCheckpointStartByMs = Date.now();
+        setIdleCheckpointStartBy(Date.now());
       }
       if (!runtimeStateDirty) {
         const vaultShareOfferWakeLatencySeed =
@@ -4138,7 +4193,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   };
 }
 
-const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 const activeHostedRuntimeDeferredUsageCaptures =
   new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
@@ -4519,14 +4573,6 @@ function readHostedWorkspaceInvocationStatusPriority(
   }
 
   return 0;
-}
-
-function resolveHostedRuntimeIdleCheckpointDelayMs(value: number | null | undefined): number {
-  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
-    return Math.min(Math.trunc(value), HOSTED_RUNTIME_MAX_TIMER_DELAY_MS);
-  }
-
-  return DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 function buildHostedRuntimeWakeKey(input: {

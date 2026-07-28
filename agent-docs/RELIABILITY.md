@@ -12,6 +12,8 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
+- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
+
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
@@ -48,6 +50,26 @@ Last verified: 2026-07-27
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq and Telegram group ingress must use the same canonical current runtime
+  AI-access decision as model execution before provisioning a group or
+  admitting work for an existing thread container. Evaluate that decision at
+  webhook processing time rather than the provider message timestamp, so a
+  delayed event cannot cross a trial-expiry boundary. A recognized inactive
+  Linq sender may receive recovery only when both the persisted route contact
+  and the provider's current direct-chat audience match that authenticated
+  sender before and after access resolution. Otherwise the group receives only
+  account-neutral guidance, and unknown or suspended senders disclose no
+  account state. Telegram may create or renew the exact active linked group
+  sender's existing participant lease without transferring container
+  ownership; delayed observations remain subject to the shared seven-day lease
+  and future timestamps are clamped to server time before the canonical
+  container decision is re-read.
+- Group-origin Telegram recovery retains three outcomes in the existing
+  delivery owner. Explicit Telegram rate limits persist a retry time;
+  provider-confirmed permanent 4xx rejection persists a recognizable definitely
+  unsent result so replay retries only the neutral room response; and ambiguous
+  no-response or non-rate-limit 5xx dispatch remains terminal and at-most-once
+  for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
@@ -74,6 +96,7 @@ Last verified: 2026-07-27
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively; the first completed assistant response closes new admission while preserving the existing provider-turn key only long enough for an already-started steer to settle, and a rejected steer plus overflow or later input remains durable and pending for the next ordinary turn. Every completed text or media segment is retained for delivery rather than replaced by a group-only latest response. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
+- Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. Every create retry during the first 30 minutes uses the
@@ -81,9 +104,11 @@ Last verified: 2026-07-27
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
-- Current-policy group funding may create one unconfirmed saved-card
-  PaymentIntent with a purchase-derived idempotency key. The producer must bind
-  its encrypted exact reference under the payer lock before confirmation. The
+- Current-policy personal, Family, and group funding may create one unconfirmed
+  saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
+  purchases retain this behavior for groups only; v1 remains Checkout-only.
+  The producer must bind its encrypted exact reference under the payer lock
+  before confirmation. The
   locked bind must re-read both payer suspension and purchase status; a
   suspension, deletion, or terminal transition that wins first leaves the
   intent unbound, canceled, and never confirmed. A succeeded or processing
@@ -93,8 +118,35 @@ Last verified: 2026-07-27
   confirmation keeps the purchase `payment_pending`; exact request replay
   retrieves and continues only that intent. A fresh request for the same
   target may recover a nonterminal purchase only when its offer matches the
-  frozen offer; a different amount fails closed, and the client keeps the
-  original amount and request key locked while the outcome is uncertain.
+  frozen offer. A different amount receives only the frozen purchase's status
+  and cancellation capability. After any unparsed selection response, the
+  browser may reuse that request key only through the same endpoint's
+  recovery-only mode. Under the payer lock, that mode can continue an exact-key
+  purchase or the current matching nonterminal purchase, but it cannot create a
+  purchase. When neither exists, it returns a miss before Stripe I/O and clears
+  the visible selection to an unselected picker while retaining the unresolved
+  request key in payer-and-target-scoped browser session storage. Web derives
+  the payer scope from the authenticated server session, stores and verifies
+  that key before the first create-capable request, hydrates it before enabling
+  a remounted picker, and keeps it through timeout, dismissal, reload, account
+  switching, and recovery miss. The next explicit Add action by that payer
+  reuses that key in normal create-capable mode. Another payer in the same tab
+  receives an independent slot and cannot read or clear it. The payer lock and
+  request-key uniqueness then serialize the key with any delayed original
+  request: one purchase wins, and a changed offer receives only that winning
+  purchase's status/cancel-only projection. Only a durable purchase response
+  that proves the submitted selection key matched for that payer clears the
+  stored key; mounting an active or return projection, retrying a projected
+  purchase, or recovering another request cannot release it.
+  A group purchase that can still start or continue payment also requires the
+  submitted sponsorship digest to match the frozen draft. Once that exact-key
+  purchase is terminal, a remounted or changed draft cannot alter it and must
+  not turn durable recovery into a permanent 409 loop: Web returns the frozen
+  nonpayable purchase, marks the sponsorship selection conflict, and
+  acknowledges the key match. An effectively expired `created` purchase is
+  closed through the existing expiry owner before that projection.
+  Unavailable storage fails closed before request entry; the winning purchase
+  remains the only payable path.
   Authentication or card failure
   may fall back to Checkout only after the exact intent is verified canceled
   and its binding is cleared under the same reconciliation fence. Direct
@@ -173,6 +225,23 @@ Last verified: 2026-07-27
   post-drain contract migration resynchronizes purchase projections before it
   widens and validates the ledger checks; only then may Web enable referral
   arming, binding, and observation.
+- A fulfilled group purchase may materialize one optional social effect after
+  the grant commits. The purchase id owns mailbox deduplication, so Checkout,
+  PaymentIntent, and webhook replay converge on one creative notification.
+  Failure to activate or queue the moment keeps the Stripe receipt retryable
+  but cannot roll back or duplicate the grant. An existing mailbox item is
+  re-signaled rather than regenerated. The creative turn adds no reservation,
+  attempt counter, or media-specific retry state: the prompt tells the model to
+  make one short original song with one `generate_song` call, and a provider
+  failure terminally skips this optional effect instead of regenerating it.
+  Once a delivery intent commits, the ordinary outbox owns retry and
+  deduplication. Running bits need no timer or cleanup job: Web reads
+  only fulfilled rows whose `expiresAt` is still in the future, and the
+  Assistant rechecks expiry before prompt construction.
+- Group payment recovery compares and resubmits the effective authorized
+  sponsor draft. Its digest never represents customization that authorization
+  discarded. An unreadable encrypted draft fails closed before the UI can offer
+  a retry, while an intentionally empty draft remains visible and replayable.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or
@@ -208,6 +277,13 @@ Last verified: 2026-07-27
   reviewed shapes remain checkpoint-gated. Completion ordering uses the
   existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
+  deterministic request identity, ten-minute expiry, isolated reviewed
+  personal read, completion append, and exact-origin group delivery. Exact
+  replay reopens and revalidates the stored group input; changed identity,
+  question, permission, target, route, or expiry becomes unavailable rather
+  than creating replacement work. It adds no scheduler, callback wait, status
+  row, grant row, retry owner, or delivery ledger.
 - The same dirty-runtime prefix admits only two server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and
