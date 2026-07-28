@@ -1,6 +1,6 @@
 # Image response transcript presence
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -45,8 +45,8 @@ Updated: 2026-07-28
 
 - Reuse the existing assistant transcript as the owner of prior assistant
   response context.
-- Append one fixed image-presence marker; never copy media metadata into
-  transcript history.
+- Prefix one fixed image-presence marker so bounded fresh-thread history keeps
+  the fact; never copy media metadata into transcript history.
 
 ## Verification
 
@@ -61,11 +61,23 @@ Updated: 2026-07-28
 - `pnpm test:diff packages/assistant-engine/src/assistant/local-service.ts
   packages/assistant-engine/test/assistant-local-service-runtime.test.ts
   packages/assistant-engine/test/assistant-codex-turn-planning.test.ts` passed
-  every affected typecheck and the full Assistant Engine suite (180 files,
-  2,802 tests); the unrelated reverse-dependent CLI phase became irreversibly
-  red under concurrent shared-host verification with eight 60-second CLI
-  command/session timeouts and ten Health Commons experiment failures, so the
-  task-owned run was stopped rather than collecting redundant failures.
+  every affected typecheck and the full Assistant Engine suite after the
+  coverage remediation (180 files, 2,803 passed, 8 skipped); the unrelated
+  reverse-dependent CLI phase became irreversibly red under concurrent
+  shared-host verification with eight 60-second CLI command/session timeouts
+  and ten Health Commons experiment failures, so the task-owned run was stopped
+  rather than collecting redundant failures.
+- Canonical remote `pnpm verify:acceptance` passed the affected suites, the
+  reverse-dependent CLI files that failed on the shared host, and the broad
+  typecheck/web/Cloudflare lanes. It exited red only on the unrelated
+  setup-assistant Venice wizard timing test; that unchanged test passed
+  immediately in isolation.
+- The exact-head hosted image-delivery E2E was replayed locally twice, including
+  once with CI-equivalent streamed logging. All three direct, async-completion,
+  and upload-failure cases passed both times. The separate unchanged web
+  handoff-timeout test that failed in CI also passed in isolation.
+- An unchanged-head CI rerun then passed the complete Codex media and provider
+  egress E2E leg, including the automatic async image-completion scenario.
 - Required local `product-experience-review`: two material findings were
   accepted and fixed (pre-steer image responses and long-history truncation);
   targeted re-review returned `NO FINDINGS` with no material evidence gaps.
@@ -75,3 +87,4 @@ Updated: 2026-07-28
   and applied deliberately; the focused runtime lane then passed all four image
   and media-only cases. The substantive preliminary pass is not rerun by
   workflow contract.
+Completed: 2026-07-28
