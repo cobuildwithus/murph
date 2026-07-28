@@ -440,7 +440,6 @@ export interface CodexAppServerTurnInput {
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
-  creativeMediaPolicy?: 'single-short' | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   excludeResumeTurns?: boolean
@@ -2801,7 +2800,6 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
-  let creativeMediaAttemptReserved = false
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
     settings: {},
   }
@@ -3638,9 +3636,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const dynamicToolRequest = readMurphDynamicToolRequest(message, {
-      creativeMediaPolicy: input.creativeMediaPolicy ?? null,
-    })
+    const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
         message,
@@ -3708,31 +3704,6 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'invalid_arguments',
       }))
-    }
-
-    if (
-      input.creativeMediaPolicy === 'single-short' &&
-      (
-        dynamicToolRequest.kind === 'generate-voice-memo' ||
-        dynamicToolRequest.kind === 'generate-song'
-      )
-    ) {
-      if (creativeMediaAttemptReserved) {
-        void tryWriteRpcMessage({
-          id: requestId,
-          result: {
-            success: false,
-            contentItems: [
-              {
-                type: 'inputText',
-                text: 'creative media attempt already used for this turn',
-              },
-            ],
-          },
-        })
-        return
-      }
-      creativeMediaAttemptReserved = true
     }
 
     if (

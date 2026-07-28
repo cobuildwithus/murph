@@ -215,7 +215,6 @@ export async function executeCodexAssistantTurnAttempt(
       input.authorizeAcceptedMessageTarget ?? null,
     approvalPolicy,
     baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-    creativeMediaPolicy: input.creativeMediaPolicy ?? null,
     developerInstructions,
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,

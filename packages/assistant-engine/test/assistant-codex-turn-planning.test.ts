@@ -506,7 +506,10 @@ describe('assistant Codex turn planning', () => {
         },
       ])
       expect(plan.systemPrompt).toContain('Text alone is valid.')
-      expect(plan.systemPrompt).toContain('at most one')
+      expect(plan.systemPrompt).toContain(
+        'call exactly one of `murph.generate_song` or `murph.generate_voice_memo`',
+      )
+      expect(plan.systemPrompt).toContain('never a second attempt')
       expect(plan.systemPrompt).toContain('murph.generate_voice_memo')
       expect(plan.systemPrompt).toContain('murph.generate_song')
       expect(plan.systemPrompt).toContain(

@@ -80,14 +80,6 @@ const generateSongArgumentsSchema = z
   })
   .strict()
 
-const creativeNotificationGenerateSongArgumentsSchema = z
-  .object({
-    durationSeconds: z.number().int().min(5).max(15),
-    instrumental: z.boolean().default(false),
-    prompt: z.string().trim().min(1).max(4100),
-  })
-  .strict()
-
 export function parseGenerateSongArguments(
   value: unknown,
 ):
@@ -95,18 +87,6 @@ export function parseGenerateSongArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateSongArgumentsSchema,
-    toolName: 'murph.generate_song',
-    value,
-  })
-}
-
-export function parseCreativeNotificationGenerateSongArguments(
-  value: unknown,
-):
-  | { ok: true; args: GenerateSongToolArgs }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  return parseDynamicToolArguments({
-    schema: creativeNotificationGenerateSongArgumentsSchema,
     toolName: 'murph.generate_song',
     value,
   })

@@ -539,11 +539,6 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          assertAssistantCreativeNotificationToolContract({
-            input,
-            rawEvents: providerResult.rawEvents ?? [],
-            responseMedia: providerResult.responseMedia ?? [],
-          })
           decision = parseAssistantNotificationDecision(providerResult.response)
         } catch (error) {
           throw annotateAssistantNotificationError(
@@ -1593,35 +1588,6 @@ function assistantGroupRoomModelDynamicMutationCompleted(
     (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
     (args?.action === 'upsert' || args?.action === 'delete')
   )
-}
-
-function assertAssistantCreativeNotificationToolContract(input: {
-  input: AssistantNotificationInput
-  rawEvents: readonly unknown[]
-  responseMedia: readonly AssistantResponseMedia[]
-}): void {
-  if (input.input.notificationToolProfile !== 'creative-response') {
-    return
-  }
-  const attempts = readAssistantCreativeNotificationToolAttempts(input.rawEvents)
-  const successfulAttemptCount = attempts.filter(
-    (attempt) => attempt.success,
-  ).length
-  if (successfulAttemptCount > 1) {
-    throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_CREATIVE_MEDIA_INVALID',
-      'Creative notification may attach at most one successful media result.',
-    )
-  }
-  const voiceMemoCount = input.responseMedia.filter(
-    (media) => media.kind === 'voice_memo',
-  ).length
-  if (voiceMemoCount !== (successfulAttemptCount === 1 ? 1 : 0)) {
-    throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_CREATIVE_MEDIA_INVALID',
-      'Creative notification media must match its media tool result.',
-    )
-  }
 }
 
 function readAssistantCreativeNotificationToolAttempts(

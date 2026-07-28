@@ -509,7 +509,6 @@ async function executeAssistantCodexAttempt(input: {
         }),
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
-        creativeMediaPolicy: creativeResponseTurn ? 'single-short' : null,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: outputOnlyTurn
           ? []
