@@ -1,5 +1,6 @@
 name: Apply Linq instant-start implementation
 
+# Temporary exact-head verifier; the successful job removes all staging files.
 on:
   push:
     branches:
