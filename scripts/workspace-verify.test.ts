@@ -31,7 +31,7 @@ function extractWorkspaceVerifyFunction(functionName: string): string {
   return functionSource;
 }
 
-function runShellHarness(source: string) {
+function runShellHarness(source: string, timeout = 10_000) {
   const harnessDir = mkdtempSync(
     path.join(os.tmpdir(), "murph-workspace-verify-function-"),
   );
@@ -42,7 +42,7 @@ function runShellHarness(source: string) {
     return spawnSync("bash", [harnessPath], {
       cwd: repoRoot,
       encoding: "utf8",
-      timeout: 10_000,
+      timeout,
     });
   } finally {
     rmSync(harnessDir, { force: true, recursive: true });
@@ -919,16 +919,39 @@ verify_log() { return 0; }
 run_workspace_package_coverage() {
   local package_dir="$1"
 
-  if [[ "$package_dir" != "packages/cli" ]]; then
-    return 0
-  fi
-
-  : >"$cli_started_file"
-  while [[ ! -f "$cli_release_file" ]]; do
-    command sleep 0.01
-  done
-
-  [[ "$cli_should_fail" != "1" ]]
+  case "$package_dir" in
+    "packages/cli")
+      : >"$cli_started_file"
+      while [[ ! -f "$cli_release_file" ]]; do
+        command sleep 0.01
+      done
+      [[ "$cli_should_fail" != "1" ]]
+      ;;
+    "packages/assistant-engine")
+      : >"$first_peer_started_file"
+      while [[ ! -f "$first_peer_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/assistant-runtime")
+      : >"$second_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/core")
+      : >"$third_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/setup-cli")
+      : >"$fourth_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+  esac
 }
 
 exercise_interlock() {
@@ -942,6 +965,12 @@ exercise_interlock() {
 
   cli_started_file="$case_dir/cli-started"
   cli_release_file="$case_dir/release-cli"
+  first_peer_started_file="$case_dir/first-peer-started"
+  first_peer_release_file="$case_dir/release-first-peer"
+  second_peer_started_file="$case_dir/second-peer-started"
+  third_peer_started_file="$case_dir/third-peer-started"
+  fourth_peer_started_file="$case_dir/fourth-peer-started"
+  refill_release_file="$case_dir/release-refill"
   acceptance_cli_coverage_ready_file="$case_dir/cli-ready"
   export MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE="$acceptance_cli_coverage_ready_file"
 
@@ -957,38 +986,73 @@ exercise_interlock() {
   ) &
   local scheduler_pid="$!"
 
-  for _ in {1..200}; do
-    if [[ -f "$cli_started_file" ]] && grep -q "wait for CLI coverage" "$case_dir/app-wait.log"; then
+  for _ in {1..400}; do
+    if [[
+      -f "$cli_started_file"
+      && -f "$first_peer_started_file"
+      && -f "$case_dir/app-wait.log"
+    ]] && grep -q "wait for CLI coverage" "$case_dir/app-wait.log"; then
       break
     fi
     command sleep 0.01
   done
 
   [[ -f "$cli_started_file" ]]
+  [[ -f "$first_peer_started_file" ]]
   grep -q "wait for CLI coverage" "$case_dir/app-wait.log"
   command sleep 0.05
   [[ ! -f "$case_dir/app-released" ]]
   [[ ! -f "$acceptance_cli_coverage_ready_file" ]]
+  [[ ! -f "$second_peer_started_file" ]]
+  [[ ! -f "$third_peer_started_file" ]]
+  [[ ! -f "$fourth_peer_started_file" ]]
 
   : >"$cli_release_file"
-  wait "$scheduler_pid"
-  wait "$app_pid"
+
+  for _ in {1..400}; do
+    if [[
+      -f "$case_dir/app-released"
+      && -f "$second_peer_started_file"
+      && -f "$third_peer_started_file"
+    ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
 
   [[ -f "$case_dir/app-released" ]]
   [[ -f "$acceptance_cli_coverage_ready_file" ]]
+  [[ -f "$second_peer_started_file" ]]
+  [[ -f "$third_peer_started_file" ]]
+  command sleep 0.05
+  [[ ! -f "$fourth_peer_started_file" ]]
+
+  : >"$first_peer_release_file"
+  for _ in {1..400}; do
+    if [[ -f "$fourth_peer_started_file" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+  [[ -f "$fourth_peer_started_file" ]]
+
+  : >"$refill_release_file"
+  wait "$scheduler_pid"
+  wait "$app_pid"
+
   observed_status="$(<"$case_dir/scheduler-status")"
   [[ "$observed_status" == "$expected_status" ]]
 }
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
-package_coverage_concurrency_limit=2
+package_coverage_concurrency_limit=3
 package_coverage_cli_active_concurrency_limit=2
 
 exercise_interlock success 0 0
 exercise_interlock failure 1 1
 printf 'interlock-covered\n'
-`);
+`, 30_000);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("interlock-covered\n");
