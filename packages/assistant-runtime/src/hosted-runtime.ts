@@ -49,7 +49,7 @@ import {
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
-  hasCompleteAssistantAutoReplyTerminalEvidence,
+  hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   createHostedAssistantTurnEnvironment,
@@ -1844,7 +1844,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await imageGenerationController?.releaseAcceptedInputs(
                 inputIds,
                 async (inputId) =>
-                  await hasCompleteAssistantAutoReplyTerminalEvidence({
+                  await hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
                     inputId,
                     vault: restored.vaultRoot,
                   }),
