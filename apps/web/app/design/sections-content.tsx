@@ -20,6 +20,7 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
+import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
@@ -100,6 +101,12 @@ export function SectionsContent() {
 
       <StudySection title="Family plan invite acceptance">
         <FamilyInviteJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Family billing recovery on Join">
+        <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
       <Separator />

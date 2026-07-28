@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Purpose
 
@@ -281,6 +281,25 @@ allocations remain retryable or require support instead of guessed accounting.
 A Family conversion may clear an owner's prior direct billing reference only
 when it names the same Stripe subscription that became the Family subscription;
 never erase a different subscription reference.
+
+## Non-obvious Affected Surfaces
+
+Terminal direct-to-Family reconciliation changes the owner's own billing status
+to `not_started`, so dashboard authentication intentionally redirects Settings
+returns to `/join`. The matched authenticated invite flow must distinguish this
+existing canceled Family group from ordinary first-time onboarding. With no
+current Family Checkout claim, `/join` offers the existing Family Checkout
+action beside the individual plans. With a fresh Family attempt or bound
+subscription, it shows persistent syncing feedback and withholds individual
+Checkout actions until the webhook closes the claim. Ordinary members without a
+canceled owner group retain the existing Pulse and Edge onboarding journey.
+
+Regression coverage follows the production boundaries: terminal-before-active
+Stripe reconciliation releases the exact direct binding, dashboard auth returns
+the owner to `/join`, the server model derives recovery from the owner group,
+the rendered surface posts Family retry to the existing Settings billing route,
+and refreshes keep pending Family state visible while invite-status polling
+waits for activation.
 
 ## Invite Issuance
 

@@ -18,9 +18,17 @@ import {
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
   const autoPulseTrialStarting = !model.launchConsent.gateActive
     && model.status.stage === "checkout"
-    && isJoinInviteAutoPulseTrialReady(model.status);
+    && isJoinInviteAutoPulseTrialReady(
+      model.status,
+      model.familyBillingRecovery,
+    );
   const messagingSetupCheckout = model.status.stage === "checkout"
     && model.status.messagingSetupRequired;
+  const familyBillingRecoveryVisible =
+    !model.launchConsent.gateActive
+    && model.status.stage === "checkout"
+    && !messagingSetupCheckout
+    && model.familyBillingRecovery !== null;
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
     || autoPulseTrialStarting
@@ -31,9 +39,17 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
     : resolveJoinInviteEyebrow(model.status.stage);
   const title = model.launchConsent.gateActive
     ? "One quick step"
+    : familyBillingRecoveryVisible
+      ? model.familyBillingRecovery === "syncing"
+        ? "Family billing is in progress"
+        : "Choose how to continue"
     : resolveJoinInviteTitle(model.status);
   const subtitle = model.launchConsent.gateActive
     ? "Review and accept the legal agreements below to get started."
+    : familyBillingRecoveryVisible
+      ? model.familyBillingRecovery === "syncing"
+        ? "Stripe is confirming your Family plan."
+        : "Restart Family or choose an individual plan."
     : resolveJoinInviteSubtitle(model.status);
 
   return (

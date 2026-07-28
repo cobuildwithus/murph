@@ -405,6 +405,8 @@ export interface HostedFamilyOwnerSnapshot {
   suspendedAt: Date | null;
 }
 
+export type HostedFamilyBillingRecoveryState = "available" | "syncing";
+
 export interface HostedFamilyUsageCreditCheckoutTarget {
   beneficiaryMemberId: string;
   groupId: string;
@@ -851,6 +853,56 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     },
     suspendedAt: group.suspendedAt,
   };
+}
+
+/**
+ * A canceled Family group remains the source of truth for the owner's
+ * onboarding recovery choice. A fresh Checkout attempt or newly bound
+ * subscription keeps individual Checkout hidden until Stripe reconciliation
+ * settles; otherwise the owner may retry Family or choose an individual plan.
+ */
+export async function readHostedFamilyBillingRecoveryForOwner(input: {
+  now?: Date;
+  ownerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedFamilyBillingRecoveryState | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const group = await prisma.hostedAccountGroup.findUnique({
+    select: {
+      billingRef: {
+        select: {
+          checkoutAttemptId: true,
+          checkoutCreatedAt: true,
+          stripeSubscriptionIdEncrypted: true,
+        },
+      },
+      billingStatus: true,
+      suspendedAt: true,
+    },
+    where: {
+      ownerMemberId: input.ownerMemberId,
+    },
+  });
+  if (
+    !group
+    || group.suspendedAt
+    || group.billingStatus !== HostedBillingStatus.canceled
+  ) {
+    return null;
+  }
+
+  const nowMs = (input.now ?? new Date()).getTime();
+  const checkoutAttemptIsCurrent = Boolean(
+    group.billingRef?.checkoutAttemptId
+    && group.billingRef.checkoutCreatedAt
+    && nowMs - group.billingRef.checkoutCreatedAt.getTime()
+      < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS,
+  );
+
+  return checkoutAttemptIsCurrent
+    || Boolean(group.billingRef?.stripeSubscriptionIdEncrypted)
+    ? "syncing"
+    : "available";
 }
 
 export async function readHostedFamilyInviteAcceptanceView(input: {

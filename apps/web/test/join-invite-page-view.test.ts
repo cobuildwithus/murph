@@ -270,6 +270,76 @@ test("JoinInvitePageView starts no-card auto Pulse Trial by default instead of r
   });
 });
 
+test("JoinInvitePageView offers direct checkout and Family retry after terminal Family cleanup", () => {
+  const model = createModel({
+    familyBillingRecovery: "available",
+    launchConsent: {
+      gateActive: false,
+      initialStatus: createConsentStatus({ launchGranted: true }),
+      status: "granted",
+    },
+    status: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, { model }),
+  );
+
+  assert.match(markup, /Choose how to continue/);
+  assert.match(markup, /Restart Family or choose an individual plan\./);
+  assert.match(markup, /Restart Family/);
+  assert.match(markup, /Get Pulse/);
+  assert.match(markup, /Get Edge/);
+  assert.match(markup, /2 to 6 people, one bill/);
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  expect(mocks.statusRefreshProps).toMatchObject({
+    current: buildJoinInviteStatusRefreshSnapshot(model.status),
+    inviteCode: "invite-code",
+    legalGateActive: false,
+  });
+});
+
+test("JoinInvitePageView persists Family syncing and withholds individual checkout", () => {
+  const model = createModel({
+    familyBillingRecovery: "syncing",
+    launchConsent: {
+      gateActive: false,
+      initialStatus: createConsentStatus({ launchGranted: true }),
+      status: "granted",
+    },
+    status: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, { model }),
+  );
+
+  assert.match(markup, /Family billing is in progress/);
+  assert.match(markup, /Your Family plan is syncing/);
+  assert.match(markup, /This page checks automatically/);
+  assert.doesNotMatch(markup, /Restart Family/);
+  assert.doesNotMatch(markup, /Get Pulse/);
+  assert.doesNotMatch(markup, /Get Edge/);
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  expect(mocks.statusRefreshProps).toMatchObject({
+    current: buildJoinInviteStatusRefreshSnapshot(model.status),
+    inviteCode: "invite-code",
+    legalGateActive: false,
+  });
+});
+
 test("JoinInvitePageView keeps messaging setup before auto Pulse Trial when messaging is required", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
@@ -498,6 +568,7 @@ function createModel(
 
   return {
     awaitingInviteSessionResolution: false,
+    familyBillingRecovery: null,
     inviteCode: "invite-code",
     launchConsent: {
       gateActive: false,

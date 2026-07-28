@@ -107,6 +107,7 @@ import {
   issueHostedFamilyInviteTx,
   prepareHostedFamilyStripeActivationCryptoDomainRoots,
   prepareHostedLegacySyntheticFamilyCleanupTx,
+  readHostedFamilyBillingRecoveryForOwner,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyChatNotificationRouteTx,
   resolveHostedFamilyCheckoutRedirectUrl,
@@ -4074,6 +4075,21 @@ describe("hosted Family plan", () => {
       stripeSubscriptionIdEncrypted: null,
       stripeSubscriptionLookupKey: null,
     });
+    tx.hostedAccountGroup.findUnique.mockImplementation(async () => ({
+      ...group,
+      billingRef: {
+        checkoutAttemptId: currentBillingRef.checkoutAttemptId,
+        checkoutCreatedAt: currentBillingRef.checkoutCreatedAt,
+        stripeSubscriptionIdEncrypted:
+          currentBillingRef.stripeSubscriptionIdEncrypted,
+      },
+      owner: { suspendedAt: null },
+    }));
+    await expect(readHostedFamilyBillingRecoveryForOwner({
+      now: new Date("2026-06-18T12:31:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: tx,
+    })).resolves.toBe("available");
 
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
       group: {
@@ -4153,6 +4169,11 @@ describe("hosted Family plan", () => {
       url: "https://local.withmurph.ai:3443/checkout/family/cs_test_familyRecovery123",
     });
     expect(checkoutCreate).toHaveBeenCalledOnce();
+    await expect(readHostedFamilyBillingRecoveryForOwner({
+      now: new Date("2026-06-18T12:32:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: tx,
+    })).resolves.toBe("syncing");
   });
 
   it("fails closed when Stripe seats drop below active Family memberships", async () => {
