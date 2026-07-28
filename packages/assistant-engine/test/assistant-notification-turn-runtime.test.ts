@@ -22,6 +22,7 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import type {
+  AssistantDeliveryOutcome,
   AssistantMessageInput,
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
@@ -1288,7 +1289,7 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
   expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
 })
 
-test('an organic same-route reply supersedes the exact-text signup welcome through the real first-contact state', async () => {
+test('a sent transcript-backed voice-only first contact supersedes the exact-text signup welcome through real state', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-first-contact-supersede-'))
   const routeBinding = {
     actorId: 'hid_linq_actor_supersede',
@@ -1444,7 +1445,9 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
         media: [],
         session: initialSession,
       },
-      response: 'Nice. First, what should I call you?',
+      // Local service supplies the persisted voice transcript as receipt
+      // provenance while the channel-visible text response remains empty.
+      response: 'Voice-only first-contact reply.',
       turnId: 'turn-organic-reply',
       vault,
     })
@@ -2749,6 +2752,168 @@ test('sendAssistantNotificationLocal quietly suppresses an unanswered recent ass
     expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
     expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
     expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test.each([
+  {
+    deliveryKind: 'sent',
+    expectedDecision: 'skip',
+  },
+  {
+    deliveryKind: 'queued',
+    expectedDecision: 'defer',
+  },
+  {
+    deliveryKind: 'failed',
+    expectedDecision: 'plan',
+  },
+] as const)('a $deliveryKind preceding-only question drives the matching choice-point lifecycle', async ({
+  deliveryKind,
+  expectedDecision,
+}) => {
+  vi.useFakeTimers()
+  const now = new Date('2026-07-18T15:00:00.000Z')
+  vi.setSystemTime(now)
+  const vault = await mkdtemp(
+    path.join(tmpdir(), `assistant-notification-preceding-${deliveryKind}-`),
+  )
+  const question = 'Would you like me to keep looking into that?'
+  const session = createAssistantSession({
+    sessionId: `session-onboarding-preceding-${deliveryKind}`,
+  })
+  const providerResult = createProviderResult({
+    response:
+      '```json\n{"kind":"skip","privateSummary":"No useful choice point now."}\n```',
+    session,
+  })
+  const outcome: AssistantDeliveryOutcome =
+    deliveryKind === 'sent'
+      ? {
+          delivery: {
+            channel: 'telegram',
+            idempotencyKey: null,
+            messageLength: question.length,
+            providerMessageId: 'provider-preceding-question',
+            providerThreadId: null,
+            sentAt: '2026-07-18T14:16:30.000Z',
+            target: 'thread-1',
+            targetKind: 'thread',
+          },
+          intentId: 'intent-preceding-question',
+          kind: 'sent',
+          media: [],
+          session,
+        }
+      : deliveryKind === 'queued'
+        ? {
+            error: null,
+            intentId: 'intent-preceding-question',
+            kind: 'queued',
+            media: [],
+            session,
+          }
+        : {
+            error: {
+              code: 'ASSISTANT_DELIVERY_FAILED',
+              message: 'preceding question delivery failed',
+            },
+            intentId: 'intent-preceding-question',
+            kind: 'failed',
+            media: [],
+            session,
+          }
+
+  try {
+    await replaceTranscriptEntries(
+      resolveAssistantStatePaths(vault),
+      session.sessionId,
+      [
+        {
+          contentReceivedAt: '2026-07-18T14:00:00.000Z',
+          createdAt: '2026-07-18T14:00:00.000Z',
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'I may want to leave this open for now.',
+        },
+        {
+          createdAt: '2026-07-18T14:16:00.000Z',
+          kind: 'assistant',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: question,
+        },
+      ],
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Prior member turn.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: session.sessionId,
+      startedAt: '2026-07-18T14:15:30.000Z',
+      turnId: `turn-preceding-question-${deliveryKind}`,
+      vault,
+    })
+    const { finalizeAssistantTurnFromDeliveryOutcome } = await import(
+      '../src/assistant/delivery-service.ts'
+    )
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      outcome,
+      response: question,
+      turnId: `turn-preceding-question-${deliveryKind}`,
+      vault,
+    })
+
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: `turn-onboarding-after-preceding-${deliveryKind}`,
+    })
+    const notificationInput = {
+      instructions: 'Offer one low-pressure health direction choice.',
+      scheduledOccurrenceAt: now.toISOString(),
+      sessionId: session.sessionId,
+      turnPolicy: {
+        kind: 'onboarding-goal-checkin' as const,
+      },
+      vault,
+    }
+
+    if (expectedDecision === 'defer') {
+      await expect(
+        sendAssistantNotificationLocal(notificationInput),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_NOTIFICATION_PRIOR_QUESTION_DELIVERY_PENDING',
+        context: {
+          retryable: true,
+        },
+      })
+      expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+      expect(deliverMessage).not.toHaveBeenCalled()
+      return
+    }
+
+    const result = await sendAssistantNotificationLocal(notificationInput)
+    if (expectedDecision === 'skip') {
+      expect(result.decision).toEqual({
+        kind: 'skip',
+        privateSummary: 'A recent assistant question is still unanswered.',
+      })
+      expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+      expect(deliverMessage).not.toHaveBeenCalled()
+      return
+    }
+
+    expect(result.decision).toEqual({
+      kind: 'skip',
+      privateSummary: 'No useful choice point now.',
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
   } finally {
     await rm(vault, { force: true, recursive: true })
   }

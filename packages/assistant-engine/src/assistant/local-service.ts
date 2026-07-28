@@ -1815,6 +1815,10 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const noReplyPrecedingResponseIndex =
+          finalResponseText === null
+            ? precedingDeliveryOutcomes.indexOf(deliveryOutcome)
+            : -1
         const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
         const finalReplyDeliveryFields =
           finalResponseText !== null
@@ -1895,6 +1899,13 @@ export async function sendAssistantMessageLocal(
             ? 'none'
             : null
         const finalResponse = finalResponseText ?? ''
+        const receiptResponse =
+          assistantTranscriptText ??
+          (
+            noReplyPrecedingResponseIndex >= 0
+              ? precedingResponses[noReplyPrecedingResponseIndex] ?? finalResponse
+              : finalResponse
+          )
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
@@ -1903,8 +1914,10 @@ export async function sendAssistantMessageLocal(
           outcome: finalDeliveryOutcome,
           // Receipt provenance follows the exact persisted transcript
           // representation. Voice-only replies and runtime-owned capabilities
-          // intentionally make it differ from the delivered response.
-          response: assistantTranscriptText ?? finalResponse,
+          // intentionally make it differ from the delivered response. When a
+          // preceding segment is the turn's only outbound reply, its selected
+          // delivery outcome owns the matching persisted segment.
+          response: receiptResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
         })

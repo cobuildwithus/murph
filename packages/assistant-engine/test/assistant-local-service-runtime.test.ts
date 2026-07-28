@@ -490,7 +490,7 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
-        onboardingGuidanceInjected: false,
+        onboardingGuidanceInjected: true,
         codexContinuation: { kind: 'explicit-structured-history' },
         codexThreadId: 'provider-thread-media-only',
         response: '',
@@ -524,6 +524,7 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
   ).toBe('Voice-only reply.')
   expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
     expect.objectContaining({
+      firstContactGuidanceInjected: true,
       response: 'Voice-only reply.',
     }),
   )
@@ -1803,7 +1804,7 @@ test('sendAssistantMessageLocal fails blank provider output without explicit no-
   expect(mocks.persistFailedAssistantPromptAttempt).toHaveBeenCalledTimes(1)
 })
 
-test('sendAssistantMessageLocal reports preceding delivery failure when no final reply exists', async () => {
+test('sendAssistantMessageLocal fingerprints a failed preceding-only question with its failed disposition', async () => {
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-failure',
   })
@@ -1826,7 +1827,7 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
         precedingResponseSegments: [
           {
             deliveryContextOrdinal: 0,
-            response: 'Answer one.',
+            response: 'Would you like me to keep looking into that?',
             media: [],
           },
         ],
@@ -1874,12 +1875,80 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
       kind: 'failed',
       intentId: 'intent-preceding-failed',
     })
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe('Would you like me to keep looking into that?')
   expect(stopTyping).toHaveBeenCalledWith({
     providerStop: true,
   })
 })
 
-test('sendAssistantMessageLocal reports preceding queued delivery when no final reply exists', async () => {
+test('sendAssistantMessageLocal fingerprints a sent preceding-only question for no-stacking proof', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-preceding-sent',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'Would you like me to keep looking into that?',
+            media: [],
+          },
+        ],
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      delivery: {
+        channel: 'telegram',
+        idempotencyKey: null,
+        messageLength: 44,
+        providerMessageId: 'provider-preceding-sent',
+        providerThreadId: null,
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-preceding-sent',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+  ])
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'ack later message',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      outcome: expect.objectContaining({
+        kind: 'sent',
+        intentId: 'intent-preceding-sent',
+      }),
+      response: 'Would you like me to keep looking into that?',
+    }),
+  )
+})
+
+test('sendAssistantMessageLocal fingerprints a queued preceding-only question for deferred no-stacking proof', async () => {
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-queued',
   })
@@ -1902,7 +1971,7 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
         precedingResponseSegments: [
           {
             deliveryContextOrdinal: 0,
-            response: 'Answer one.',
+            response: 'Would you like me to keep looking into that?',
             media: [],
           },
         ],
@@ -1950,6 +2019,8 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
       kind: 'queued',
       intentId: 'intent-preceding-queued',
     })
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe('Would you like me to keep looking into that?')
   expect(stopTyping).toHaveBeenCalledWith({
     providerStop: false,
   })
