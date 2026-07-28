@@ -361,11 +361,17 @@ Last verified: 2026-07-27
   captured base as detached `HEAD` with that candidate staged so implicit diff
   selection remains intact without depending on a local branch. Crabbox excludes
   `.git`, so the dispatcher may add only generated base-tree/object metadata
-  after candidate admission; the remote entrypoint must move it out of the
-  worktree, reconstruct detached `HEAD`, and verify both admitted tree ids before
-  candidate-controlled install or verification starts. The local artifact lock
-  protects cooperating local producers and candidate capture only. A native
-  macOS `lockf` descriptor inherited by the remote verifier is the sole
+  after candidate admission. Before inspecting that metadata or starting any
+  candidate-controlled install or verification, the remote entrypoint must use
+  only its rebuilt non-secret environment to prove `tar` and a bounded `zstd`
+  stdin round trip with the production snapshot arguments; missing,
+  incompatible, or corrupt behavior fails closed without copying stderr or
+  ambient environment data into diagnostics. Only then may it move the metadata
+  out of the worktree, reconstruct detached `HEAD`, and verify both admitted tree
+  ids. The same entrypoint must stamp the `static-ssh` verification profile
+  internally after discarding caller profile and worker-tuning values. The local
+  artifact lock protects cooperating local producers and candidate capture only.
+  A native macOS `lockf` descriptor inherited by the remote verifier is the sole
   static-worker capacity authority; its path must resolve above Crabbox's nested
   lease/repository directories so every run contends on the same kernel lock.
   The verifier must retain it through exact child-group cleanup and delete only

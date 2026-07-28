@@ -15,6 +15,14 @@ Last verified: 2026-07-27
   writes cannot change the work in flight. Static SSH gives every invocation a
   unique remote directory. Missing, malformed, or unresolvable local host, user,
   or port routing fails before remote execution; no other executor is selected.
+  After the worker lock is acquired, native `tar` plus the production-compatible
+  `zstd` stdin round trip must pass before Git reconstruction, installation, or
+  candidate verification. The entrypoint internally selects `profile=static-ssh`;
+  that profile ignores caller scheduling overrides, cannot enter composed
+  acceptance from CPU count alone, and completes package coverage before app and
+  fixture work. Its readiness line, plus the `resources` line for
+  `verify:acceptance`, are required execution evidence rather than optional
+  diagnostics.
   Crabbox's nested static lease and repository directories still resolve to one
   native macOS `lockf` descriptor above the run root, which remains the
   worker-capacity authority. A busy worker fails closed. The remote verifier

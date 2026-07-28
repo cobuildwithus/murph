@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -49,7 +50,11 @@ describe("Crabbox verification environment", () => {
         CRABBOX_ENV_ALLOW: "CI,NODE_OPTIONS",
         CUSTOM_PROVIDER_TOKEN: "secret-custom-token",
         DATABASE_URL: "postgresql://real-secret",
+        MURPH_APP_VITEST_MAX_WORKERS: "99",
         MURPH_CRABBOX_NO_FORWARD: "must-not-reach-verification",
+        MURPH_PACKAGE_COVERAGE_CONCURRENCY: "99",
+        MURPH_VERIFY_PROFILE: "attacker-controlled",
+        MURPH_VERIFY_STEP_PARALLEL: "1",
         NODE_OPTIONS: "--trace-warnings",
         OPENAI_API_KEY: "secret-openai-key",
         STRIPE_SECRET_KEY: "secret-stripe-key",
@@ -61,6 +66,7 @@ describe("Crabbox verification environment", () => {
       HOME: "/home/crabbox",
       MURPH_CRABBOX_REMOTE: "1",
       MURPH_VERIFY_EXECUTOR: "local",
+      MURPH_VERIFY_PROFILE: "default",
       MURPH_VERIFY_SHARED_HOST: "0",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_crabbox_verify_placeholder1",
       PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -74,7 +80,11 @@ describe("Crabbox verification environment", () => {
     expect(environment).not.toHaveProperty("CI");
     expect(environment).not.toHaveProperty("CRABBOX_ENV_ALLOW");
     expect(environment).not.toHaveProperty("CUSTOM_PROVIDER_TOKEN");
+    expect(environment).not.toHaveProperty("MURPH_APP_VITEST_MAX_WORKERS");
     expect(environment).not.toHaveProperty("MURPH_CRABBOX_NO_FORWARD");
+    expect(environment).not.toHaveProperty(
+      "MURPH_PACKAGE_COVERAGE_CONCURRENCY",
+    );
     expect(environment).not.toHaveProperty("MURPH_VERIFY_STEP_PARALLEL");
     expect(environment).not.toHaveProperty("NODE_OPTIONS");
 
@@ -112,7 +122,7 @@ describe("Crabbox verification environment", () => {
         "#!/bin/sh",
         `[ -f ${shellQuote(installMarkerPath)} ] || exit 41`,
         `printf "%s\\n" "$@" > ${shellQuote(verifierArgsPath)}`,
-        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nCUSTOM_PROVIDER_TOKEN=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" > ${shellQuote(verifierEnvironmentPath)}`,
+        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nMURPH_VERIFY_PROFILE=%s\\nCUSTOM_PROVIDER_TOKEN=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${MURPH_VERIFY_PROFILE-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" > ${shellQuote(verifierEnvironmentPath)}`,
       ].join("\n"),
     );
 
@@ -155,7 +165,7 @@ describe("Crabbox verification environment", () => {
       ".crabbox.yaml",
     ]);
     expect(readFileSync(verifierEnvironmentPath, "utf8")).toBe(
-      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nCUSTOM_PROVIDER_TOKEN=unset\n",
+      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nMURPH_VERIFY_PROFILE=default\nCUSTOM_PROVIDER_TOKEN=unset\n",
     );
   });
 
@@ -171,17 +181,26 @@ describe("Crabbox verification environment", () => {
     )).toContain("supports only");
   });
 
-  it("lets the dedicated SSH account enter only the sanitized verification core", () => {
+  it("proves the static archive contract before entering the sanitized verification core", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const environmentPath = path.join(tempRoot, "environment.txt");
+    const eventLogPath = path.join(tempRoot, "events.txt");
 
-    writeExecutable(path.join(binDir, "corepack"), "#!/bin/sh\nexit 0");
+    writeStaticArchiveCapabilityTools(binDir, { eventLogPath });
+    writeExecutable(
+      path.join(binDir, "corepack"),
+      [
+        "#!/bin/sh",
+        `printf 'install\\n' >> ${shellQuote(eventLogPath)}`,
+      ].join("\n"),
+    );
     writeExecutable(
       path.join(binDir, "bash"),
       [
         "#!/bin/sh",
-        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nOPENAI_API_KEY=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${OPENAI_API_KEY-unset}" > ${shellQuote(environmentPath)}`,
+        `printf 'verify\\n' >> ${shellQuote(eventLogPath)}`,
+        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nMURPH_VERIFY_PROFILE=%s\\nMURPH_PACKAGE_COVERAGE_CONCURRENCY=%s\\nOPENAI_API_KEY=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${MURPH_VERIFY_PROFILE-unset}" "\${MURPH_PACKAGE_COVERAGE_CONCURRENCY-unset}" "\${OPENAI_API_KEY-unset}" > ${shellQuote(environmentPath)}`,
       ].join("\n"),
     );
 
@@ -193,16 +212,219 @@ describe("Crabbox verification environment", () => {
         encoding: "utf8",
         env: {
           HOME: path.join(tempRoot, "home"),
+          MURPH_PACKAGE_COVERAGE_CONCURRENCY: "99",
+          MURPH_VERIFY_PROFILE: "default",
           OPENAI_API_KEY: "must-not-reach-verification",
-          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
+          PATH: binDir,
         },
       },
     );
 
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(environmentPath, "utf8")).toBe(
-      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nOPENAI_API_KEY=unset\n",
+    expect(result.stderr).toContain(
+      "readiness=tar-zstd-round-trip profile=static-ssh",
     );
+    expect(readFileSync(eventLogPath, "utf8")).toBe(
+      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n" +
+        "zstd:-3 --no-progress -T2\n" +
+        "zstd:-d --stdout\n" +
+        "tar:-tf -\n" +
+        "install\n" +
+        "verify\n",
+    );
+    expect(readFileSync(environmentPath, "utf8")).toBe(
+      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nMURPH_VERIFY_PROFILE=static-ssh\nMURPH_PACKAGE_COVERAGE_CONCURRENCY=unset\nOPENAI_API_KEY=unset\n",
+    );
+  });
+
+  it("fails closed on an absent static tar before installation", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
+    const eventLogPath = path.join(tempRoot, "events.txt");
+
+    writeStaticArchiveCapabilityTools(binDir, {
+      eventLogPath,
+      tarMode: "absent",
+    });
+    for (const command of ["corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(childMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [sshRunnerPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "tar is unavailable on the non-interactive PATH",
+    );
+    expect(existsSync(eventLogPath)).toBe(false);
+    expect(existsSync(childMarkerPath)).toBe(false);
+  });
+
+  it("fails closed on an absent static zstd before Git inspection or installation", () => {
+    const tempRoot = makeTempRoot();
+    const { runDirectory, workspaceRoot } =
+      createStaticRunnerWorkspace(tempRoot);
+    const binDir = path.join(tempRoot, "bin");
+    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
+    const eventLogPath = path.join(tempRoot, "events.txt");
+
+    writeStaticArchiveCapabilityTools(binDir, {
+      eventLogPath,
+      zstdMode: "absent",
+    });
+    for (const command of ["corepack", "bash", "git"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(childMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(
+          workspaceRoot,
+          "scripts",
+          "crabbox",
+          "run-ssh-verification.mjs",
+        ),
+        "--cleanup-static-workspace",
+        "verify:acceptance",
+      ],
+      {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "zstd is unavailable on the non-interactive PATH",
+    );
+    expect(result.stderr).not.toContain("Git snapshot");
+    expect(readFileSync(eventLogPath, "utf8")).toBe(
+      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n",
+    );
+    expect(existsSync(childMarkerPath)).toBe(false);
+    expect(existsSync(runDirectory)).toBe(false);
+  });
+
+  it("fails closed when static zstd does not emit a zstd frame", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
+    const eventLogPath = path.join(tempRoot, "events.txt");
+
+    writeStaticArchiveCapabilityTools(binDir, {
+      eventLogPath,
+      zstdMode: "passthrough",
+    });
+    for (const command of ["corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(childMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [sshRunnerPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "zstd compression did not produce a standard zstd frame",
+    );
+    expect(readFileSync(eventLogPath, "utf8")).toBe(
+      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n" +
+        "zstd:-3 --no-progress -T2\n",
+    );
+    expect(existsSync(childMarkerPath)).toBe(false);
+  });
+
+  it("fails closed on incompatible static zstd arguments before installation", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
+    const eventLogPath = path.join(tempRoot, "events.txt");
+
+    writeStaticArchiveCapabilityTools(binDir, {
+      eventLogPath,
+      zstdMode: "incompatible",
+    });
+    for (const command of ["corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(childMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [sshRunnerPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "zstd could not compress stdin with Murph's snapshot arguments (-3 --no-progress -T2) (exit 17)",
+    );
+    expect(result.stderr).not.toContain("worker-local-detail");
+    expect(readFileSync(eventLogPath, "utf8")).toBe(
+      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n" +
+        "zstd:-3 --no-progress -T2\n",
+    );
+    expect(existsSync(childMarkerPath)).toBe(false);
   });
 
   it("cleans only an exact opaque static SSH run workspace", () => {
@@ -338,6 +560,7 @@ describe("Crabbox verification environment", () => {
         "crabbox",
       );
       const binDir = path.join(tempRoot, "bin");
+      writeStaticArchiveCapabilityTools(binDir);
       mkdirSync(workspaceScriptDir, { recursive: true });
       for (const scriptName of [
         "run-ssh-locked-verification.sh",
@@ -422,6 +645,7 @@ describe("Crabbox verification environment", () => {
     const childPidPath = path.join(tempRoot, "child-pid");
     const descendantHupPath = path.join(tempRoot, "descendant-hup");
     const descendantPidPath = path.join(tempRoot, "descendant-pid");
+    writeStaticArchiveCapabilityTools(binDir);
     writeExecutable(
       path.join(binDir, "slow-verifier-child"),
       [
@@ -536,6 +760,100 @@ describe("Crabbox verification environment", () => {
     expect(existsSync(childMarkerPath)).toBe(false);
   });
 });
+
+function createStaticRunnerWorkspace(tempRoot: string): {
+  runDirectory: string;
+  workspaceRoot: string;
+} {
+  const runDirectory = path.join(
+    tempRoot,
+    "murph-crabbox",
+    "runs",
+    "0123456789abcdef-fedcba9876543210",
+  );
+  const workspaceRoot = path.join(
+    runDirectory,
+    "static_murph_0123456789abcdef",
+    "murph",
+  );
+  const workspaceScriptDir = path.join(
+    workspaceRoot,
+    "scripts",
+    "crabbox",
+  );
+  mkdirSync(workspaceScriptDir, { recursive: true });
+  for (const scriptName of [
+    "run-ssh-verification.mjs",
+    "run-verification.mjs",
+  ]) {
+    cpSync(
+      path.join(repoRoot, "scripts", "crabbox", scriptName),
+      path.join(workspaceScriptDir, scriptName),
+    );
+  }
+  return { runDirectory, workspaceRoot: realpathSync(workspaceRoot) };
+}
+
+function writeStaticArchiveCapabilityTools(
+  binDir: string,
+  options: {
+    eventLogPath?: string;
+    tarMode?: "absent" | "success";
+    zstdMode?: "absent" | "incompatible" | "passthrough" | "success";
+  } = {},
+): void {
+  const eventLogPath = options.eventLogPath;
+  const logTar = eventLogPath
+    ? `printf 'tar:%s\\n' "$*" >> ${shellQuote(eventLogPath)}`
+    : ":";
+  const logZstd = eventLogPath
+    ? `printf 'zstd:%s\\n' "$*" >> ${shellQuote(eventLogPath)}`
+    : ":";
+
+  if (options.tarMode !== "absent") {
+    writeExecutable(
+      path.join(binDir, "tar"),
+      [
+        "#!/bin/sh",
+        logTar,
+        "case \"$*\" in",
+        "  \"--format=pax --no-recursion --null -T /dev/null -cvvf -\") printf 'murph-static-tar-probe' ;;",
+        '  "-tf -") /bin/cat >/dev/null ;;',
+        "  *) exit 91 ;;",
+        "esac",
+      ].join("\n"),
+    );
+  }
+  if (options.zstdMode === "absent") {
+    return;
+  }
+
+  const zstdBehavior = options.zstdMode === "passthrough"
+    ? [
+        "case \"$*\" in",
+        '  "-3 --no-progress -T2") /bin/cat ;;',
+        "  *) exit 92 ;;",
+        "esac",
+      ]
+    : [
+        "case \"$*\" in",
+        "  \"-3 --no-progress -T2\") printf '\\050\\265\\057\\375'; /bin/cat ;;",
+        '  "-d --stdout") /usr/bin/tail -c +5 ;;',
+        "  *) exit 92 ;;",
+        "esac",
+      ];
+  writeExecutable(
+    path.join(binDir, "zstd"),
+    [
+      "#!/bin/sh",
+      logZstd,
+      ...(options.zstdMode === "incompatible"
+        ? ["printf 'worker-local-detail\n' >&2", "exit 17"]
+        : []),
+      ...zstdBehavior,
+    ].join("\n"),
+  );
+}
 
 function makeTempRoot(): string {
   const tempRoot = mkdtempSync(path.join(os.tmpdir(), "murph-crabbox-runner-test-"));

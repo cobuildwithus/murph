@@ -1359,10 +1359,14 @@ as detached `HEAD`, verifies and logs its tree id, and performs a full sync
 from that candidate without requiring a source branch. Because Crabbox excludes
 the local `.git` directory, the dispatcher also transports a bounded generated
 object pack for the base objects absent from the candidate. The remote
-entrypoint rebuilds the detached base plus staged candidate and verifies both
-tree ids before installing dependencies. Later checkout writes cannot change
-the run, while the dirty candidate preserves implicit diff scope. A native
-macOS `lockf` descriptor inherited by the verifier is the single
+entrypoint first proves native `tar` plus the production-compatible `zstd`
+stdin compression/decompression contract, then rebuilds the detached base plus
+staged candidate and verifies both tree ids before installing dependencies.
+That entrypoint internally selects the `static-ssh` verification profile; the
+root verifier disables CPU-count-only composed admission and completes package
+coverage before app and fixture work for that profile. Later checkout writes
+cannot change the run, while the dirty candidate preserves implicit diff
+scope. A native macOS `lockf` descriptor inherited by the verifier is the single
 remote-capacity owner until its exact child groups exit. For that same finite
 lifetime, native `caffeinate` prevents idle system sleep without changing a
 persistent power setting. The verifier then removes only that run directory.

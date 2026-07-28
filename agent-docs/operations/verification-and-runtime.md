@@ -16,8 +16,10 @@ through `scripts/verification-dispatch.mjs`:
   and smaller hosts keep their conservative shared-host worker budgets.
 - `MURPH_VERIFY_EXECUTOR=local|ssh|crabbox` explicitly selects an executor.
   `ssh` uses a configured, dedicated static macOS worker through Crabbox and
-  fails closed when its validated host, user, port, or the Crabbox CLI is
-  unavailable.
+  fails closed when its validated host, user, port, Crabbox CLI, or required
+  native archive capability is unavailable. Its locked entrypoint selects the
+  `static-ssh` verification profile internally; caller environment values do
+  not select or tune that profile.
   `crabbox` requests a fresh one-shot Blacksmith Testbox and fails closed when
   either CLI is unavailable. No remote failure silently duplicates work
   locally. The `:local` package aliases exist only for executor diagnosis
@@ -73,11 +75,11 @@ Prepare the worker once:
    neutral resolvable DNS or mDNS name. Match that name in local SSH config for
    `IdentityFile` and `IdentitiesOnly yes`; disable agent forwarding.
 3. Give only that account access to `/Users/Shared/murph-crabbox`. Install
-   `git`, `rsync`, Node `>=24.14.1`, and Corepack; the repository pins pnpm
-   `10.33.0`. The native `/bin/sh` and `/usr/bin/lockf` must also be present.
-   Make `git`, `rsync`, `node`, `corepack`, and `lockf` visible in the account's
-   non-interactive SSH `PATH`; the doctor probe must see the same command
-   surface that a run will use.
+   `git`, `rsync`, `tar`, `zstd`, Node `>=24.14.1`, and Corepack; the repository
+   pins pnpm `10.33.0`. The native `/bin/sh` and `/usr/bin/lockf` must also be
+   present. Make `git`, `rsync`, `tar`, `zstd`, `node`, `corepack`, and `lockf`
+   visible in the account's non-interactive SSH `PATH`; the doctor probe and a
+   canonical run must see the same command surface.
 4. Keep the Mac reachable while it is offered as a worker, then prove
    reachability. The verifier cannot wake a Mac that is already offline. Once
    admitted, each run uses native `caffeinate` to prevent idle system sleep for
@@ -94,6 +96,14 @@ crabbox doctor \
   --static-work-root /Users/Shared/murph-crabbox/doctor \
   --doctor-probe-ssh
 ```
+
+The doctor command proves transport and its supported tool probe only. The
+canonical locked entrypoint is the readiness authority for Murph's snapshot
+path: before Git reconstruction, dependency installation, or candidate
+verification, it creates a bounded `tar` probe and requires `zstd` to preserve
+that input through stdin compression with `-3 --no-progress -T2` and stdin
+decompression with `-d --stdout`. Missing, incompatible, or corrupt behavior
+fails closed with a worker-prerequisite diagnostic.
 
 Each local worktree derives a deterministic opaque static lease id. Every
 invocation adds a fresh opaque token and syncs into its own directory below
@@ -113,16 +123,16 @@ verifies and logs the tree, invokes Crabbox from that candidate with full
 resync, and removes the local snapshot when the provider exits. Later checkout
 writes and late untracked files cannot enter the run.
 
-Crabbox deliberately excludes `.git` from rsync. After admission, the
-dispatcher therefore adds generated transport metadata containing the exact
-base tree, candidate tree, tree objects, and only base blobs absent from the
-candidate. On the worker, the locked entrypoint moves that metadata under a new
-private `.git`, reconstructs the base as detached `HEAD`, stages the transported
-candidate, proves both tree ids, and checks base connectivity before dependency
-installation. The metadata is not part of the admitted candidate tree and is
-removed after reconstruction. This preserves no-argument `test:diff` and
-Git-backed acceptance guards without a source branch or remote repository
-credential.
+Crabbox deliberately excludes `.git` from rsync. Before sync, the dispatcher
+adds generated transport metadata containing the exact base tree, candidate
+tree, tree objects, and only base blobs absent from the candidate. That metadata
+is outside the admitted candidate tree. On the worker, only after native archive
+readiness passes does the locked entrypoint move the metadata under a new private
+`.git`, reconstruct the base as detached `HEAD`, stage the transported candidate,
+prove both tree ids, and check base connectivity before dependency installation.
+The metadata is removed after reconstruction. This preserves no-argument
+`test:diff` and Git-backed acceptance guards without a source branch or remote
+repository credential.
 
 On the worker, `/Users/Shared/murph-crabbox/verification.lock` is the single
 static-worker capacity boundary. Native `lockf -t 0` acquires it on a file
@@ -139,12 +149,17 @@ only machine-level package-manager caches outside those directories.
 The three routing variables are non-secret local control inputs and are not
 forwarded as an environment allowlist. Candidate code enters through
 `scripts/crabbox/run-ssh-locked-verification.sh`; its Node verifier rebuilds
-the same synthetic test-only environment as the Blacksmith path. The dedicated
-account is the trust boundary: candidate code can execute arbitrary repository
-commands on that account, so never reuse a personal or credential-bearing
-account. Static SSH is host-managed and has no provider TTL or automatic
-machine shutdown; stop offering the Mac by disabling Remote Login or removing
-its authorized key.
+the same synthetic test-only environment as the Blacksmith path and stamps
+`MURPH_VERIFY_PROFILE=static-ssh` after discarding caller overrides. The root
+verifier treats that profile as executor-owned: CPU count cannot admit composed
+acceptance, package coverage uses the reported bounded plan, and app plus
+fixture work starts only after package coverage completes. For
+`verify:acceptance`, the startup `resources` line is the authoritative plan
+evidence. The dedicated account is
+the trust boundary: candidate code can execute arbitrary repository commands on
+that account, so never reuse a personal or credential-bearing account. Static
+SSH is host-managed and has no provider TTL or automatic machine shutdown; stop
+offering the Mac by disabling Remote Login or removing its authorized key.
 
 ### Ten-minute local admission fallback
 
@@ -458,9 +473,9 @@ the advisory budget.
 - `pnpm docs:drift`: runs the manual durable-doc drift check. Use it when a task intentionally changes `agent-docs/**`, `ARCHITECTURE.md`, or other durable repo docs and you want the old index/truthfulness guard explicitly, without making every default `pnpm test` run sensitive to unrelated dirty-tree doc work. Doc gardening intersects unindexed findings with Git's tracked-file inventory, so ignored or otherwise untracked local documents cannot block acceptance. It also excludes immutable `agent-docs/exec-plans/completed/**` snapshots from live index enforcement; active plans and durable current docs remain governed.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
 - `pnpm test:apps`: holds one parent artifact lock, prepares Health Commons output and the hosted-web Prisma client once, then executes `apps/web verify` and `apps/cloudflare verify` concurrently by default locally (serially in CI unless overridden). Both children consume the prepared inputs instead of racing their own generation and therefore realize the intended parallel app lane. Their existing internal parallelism, app-local worker caps, and acceptance skip flags remain unchanged.
-- `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. CI remains one outer process with a 50% inner cap. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
-- `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Standalone local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The capable-host acceptance composition starts Web tests, lint, and dev smoke with package coverage under bounded worker budgets. CLI completion releases the hosted-web Next build and Cloudflare's serial app tests and independently releases package coverage from its protected two-process phase into the five-process refill. The Assistant Engine coverage owner receives the repository-pinned `NODE_OPTIONS=--max-old-space-size=6144` already proven by release CI, while other package coverage commands retain their existing environment. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available, and source-artifact hygiene continues to reject private env files and generated residue.
-- `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized Crabbox bootstrap does not set an app-step policy; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. This profile applies equally to a capable local host and the 16-vCPU Blacksmith Testbox. Standalone `pnpm test:coverage`, smaller hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
+- `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. The executor-owned `static-ssh` profile instead fixes package coverage at two outer processes, admits only the CLI process until it terminates, and gives each process two Vitest workers; source environment overrides cannot change that plan. CI remains one outer process with a 50% inner cap. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides for the default profile. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
+- `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Standalone local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The capable-host acceptance composition starts Web tests, lint, and dev smoke with package coverage under bounded worker budgets. CLI completion releases the hosted-web Next build and Cloudflare's serial app tests and independently releases package coverage from its protected two-process phase into the five-process refill. The Assistant Engine coverage owner receives the repository-pinned `NODE_OPTIONS=--max-old-space-size=6144` already proven by release CI, while other package coverage commands retain their existing environment. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. The `static-ssh` profile admits CLI coverage as the sole active package process, refills to two two-worker package processes only after CLI terminates, completes package coverage before app verification and fixture smoke, then runs apps serially with a two-worker app-test budget; it ignores caller worker and overlap controls. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available to the default and CI profiles, and source-artifact hygiene continues to reject private env files and generated residue.
+- `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is different by construction: its entrypoint selects `profile=static-ssh`, composed admission stays off regardless of CPU count, and package coverage completes before app verification and fixture smoke begin. The `resources` line reports the effective profile, worker plan, and overlap controls. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
 - Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.

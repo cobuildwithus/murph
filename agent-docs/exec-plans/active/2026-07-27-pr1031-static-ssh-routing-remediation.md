@@ -43,10 +43,25 @@ Done:
   exact cleanup through that boundary.
 - Canonical local `pnpm test:diff` passed 30 repo-tool files and 448 tests after
   the wake-lifetime correction.
+- Completed the production-faithful retry through the full 8m37s canonical
+  command. Native `caffeinate` kept the worker online, exact cleanup and lock
+  release passed, and the command propagated its test exit status. The run
+  exposed one shared cause for the Cloudflare snapshot failures: `zstd` was not
+  part of static-worker readiness. It also exposed CPU-count-only composed
+  scheduling as an invalid assumption for the dedicated worker's bounded CLI
+  test budgets.
+- ReviewGPT identified both mechanisms plus duplicated mutable scheduling
+  claims in the Crabbox skill. The remediation now proves native `tar` and the
+  production-compatible `zstd` round trip before candidate inspection, selects
+  an executor-owned `static-ssh` profile, serializes package coverage before
+  app and fixture work, and keeps Crabbox's supported generic preflight list
+  unchanged.
+- Focused runner/dispatcher/workspace coverage passed 67 tests. Canonical local
+  `pnpm test:diff` passed 30 repo-tool files and 455 tests.
 
 Now:
-- Complete the production-faithful canonical acceptance command after the
-  static worker becomes reachable again.
+- Make `zstd` available in the dedicated account's non-interactive `PATH`, then
+  complete the production-faithful canonical acceptance command.
 
 Next:
 - Run preliminary specialist review, parent final review, final ReviewGPT, and PR CI.
@@ -63,4 +78,9 @@ Working set (files/ids/commands):
 - agent-docs/RELIABILITY.md
 - agent-docs/operations/verification-and-runtime.md
 - agent-docs/references/testing-ci-map.md
+- scripts/crabbox/run-ssh-verification.mjs
+- scripts/crabbox/run-verification.mjs
+- scripts/crabbox/run-verification.test.ts
+- scripts/workspace-verify.sh
+- scripts/workspace-verify.test.ts
 - PR #1031

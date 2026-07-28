@@ -9,6 +9,12 @@ const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
 ]);
+const DEFAULT_VERIFICATION_PROFILE = "default";
+export const STATIC_SSH_VERIFICATION_PROFILE = "static-ssh";
+const SUPPORTED_VERIFICATION_PROFILES = new Set([
+  DEFAULT_VERIFICATION_PROFILE,
+  STATIC_SSH_VERIFICATION_PROFILE,
+]);
 const TRUSTED_ENTRYPOINT_ENV = "MURPH_CRABBOX_TRUSTED_ENTRYPOINT";
 
 const SENSITIVE_ENVIRONMENT_NAMES = [
@@ -67,10 +73,16 @@ export function parseRemoteVerificationRequest(argv) {
   return { commandArgs, verificationCommand };
 }
 
-export function buildSanitizedVerificationEnvironment(source = process.env) {
+export function buildSanitizedVerificationEnvironment(
+  source = process.env,
+  options = {},
+) {
   const home = requireEnvironmentValue(source, "HOME");
   const executablePath = requireEnvironmentValue(source, "PATH");
   const user = source.USER?.trim() || "crabbox";
+  const verificationProfile = resolveVerificationProfile(
+    options.verificationProfile,
+  );
 
   const environment = {
     HOME: home,
@@ -83,6 +95,7 @@ export function buildSanitizedVerificationEnvironment(source = process.env) {
     TMPDIR: source.TMPDIR?.trim() || "/tmp",
     USER: user,
     ...SAFE_TEST_ENVIRONMENT,
+    MURPH_VERIFY_PROFILE: verificationProfile,
   };
 
   assertNoSensitiveEnvironment(environment);
@@ -108,13 +121,17 @@ export async function runRemoteVerification(argv, sourceEnvironment = process.en
 export async function runSanitizedVerification(
   argv,
   sourceEnvironment = process.env,
+  options = {},
 ) {
   const request = parseRemoteVerificationRequest(argv);
-  const environment = buildSanitizedVerificationEnvironment(sourceEnvironment);
+  const environment = buildSanitizedVerificationEnvironment(
+    sourceEnvironment,
+    options,
+  );
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   process.stderr.write(
-    `[crabbox-verification] command=${request.verificationCommand} env=synthetic-no-vercel-development-env\n`,
+    `[crabbox-verification] command=${request.verificationCommand} env=synthetic-no-vercel-development-env profile=${environment.MURPH_VERIFY_PROFILE}\n`,
   );
 
   const installExitCode = await runChild(
@@ -154,6 +171,18 @@ function requireEnvironmentValue(environment, name) {
     throw new Error(`Crabbox verification requires ${name}.`);
   }
   return value;
+}
+
+function resolveVerificationProfile(value) {
+  const profile = value ?? DEFAULT_VERIFICATION_PROFILE;
+  if (!SUPPORTED_VERIFICATION_PROFILES.has(profile)) {
+    throw new Error(
+      `Crabbox verification profile must be one of: ${[
+        ...SUPPORTED_VERIFICATION_PROFILES,
+      ].join(", ")}.`,
+    );
+  }
+  return profile;
 }
 
 function runChild(command, args, options) {

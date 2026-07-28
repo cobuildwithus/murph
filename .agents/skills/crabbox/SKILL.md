@@ -20,10 +20,10 @@ may be selected intentionally with `MURPH_VERIFY_EXECUTOR=ssh`; use
 `agent-docs/operations/verification-and-runtime.md`: ordinary escalation follows
 a 10-minute local admission wait, while a workflow or trusted-entrypoint change
 requires one post-landing trust-root proof without that wait. Within the local
-path, canonical acceptance intentionally selects the bounded composed profile
-on hosts with at least 12 logical CPUs; ordinary commands and smaller hosts keep
-their conservative shared-host caps. Every explicit Blacksmith check creates a
-fresh one-shot Testbox whose hydration route is pinned by the dispatcher.
+path, the root verifier owns profile selection, scheduling, and worker budgets
+and reports the selected profile in its `resources` line. Every explicit
+Blacksmith check creates a fresh one-shot Testbox whose hydration route is
+pinned by the dispatcher.
 Reusable lease IDs are rejected because the available lease metadata does not
 prove the Blacksmith organization that installed the root-owned trust
 entrypoint.
@@ -92,11 +92,16 @@ entrypoint.
   fails closed without waiting or falling back. The verifier holds that
   descriptor while it reaps its exact child process groups and uses the native
   `caffeinate` binary to prevent idle sleep for that finite lifetime only.
-  Crabbox excludes `.git`, so the locked entrypoint first reconstructs and
-  verifies the detached base plus staged candidate from bounded generated
-  transport metadata. It then removes only the validated outer run directory.
-  Static SSH never forwards an SSH agent or environment allowlist. Follow the
-  one-time host setup and doctor command in the verification guide.
+  Before candidate inspection or install, the locked entrypoint authoritatively
+  proves `tar` plus a `zstd` stdin compression/decompression round trip with the
+  production snapshot arguments. It fails closed when that capability is absent
+  or incompatible. Crabbox excludes `.git`, so only after readiness passes does
+  the entrypoint reconstruct and verify the detached base plus staged candidate
+  from bounded generated transport metadata. The entrypoint internally stamps
+  the `static-ssh` verification profile; caller environment values cannot select
+  or tune it. It then removes only the validated outer run directory. Static SSH
+  never forwards an SSH agent or environment allowlist. Follow the one-time host
+  setup and doctor command in the verification guide.
 
 ## Controls
 
@@ -133,15 +138,13 @@ claim, command invocation, timing, and one-shot cleanup. Preserve the printed
 Testbox ID, Crabbox timing summary, and linked Actions run in Blacksmith
 verification evidence. For static SSH, preserve the command, result, and timing
 without recording host, account, or local-path identifiers.
-On the standard 16-vCPU Testbox, `verify:acceptance` automatically selects the
-same bounded composed-parallel profile as a capable local host; confirm the
-printed `resources` line rather than adding provider-specific worker overrides.
-The sanitized remote bootstrap deliberately leaves `MURPH_VERIFY_STEP_PARALLEL`
-unset so the root verifier remains the sole owner of Web-parallel versus
-Cloudflare-serial composed app scheduling.
-The protected CLI phase uses four CLI workers with one two-worker package peer;
-CLI completion releases the two heavy app steps and lets package coverage refill
-to five two-worker processes. The scheduled Vitest total stays below the host's
-CPU count.
+Do not add provider-specific worker overrides. The root verifier is the sole
+authority for scheduling and worker budgets. For `verify:acceptance`, Blacksmith
+evidence must show the expected default profile in the printed `resources` line.
+Static SSH acceptance evidence is valid only when the entrypoint first reports
+successful `tar`/`zstd` readiness and the `resources` line then reports
+`profile=static-ssh`; that profile keeps app and fixture work out of the
+package-coverage phase. Treat either missing acceptance evidence line as an
+infrastructure failure rather than candidate proof.
 Audits, parent final review, plan/ledger closure, commits, pushes, and PR work
 remain local.

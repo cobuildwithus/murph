@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
@@ -13,11 +14,23 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { runSanitizedVerification } from "./run-verification.mjs";
+import {
+  buildSanitizedVerificationEnvironment,
+  runSanitizedVerification,
+  STATIC_SSH_VERIFICATION_PROFILE,
+} from "./run-verification.mjs";
 
 const CLEANUP_FLAG = "--cleanup-static-workspace";
 const CLEANUP_ONLY_FLAG = "--cleanup-static-workspace-only";
 const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
+const STATIC_ARCHIVE_PROBE_MAX_BYTES = 1024 * 1024;
+const STATIC_ARCHIVE_ZSTD_FRAME_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+const STATIC_ARCHIVE_ZSTD_COMPRESSION_ARGS = [
+  "-3",
+  "--no-progress",
+  "-T2",
+];
+const STATIC_ARCHIVE_ZSTD_DECOMPRESSION_ARGS = ["-d", "--stdout"];
 
 export function parseSshVerificationRequest(argv) {
   if (argv[0] === CLEANUP_ONLY_FLAG && argv.length === 1) {
@@ -75,6 +88,104 @@ export function cleanupStaticWorkspace(
     force: true,
     recursive: true,
   });
+}
+
+export function assertStaticWorkerArchiveCapabilities(
+  sourceEnvironment = process.env,
+) {
+  const environment = buildSanitizedVerificationEnvironment(
+    sourceEnvironment,
+    { verificationProfile: STATIC_SSH_VERIFICATION_PROFILE },
+  );
+  const tarArchive = runStaticArchiveProbeCommand({
+    args: [
+      "--format=pax",
+      "--no-recursion",
+      "--null",
+      "-T",
+      "/dev/null",
+      "-cvvf",
+      "-",
+    ],
+    command: "tar",
+    environment: { ...environment, COPYFILE_DISABLE: "1" },
+    failureDescription: "create a production-compatible probe archive",
+  });
+  if (tarArchive.byteLength === 0) {
+    throw new Error(
+      "Static SSH worker prerequisite failed: tar produced an empty probe archive.",
+    );
+  }
+
+  const compressedArchive = runStaticArchiveProbeCommand({
+    args: STATIC_ARCHIVE_ZSTD_COMPRESSION_ARGS,
+    command: "zstd",
+    environment,
+    failureDescription:
+      "compress stdin with Murph's snapshot arguments (-3 --no-progress -T2)",
+    input: tarArchive,
+  });
+  if (!compressedArchive.subarray(0, 4).equals(STATIC_ARCHIVE_ZSTD_FRAME_MAGIC)) {
+    throw new Error(
+      "Static SSH worker prerequisite failed: zstd compression did not produce a standard zstd frame.",
+    );
+  }
+  const restoredArchive = runStaticArchiveProbeCommand({
+    args: STATIC_ARCHIVE_ZSTD_DECOMPRESSION_ARGS,
+    command: "zstd",
+    environment,
+    failureDescription:
+      "decompress stdin with Murph's snapshot arguments (-d --stdout)",
+    input: compressedArchive,
+  });
+  if (!restoredArchive.equals(tarArchive)) {
+    throw new Error(
+      "Static SSH worker prerequisite failed: zstd did not preserve the probe archive through compression and decompression.",
+    );
+  }
+  runStaticArchiveProbeCommand({
+    args: ["-tf", "-"],
+    command: "tar",
+    environment,
+    failureDescription: "read the restored probe archive",
+    input: restoredArchive,
+  });
+
+  process.stderr.write(
+    `[ssh-verification] readiness=tar-zstd-round-trip profile=${STATIC_SSH_VERIFICATION_PROFILE}\n`,
+  );
+}
+
+function runStaticArchiveProbeCommand({
+  args,
+  command,
+  environment,
+  failureDescription,
+  input,
+}) {
+  const result = spawnSync(command, args, {
+    encoding: null,
+    env: environment,
+    input,
+    maxBuffer: STATIC_ARCHIVE_PROBE_MAX_BYTES,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (result.error && result.error.code === "ENOENT") {
+    throw new Error(
+      `Static SSH worker prerequisite failed: ${command} is unavailable on the non-interactive PATH.`,
+    );
+  }
+  if (result.error) {
+    throw new Error(
+      `Static SSH worker prerequisite failed: ${command} could not start to ${failureDescription}.`,
+    );
+  }
+  if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+    throw new Error(
+      `Static SSH worker prerequisite failed: ${command} could not ${failureDescription} (exit ${result.status ?? "unknown"}).`,
+    );
+  }
+  return result.stdout;
 }
 
 export function restoreStaticGitSnapshot({ workspaceRoot }) {
@@ -274,11 +385,14 @@ if (isDirectEntrypoint()) {
     );
     try {
       if (!request.cleanupOnly) {
+        assertStaticWorkerArchiveCapabilities(process.env);
         if (request.cleanupWorkspace) {
           restoreStaticGitSnapshot({ workspaceRoot });
         }
         process.exitCode = await runSanitizedVerification(
           request.verificationArgs,
+          process.env,
+          { verificationProfile: STATIC_SSH_VERIFICATION_PROFILE },
         );
       }
     } finally {
