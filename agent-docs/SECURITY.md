@@ -124,13 +124,14 @@ Last verified: 2026-07-26
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
   creative notification prompt profile supplies only the task and bounded
-  committed group history in an isolated thread, then projects only
-  `generate_song` from the ordinary provider-turn tools and uses the ordinary
-  delivery path. Its prompt asks for one short original song through exactly
-  one `generate_song` call,
-  and forbids commands, network use, separate contact,
-  scheduling, state mutation, or disclosure of private health, account,
-  payment, or routing details. Running bits may reach only fresh
+  committed group history in an isolated thread, projects only
+  `generate_song`, and applies the output-only native-capability deny set:
+  approval never, read-only sandbox, and no shell, browser, apps, plugins,
+  delegated agents, web search, provider/public fetch, artifact
+  materialization, generated-image upload, or progress delivery. Its prompt
+  asks for one short original song through exactly one `generate_song` call
+  and forbids separate contact, scheduling, state mutation, or disclosure of
+  private health, account, payment, or routing details. Running bits may reach only fresh
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.

@@ -7,6 +7,7 @@ import {
   hasHostedGroupSponsorshipCustomizationAuthority,
   parseHostedGroupSponsorshipDraft,
   readHostedActiveGroupRunningBit,
+  readHostedGroupSponsorshipDraftForCreator,
   readHostedGroupSponsorshipMomentForNotification,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
 import {
@@ -109,6 +110,11 @@ describe("hosted group sponsorship store", () => {
       celebrationScale: "medium",
       ...draft,
     });
+    await expect(readHostedGroupSponsorshipDraftForCreator({
+      creatorMemberId: "member_sponsor",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_123",
+    })).resolves.toEqual(draft);
     await expect(readHostedActiveGroupRunningBit({
       now: new Date("2026-07-27T13:00:00.000Z"),
       prisma: harness.prisma as never,

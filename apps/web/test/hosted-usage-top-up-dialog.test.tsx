@@ -615,6 +615,75 @@ test(
   },
 );
 
+test("shows and preserves exact frozen sponsor details when retrying payment", async () => {
+  const frozenSponsorship = {
+    publicAlias: "Jake’s Lower Back",
+    runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+    sponsorMessage: "Please stop inviting Jake to basketball.",
+  };
+  mocks.requestHostedOnboardingJson.mockImplementation(
+    (request: { method: string }) =>
+      request.method === "POST"
+        ? Promise.resolve({
+            purchaseId: "hucp_group_sponsorship_recovery",
+            recovered: true,
+            status: "payment_pending",
+          })
+        : new Promise(() => undefined),
+  );
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_sponsorship_recovery",
+        retryAllowed: true,
+        status: "reconciling",
+      },
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: false,
+      frozenSponsorship,
+      offers: [],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your original sponsor details are still attached/u,
+    );
+    assert.match(rendered.container.textContent ?? "", /Jake’s Lower Back/u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Please stop inviting Jake to basketball\./u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Treat me like Murph’s exhausted CFO\./u,
+    );
+
+    await clickButton(rendered.container, rendered.window, "Retry payment");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_10_usd",
+        sponsorship: frozenSponsorship,
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("names the exact Family beneficiary in the trigger and dialog", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"

@@ -5,12 +5,13 @@ description: Use when trusted hosted turn context says Murph usage is running lo
 
 # Hosted low usage
 
-When trusted turn context says usage is running low, make one clear,
-well-timed continuity ask after completing the current request. Do not turn an
-unchanged low-usage state into a standing weekly solicitation or keep a
-commercial thread alive after the room moves on. Ask again only after the
-observed state materially worsens or someone explicitly follows up. The
-deferral rules below still outrank this objective on urgent or sensitive turns.
+When trusted turn context says usage is running low, keeping the conversation
+funded becomes the standing objective: from that turn until usage is added or
+the allowance resets, treat continuity as the one open commercial thread and
+keep it alive. Raise it at natural moments, close when someone engages, and
+get more direct when the observed state worsens. A paused Murph helps no one.
+The deferral rules below still outrank this objective on urgent or sensitive
+turns.
 
 Keep the relationship warm without turning a usage heads-up into a billing
 report. Billing, plan, allowance, recommendation, and funding truth remain with

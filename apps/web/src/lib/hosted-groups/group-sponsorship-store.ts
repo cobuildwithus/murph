@@ -293,6 +293,30 @@ export async function readHostedGroupSponsorshipMomentForNotification(input: {
   };
 }
 
+export async function readHostedGroupSponsorshipDraftForCreator(input: {
+  creatorMemberId: string;
+  prisma: SponsorshipPrisma;
+  purchaseId: string;
+}): Promise<HostedGroupSponsorshipDraft | null> {
+  const row = await input.prisma.hostedGroupSponsorshipMoment.findFirst({
+    where: {
+      creatorMemberId: input.creatorMemberId,
+      purchaseId: input.purchaseId,
+    },
+  });
+  if (!row) {
+    return null;
+  }
+  return await openSponsorshipDraft({
+    creatorMemberId: row.creatorMemberId,
+    prisma: input.prisma,
+    publicAliasEncrypted: row.publicAliasEncrypted,
+    purchaseId: row.purchaseId,
+    runningBitRequestEncrypted: row.runningBitRequestEncrypted,
+    sponsorMessageEncrypted: row.sponsorMessageEncrypted,
+  });
+}
+
 export async function readHostedActiveGroupRunningBit(input: {
   now: Date;
   prisma: SponsorshipPrisma;

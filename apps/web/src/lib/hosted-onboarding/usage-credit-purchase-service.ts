@@ -133,7 +133,6 @@ export interface HostedGroupSponsorshipCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedGroupSponsorshipOfferCode;
   sponsorship: HostedGroupSponsorshipDraft | null;
-  sponsorshipProvided: boolean;
 }
 
 type HostedUsageCreditCheckoutTarget =
@@ -233,7 +232,6 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
     clientRequestKey: base.clientRequestKey,
     offerCode,
     sponsorship: parseHostedGroupSponsorshipDraft(value.sponsorship),
-    sponsorshipProvided: keys.includes("sponsorship"),
   };
 }
 
@@ -265,7 +263,6 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   payerMemberId: string;
   prisma?: PrismaClient;
   sponsorship?: HostedGroupSponsorshipDraft | null;
-  sponsorshipProvided?: boolean;
 }): Promise<HostedUsageCreditCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
   const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
@@ -283,7 +280,6 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
     groupSponsorship: input.sponsorship ?? null,
-    groupSponsorshipProvided: input.sponsorshipProvided ?? false,
     groupStripeCustomerId: stripeCustomerId,
     now: input.now,
     offerCode: input.offerCode,
@@ -322,7 +318,6 @@ export async function createHostedFamilyMemberUsageCreditCheckout(input: {
 async function createHostedUsageCreditCheckoutForTarget(input: {
   clientRequestKey: string;
   groupSponsorship?: HostedGroupSponsorshipDraft | null;
-  groupSponsorshipProvided?: boolean;
   groupStripeCustomerId?: string;
   now?: Date;
   offerCode: HostedUsageCreditOfferCode;
@@ -358,10 +353,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: racedExisting,
         target: input.target,
       });
-      if (
-        input.target.kind === "group" &&
-        input.groupSponsorshipProvided
-      ) {
+      if (input.target.kind === "group") {
         await assertHostedGroupSponsorshipRequestMatchesTx({
           draft: input.groupSponsorship ?? null,
           purchaseId: racedExisting.id,
@@ -432,6 +424,13 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: existingActive,
         target,
       })) {
+        if (target.kind === "group") {
+          await assertHostedGroupSponsorshipRequestMatchesTx({
+            draft: input.groupSponsorship ?? null,
+            purchaseId: existingActive.id,
+            tx,
+          });
+        }
         if (
           target.kind === "group" &&
           existingActive.offerCode !== input.offerCode

@@ -38,7 +38,6 @@ export const POST = withJsonError(async (
     payerMemberId: auth.member.id,
     prisma: getPrisma(),
     sponsorship: checkoutRequest.sponsorship,
-    sponsorshipProvided: checkoutRequest.sponsorshipProvided,
   });
 
   return jsonOk(checkout);

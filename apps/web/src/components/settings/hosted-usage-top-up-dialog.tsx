@@ -251,6 +251,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 {statusContent.message}
               </p>
             </div>
+            {props.renderPurchaseDetails}
             <FieldError>{purchase.checkoutError}</FieldError>
             <div className="flex flex-col gap-2">
               {canResume ? (

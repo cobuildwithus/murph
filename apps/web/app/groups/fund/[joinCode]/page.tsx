@@ -23,6 +23,7 @@ import {
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
   hasHostedGroupSponsorshipCustomizationAuthority,
+  readHostedGroupSponsorshipDraftForCreator,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
 import {
   getHostedGroupSponsorshipExperiencePolicy,
@@ -134,6 +135,14 @@ export default async function GroupFundingPage({
     activePurchase?.target.kind === "group" &&
     activePurchase.target.beneficiaryMemberId === target.runtimeMemberId &&
     activePurchase.target.groupJoinCode === target.joinCode;
+  const frozenSponsorship =
+    member && activePurchaseMatchesTarget && activePurchase
+      ? await readHostedGroupSponsorshipDraftForCreator({
+          creatorMemberId: member.id,
+          prisma,
+          purchaseId: activePurchase.purchaseId,
+        }).catch(() => null)
+      : undefined;
   const visibleActivePurchase = activePurchase
     ? activePurchaseMatchesTarget
       ? activePurchase
@@ -165,6 +174,7 @@ export default async function GroupFundingPage({
                 activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 customizationAllowed={customizationAllowed}
+                frozenSponsorship={frozenSponsorship}
                 offers={offers}
                 purchaseReturn={purchaseReturn}
               />

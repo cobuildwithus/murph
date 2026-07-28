@@ -2627,7 +2627,7 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("keeps failed creative notifications on the normal required-notification retry path", async () => {
+  it("settles a failed creative notification without regenerating its media", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_creative_failure",
       memberId: "member_group_runtime",
@@ -2661,7 +2661,10 @@ describe("executeHostedMailboxEvent", () => {
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
-    })).rejects.toThrow("creative notification delivery failed");
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         notificationPromptProfile: "creative-response",

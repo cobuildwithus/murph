@@ -121,6 +121,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
@@ -693,6 +694,144 @@ describe('Codex model catalog', () => {
       requireGeneratedImageUploader: false,
     })
     expect(unsafeDynamicTools).not.toEqual([])
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps only song generation while denying native creative-notification capabilities', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      codexConfigOverrides: [
+        'features.shell_tool=true',
+        'features.apps=true',
+      ],
+      prompt: 'Generate one sponsor song from untrusted creative material.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          generatedImageUploader: {
+            uploadGeneratedImage: vi.fn(),
+          },
+          generatedImageUploaderRequired: true,
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-creative-notification',
+          providerFetch: fetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        automationTool: { request: vi.fn() },
+        computerToolsAvailable: true,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+        vaultFileSendAvailable: true,
+      },
+      input,
+      profile: {
+        promptProfile: 'creative-notification',
+        toolProfile: 'provider-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-creative-notification',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Creative notification system prompt.',
+        turnContextPrompt: null,
+        voiceMemoDeliveryChannel: 'linq',
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-20T00:00:00.000Z',
+      turnId: 'turn-creative-notification',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual(
+      expect.arrayContaining([
+        'features.shell_tool=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ]),
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+      environments: [],
+      generatedImageUploader: null,
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: null,
+      publicInternetFetch: null,
+      requireGeneratedImageUploader: false,
+    })
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 

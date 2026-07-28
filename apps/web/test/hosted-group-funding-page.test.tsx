@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, `top-up:${String(props.scope)}`)
   ),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
+  readHostedGroupSponsorshipDraftForCreator: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedUsageCreditPurchaseStatus: vi.fn(),
@@ -62,6 +63,8 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
   hasHostedGroupSponsorshipCustomizationAuthority:
     mocks.hasHostedGroupSponsorshipCustomizationAuthority,
+  readHostedGroupSponsorshipDraftForCreator:
+    mocks.readHostedGroupSponsorshipDraftForCreator,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -108,6 +111,7 @@ describe("hosted group funding page", () => {
       periodEnd: "2026-08-01T00:00:00.000Z",
     });
     mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
+    mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValue(null);
     mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
       purchaseId: PURCHASE_ID,
       status: "fulfilled",
@@ -185,6 +189,49 @@ describe("hosted group funding page", () => {
           url: undefined,
         }),
         offers: [],
+        scope: "group",
+      }),
+      undefined,
+    );
+  });
+
+  it("restores the payer's exact frozen sponsor details with a matching active purchase", async () => {
+    const frozenSponsorship = {
+      publicAlias: "Jake’s Lower Back",
+      runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+      sponsorMessage: "Please stop inviting Jake to basketball.",
+    };
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
+      offerCode: "usage_10_usd",
+      purchaseId: "hucp_groupactive12",
+      retryAllowed: true,
+      status: "reconciling",
+      target: {
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      },
+    });
+    mocks.readHostedGroupSponsorshipDraftForCreator.mockResolvedValueOnce(
+      frozenSponsorship,
+    );
+
+    renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    expect(mocks.readHostedGroupSponsorshipDraftForCreator).toHaveBeenCalledWith({
+      creatorMemberId: "member_payer",
+      prisma: { label: "test-prisma" },
+      purchaseId: "hucp_groupactive12",
+    });
+    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: expect.objectContaining({
+          purchaseId: "hucp_groupactive12",
+        }),
+        offers: [],
+        renderPurchaseDetails: expect.anything(),
         scope: "group",
       }),
       undefined,

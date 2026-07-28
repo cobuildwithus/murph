@@ -178,10 +178,11 @@ Last verified: 2026-07-27
   Failure to activate or queue the moment keeps the Stripe receipt retryable
   but cannot roll back or duplicate the grant. An existing mailbox item is
   re-signaled rather than regenerated. The creative turn adds no reservation,
-  attempt counter, or media-specific retry state: provider and delivery failures
-  follow the ordinary required-notification retry and delivery-deduplication
-  path, while the prompt tells the model to make one short original song with
-  one `generate_song` call. Running bits need no timer or cleanup job: Web reads
+  attempt counter, or media-specific retry state: the prompt tells the model to
+  make one short original song with one `generate_song` call, and a provider
+  failure terminally skips this optional effect instead of regenerating it.
+  Once a delivery intent commits, the ordinary outbox owns retry and
+  deduplication. Running bits need no timer or cleanup job: Web reads
   only fulfilled rows whose `expiresAt` is still in the future, and the
   Assistant rechecks expiry before prompt construction.
 - Matching usage-credit refund or dispute events must never fall through to the

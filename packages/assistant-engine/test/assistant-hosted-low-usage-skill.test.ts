@@ -156,7 +156,7 @@ describe('assistant hosted low-usage skill', () => {
       'never reveal who paid, amounts, or',
     )
     expect(skill).toContain('never claim messages were sponsored when they were not')
-    expect(skill).toContain('standing weekly solicitation')
+    expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })
 

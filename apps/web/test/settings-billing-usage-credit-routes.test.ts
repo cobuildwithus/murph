@@ -178,7 +178,6 @@ describe("usage-credit checkout route", () => {
         runningBitRequest: "Treat me like Murph’s exhausted CFO.",
         sponsorMessage: "Please stop inviting Jake to basketball.",
       },
-      sponsorshipProvided: true,
     });
   });
 

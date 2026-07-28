@@ -107,6 +107,11 @@ submits only an offer code, request key, and bounded optional sponsorship
 draft; Web resolves payer, beneficiary, amount, grant, and sponsorship policy.
 Pressing **Sponsor ~100 messages · $5** authorizes exactly one charge for the
 selected fixed amount.
+If a payment is recovered, Web restores the authenticated payer's exact
+encrypted sponsor draft, shows that it is still attached, and resubmits it
+unchanged. Every active-purchase recovery compares the normalized draft,
+including omission, with the frozen digest before another Stripe operation.
+Canceling the active payment is the only way to replace that draft.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
 the card and saves it for a later group contribution.
@@ -139,14 +144,16 @@ fulfilled group purchase, Web idempotently:
 3. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-The creative turn is isolated, projects only `generate_song` from the ordinary
-provider-turn tools, and uses the ordinary delivery path. Its prompt tells the
-model to call that tool exactly once for one 5–15-second original sponsor song.
+The creative turn is isolated, projects only `generate_song`, applies the
+output-only native-capability deny set, and uses the ordinary delivery path.
+Its prompt tells the model to call that tool exactly once for one
+5–15-second original sponsor song.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
-song gentle and non-comedic. Notification failures follow
-the ordinary required-notification retry and delivery-deduplication path; there
-is no reservation, attempt counter, post-hoc media-attempt accounting, or
-media-specific retry state. The reconciler wakes newly paid usage work before
+song gentle and non-comedic. A creative provider failure terminally settles
+this optional notification instead of asking the model to make another song.
+Once a delivery intent commits, the ordinary outbox retains its retry and
+deduplication behavior. There is no reservation, attempt counter, post-hoc
+media-attempt accounting, or media-specific retry state. The reconciler wakes newly paid usage work before
 attempting this optional social effect, and notification failure never rolls
 back an already committed credit grant.
 

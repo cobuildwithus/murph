@@ -28,7 +28,14 @@ type GroupSponsorshipDialogProps = Omit<
   "buildCheckoutPayload" | "offers" | "renderSelectionDetails" | "scope"
 > & {
   customizationAllowed: boolean;
+  frozenSponsorship?: FrozenGroupSponsorship | null;
   offers: readonly GroupSponsorshipOffer[];
+};
+
+type FrozenGroupSponsorship = {
+  publicAlias: string | null;
+  runningBitRequest: string | null;
+  sponsorMessage: string | null;
 };
 
 type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
@@ -37,20 +44,36 @@ type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
 
 function GroupSponsorshipDialog({
   customizationAllowed,
+  frozenSponsorship,
   offers,
   ...props
 }: GroupSponsorshipDialogProps) {
-  const [publicAlias, setPublicAlias] = useState("");
-  const [runningBitRequest, setRunningBitRequest] = useState("");
-  const [sponsorMessage, setSponsorMessage] = useState("");
+  const [publicAlias, setPublicAlias] = useState(
+    frozenSponsorship?.publicAlias ?? "",
+  );
+  const [runningBitRequest, setRunningBitRequest] = useState(
+    frozenSponsorship?.runningBitRequest ?? "",
+  );
+  const [sponsorMessage, setSponsorMessage] = useState(
+    frozenSponsorship?.sponsorMessage ?? "",
+  );
+  const recoveringFrozenPurchase =
+    props.activePurchase != null && frozenSponsorship !== undefined;
 
   return (
     <HostedUsageTopUpDialog
       {...props}
       scope="group"
       offers={offers}
-      buildCheckoutPayload={({ clientRequestKey, offerCode }) =>
-        customizationAllowed
+      buildCheckoutPayload={({ clientRequestKey, offerCode }) => {
+        if (recoveringFrozenPurchase) {
+          return {
+            clientRequestKey,
+            offerCode,
+            sponsorship: frozenSponsorship ?? {},
+          };
+        }
+        return customizationAllowed
           ? {
               clientRequestKey,
               offerCode,
@@ -62,7 +85,12 @@ function GroupSponsorshipDialog({
                   : { runningBitRequest }),
               },
             }
-          : { clientRequestKey, offerCode }
+          : { clientRequestKey, offerCode };
+      }}
+      renderPurchaseDetails={
+        recoveringFrozenPurchase && frozenSponsorship
+          ? <FrozenSponsorshipDetails sponsorship={frozenSponsorship} />
+          : null
       }
       renderSelectionDetails={({ disabled, selectedOffer }) => {
         const selectedSponsorshipOffer = offers.find(
@@ -145,5 +173,46 @@ function GroupSponsorshipDialog({
   );
 }
 
+function FrozenSponsorshipDetails({
+  sponsorship,
+}: {
+  sponsorship: FrozenGroupSponsorship;
+}) {
+  const details = [
+    ["Sponsor name", sponsorship.publicAlias],
+    ["Note", sponsorship.sponsorMessage],
+    ["Running bit", sponsorship.runningBitRequest],
+  ].filter((entry): entry is [string, string] => entry[1] !== null);
+  if (details.length === 0) {
+    return null;
+  }
+  return (
+    <div className="rounded-2xl border border-border bg-muted/30 p-5">
+      <p className="text-sm font-medium text-foreground">
+        Your original sponsor details are still attached
+      </p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        Cancel this payment before changing them.
+      </p>
+      <dl className="mt-3 space-y-2">
+        {details.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {label}
+            </dt>
+            <dd className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 export { GroupSponsorshipDialog };
-export type { GroupSponsorshipDialogProps, GroupSponsorshipOffer };
+export type {
+  FrozenGroupSponsorship,
+  GroupSponsorshipDialogProps,
+  GroupSponsorshipOffer,
+};

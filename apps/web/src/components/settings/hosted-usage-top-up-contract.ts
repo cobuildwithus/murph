@@ -49,6 +49,7 @@ interface HostedUsageTopUpDialogProps {
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
     selectedOffer: HostedUsageTopUpOffer | null;

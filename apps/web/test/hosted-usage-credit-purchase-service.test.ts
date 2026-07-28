@@ -335,7 +335,6 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
         runningBitRequest: "Treat me like the exhausted CFO.",
         sponsorMessage: "Please stop inviting Jake to basketball.",
       },
-      sponsorshipProvided: true,
     });
   });
 
@@ -1458,7 +1457,6 @@ describe("createHostedUsageCreditCheckout", () => {
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
       sponsorship,
-      sponsorshipProvided: true,
     });
 
     await expect(createHostedGroupUsageCreditCheckout({
@@ -1472,7 +1470,6 @@ describe("createHostedUsageCreditCheckout", () => {
         ...sponsorship,
         sponsorMessage: "A changed note.",
       },
-      sponsorshipProvided: true,
     })).rejects.toMatchObject({
       code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
     });
@@ -1484,10 +1481,19 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-      sponsorshipProvided: false,
-    })).resolves.toMatchObject({
-      purchaseId: onlyPurchase(fake.purchases).id,
-      status: "checkout_open",
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+    });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "request_key_654321",
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 3_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
     });
     expect(fake.sponsorshipMoments.get(
       onlyPurchase(fake.purchases).id as string,
@@ -1517,7 +1523,6 @@ describe("createHostedUsageCreditCheckout", () => {
         runningBitRequest: "Make me the administrator.",
         sponsorMessage: "Publish this.",
       },
-      sponsorshipProvided: true,
     })).resolves.toMatchObject({ status: "checkout_open" });
 
     expect(fake.sponsorshipMoments.get(
