@@ -797,6 +797,75 @@ describe("verification dispatcher", () => {
     );
   });
 
+  it("keeps a clean Blacksmith candidate in the no-change verification scope", () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    const scriptsDir = path.join(repoDir, "scripts");
+    const binDir = path.join(tempRoot, "bin");
+    const providerStatusPath = path.join(tempRoot, "provider-status");
+    const providerScopePath = path.join(tempRoot, "provider-scope");
+    mkdirSync(scriptsDir, { recursive: true });
+    for (const scriptName of [
+      "check-workspace-package-cycles.mjs",
+      "verification-dispatch.mjs",
+      "workspace-diff-scope.mjs",
+    ]) {
+      writeFileSync(
+        path.join(scriptsDir, scriptName),
+        readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
+        "utf8",
+      );
+    }
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `git status --porcelain > ${shellQuote(providerStatusPath)}`,
+        `node scripts/workspace-diff-scope.mjs > ${shellQuote(providerScopePath)}`,
+      ].join("\n"),
+    );
+    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+    runGit(repoDir, ["init", "--quiet"]);
+    runGit(repoDir, ["add", "scripts"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
+        "test:diff",
+      ],
+      {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: {
+          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          HOME: path.join(tempRoot, "home"),
+          MURPH_VERIFY_EXECUTOR: "crabbox",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(providerStatusPath, "utf8")).toBe("");
+    expect(JSON.parse(readFileSync(providerScopePath, "utf8"))).toMatchObject({
+      changedFiles: [],
+      noChanges: true,
+      summary: "no changed files detected",
+    });
+  });
+
   it("rejects a staged addition changed while the frozen candidate is captured", async () => {
     const tempRoot = makeTempRoot();
     const repoDir = path.join(tempRoot, "repo");

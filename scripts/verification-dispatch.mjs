@@ -286,7 +286,11 @@ export async function runVerification(argv, env = process.env) {
     return await runChild(invocation, childEnvironment);
   }
 
-  const candidate = createRemoteCandidateSnapshot(repoRoot, childEnvironment);
+  const candidate = createRemoteCandidateSnapshot(
+    repoRoot,
+    childEnvironment,
+    { includeStaticGitMetadata: resolution.executor === "ssh" },
+  );
   process.stderr.write(
     `[verification-dispatch] candidate-tree=${candidate.tree}\n`,
   );
@@ -325,6 +329,7 @@ export function findSensitiveRemoteSyncPaths(paths) {
 export function createRemoteCandidateSnapshot(
   repoRoot,
   environment = process.env,
+  { includeStaticGitMetadata = false } = {},
 ) {
   const snapshotRoot = mkdtempSync(
     path.join(os.tmpdir(), "murph-remote-candidate-"),
@@ -489,10 +494,12 @@ export function createRemoteCandidateSnapshot(
       { cwd: snapshotRoot, env: environment },
       "bind the remote verification candidate to its public origin",
     );
-    writeStaticGitSnapshotMetadata(
-      { baseTree, candidateTree, snapshotRoot },
-      environment,
-    );
+    if (includeStaticGitMetadata) {
+      writeStaticGitSnapshotMetadata(
+        { baseTree, candidateTree, snapshotRoot },
+        environment,
+      );
+    }
 
     let disposed = false;
     return {
