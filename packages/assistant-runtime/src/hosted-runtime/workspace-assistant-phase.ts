@@ -2122,6 +2122,10 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
+        postDeliveryReconciliationWake:
+          assistantCronWakeAfterPass?.available === true
+            ? assistantCronWakeAfterPass.wake
+            : null,
         providerCleanupPlan,
         redactedStatus: null,
         shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
@@ -2292,6 +2296,10 @@ export async function runHostedWorkspaceAssistantPhase(
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 canConsumeWorkspaceAssistantWake: true,
                 input,
+                postDeliveryReconciliationWake:
+                  assistantCronWakeAfterPass?.available === true
+                    ? assistantCronWakeAfterPass.wake
+                    : null,
                 providerCleanupPlan,
                 redactedStatus: null,
                 shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
