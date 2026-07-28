@@ -887,7 +887,7 @@ rm -rf -- "$ready_dir"
     expect(result.stdout).toBe("ready\n");
   });
 
-  it("keeps app tests blocked through CLI completion and releases them on success or failure", () => {
+  it("releases apps and expands package fanout after CLI success or failure", () => {
     const markCliCoverageComplete = extractWorkspaceVerifyFunction(
       "mark_acceptance_cli_coverage_complete",
     );

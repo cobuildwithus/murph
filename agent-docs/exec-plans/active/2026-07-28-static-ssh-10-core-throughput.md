@@ -78,6 +78,11 @@ Updated: 2026-07-28
   package lanes, a three-worker CLI with one package peer during its protected
   phase, and one-worker app pools; smaller or memory-unobservable workers keep
   the prior serial fallback.
+- Accept the preliminary ReviewGPT coverage finding. Its returned test-only
+  patch was inspected but not applied because the parent implementation proves
+  the same protected/refill transition plus the fourth-peer release and uses a
+  contention-tolerant harness timeout; the canonical diff lane passes with that
+  correction.
 
 ## Verification
 
