@@ -72,7 +72,6 @@ const mocks = vi.hoisted(() => ({
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
     pulseTrialBillingContinuationPending?: boolean;
-    usageCreditBalanceUsdMicros?: string | null;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
     usageTopUpOffers?: readonly unknown[];
@@ -112,7 +111,6 @@ const mocks = vi.hoisted(() => ({
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
-  readHostedUsageCreditProjection: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
     serverApprovedPrivyLinkedAccounts?: unknown;
@@ -149,10 +147,6 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
-}));
-
-vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
-  readHostedUsageCreditProjection: mocks.readHostedUsageCreditProjection,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
@@ -294,10 +288,6 @@ beforeEach(() => {
     recommendedAction: null,
     status: "unavailable",
   });
-  mocks.readHostedUsageCreditProjection.mockResolvedValue({
-    balanceUsdMicros: 0n,
-    ledgerVersion: 0n,
-  });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
 });
@@ -383,7 +373,6 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
-  expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
@@ -642,10 +631,6 @@ test("SettingsPage reads the app session and persisted account settings into the
     usedPercent: 32,
   } as const;
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(usageStatus);
-  mocks.readHostedUsageCreditProjection.mockResolvedValue({
-    balanceUsdMicros: 8_429_999n,
-    ledgerVersion: 4n,
-  });
 
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
@@ -689,7 +674,6 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentBillingPhase: "paid",
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: "8429999",
       usageStatus,
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
@@ -741,10 +725,6 @@ test("SettingsPage reads the app session and persisted account settings into the
         kind: "personal",
       }],
       payerMemberId: "member_123",
-      prisma: mocks.prisma,
-    });
-    expect(mocks.readHostedUsageCreditProjection).toHaveBeenCalledWith({
-      beneficiaryMemberId: "member_123",
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
@@ -1618,12 +1598,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       status: "unavailable",
     }),
   );
-  mocks.readHostedUsageCreditProjection.mockImplementation(
-    trackDatabaseRead("usageCreditProjection", {
-      balanceUsdMicros: 0n,
-      ledgerVersion: 0n,
-    }),
-  );
   mocks.readHostedPersonalUsageCreditOfferCodes.mockImplementation(
     trackDatabaseRead("usageTopUpOfferCodes", []),
   );
@@ -1652,7 +1626,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       "familyOwner",
       "familyAccess",
       "usageStatus",
-      "usageCreditProjection",
       "usageTopUpOfferCodes",
       "usageTopUpActivePurchase",
     ]);
@@ -1739,7 +1712,6 @@ test("SettingsPage renders fallback values without reading settings data when th
     expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
     expect(mocks.readHostedFamilyAccessForMember).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
-    expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).not.toHaveBeenCalled();
     expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
@@ -1747,7 +1719,6 @@ test("SettingsPage renders fallback values without reading settings data when th
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         authenticated: true,
-        usageCreditBalanceUsdMicros: null,
         usageStatus: null,
         usageTopUpActivePurchase: null,
         usageTopUpOffers: [],

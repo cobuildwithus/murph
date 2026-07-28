@@ -42,7 +42,7 @@ describe('assistant dynamic context prompt blocks', () => {
         'complete the user\'s current request first',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'before answering an explicit hosted plan, included-usage, billing, Family-member usage, or group-funding request',
+        'before answering an explicit hosted plan, AI-usage, billing, Family-member usage, or group-funding request',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
         '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',

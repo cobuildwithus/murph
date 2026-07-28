@@ -1,16 +1,16 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 Status: Implemented current-state contract
 
 ## Goal
 
-Give a member one honest view of their current included AI usage, block new
-usage-bearing work when included and purchased capacity are both exhausted,
+Give a member one honest view of all currently available AI usage, block new
+usage-bearing work when included allowance and usage credit are both exhausted,
 and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
 the same web-owned projection. Stripe and the existing web billing services
-remain the payment system; Murph owns allowance and purchased usage capacity.
+remain the payment system; Murph owns allowance and usage-credit capacity.
 The personal, Family-member, and group top-up implementation contract lives in
 `agent-docs/product-specs/hosted-usage-topups.md`.
 
@@ -21,11 +21,14 @@ hosted usage ledger. It also selects any billing action shown to the member.
 The projection is a read: it does not write a forecast, query Stripe, create a
 usage period, or change billing state.
 
-Purchased credit stays separate from the included-allowance period. The
-append-only credit ledger is canonical, and the compact member balance/version
-is its bounded admission and Settings projection. The plan-usage response may
-recommend the authenticated Settings top-up handoff, but it cannot create
-Checkout or grant credit.
+Usage credit stays separate from the included-allowance period in storage and
+consumption order. The append-only credit ledger stores purchase and referral
+grants as the canonical source, and the compact member balance/version remains
+its bounded admission projection. The plan-usage read combines current-period
+spend with every unit of capacity the gate says remains, so Settings and the
+assistant receive one overall percentage without receiving internal allowance,
+credit, or source-split values. The response may recommend the authenticated
+Settings top-up handoff, but it cannot create Checkout or grant credit.
 
 The growth dashboard's tracked fulfilled-top-up total has a different,
 company-wide scope. One anonymous singleton count is seeded from retained
@@ -89,15 +92,15 @@ Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
 their stored limit.
 
-Usage is cost-weighted included capacity across models and modalities. It is
-not a token count or cash balance. Used and remaining included percentages are
-bounded integers that sum to 100. An included period reports 100% used even
-while carryover usage credit still keeps effective capacity positive. Settings
-shows that usage credit remains effective without folding it into the plan
-percentage, exposing its exact remaining dollar amount, or exposing the
-internal included allowance value. When included usage is exhausted, Settings
-may explain that Murph will use remaining usage credit without quantifying it.
-The operation that crosses effective capacity may finish, but subsequent
+Usage is cost-weighted capacity across models and modalities. It is not a token
+count or cash balance. Used and remaining percentages are bounded integers that
+sum to 100. Their denominator is current-period spend plus every unit of
+effective capacity still available from the plan and generic usage credit. A
+fulfilled top-up can therefore move the percentage backward immediately.
+Settings still exposes neither the exact usage-credit balance nor the internal
+included-allowance value. At a monthly reset, period spend returns to zero, the
+plan allowance replenishes, and unused usage credit remains available. The
+operation that crosses effective capacity may finish, but subsequent
 usage-bearing work blocks and accepted conversation input remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
@@ -105,7 +108,7 @@ server-owned recurring amount for that member's billing mode and tier. Direct
 Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
 Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
 from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
-purchased usage credit do not redefine this catalog-owned allowance.
+usage credit do not redefine this catalog-owned allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -116,16 +119,17 @@ current bounds. It skips calendar fallbacks because their temporary key can be
 replaced by a delayed billing projection without a renewal. Existing allowance,
 spend, and future periods remain untouched.
 
-A forecast requires at least 24 hours of counted usage. It is shown only when
-the observed pace projects exhaustion before the current period ends. The
-forecast is conservative and optional; the product must not invent one when
-the projection omits it.
+A forecast requires at least 24 hours of counted usage. It uses the same
+overall effective capacity as the percentage and is shown only when the
+observed pace projects exhaustion before the current period ends. The forecast
+is conservative and optional; the product must not invent one when the
+projection omits it.
 
 ## Actions
 
-`apps/web` may return `recommendedAction` only when included usage is
-exhausted, the forecast projects exhaustion, or at least 80% of included usage
-is used. Trial access may recommend **Start Pulse now** with the
+`apps/web` may return `recommendedAction` only when all available usage is
+exhausted, the forecast projects exhaustion, or at least 80% of overall
+available usage is used. Trial access may recommend **Start Pulse now** with the
 current monthly price. An eligible direct paid Pulse or Edge member may receive
 **Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
 Edge upgrade remains on the plan card. Family and group contexts do not receive
@@ -252,18 +256,19 @@ their current account links; they are not authority to invoke
 `murph.subscription`.
 
 When discussing a usage-saving model, call it “a less capable model that uses
-less of your included usage.” Do not assume the member knows Luna, Terra, or
+less AI usage.” Do not assume the member knows Luna, Terra, or
 Sol; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 
 The web-owned allowance gate is the single model-work admission owner. It
-combines current included capacity with the compact purchased-credit
+combines current included capacity with the compact usage-credit
 projection. When both reach zero, subsequent assistant or eligible system work
 is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
 expired trial entitlement, and existing abuse controls remain separate
-fail-closed reasons. The read-only plan-usage projection remains an
-included-period view and must not be treated as the gate result.
+fail-closed reasons. The read-only plan-usage projection presents that combined
+capacity as one overall available-usage view; it remains a projection and must
+not be treated as the gate result.
 
 Usage accounting may create a period-scoped notice candidate when remaining
 effective capacity reaches zero. Low capacity does not send a standalone
@@ -333,9 +338,9 @@ runtime and webhook delivery fences retain their deterministic durable IDs.
 This prevents a retained history row or provider deduplication from suppressing
 the next real limit crossing without changing unrelated delivery correlation.
 
-Reset never deletes or rewrites immutable usage rows, purchased-credit entries,
-the purchased-credit balance or version, billing state, mailbox rows, or
-delivery history. It creates no second usage ledger or message counter. A stale
+Reset never deletes or rewrites immutable usage rows, usage-credit entries, the
+usage-credit balance or version, billing state, mailbox rows, or delivery
+history. It creates no second usage ledger or message counter. A stale
 table row fails closed and must be refreshed before retrying.
 
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
@@ -351,7 +356,7 @@ plan recommendation.
 
 `murph.plan_usage` accepts no arguments. Member identity comes from the signed
 runtime callback, not from the model. Murph may call it only when a member asks
-about their current plan or included usage, explicitly asks to manage billing
+about their current plan or AI usage, explicitly asks to manage billing
 or an unsupported Family account change, or when a trusted runtime instruction
 requests one manual private check. A trusted check authorizes the read only; it
 does not authorize a billing action or a proactive payment link.
