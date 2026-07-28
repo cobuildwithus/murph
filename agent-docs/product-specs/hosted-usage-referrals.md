@@ -221,16 +221,23 @@ Referral production is fail-closed unless Web reads the exact value
 1. Keep that gate unset or disabled while the expand-only Prisma migration adds
    the referral schema and entry-keyed grant projection, backfills existing
    purchase grants, and deploys the compatible Web reader/writer.
-2. Prove the new Web deployment is current, wait for the previous Vercel
-   function window to drain, and run contract migration
-   `20260726123000_allow_hosted_usage_referral_credit_entries`. It resynchronizes
-   any purchase projection written during the expand window, replaces the old
-   purchase-only ledger checks with purchase-or-referral checks, and validates
-   every existing row.
-3. Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`, redeploy that same or newer Web
+2. Apply normal migration
+   `20260728030000_hosted_usage_referral_credit_entry_constraints` while the
+   gate remains disabled. It replaces the old purchase-only ledger checks with
+   purchase-or-referral checks under a bounded metadata lock, then validates
+   every existing row outside that lock.
+3. Prove the compatible Web deployment is current, wait for the previous
+   Vercel function window to drain, and run the DML-only contract migration
+   `20260728031000_resynchronize_hosted_usage_credit_purchase_grants`. It
+   resynchronizes any purchase projection written during the expand window
+   without changing table constraints. It takes affected beneficiary locks in
+   the same deterministic order as live grant/debit/adjustment writers before
+   reading purchase capacity, and rolls back unless purchase/grant projections
+   converge.
+4. Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`, redeploy that same or newer Web
    head, then deploy Cloudflare/hosted runtime and assistant packages. Older
    runtimes never emit the new actions.
-4. Before broad exposure, prove purchase projection parity and smoke one
+5. Before broad exposure, prove purchase projection parity and smoke one
    personal and one group `read_usage_referral` request, one fresh-group bind,
    one replayed reward, one recovery-cron retry, the source celebration, and
    the next usage debit.
