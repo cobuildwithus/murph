@@ -1056,6 +1056,22 @@ function createStatefulThreadRoutePrisma() {
   return prisma;
 }
 
+/** Narrows the stateful route fixture at the transaction boundary it models. */
+function assertThreadContainerRouteTransactionClient(
+  value: unknown,
+): asserts value is Parameters<typeof ensureHostedThreadContainerRouteTx>[0]["prisma"] {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("$queryRaw" in value)
+    || !("hostedMember" in value)
+    || !("hostedThreadContainer" in value)
+    || !("hostedThreadRoute" in value)
+  ) {
+    throw new TypeError("Expected a thread-container route transaction client.");
+  }
+}
+
 function buildHostedMailboxItem(input: {
   id: string;
   userId: string;
@@ -1254,6 +1270,7 @@ describe("Linq explicit external-thread routing", () => {
       suspendedAt: null,
       threadContainer: null,
     });
+    assertThreadContainerRouteTransactionClient(prisma);
 
     await expect(
       ensureHostedThreadContainerRouteTx({
@@ -1261,7 +1278,7 @@ describe("Linq explicit external-thread routing", () => {
         channel: "linq",
         occurredAt: new Date("2026-06-24T12:00:00.000Z"),
         ownerMemberId: "member_owner_123",
-        prisma: prisma as unknown as Prisma.TransactionClient,
+        prisma,
         threadId: "chat_expired_trial_123",
       }),
     ).rejects.toMatchObject({
