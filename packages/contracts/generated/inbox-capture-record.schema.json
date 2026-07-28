@@ -262,6 +262,10 @@
             "additionalProperties": false
           }
         },
+        "textRetiredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
         "text": {
           "anyOf": [
             {
@@ -558,6 +562,10 @@
             ],
             "additionalProperties": false
           }
+        },
+        "textRetiredAt": {
+          "type": "string",
+          "format": "date-time"
         },
         "text": {
           "anyOf": [

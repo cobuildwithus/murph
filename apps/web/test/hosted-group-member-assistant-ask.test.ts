@@ -884,6 +884,40 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
   });
 
+  it("recovers a content-retired completion with only the fixed fallback", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockResolvedValue({
+      ...mailboxItemForWake(completionWake),
+      payloadBytes: null,
+      payloadHash: null,
+      payloadInlineCiphertext: null,
+      payloadRef: null,
+    });
+    const deliveryInput = {
+      answeredMailboxItemIds: [completionWake.eventId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: new Date(requestWake.ask.expiresAt),
+      tx: tx as never,
+    };
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: false,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: true,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedMailboxWakeByDedupeKey).not.toHaveBeenCalled();
+  });
+
   it("rejects provider dispatch when the request expired after completion", async () => {
     const requestWake = disclosureRequestWake();
     const completionWake = reviewedCompletionWake(requestWake);
