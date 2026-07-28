@@ -254,7 +254,26 @@ describe('assistant store persistence seams', () => {
     ])
     await expect(
       readAssistantTranscriptEntries(paths, session.sessionId),
-    ).resolves.toHaveLength(3)
+    ).resolves.toEqual([
+      createTranscriptEntry(
+        'user',
+        'first prompt',
+        '2026-04-08T00:01:00.000Z',
+      ),
+      {
+        contentReceivedAt: '2026-04-08T00:02:00.000Z',
+        createdAt: '2026-04-08T00:02:00.000Z',
+        kind: 'user',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: 'late follow up',
+      },
+      {
+        createdAt: '2026-04-08T00:03:00.000Z',
+        kind: 'assistant',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: 'draft answer',
+      },
+    ])
   })
 
   it('treats expired sessions according to last-turn precedence and ignores disabled age limits', () => {
@@ -390,20 +409,32 @@ describe('assistant store persistence seams', () => {
       createTranscriptEntry('error', 'old error', '2026-04-08T00:00:00.000Z'),
       ...Array.from({
         length: 105,
-      }, (_, index) =>
-        createTranscriptEntry(
-          index % 2 === 0 ? 'user' : 'assistant',
+      }, (_, index) => {
+        const kind = index % 2 === 0 ? 'user' : 'assistant'
+        const createdAt =
+          new Date(Date.UTC(2026, 3, 8, 0, index + 1, 0)).toISOString()
+        const entry = createTranscriptEntry(
+          kind,
           `entry-${index}`,
-          new Date(Date.UTC(2026, 3, 8, 0, index + 1, 0)).toISOString(),
-        ),
-      ),
+          createdAt,
+        )
+        return kind === 'user'
+          ? { ...entry, contentReceivedAt: createdAt }
+          : entry
+      }),
       createTranscriptEntry('error', 'recent error', '2026-04-08T03:00:00.000Z'),
     ]
 
     await replaceTranscriptEntries(paths, session.sessionId, transcriptEntries)
 
-    await expect(pruneAssistantTranscriptRetention(paths)).resolves.toEqual({
+    // Pin `now` inside the content-retention window so this case stays about
+    // trimming; expiry of old inbound text is covered separately.
+    await expect(pruneAssistantTranscriptRetention(paths, {
+      now: new Date('2026-04-08T04:00:00.000Z'),
+    })).resolves.toEqual({
+      entriesRedacted: 0,
       entriesTrimmed: 6,
+      nextEligibleAt: '2026-04-22T00:07:00.000Z',
       transcriptsTrimmed: 1,
     })
 
@@ -418,6 +449,50 @@ describe('assistant store persistence seams', () => {
       kind: 'error',
       text: 'recent error',
     })
+  })
+
+  it('preserves an abort reason before transcript retention scans files', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-transcript-retention-abort-',
+    )
+    const controller = new AbortController()
+    const reason = new Error('foreground work interrupted transcript retention')
+    controller.abort(reason)
+
+    await expect(pruneAssistantTranscriptRetention(paths, {
+      signal: controller.signal,
+    })).rejects.toBe(reason)
+  })
+
+  it('preserves unstamped legacy inbound text until the phase-two cutover', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-transcript-legacy-phase-one-',
+    )
+    const sessionId = 'session-transcript-legacy-phase-one'
+    const legacyEntries = [
+      createTranscriptEntry(
+        'user',
+        'recent legacy input remains paired with its answer',
+        '2026-07-24T00:00:00.000Z',
+      ),
+      createTranscriptEntry(
+        'assistant',
+        'assistant output remains available',
+        '2026-07-24T00:01:00.000Z',
+      ),
+    ]
+    await replaceTranscriptEntries(paths, sessionId, legacyEntries)
+
+    const now = new Date('2026-07-25T00:00:00.000Z')
+    await expect(pruneAssistantTranscriptRetention(paths, { now }))
+      .resolves.toEqual({
+        entriesRedacted: 0,
+        entriesTrimmed: 0,
+        nextEligibleAt: null,
+        transcriptsTrimmed: 0,
+      })
+    await expect(readAssistantTranscriptEntries(paths, sessionId))
+      .resolves.toEqual(legacyEntries)
   })
 
   it('initializes and synchronizes the session index store across alias and conversation-key changes', async () => {

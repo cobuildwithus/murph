@@ -39,6 +39,7 @@ import {
   readAssistantTranscriptTailEntries,
   readAutomationState,
   retireLegacyAssistantConversationKey,
+  pruneAssistantTranscriptRetention,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -93,6 +94,22 @@ export function isAssistantSessionNotFoundError(error: unknown): boolean {
       'code' in error &&
       (error as { code?: unknown }).code === 'ASSISTANT_SESSION_NOT_FOUND',
   )
+}
+
+export async function runAssistantTranscriptContentRetention(input: {
+  now?: Date
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<Awaited<ReturnType<typeof pruneAssistantTranscriptRetention>>> {
+  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    input.signal?.throwIfAborted()
+    await ensureAssistantState(paths)
+    input.signal?.throwIfAborted()
+    return await pruneAssistantTranscriptRetention(paths, {
+      now: input.now ?? new Date(),
+      signal: input.signal,
+    })
+  }, input.signal)
 }
 
 export async function resolveAssistantSession(
@@ -583,14 +600,22 @@ export async function appendAssistantTranscriptEntriesWithRefs(
 
     const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
     const firstEntryIndex = existingEntries.length
-    const parsed = entries.map((entry) =>
-      assistantTranscriptEntrySchema.parse({
+    const parsed = entries.map((entry) => {
+      const createdAt =
+        normalizeNullableString(entry.createdAt) ?? new Date().toISOString()
+      const contentReceivedAt =
+        normalizeNullableString(entry.contentReceivedAt)
+        ?? (entry.kind === 'user' ? createdAt : null)
+      return assistantTranscriptEntrySchema.parse({
         schema: 'murph.assistant-transcript-entry.v1',
         kind: entry.kind,
         text: entry.text,
-        createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
-      }),
-    )
+        createdAt,
+        ...(contentReceivedAt
+          ? { contentReceivedAt }
+          : {}),
+      })
+    })
     await appendTranscriptEntries(paths, sessionId, parsed)
 
     return {
@@ -689,12 +714,20 @@ function normalizeAssistantConversationSnapshot(
 function parseAssistantTranscriptEntries(
   entries: readonly AssistantTranscriptEntryInput[],
 ): AssistantTranscriptEntry[] {
-  return entries.map((entry) =>
-    assistantTranscriptEntrySchema.parse({
+  return entries.map((entry) => {
+    const createdAt =
+      normalizeNullableString(entry.createdAt) ?? new Date().toISOString()
+    const contentReceivedAt =
+      normalizeNullableString(entry.contentReceivedAt)
+      ?? (entry.kind === 'user' ? createdAt : null)
+    return assistantTranscriptEntrySchema.parse({
       schema: 'murph.assistant-transcript-entry.v1',
       kind: entry.kind,
       text: entry.text,
-      createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
-    }),
-  )
+      createdAt,
+      ...(contentReceivedAt
+        ? { contentReceivedAt }
+        : {}),
+    })
+  })
 }

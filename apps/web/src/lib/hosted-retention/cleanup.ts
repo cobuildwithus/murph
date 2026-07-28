@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
+import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
@@ -15,7 +16,10 @@ const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_RUN_LOG_VERBOSE_RETENTION_MS = 7 * DAY_MS;
-export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
+// Re-exported for existing importers; the window itself is owned by the mailbox
+// store so content retirement and the live-item read filter cannot drift.
+export { HOSTED_MAILBOX_RETENTION_MS };
+export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
@@ -38,9 +42,11 @@ export interface HostedRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredComputerRunsCleanedUp: number;
+  expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
-  expiredMailboxItemsDeleted: number;
+  expiredMailboxContentRetired: number;
+  expiredMailboxTombstonesDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -58,7 +64,7 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
+  const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
   });
@@ -103,9 +109,12 @@ export async function runHostedRetentionCleanup(input: {
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredComputerRunsCleanedUp,
+    expiredConversationPolicyNonRepliesRecorded:
+      expiredMailboxItems.policyNonReplies,
     expiredDeviceWebhookTracesDeleted,
     expiredIngressLatencyTracesDeleted,
-    expiredMailboxItemsDeleted,
+    expiredMailboxContentRetired: expiredMailboxItems.retired,
+    expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted,
@@ -225,39 +234,167 @@ async function signalRuntimeRecheckWithDeadline(input: {
 
 async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRecheckSignal> {
   const runtimeSignalModule = await import("../hosted-orchestration/signal-runtime");
-  return runtimeSignalModule.signalHostedRuntimeRecheckRuntime;
+  return runtimeSignalModule.signalHostedRetentionRuntimeRecheck;
 }
 
-async function deleteExpiredMailboxItems(input: {
+async function retireExpiredMailboxContent(input: {
   now: Date;
   prisma: PrismaClient;
-}): Promise<number> {
+}): Promise<{
+  policyNonReplies: number;
+  retired: number;
+  tombstonesDeleted: number;
+}> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_mailbox_item"
-      WHERE "expires_at" <= ${input.now}
-      ORDER BY "expires_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_mailbox_item" AS mailbox_item
-    USING doomed
-    WHERE mailbox_item."id" = doomed."id"
-  `);
-  const aged = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_mailbox_item"
-      WHERE "created_at" < ${cutoff}
-      ORDER BY "created_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "hosted_mailbox_item" AS mailbox_item
-    USING doomed
-    WHERE mailbox_item."id" = doomed."id"
-  `);
-  return expired + aged;
+  const structuralCutoff = new Date(
+    input.now.getTime() - HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
+  );
+  // Retire content in place before pruning ordinary structural tombstones.
+  // An unhandled conversation row becomes an explicit policy non-reply in the
+  // same owner row, and its lane watermark advances in the same transaction.
+  // That keeps accepted-work terminality durable while both inline and sidecar
+  // ciphertext disappear at the privacy deadline. Both content retirement and
+  // later structural pruning are bounded so an hourly cleanup cannot monopolize
+  // the production pool while a backlog drains.
+  return await runMailboxRetentionBatches(async () => {
+    const rows = await input.prisma.$queryRaw<
+      Array<{
+        policyNonReplies: bigint;
+        retired: bigint;
+        tombstonesDeleted: bigint;
+      }>
+    >`
+      WITH eligible AS MATERIALIZED (
+        SELECT
+          "id",
+          "user_id",
+          "lane",
+          "lane_seq",
+          "kind",
+          "consumed_at"
+        FROM "hosted_mailbox_item"
+        WHERE "content_retired_at" IS NULL
+          AND (
+            "expires_at" <= ${input.now}
+            OR "created_at" <= ${cutoff}
+          )
+        ORDER BY "created_at" ASC, "id" ASC
+        LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+        FOR UPDATE
+      ),
+      removed_sidecars AS (
+        DELETE FROM "hosted_mailbox_payload" AS payload
+        USING eligible
+        WHERE payload."mailbox_item_id" = eligible."id"
+        RETURNING payload."mailbox_item_id"
+      ),
+      retired AS (
+        UPDATE "hosted_mailbox_item" AS item
+        SET
+          "payload_inline_ciphertext" = NULL,
+          "payload_ref" = NULL,
+          "payload_bytes" = NULL,
+          "payload_hash" = NULL,
+          "content_retired_at" = ${input.now},
+          "retention_disposition" = CASE
+            WHEN eligible."kind" = 'conversation.message'
+              AND eligible."consumed_at" IS NULL
+              THEN 'policy_non_reply.content_expired'
+            ELSE NULL
+          END,
+          "consumed_at" = CASE
+            WHEN eligible."kind" = 'conversation.message'
+              AND eligible."consumed_at" IS NULL
+              THEN ${input.now}
+            ELSE eligible."consumed_at"
+          END,
+          "updated_at" = ${input.now}
+        FROM eligible
+        WHERE item."id" = eligible."id"
+        RETURNING
+          item."id",
+          item."user_id",
+          item."lane",
+          item."lane_seq",
+          item."retention_disposition"
+      ),
+      conversation_users AS (
+        SELECT DISTINCT "user_id"
+        FROM retired
+        WHERE "lane" = 'conversation'
+          AND "retention_disposition" = 'policy_non_reply.content_expired'
+      ),
+      conversation_floor AS (
+        SELECT
+          conversation_users."user_id",
+          COALESCE(
+            MIN(blocker."lane_seq") - 1,
+            counter."next_seq" - 1
+          ) AS "lane_seq"
+        FROM conversation_users
+        JOIN "hosted_mailbox_lane_counter" AS counter
+          ON counter."user_id" = conversation_users."user_id"
+          AND counter."lane" = 'conversation'
+        LEFT JOIN "hosted_mailbox_item" AS blocker
+          ON blocker."user_id" = conversation_users."user_id"
+          AND blocker."lane" = 'conversation'
+          AND blocker."consumed_at" IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM retired AS policy_non_reply
+            WHERE policy_non_reply."id" = blocker."id"
+              AND policy_non_reply."retention_disposition"
+                = 'policy_non_reply.content_expired'
+          )
+        GROUP BY
+          conversation_users."user_id",
+          counter."next_seq"
+      ),
+      advanced AS (
+        UPDATE "hosted_mailbox_lane_counter" AS counter
+        SET
+          "consumed_seq" = GREATEST(
+            counter."consumed_seq",
+            LEAST(conversation_floor."lane_seq", counter."next_seq" - 1)
+          ),
+          "updated_at" = ${input.now}
+        FROM conversation_floor
+        WHERE counter."user_id" = conversation_floor."user_id"
+          AND counter."lane" = 'conversation'
+        RETURNING counter."user_id"
+      ),
+      prunable AS MATERIALIZED (
+        SELECT "id"
+        FROM "hosted_mailbox_item"
+        WHERE "content_retired_at" IS NOT NULL
+          AND "retention_disposition" IS NULL
+          AND "created_at" < ${structuralCutoff}
+        ORDER BY "created_at" ASC, "id" ASC
+        LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+        FOR UPDATE
+      ),
+      pruned AS (
+        DELETE FROM "hosted_mailbox_item" AS item
+        USING prunable
+        WHERE item."id" = prunable."id"
+        RETURNING item."id"
+      )
+      SELECT
+        (SELECT COUNT(*) FROM retired)::bigint AS "retired",
+        (
+          SELECT COUNT(*)
+          FROM retired
+          WHERE "retention_disposition" = 'policy_non_reply.content_expired'
+        )::bigint AS "policyNonReplies",
+        (SELECT COUNT(*) FROM pruned)::bigint AS "tombstonesDeleted"
+    `;
+    const result = rows[0];
+    return {
+      policyNonReplies: Number(result?.policyNonReplies ?? 0n),
+      retired: Number(result?.retired ?? 0n),
+      tombstonesDeleted: Number(result?.tombstonesDeleted ?? 0n),
+    };
+  });
 }
 
 // Verbose levels are the overwhelming majority of the table and are only ever
@@ -383,6 +520,36 @@ async function compactOldLinqProviderEventDiagnostics(input: {
     FROM compactable
     WHERE provider_event."event_id" = compactable."event_id"
   `);
+}
+
+type MailboxRetentionBatchResult = {
+  policyNonReplies: number;
+  retired: number;
+  tombstonesDeleted: number;
+};
+
+async function runMailboxRetentionBatches(
+  mutateBatch: () => Promise<MailboxRetentionBatchResult>,
+): Promise<MailboxRetentionBatchResult> {
+  const total: MailboxRetentionBatchResult = {
+    policyNonReplies: 0,
+    retired: 0,
+    tombstonesDeleted: 0,
+  };
+  for (let batch = 0; batch < HOSTED_RETENTION_MAX_BATCHES; batch += 1) {
+    const result = await mutateBatch();
+    total.policyNonReplies += result.policyNonReplies;
+    total.retired += result.retired;
+    total.tombstonesDeleted += result.tombstonesDeleted;
+    if (
+      result.retired < HOSTED_RETENTION_BATCH_SIZE
+      && result.tombstonesDeleted < HOSTED_RETENTION_BATCH_SIZE
+    ) {
+      break;
+    }
+  }
+
+  return total;
 }
 
 // Runs one bounded batch at a time and stops as soon as a batch comes back
