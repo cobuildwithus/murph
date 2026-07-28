@@ -145,10 +145,23 @@ test("progress-card renderer retains the authenticated card brand language", asy
   assert.match(svg, /font-family="DM Sans, Arial, sans-serif"/u);
   assert.match(svg, /id="murph-wordmark"[^>]* y="708"[^>]* height="52"/u);
   assert.match(svg, /Health experiments with friends\./u);
-  assert.match(svg, /withmurph\.ai · as of 2026-07-27/u);
+  assert.match(svg, />withmurph\.ai<\/text>/u);
+  assert.doesNotMatch(svg, /as of 2026-07-27/u);
   assert.match(svg, /RESTING HEART RATE/u);
   assert.match(svg, /DEEP SLEEP/u);
+  assert.match(
+    svg,
+    /data-role="mover-change"[^>]*><text[^>]*>↓ 8%<\/text>/u,
+  );
+  assert.match(
+    svg,
+    /data-role="mover-detail"[^>]*><text[^>]*><tspan[^>]*>54 bpm<\/tspan><tspan[^>]*>4 bpm<\/tspan>/u,
+  );
   assert.match(svg, /CONFOUNDERS/u);
+  assert.match(svg, /Jul 18 · Late flight &amp; short sleep/u);
+  assert.match(svg, /Jul 24 · Strength training/u);
+  assert.doesNotMatch(svg, /2026-07-18/u);
+  assert.doesNotMatch(svg, /2026-07-24/u);
   assert.match(svg, /Late flight &amp; short sleep/u);
   assert.match(svg, /Morning light &amp; recovery &lt;check&gt;/u);
   assert.doesNotMatch(svg, />murph<\/text>/u);
@@ -181,7 +194,11 @@ test("progress-card renderer retains the authenticated card brand language", asy
   assert.doesNotMatch(boundedSvg, /textLength=/u);
   assert.match(
     boundedSvg,
-    /font-size="38" font-weight="600"><tspan>WWWWWWWWWWWWWWWW/u,
+    /data-role="mover-change"[^>]*scale\([^)]* 1\)"><text[^>]*font-size="64"[^>]*>↓ WWWWWWWW<\/text>/u,
+  );
+  assert.match(
+    boundedSvg,
+    /data-role="mover-detail"[^>]*scale\([^)]* 1\)"><text[^>]*font-size="18"><tspan[^>]*>WWWWWWWWWWWWWWWW WWWWWWWWWWWW<\/tspan>/u,
   );
 
   const boundedPng = await sharp(Buffer.from(boundedSvg)).png().toBuffer();

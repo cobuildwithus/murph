@@ -90,7 +90,7 @@ async function renderExperimentProgressCard(
   card: ExperimentProgressCardData,
 ): Promise<RenderedProgressCard> {
   const cardIdentity = createHash("sha256")
-    .update("murph.experiment-progress-card.render.v2")
+    .update("murph.experiment-progress-card.render.v3")
     .update("\0")
     .update(JSON.stringify(card))
     .digest("hex");
@@ -256,7 +256,7 @@ export function buildExperimentProgressCardSvg(
     `<line x1="${CONTENT_LEFT}" y1="700" x2="${CONTENT_RIGHT}" y2="700" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
     `<image id="murph-wordmark" href="${LOGO_DATA_URI}" x="${CONTENT_LEFT}" y="708" width="${LOGO_WIDTH}" height="${LOGO_HEIGHT}" aria-label="murph"/>`,
     `<text x="${CONTENT_RIGHT}" y="727" text-anchor="end" fill="${COLOR.foreground}" fill-opacity=".42" font-family="${SANS_FONT}" font-size="22">Health experiments with friends.</text>`,
-    `<text x="${CONTENT_RIGHT}" y="756" text-anchor="end" fill="${COLOR.primary}" font-family="${SANS_FONT}" font-size="19">withmurph.ai · as of ${escapeSvg(card.asOf)}</text>`,
+    `<text x="${CONTENT_RIGHT}" y="756" text-anchor="end" fill="${COLOR.primary}" font-family="${SANS_FONT}" font-size="19">withmurph.ai</text>`,
     "</svg>",
   ].join("");
 }
@@ -276,13 +276,16 @@ function renderMoverPanel(
 ): string {
   const x = index === 0 ? CONTENT_LEFT : 610;
   const width = moverCount === 1 ? CONTENT_WIDTH : 526;
-  const sentiment = resolveMoverSentiment(mover.sentiment);
+  const sentimentColor = resolveMoverSentimentColor(mover.sentiment);
   const arrow = mover.direction === "up"
     ? "↑"
     : mover.direction === "down"
       ? "↓"
       : "—";
-  const deltaText = `${arrow} ${mover.changePct} · ${mover.delta}`;
+  const changeText = `${arrow} ${mover.changePct}`;
+  const currentValue = mover.unit
+    ? `${mover.value} ${mover.unit}`
+    : mover.value;
   const label = mover.label.toUpperCase();
   const labelScale = fittedTextScale({
     fontSize: 17,
@@ -290,52 +293,46 @@ function renderMoverPanel(
     maxWidth: width - 60,
     text: label,
   });
-  const valueFontSize = moverValueFontSize(mover.value, mover.unit);
-  const valueWidth = estimatedTextWidth(mover.value, valueFontSize)
-    + (mover.unit
-      ? 10 + estimatedTextWidth(mover.unit, 23)
-      : 0);
-  const valueScale = roundSvgNumber(
-    Math.min(1, (width - 72) / Math.max(1, valueWidth)),
-  );
-  const deltaScale = fittedTextScale({
-    fontSize: 21,
-    maxWidth: width - 96,
-    text: deltaText,
+  const changeFontSize = 64;
+  const changeScale = fittedTextScale({
+    fontSize: changeFontSize,
+    maxWidth: width - 60,
+    text: changeText,
   });
-  const deltaWidth = estimatedTextWidth(deltaText, 21) * deltaScale;
-  const chipWidth = Math.min(
-    width - 60,
-    Math.max(190, 36 + deltaWidth),
+  const detailFontSize = moverDetailFontSize(currentValue, mover.delta);
+  const detailWidth = estimatedTextWidth(currentValue, detailFontSize)
+    + 18
+    + estimatedTextWidth(mover.delta, detailFontSize - 2);
+  const detailScale = roundSvgNumber(
+    Math.min(1, (width - 60) / Math.max(1, detailWidth)),
   );
 
   return [
     `<rect x="${x}" y="${top}" width="${width}" height="232" rx="24" fill="${COLOR.panel}" fill-opacity=".72" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
     `<g transform="translate(${x + 30} ${top + 43}) scale(${labelScale} 1)"><text x="0" y="0" fill="${COLOR.foreground}" fill-opacity=".5" font-family="${SANS_FONT}" font-size="17" letter-spacing="2.2">${escapeSvg(label)}</text></g>`,
-    `<g transform="translate(${x + 30} ${top + 124}) scale(${valueScale} 1)"><text x="0" y="0" fill="${COLOR.foreground}" font-family="${SERIF_FONT}" font-size="${valueFontSize}" font-weight="600"><tspan>${escapeSvg(mover.value)}</tspan>${mover.unit ? `<tspan dx="10" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="23" font-weight="400">${escapeSvg(mover.unit)}</tspan>` : ""}</text></g>`,
-    `<rect x="${x + 30}" y="${top + 155}" width="${chipWidth}" height="44" rx="22" fill="${sentiment.color}" fill-opacity="${sentiment.chipOpacity}"/>`,
-    `<g transform="translate(${x + 48} ${top + 184}) scale(${deltaScale} 1)"><text x="0" y="0" fill="${sentiment.color}" font-family="${SANS_FONT}" font-size="21">${escapeSvg(deltaText)}</text></g>`,
+    `<g data-role="mover-change" transform="translate(${x + 30} ${top + 126}) scale(${changeScale} 1)"><text x="0" y="0" fill="${sentimentColor}" font-family="${SERIF_FONT}" font-size="${changeFontSize}" font-weight="600">${escapeSvg(changeText)}</text></g>`,
+    `<g data-role="mover-detail" transform="translate(${x + 30} ${top + 185}) scale(${detailScale} 1)"><text x="0" y="0" font-family="${SANS_FONT}" font-size="${detailFontSize}"><tspan fill="${COLOR.foreground}">${escapeSvg(currentValue)}</tspan><tspan dx="18" fill="${sentimentColor}" font-size="${detailFontSize - 2}">${escapeSvg(mover.delta)}</tspan></text></g>`,
   ].join("");
 }
 
-function resolveMoverSentiment(
+function resolveMoverSentimentColor(
   sentiment: ExperimentProgressCardMover["sentiment"],
-): { chipOpacity: string; color: string } {
+): string {
   if (sentiment === "positive") {
-    return { chipOpacity: ".14", color: COLOR.positive };
+    return COLOR.positive;
   }
   if (sentiment === "negative") {
-    return { chipOpacity: ".15", color: COLOR.negative };
+    return COLOR.negative;
   }
-  return { chipOpacity: ".14", color: COLOR.muted };
+  return COLOR.muted;
 }
 
-function moverValueFontSize(value: string, unit: string | null): number {
-  const length = value.length + (unit?.length ?? 0);
-  if (length > 20) return 38;
-  if (length > 14) return 44;
-  if (length > 10) return 50;
-  return 58;
+function moverDetailFontSize(value: string, delta: string): number {
+  const length = value.length + delta.length;
+  if (length > 36) return 18;
+  if (length > 28) return 20;
+  if (length > 20) return 22;
+  return 25;
 }
 
 function renderTimeline(card: ExperimentProgressCardData): string {
@@ -386,7 +383,7 @@ function renderConfounders(card: ExperimentProgressCardData): string {
     ...card.confounders.map((entry, index) => {
       const x = index % 2 === 0 ? CONTENT_LEFT : 610;
       const y = index < 2 ? 658 : 685;
-      const text = `${entry.date} · ${entry.label}`;
+      const text = `${monthDayLabel(entry.date)} · ${entry.label}`;
       const fontSize = confounderFontSize(text);
       const scale = fittedTextScale({
         fontSize,
@@ -428,6 +425,27 @@ function addDays(date: string, days: number): string {
   const stamp = new Date(`${date}T00:00:00.000Z`);
   stamp.setUTCDate(stamp.getUTCDate() + days);
   return stamp.toISOString().slice(0, 10);
+}
+
+const MONTH_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+function monthDayLabel(date: string): string {
+  const [, rawMonth, rawDay] = date.split("-").map(Number);
+  const month = MONTH_LABELS[rawMonth - 1];
+  return `${month} ${rawDay}`;
 }
 
 function layoutCardTitle(title: string): {
