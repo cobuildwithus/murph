@@ -1,6 +1,6 @@
 # Connected-app approval final-review remediation
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -52,23 +52,28 @@ Updated: 2026-07-28
 
 ## Tasks
 
-1. [ ] Add encrypted connected-app presentation storage and owner-bound
+1. [x] Add encrypted connected-app presentation storage and owner-bound
    decrypt-on-render behavior.
-2. [ ] Add one canonical mutation preparation path shared by approval and
+2. [x] Add one canonical mutation preparation path shared by approval and
    provider execution.
-3. [ ] Add migration, persistence, hostile-value, ambiguity, and execution
+3. [x] Add migration, persistence, hostile-value, ambiguity, and execution
    regressions.
-4. [ ] Run focused checks, preliminary specialist review for the remediation
-   delta, canonical verification, and acceptance.
-5. [ ] Close the plan with a scoped commit, push the draft PR, then run the
-   immutable-baseline final ReviewGPT remediation round and CI.
+4. [x] Run focused checks, canonical verification, parent review, and
+   acceptance. The PR's one substantive preliminary specialist pass already
+   completed before the final-gate findings; do not rerun it for remediation.
+5. [x] Close the implementation plan with a scoped commit and push the draft
+   PR. The immutable-baseline final ReviewGPT remediation round and CI remain
+   the post-closure PR gates.
 
 ## Verification
 
 - Focused Web approval, connected-app builder/service, migration, and database
-  tests plus Web typecheck.
-- `pnpm test:diff packages/hosted-execution packages/assistant-engine apps/web`
-- `pnpm verify:acceptance`
-- Preliminary `completion-specialists` ReviewGPT pass on the exact pushed head,
-  followed by parent review.
+  tests plus Web typecheck: passed, including 69 focused Web tests and 10
+  isolated real-PostgreSQL encryption/AAD tests.
+- `pnpm test:diff packages/hosted-execution packages/assistant-engine apps/web`:
+  passed.
+- `pnpm verify:acceptance`: passed.
+- The PR's completed preliminary `completion-specialists` ReviewGPT pass
+  remains the one substantive preliminary pass; parent-review the remediation.
 - Final ReviewGPT remediation round for PR 1028 and green PR CI.
+Completed: 2026-07-28

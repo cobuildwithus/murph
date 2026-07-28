@@ -15,6 +15,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'actionHash String? @map("action_hash")',
     'presentationTitle String? @map("presentation_title")',
     'presentationBody String? @map("presentation_body")',
+    'presentationTitleEncrypted String? @map("presentation_title_encrypted")',
+    'presentationBodyEncrypted String? @map("presentation_body_encrypted")',
     'approvalStatus HostedSensitiveActionApprovalStatus? @map("approval_status")',
     'decidedAt DateTime? @map("decided_at")',
     'consumedAt DateTime? @map("consumed_at")',
@@ -961,6 +963,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_thread_container_usage_default",
       "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "20260727120000_hosted_member_checkout_session",
+      "20260728040000_connected_app_approval_presentation_encryption",
       "migration_lock.toml",
     ]);
     expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
