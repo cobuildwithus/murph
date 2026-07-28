@@ -849,6 +849,10 @@ second disposition record and does not advance mailbox consumption. Web keeps
 in-flight timing milestones scoped to the exact staged runtime attempt. The
 terminal marker may converge across a later attempt because authenticated user,
 source, and assistant input ID identify the durable disposition being projected.
+The terminal projection carries the runtime's current checkpoint-publication
+expectation. Whenever later dirty work restarts the idle window, the runtime
+publishes a monotonic `checkpoint_publication_expected_by` milestone across the
+same fenced attempt so every earlier terminal trace observes the reset.
 All milestones merge into the existing phase document under a row lock. Emission
 is queued off the reply path and may retry only the bounded staging/trace-row
 race; it carries no message, prompt, response, reasoning, or provider payload.
@@ -1967,22 +1971,20 @@ provider payloads, secrets, local paths, or direct personal identifiers.
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous; a trace at or
-above the boundary is unresolved only when it has no accepted delivery, no
-valid recent `terminal_non_reply_committed` projection, and no durable consumed
-evidence. The terminal marker grants only five minutes of checkpoint grace:
-intentional silence stops paging immediately, but a trace becomes unresolved
-again if `consumed_at` does not confirm the normal three-minute idle checkpoint
-before that grace expires. This prevents a marker emitted before a runner crash
-from becoming de facto disposition authority after recovery restores an older
-snapshot. The marker never pretends a reply was delivered or consumes the
-mailbox item early. Invalid marker chronology cannot hide still-unconsumed work.
-The terminal leaf alone uses max-timestamp merge semantics: replay carries the
-original evidence time and cannot extend grace, while a genuinely new
-post-recovery suppression commit advances the marker and receives a fresh
-bounded checkpoint window. Recovery preserves that evidence timestamp per
-assistant input; a newer suppression for another input cannot refresh an older
-trace. Every other latency leaf remains assign-once.
+recent accepted delivery at or above that boundary is anomalous. A trace at or
+above the boundary with no accepted delivery and no durable consumed evidence
+is provisionally resolved only when it has valid
+`terminal_non_reply_committed` evidence and the runtime's latest
+checkpoint-publication expectation has not elapsed. The expectation includes
+the configured idle window plus the bounded idle-maintenance, snapshot
+construction/upload, and checkpoint-control envelope. Later dirty work moves it
+forward through the attempt-wide runtime milestone; a crashed runtime stops
+refreshing it, so the trace becomes unresolved after the last published
+expectation. The marker never pretends a reply was delivered or consumes the
+mailbox item early. Missing, expired, or chronologically invalid expectation
+data cannot hide still-unconsumed work. The terminal and publication-expectation
+leaves alone use max-timestamp merge semantics. Every other latency leaf remains
+assign-once.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

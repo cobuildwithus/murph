@@ -1052,6 +1052,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.375Z"),
       authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
       runtimeAttemptId: "attempt_terminal_replay_2",
@@ -1065,6 +1066,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.750Z"),
       authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:30:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
       runtimeAttemptId: "attempt_terminal_recovery_3",
@@ -1078,9 +1080,34 @@ describe("hosted runtime latency dashboard store", () => {
       assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.500Z"),
       authenticatedUserId: "member_latency_1",
+      checkpointPublicationExpectedBy: instant("2026-06-02T19:25:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
       runtimeAttemptId: "attempt_terminal_stale_replay_4",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:40:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:35:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1104,6 +1131,8 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       assistant: {
         linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
+        checkpointPublicationExpectedByEpochMs:
+          Date.parse("2026-06-02T19:40:00.000Z"),
         terminalNonReplyCommittedAtEpochMs:
           Date.parse("2026-06-02T19:12:21.750Z"),
       },

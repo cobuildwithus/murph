@@ -388,6 +388,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
   assistantInputIds: readonly string[];
   at?: Date | string | null;
   authenticatedUserId: string;
+  checkpointPublicationExpectedBy?: Date | string | null;
   milestone: HostedRuntimeAssistantMilestone;
   prisma?: HostedIngressLatencyPrismaClient;
   runtimeAttemptId?: string | null;
@@ -402,6 +403,18 @@ export async function recordHostedIngressAssistantMilestone(input: {
     )),
   ];
   const runtimeAttemptId = normalizeNullableLatencyIdentifier(input.runtimeAttemptId);
+  const checkpointPublicationExpectedBy = normalizeOptionalDate(
+    input.checkpointPublicationExpectedBy,
+    "Hosted ingress latency checkpoint publication expected by",
+  );
+  if (
+    checkpointPublicationExpectedBy
+    && input.milestone !== "terminal_non_reply_committed"
+  ) {
+    throw new TypeError(
+      "Hosted ingress latency checkpoint publication expectation requires terminal_non_reply_committed.",
+    );
+  }
 
   if (assistantInputIds.length === 0 || !runtimeAttemptId) {
     return { matchedCount: 0, recorded: false, unmatchedCount: assistantInputIds.length };
@@ -422,6 +435,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
   });
   const phaseBreakdown = buildHostedRuntimeAssistantMilestonePhaseBreakdown({
     at,
+    checkpointPublicationExpectedBy,
     milestone: input.milestone,
   });
   // Sequential on purpose: each locked update opens its own transaction, so
@@ -1432,6 +1446,26 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     userId: input.userId,
   };
 
+  if (input.milestone === "checkpoint_publication_expected_by") {
+    const rows = await prisma.hostedIngressLatencyTrace.findMany({
+      select: { id: true },
+      where: baseWhere,
+    });
+    let matchedCount = 0;
+    for (const row of rows) {
+      if (
+        await updateHostedIngressCheckpointPublicationExpectedByLocked(prisma, {
+          expectedBy: input.at,
+          runtimeAttemptId: input.runtimeAttemptId,
+          traceId: row.id,
+        })
+      ) {
+        matchedCount += 1;
+      }
+    }
+    return matchedCount;
+  }
+
   const field = readHostedIngressLatencyRuntimeMilestoneField(input.milestone);
   const result = await prisma.hostedIngressLatencyTrace.updateMany({
     data: {
@@ -1448,7 +1482,10 @@ async function updateHostedIngressLatencyRuntimeMilestone(
 }
 
 function readHostedIngressLatencyRuntimeMilestoneField(
-  milestone: HostedRuntimeLatencyTraceMilestone,
+  milestone: Exclude<
+    HostedRuntimeLatencyTraceMilestone,
+    "checkpoint_publication_expected_by"
+  >,
 ): HostedIngressLatencyRuntimeMilestoneField {
   switch (milestone) {
     case "runner_job_accepted":
@@ -1731,8 +1768,42 @@ async function updateHostedIngressAssistantMilestoneLocked(
   });
 }
 
+async function updateHostedIngressCheckpointPublicationExpectedByLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    expectedBy: Date;
+    runtimeAttemptId: string;
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace || trace.runtimeAttemptId !== input.runtimeAttemptId) {
+      return false;
+    }
+
+    const phaseBreakdownUpdate = readTerminalNonReplyPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      {
+        schemaVersion: 1,
+        assistant: {
+          checkpointPublicationExpectedByEpochMs: input.expectedBy.getTime(),
+        },
+      },
+    );
+    if (Object.keys(phaseBreakdownUpdate).length > 0) {
+      await tx.hostedIngressLatencyTrace.update({
+        data: phaseBreakdownUpdate,
+        where: { id: trace.id },
+      });
+    }
+    return true;
+  });
+}
+
 function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
   at: Date;
+  checkpointPublicationExpectedBy: Date | null;
   milestone: HostedRuntimeAssistantMilestone;
 }): HostedRuntimeLatencyPhaseBreakdown {
   const atEpochMs = input.at.getTime();
@@ -1746,7 +1817,18 @@ function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
     case "first_codex_text_observed":
       return { schemaVersion: 1, assistant: { firstCodexTextObservedAtEpochMs: atEpochMs } };
     case "terminal_non_reply_committed":
-      return { schemaVersion: 1, assistant: { terminalNonReplyCommittedAtEpochMs: atEpochMs } };
+      return {
+        schemaVersion: 1,
+        assistant: {
+          terminalNonReplyCommittedAtEpochMs: atEpochMs,
+          ...(input.checkpointPublicationExpectedBy
+            ? {
+                checkpointPublicationExpectedByEpochMs:
+                  input.checkpointPublicationExpectedBy.getTime(),
+              }
+            : {}),
+        },
+      };
   }
 }
 
@@ -1819,10 +1901,10 @@ function readPhaseBreakdownMergeUpdate(
   return { phaseBreakdownJson: merged.value };
 }
 
-// Terminal suppression may be recomputed after crash recovery. A replay carries
-// the original evidence timestamp, while a genuinely new commit carries a later
-// one, so max timestamp preserves bounded grace without letting stale replay
-// extend it. All other diagnostic leaves retain assign-once semantics.
+// Terminal suppression may be recomputed after crash recovery, and the live
+// runtime may extend its checkpoint-publication expectation when new dirty work
+// restarts the idle window. Max-merge only those two leaves; all other
+// diagnostic leaves retain assign-once semantics.
 function readTerminalNonReplyPhaseBreakdownMergeUpdate(
   existingValue: unknown,
   incoming: HostedRuntimeLatencyPhaseBreakdown,
@@ -1832,32 +1914,40 @@ function readTerminalNonReplyPhaseBreakdownMergeUpdate(
     incoming,
     phases: ["assistant"],
   });
-  const incomingAt =
-    incoming.assistant?.terminalNonReplyCommittedAtEpochMs;
   const assistant =
     typeof merged.value.assistant === "object"
     && merged.value.assistant !== null
     && !Array.isArray(merged.value.assistant)
       ? merged.value.assistant
       : {};
-  const storedAt =
-    assistant.terminalNonReplyCommittedAtEpochMs;
-  if (
-    incomingAt !== undefined
-    && typeof storedAt === "number"
-    && incomingAt > storedAt
+  let changed = merged.changed;
+  const nextAssistant = { ...assistant };
+  for (
+    const leaf of [
+      "terminalNonReplyCommittedAtEpochMs",
+      "checkpointPublicationExpectedByEpochMs",
+    ] as const
   ) {
+    const incomingValue = incoming.assistant?.[leaf];
+    const storedValue = assistant[leaf];
+    if (
+      incomingValue !== undefined
+      && typeof storedValue === "number"
+      && incomingValue > storedValue
+    ) {
+      nextAssistant[leaf] = incomingValue;
+      changed = true;
+    }
+  }
+  if (changed) {
     return {
       phaseBreakdownJson: {
         ...merged.value,
-        assistant: {
-          ...assistant,
-          terminalNonReplyCommittedAtEpochMs: incomingAt,
-        },
+        assistant: nextAssistant,
       },
     };
   }
-  return merged.changed ? { phaseBreakdownJson: merged.value } : {};
+  return {};
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

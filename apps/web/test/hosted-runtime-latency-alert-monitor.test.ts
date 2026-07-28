@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS,
   HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS,
-  HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS,
   runHostedRuntimeLatencyAlertMonitor,
   summarizeHostedRuntimeLatencyRows,
   type HostedRuntimeLatencyHealthRow,
@@ -75,6 +74,7 @@ describe("hosted runtime latency health", () => {
       rows: [
         latencyRow({
           acceptedAt: "2026-07-26T15:58:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
           terminalNonReplyCommittedAt: "2026-07-26T15:58:12.000Z",
         }),
       ],
@@ -87,18 +87,18 @@ describe("hosted runtime latency health", () => {
     });
   });
 
-  it("reopens an unconsumed terminal non-reply after checkpoint grace expires", () => {
+  it("reopens an unconsumed terminal non-reply after the runtime expectation expires", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
       rows: [
         latencyRow({
           acceptedAt: "2026-07-26T15:54:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T15:59:59.999Z",
           terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
         }),
       ],
     });
 
-    expect(HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS).toBe(5 * 60_000);
     expect(health).toMatchObject({
       anomalous: true,
       invalidChronologyCount: 0,
@@ -107,12 +107,13 @@ describe("hosted runtime latency health", () => {
     });
   });
 
-  it("keeps checkpointed terminal non-replies resolved after grace expires", () => {
+  it("keeps checkpointed terminal non-replies resolved after the expectation expires", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
       rows: [
         latencyRow({
           acceptedAt: "2026-07-26T15:54:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T15:59:00.000Z",
           consumedAt: "2026-07-26T15:57:30.000Z",
           terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
         }),
@@ -126,12 +127,31 @@ describe("hosted runtime latency health", () => {
     });
   });
 
+  it("does not hide an unconsumed terminal non-reply without a runtime expectation", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:58:12.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 0,
+      unresolvedReplyCount: 1,
+    });
+  });
+
   it("ignores impossible terminal non-reply chronology and keeps stuck work alertable", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
       rows: [
         latencyRow({
           acceptedAt: "2026-07-26T15:58:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
           terminalNonReplyCommittedAt: "2026-07-26T15:57:59.000Z",
         }),
       ],
@@ -177,6 +197,7 @@ describe("hosted runtime latency alert monitor", () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
+        checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
         terminalNonReplyCommittedAt: "2026-07-26T15:58:05.000Z",
       }),
     ]);
@@ -1046,12 +1067,16 @@ describe("hosted runtime latency alert monitor", () => {
 
 function latencyRow(input: {
   acceptedAt: string;
+  checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
   terminalNonReplyCommittedAt?: string | null;
 }): HostedRuntimeLatencyHealthRow {
   return {
     acceptedAt: instant(input.acceptedAt),
+    checkpointPublicationExpectedBy: input.checkpointPublicationExpectedBy
+      ? instant(input.checkpointPublicationExpectedBy)
+      : null,
     consumedAt: input.consumedAt ? instant(input.consumedAt) : null,
     deliveryAcceptedAt: input.deliveryAcceptedAt
       ? instant(input.deliveryAcceptedAt)
@@ -1083,11 +1108,22 @@ function createMonitorPrismaFixture(
       mailboxItem: {
         consumedAt: row.consumedAt,
       },
-      phaseBreakdownJson: row.terminalNonReplyCommittedAt
+      phaseBreakdownJson:
+        row.terminalNonReplyCommittedAt || row.checkpointPublicationExpectedBy
         ? {
             assistant: {
-              terminalNonReplyCommittedAtEpochMs:
-                row.terminalNonReplyCommittedAt.getTime(),
+              ...(row.terminalNonReplyCommittedAt
+                ? {
+                    terminalNonReplyCommittedAtEpochMs:
+                      row.terminalNonReplyCommittedAt.getTime(),
+                  }
+                : {}),
+              ...(row.checkpointPublicationExpectedBy
+                ? {
+                    checkpointPublicationExpectedByEpochMs:
+                      row.checkpointPublicationExpectedBy.getTime(),
+                  }
+                : {}),
             },
             schemaVersion: 1,
           }

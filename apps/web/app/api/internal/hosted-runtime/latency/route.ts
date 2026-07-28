@@ -45,6 +45,12 @@ export const POST = withJsonError(async (request: Request) => {
           assistantInputIds: traceRequest.event.assistantInputIds,
           at: traceRequest.event.at,
           authenticatedUserId,
+          ...(traceRequest.event.checkpointPublicationExpectedBy === undefined
+            ? {}
+            : {
+                checkpointPublicationExpectedBy:
+                  traceRequest.event.checkpointPublicationExpectedBy,
+              }),
           milestone: traceRequest.event.milestone,
           runtimeAttemptId,
           source: traceRequest.event.source,

@@ -1238,6 +1238,7 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.750Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:15:00.000Z",
         milestone: "terminal_non_reply_committed",
         runtimeAttemptId: "attempt_1",
         source: "linq",
@@ -1247,10 +1248,28 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.750Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:15:00.000Z",
         milestone: "terminal_non_reply_committed",
         runtimeAttemptId: "attempt_1",
         source: "linq",
         type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    })).toEqual({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
       },
     });
     expect(parseHostedRuntimeLatencyTraceRequest({

@@ -59,6 +59,10 @@ import {
   recordHostedAssistantMilestonesBestEffort,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
+import {
+  resolveHostedRuntimeCheckpointPublicationExpectedByMs,
+  resolveHostedRuntimeIdleCheckpointDelayMs,
+} from "./checkpoint-publication.ts";
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 
@@ -141,6 +145,7 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
+  idleCheckpointDelayMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
@@ -200,6 +205,8 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          commitTimeoutMs: input.runtime.commitTimeoutMs,
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -272,6 +279,8 @@ export async function runHostedAssistantAutomation(
   options?: {
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
+    commitTimeoutMs?: number | null;
+    idleCheckpointDelayMs?: number | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -513,7 +522,9 @@ export async function runHostedAssistantAutomation(
       },
       onTerminalNonReplyCommitted: (event) => {
         recordHostedAssistantTerminalNonReplyBestEffort({
+          commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
+          idleCheckpointDelayMs: options?.idleCheckpointDelayMs ?? null,
           latencyTracePort: options?.latencyTracePort ?? null,
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
@@ -679,11 +690,13 @@ export async function runHostedAssistantAutomation(
 }
 
 function recordHostedAssistantTerminalNonReplyBestEffort(input: {
+  commitTimeoutMs: number | null;
   event: {
     inputIds: readonly string[];
     recordedAt: string;
     source: string;
   };
+  idleCheckpointDelayMs: number | null;
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
   runtimeAttemptId: string | null;
 }): void {
@@ -692,6 +705,15 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
   if (!runtimeAttemptId || !source) {
     return;
   }
+  const recordedAtMs = Date.parse(input.event.recordedAt);
+  const checkpointPublicationExpectedBy = Number.isFinite(recordedAtMs)
+    ? new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
+        checkpointStartByMs:
+          recordedAtMs
+          + resolveHostedRuntimeIdleCheckpointDelayMs(input.idleCheckpointDelayMs),
+        commitTimeoutMs: input.commitTimeoutMs,
+      })).toISOString()
+    : null;
 
   recordHostedAssistantMilestonesBestEffort({
     context: {
@@ -702,6 +724,9 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     },
     milestones: [{
       at: input.event.recordedAt,
+      ...(checkpointPublicationExpectedBy
+        ? { checkpointPublicationExpectedBy }
+        : {}),
       milestone: "terminal_non_reply_committed",
     }],
   });

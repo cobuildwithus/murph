@@ -3423,6 +3423,7 @@ describe("runHostedAssistantAutomationLane", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
+      idleCheckpointDelayMs: 180_000,
       executionContext: {
         hosted: {
           memberId: "member_123",
@@ -3446,6 +3447,7 @@ describe("runHostedAssistantAutomationLane", () => {
         event: {
           assistantInputIds: ["input_group_1", "input_group_2"],
           at: "2026-04-08T00:00:02.000Z",
+          checkpointPublicationExpectedBy: "2026-04-08T00:27:47.000Z",
           milestone: "terminal_non_reply_committed",
           runtimeAttemptId: "attempt_terminal_non_reply",
           source: "linq",

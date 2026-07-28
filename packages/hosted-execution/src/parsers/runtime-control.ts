@@ -374,6 +374,7 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
 const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS = new Set([
   "assistantInputIds",
   "at",
+  "checkpointPublicationExpectedBy",
   "milestone",
   "runtimeAttemptId",
   "source",
@@ -4611,6 +4612,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexOutputObservedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexTextObservedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "terminalNonReplyCommittedAtEpochMs", assistantLabel),
+      ...requireOptionalNonNegativeInteger(assistant, "checkpointPublicationExpectedByEpochMs", assistantLabel),
     };
   }
 
@@ -4688,11 +4690,31 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
     HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_MILESTONE_KEYS,
     "Hosted runtime latency trace assistant_milestone event",
   );
+  const milestone = parseHostedRuntimeAssistantMilestone(record.milestone);
+  const checkpointPublicationExpectedBy =
+    record.checkpointPublicationExpectedBy === undefined
+      ? undefined
+      : readNullableString(
+          record.checkpointPublicationExpectedBy,
+          "Hosted runtime latency trace checkpointPublicationExpectedBy",
+        );
+  if (
+    checkpointPublicationExpectedBy !== undefined
+    && checkpointPublicationExpectedBy !== null
+    && milestone !== "terminal_non_reply_committed"
+  ) {
+    throw new TypeError(
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+    );
+  }
 
   return {
     assistantInputIds: parseHostedRuntimeLatencyTraceAssistantInputIds(record),
     at: requireString(record.at, "Hosted runtime latency trace at"),
-    milestone: parseHostedRuntimeAssistantMilestone(record.milestone),
+    ...(checkpointPublicationExpectedBy === undefined
+      ? {}
+      : { checkpointPublicationExpectedBy }),
+    milestone,
     ...(record.runtimeAttemptId === undefined
       ? {}
       : {

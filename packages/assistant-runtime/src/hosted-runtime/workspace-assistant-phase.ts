@@ -1723,6 +1723,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
+            idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
             now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,

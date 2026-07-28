@@ -18,7 +18,6 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 30_000;
 export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS = 10 * 60_000;
-export const HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS = 5 * 60_000;
 
 const HOSTED_RUNTIME_LATENCY_MONITOR_ID = "hosted-runtime-latency-monitor:v1";
 const HOSTED_RUNTIME_LATENCY_MONITOR_KIND = "hosted_runtime_latency_monitor";
@@ -56,6 +55,7 @@ type HostedRuntimeLatencySend = (input: {
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
+  checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
   terminalNonReplyCommittedAt: Date | null;
@@ -233,6 +233,8 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
+      checkpointPublicationExpectedBy:
+        readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.mailboxItem.consumedAt,
       deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
       terminalNonReplyCommittedAt:
@@ -258,6 +260,8 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 
   for (const row of input.rows) {
     const acceptedAtMs = row.acceptedAt.getTime();
+    const checkpointPublicationExpectedByMs =
+      row.checkpointPublicationExpectedBy?.getTime() ?? null;
     const deliveryAcceptedAtMs = row.deliveryAcceptedAt?.getTime() ?? null;
     const terminalNonReplyCommittedAtMs =
       row.terminalNonReplyCommittedAt?.getTime() ?? null;
@@ -290,13 +294,20 @@ export function summarizeHostedRuntimeLatencyRows(input: {
       ) {
         invalidChronologyCount += 1;
       } else if (
-        nowMs - terminalNonReplyCommittedAtMs
-        < HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs >= terminalNonReplyCommittedAtMs
+        && nowMs <= checkpointPublicationExpectedByMs
       ) {
-        // Suppression evidence is local until the idle-shutdown checkpoint
-        // stamps consumedAt. Treat its projection only as bounded grace so a
-        // crash before snapshot publication cannot hide restored pending work.
+        // The runtime refreshes this expectation whenever later dirty work
+        // restarts the idle checkpoint window. A crashed runtime stops
+        // refreshing it, so the row becomes unresolved after the last
+        // published expectation instead of being hidden indefinitely.
         continue;
+      } else if (
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs < terminalNonReplyCommittedAtMs
+      ) {
+        invalidChronologyCount += 1;
       }
     }
 
@@ -326,6 +337,27 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 }
 
 function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "terminalNonReplyCommittedAtEpochMs",
+  );
+}
+
+function readHostedRuntimeCheckpointPublicationExpectedBy(
+  value: unknown,
+): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "checkpointPublicationExpectedByEpochMs",
+  );
+}
+
+function readHostedRuntimeAssistantEpochDate(
+  value: unknown,
+  leaf:
+    | "checkpointPublicationExpectedByEpochMs"
+    | "terminalNonReplyCommittedAtEpochMs",
+): Date | null {
   if (!isHostedRuntimeLatencyPhaseRecord(value)) {
     return null;
   }
@@ -333,7 +365,7 @@ function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | nu
   if (!isHostedRuntimeLatencyPhaseRecord(assistant)) {
     return null;
   }
-  const epochMs = assistant.terminalNonReplyCommittedAtEpochMs;
+  const epochMs = assistant[leaf];
   if (
     typeof epochMs !== "number"
     || !Number.isSafeInteger(epochMs)

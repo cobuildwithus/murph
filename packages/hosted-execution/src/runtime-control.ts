@@ -1630,6 +1630,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runtime_phase_started",
   "workspace_restore_done",
   "mailbox_import_done",
+  "checkpoint_publication_expected_by",
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
@@ -1754,6 +1755,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
+    checkpointPublicationExpectedByEpochMs?: number;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1882,6 +1884,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
+    "checkpointPublicationExpectedByEpochMs",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -2183,6 +2186,7 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
 export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
   assistantInputIds: string[];
   at: string;
+  checkpointPublicationExpectedBy?: string | null;
   milestone: HostedRuntimeAssistantMilestone;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;
