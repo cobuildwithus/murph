@@ -75,6 +75,9 @@ Updated: 2026-07-27
 - After preliminary remediation, focused engine tests passed 104/104, focused
   runtime/workspace tests passed 241/241, and both owning package typechecks
   passed.
+- Parent final review aligned the queued duplicate-tool fallback with the same
+  trusted-turn-context provenance marker; its focused test passed 7/7 and the
+  engine typecheck remained green.
 - The exact-head `pnpm test:diff <changed paths>` passed repository guards,
   affected and reverse-dependent typechecks, and all 6,028 affected package
   tests. Per the ten-minute local-admission rule, it was stopped while waiting

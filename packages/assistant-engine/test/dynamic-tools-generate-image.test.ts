@@ -302,7 +302,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(queuedConversationFollowup.rpcResult).toMatchObject({
       contentItems: [{
         text: expect.stringContaining(
-          'otherwise say the trusted result is queued',
+          'if trusted turn context includes `Trusted hosted image completion',
         ),
       }],
     })
