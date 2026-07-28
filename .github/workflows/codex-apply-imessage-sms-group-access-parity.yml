@@ -31,7 +31,8 @@ jobs:
             .codex/imessage-sms-group-access-parity/00.part \
             .codex/imessage-sms-group-access-parity/01.part \
             .codex/imessage-sms-group-access-parity/02.part \
-            .codex/imessage-sms-group-access-parity/03.part \
+            .codex/imessage-sms-group-access-parity/03a.part \
+            .codex/imessage-sms-group-access-parity/03b.part \
             .codex/imessage-sms-group-access-parity/04.part \
             .codex/imessage-sms-group-access-parity/05.part \
             | base64 --decode \
