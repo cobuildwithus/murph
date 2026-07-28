@@ -585,7 +585,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMailboxItem.findMany).toHaveBeenNthCalledWith(1, {
       select: expect.any(Object),
       where: {
-        createdAt: { gte: expect.any(Date) },
+        createdAt: { gt: expect.any(Date) },
         id: { in: answeredMailboxItemIds },
         OR: [
           { expiresAt: null },
@@ -598,7 +598,7 @@ describe("hosted Linq egress authority", () => {
       select: expect.any(Object),
       take: 100,
       where: {
-        createdAt: { gte: expect.any(Date) },
+        createdAt: { gt: expect.any(Date) },
         kind: "conversation.message",
         lane: "conversation",
         OR: [
@@ -615,7 +615,7 @@ describe("hosted Linq egress authority", () => {
       },
       where: {
         mailboxItem: {
-          createdAt: { gte: expect.any(Date) },
+          createdAt: { gt: expect.any(Date) },
           OR: [
             { expiresAt: null },
             { expiresAt: { gt: expect.any(Date) } },
@@ -638,8 +638,8 @@ describe("hosted Linq egress authority", () => {
     const answeredQuery = prisma.hostedMailboxItem.findMany.mock.calls[0][0];
     const recentQuery = prisma.hostedMailboxItem.findMany.mock.calls[1][0];
     const payloadQuery = prisma.hostedMailboxPayload.findMany.mock.calls[0][0];
-    expect(answeredQuery.where.createdAt.gte).toEqual(
-      recentQuery.where.createdAt.gte,
+    expect(answeredQuery.where.createdAt.gt).toEqual(
+      recentQuery.where.createdAt.gt,
     );
     expect(answeredQuery.where.OR[1].expiresAt.gt).toBe(
       recentQuery.where.OR[1].expiresAt.gt,
@@ -648,10 +648,13 @@ describe("hosted Linq egress authority", () => {
       createdAt: answeredQuery.where.createdAt,
       OR: answeredQuery.where.OR,
     });
+    // Pinned independently of the source constant: this scan must never reach
+    // past the mailbox retention window, or it would look for rows the
+    // retention sweep has already deleted.
     expect(
       answeredQuery.where.OR[1].expiresAt.gt.getTime()
-      - answeredQuery.where.createdAt.gte.getTime(),
-    ).toBe(30 * 24 * 60 * 60 * 1000);
+      - answeredQuery.where.createdAt.gt.getTime(),
+    ).toBe(14 * 24 * 60 * 60 * 1000);
   });
 
   it("keeps malformed refs outside payload reads and foreign rows outside decrypts", async () => {

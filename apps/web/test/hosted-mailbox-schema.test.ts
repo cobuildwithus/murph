@@ -36,6 +36,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const messageRetentionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725190000_hosted_mailbox_content_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -105,5 +112,32 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       'ON "hosted_mailbox_item"("user_id", "assistant_input_lookup_key")',
     );
     expect(assistantInputLookupMigrationSql).not.toMatch(/UPDATE|NOT NULL/iu);
+    expect(schema).toContain(
+      'contentRetiredAt        DateTime?             @map("content_retired_at")',
+    );
+    expect(schema).toContain(
+      'retentionDisposition    String?               @map("retention_disposition")',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      'ADD COLUMN "content_retired_at" TIMESTAMP(3)',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      'ADD COLUMN "retention_disposition" TEXT',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      '"inbox_media_retention_wake_at"',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      'SET\n  "inbox_media_retention_wake_at" = CURRENT_TIMESTAMP',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      '"inbox_media_retention_signal_attempted_at" = NULL',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      '"version" = "version" + 1',
+    );
+    expect(messageRetentionMigrationSql).toContain(
+      'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
+    );
   });
 });
