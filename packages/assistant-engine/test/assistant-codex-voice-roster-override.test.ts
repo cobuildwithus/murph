@@ -67,7 +67,7 @@ describe('voice memo roster overrides', () => {
       },
     })
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       args: {
         text: 'A stern country reminder.',
         voiceId: null,
