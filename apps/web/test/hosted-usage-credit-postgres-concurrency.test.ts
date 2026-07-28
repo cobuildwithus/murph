@@ -7,7 +7,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import pg from "pg";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   grantHostedUsageCreditForPurchaseTx,
@@ -35,6 +35,9 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  getHostedAiUsageMonthlyAllowanceUsdMicros,
+} from "@/src/lib/hosted-onboarding/billing-plans";
+import {
   upsertHostedMemberHomeLinqBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
@@ -54,6 +57,20 @@ const runPostgresConcurrencyProof =
 const detachedDirectProofMigrationSql = readFileSync(
   new URL(
     "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const referralCreditEntryConstraintMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260728030000_hosted_usage_referral_credit_entry_constraints/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const purchaseGrantResynchronizationContractMigrationSql = readFileSync(
+  new URL(
+    "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
     import.meta.url,
   ),
   "utf8",
@@ -94,6 +111,10 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function stringifyWarningValue(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
 
 async function createUsageCreditFixture(input: {
@@ -247,6 +268,21 @@ async function waitForBlockedBackend(input: {
   throw new Error("Expected the PostgreSQL transaction to wait on a held lock.");
 }
 
+async function applyPurchaseGrantResynchronizationContractMigration(
+  client: pg.Client,
+): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(
+      purchaseGrantResynchronizationContractMigrationSql,
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 function isClearlyLocalPostgresUrl(value: string): boolean {
   let parsed: URL;
   try {
@@ -274,8 +310,370 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       await client.connect();
       try {
         await client.query(detachedDirectProofMigrationSql);
+        await client.query(referralCreditEntryConstraintMigrationSql);
       } finally {
         await client.end();
+      }
+    });
+
+    it("installs validated amount and source checks for every database enum kind", async () => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        const enumResult = await client.query<{ enumLabel: string }>(`
+          SELECT enum_value.enumlabel AS "enumLabel"
+          FROM pg_type AS enum_type
+          INNER JOIN pg_enum AS enum_value
+            ON enum_value.enumtypid = enum_type.oid
+          WHERE enum_type.typname = 'HostedUsageCreditEntryKind'
+          ORDER BY enum_value.enumsortorder
+        `);
+        const constraintResult = await client.query<{
+          convalidated: boolean;
+          definition: string;
+          name: string;
+        }>(`
+          SELECT
+            constraint_row.conname AS "name",
+            constraint_row.convalidated AS "convalidated",
+            pg_get_constraintdef(constraint_row.oid, true) AS "definition"
+          FROM pg_constraint AS constraint_row
+          WHERE constraint_row.conrelid = 'hosted_usage_credit_entry'::regclass
+            AND constraint_row.conname IN (
+              'hosted_usage_credit_entry_amount_direction_valid',
+              'hosted_usage_credit_entry_source_shape_valid'
+            )
+          ORDER BY constraint_row.conname
+        `);
+        const constraintsByName = new Map(
+          constraintResult.rows.map((row) => [row.name, row]),
+        );
+        const enumLabels = enumResult.rows.map(({ enumLabel }) => enumLabel);
+
+        expect(new Set(enumLabels)).toEqual(new Set([
+          "purchase_grant",
+          "referral_grant",
+          "usage_debit",
+          "refund_adjustment",
+          "dispute_adjustment",
+        ]));
+        expect([...constraintsByName.keys()]).toEqual([
+          "hosted_usage_credit_entry_amount_direction_valid",
+          "hosted_usage_credit_entry_source_shape_valid",
+        ]);
+        for (const constraint of constraintsByName.values()) {
+          expect(constraint.convalidated).toBe(true);
+          for (const enumLabel of enumLabels) {
+            expect(constraint.definition).toContain(`'${enumLabel}'`);
+          }
+        }
+      } finally {
+        await client.end();
+      }
+    });
+
+    it("resynchronizes purchase grant projections without touching referral grants and is replay-safe", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_credit_resync_${fixtureId}`;
+      const missingPurchaseId = `hucp_resync_missing_${fixtureId}`;
+      const stalePurchaseId = `hucp_resync_stale_${fixtureId}`;
+      const missingEntryId = `huce_resync_missing_${fixtureId}`;
+      const staleEntryId = `huce_resync_stale_${fixtureId}`;
+      const referralId = `hur_resync_${fixtureId}`;
+      const referralEntryId = `huce_resync_referral_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const targetBoundAt = new Date(now.getTime() - 3 * 60_000);
+      const qualifiedAt = new Date(now.getTime() - 2 * 60_000);
+      const rewardedAt = new Date(now.getTime() - 60_000);
+      let referralGrantBefore: {
+        createdAt: Date;
+        remainingUsdMicros: bigint;
+        updatedAt: Date;
+      } | null = null;
+
+      try {
+        await observer.hostedMember.create({
+          data: { billingStatus: "active", id: memberId },
+        });
+        await observer.hostedUsageCreditPurchase.createMany({
+          data: [
+            {
+              beneficiaryMemberId: memberId,
+              cashAmountMinor: 500,
+              cashCurrency: "usd",
+              checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+              checkoutExpiresAt: new Date(now.getTime() + 60 * 60_000),
+              checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+              checkoutSuccessUrl: "https://example.test/settings?usage=return",
+              clientRequestKey: `resync-missing:${fixtureId}`,
+              grantUsdMicros: 5_000_000n,
+              id: missingPurchaseId,
+              offerCode: "usage_5_usd",
+              payerMemberId: memberId,
+              remainingCreditUsdMicros: 4_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              stripeCustomerIdEncrypted:
+                `encrypted-customer-missing:${fixtureId}`,
+              stripeCustomerLookupKey: `customer-missing:${fixtureId}`,
+              stripeLiveMode: false,
+              stripePriceIdEncrypted: `encrypted-price-missing:${fixtureId}`,
+              stripePriceLookupKey: `price-missing:${fixtureId}`,
+            },
+            {
+              beneficiaryMemberId: memberId,
+              cashAmountMinor: 500,
+              cashCurrency: "usd",
+              checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+              checkoutExpiresAt: new Date(now.getTime() + 60 * 60_000),
+              checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+              checkoutSuccessUrl: "https://example.test/settings?usage=return",
+              clientRequestKey: `resync-stale:${fixtureId}`,
+              grantUsdMicros: 5_000_000n,
+              id: stalePurchaseId,
+              offerCode: "usage_5_usd",
+              payerMemberId: memberId,
+              remainingCreditUsdMicros: 3_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              stripeCustomerIdEncrypted:
+                `encrypted-customer-stale:${fixtureId}`,
+              stripeCustomerLookupKey: `customer-stale:${fixtureId}`,
+              stripeLiveMode: false,
+              stripePriceIdEncrypted: `encrypted-price-stale:${fixtureId}`,
+              stripePriceLookupKey: `price-stale:${fixtureId}`,
+            },
+          ],
+        });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt: new Date(now.getTime() - 4 * 60_000),
+            beneficiaryMemberId: memberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            id: referralId,
+            policyCode: "new_person_activation_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            qualifiedAt,
+            referrerMemberId: memberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardedAt,
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "rewarded",
+            targetBoundAt,
+          },
+        });
+        await observer.hostedUsageCreditEntry.createMany({
+          data: [
+            {
+              amountUsdMicros: 5_000_000n,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 1n,
+              effectiveAt: now,
+              id: missingEntryId,
+              kind: "purchase_grant",
+              purchaseId: missingPurchaseId,
+              semanticSourceKey: `purchase:${missingPurchaseId}`,
+            },
+            {
+              amountUsdMicros: 5_000_000n,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 2n,
+              effectiveAt: now,
+              id: staleEntryId,
+              kind: "purchase_grant",
+              purchaseId: stalePurchaseId,
+              semanticSourceKey: `purchase:${stalePurchaseId}`,
+            },
+            {
+              amountUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 3n,
+              effectiveAt: now,
+              id: referralEntryId,
+              kind: "referral_grant",
+              referralId,
+              semanticSourceKey: `referral:${referralId}`,
+            },
+          ],
+        });
+        await observer.hostedUsageCreditGrant.createMany({
+          data: [
+            {
+              entryId: staleEntryId,
+              remainingUsdMicros: 1_000_000n,
+            },
+            {
+              entryId: referralEntryId,
+              remainingUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            },
+          ],
+        });
+        referralGrantBefore =
+          await observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              createdAt: true,
+              remainingUsdMicros: true,
+              updatedAt: true,
+            },
+            where: { entryId: referralEntryId },
+          });
+
+        const client = new pg.Client({ connectionString: databaseUrl });
+        await client.connect();
+        try {
+          await applyPurchaseGrantResynchronizationContractMigration(client);
+          await applyPurchaseGrantResynchronizationContractMigration(client);
+        } finally {
+          await client.end();
+        }
+
+        await expect(observer.hostedUsageCreditGrant.findMany({
+          orderBy: { entryId: "asc" },
+          select: {
+            entryId: true,
+            remainingUsdMicros: true,
+          },
+          where: {
+            entryId: {
+              in: [missingEntryId, staleEntryId, referralEntryId],
+            },
+          },
+        })).resolves.toEqual([
+          {
+            entryId: missingEntryId,
+            remainingUsdMicros: 4_000_000n,
+          },
+          {
+            entryId: referralEntryId,
+            remainingUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+          },
+          {
+            entryId: staleEntryId,
+            remainingUsdMicros: 3_000_000n,
+          },
+        ]);
+        await expect(
+          observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              createdAt: true,
+              remainingUsdMicros: true,
+              updatedAt: true,
+            },
+            where: { entryId: referralEntryId },
+          }),
+        ).resolves.toEqual(referralGrantBefore);
+      } finally {
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: {
+            entryId: { in: [missingEntryId, staleEntryId, referralEntryId] },
+          },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: {
+            id: { in: [missingEntryId, staleEntryId, referralEntryId] },
+          },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: referralId },
+        });
+        await observer.hostedUsageCreditPurchase.deleteMany({
+          where: { id: { in: [missingPurchaseId, stalePurchaseId] } },
+        });
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await observer.$disconnect();
+      }
+    });
+
+    it("waits for an in-flight debit before resynchronizing purchase grant projections", async () => {
+      const fixture = await createUsageCreditFixture();
+      const paidAt = new Date("2026-07-16T12:12:00.000Z");
+      const debitApplied = createDeferred();
+      const releaseDebit = createDeferred();
+      const resyncClient = new pg.Client({ connectionString: databaseUrl });
+      let debitTransaction: Promise<Awaited<ReturnType<
+        typeof settleHostedUsageCreditForUsageTx
+      >>> | null = null;
+      let resync: Promise<void> | null = null;
+
+      try {
+        await fixture.firstClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions
+        );
+        debitTransaction = fixture.secondClient.$transaction(async (tx) => {
+          const result = await settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T12:13:00.000Z"),
+            sourceUsageId: `usage_resync_race_${randomUUID()}`,
+            tx,
+          });
+          debitApplied.resolve();
+          await releaseDebit.promise;
+          return result;
+        }, transactionOptions);
+        await Promise.race([debitApplied.promise, debitTransaction]);
+
+        await resyncClient.connect();
+        const pidResult = await resyncClient.query<{ pid: number }>(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        const resyncPid = pidResult.rows[0]?.pid;
+        if (typeof resyncPid !== "number") {
+          throw new Error("Expected a contract-migration PostgreSQL backend pid.");
+        }
+        resync =
+          applyPurchaseGrantResynchronizationContractMigration(resyncClient);
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: resyncPid,
+        });
+
+        releaseDebit.resolve();
+        await expect(debitTransaction).resolves.toMatchObject({
+          debitedUsdMicros: 1_000_000n,
+        });
+        await expect(resync).resolves.toBeUndefined();
+
+        await expect(Promise.all([
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: { remainingCreditUsdMicros: true },
+            where: { id: fixture.purchaseId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findFirstOrThrow({
+            select: { remainingUsdMicros: true },
+            where: {
+              entry: {
+                kind: "purchase_grant",
+                purchaseId: fixture.purchaseId,
+              },
+            },
+          }),
+          fixture.observer.hostedUsageCreditEntry.count({
+            where: {
+              kind: "usage_debit",
+              purchaseId: fixture.purchaseId,
+            },
+          }),
+        ])).resolves.toEqual([
+          { remainingCreditUsdMicros: 4_000_000n },
+          { remainingUsdMicros: 4_000_000n },
+          1,
+        ]);
+      } finally {
+        releaseDebit.resolve();
+        await Promise.allSettled([
+          ...(debitTransaction ? [debitTransaction] : []),
+          ...(resync ? [resync] : []),
+        ]);
+        await resyncClient.end().catch(() => undefined);
+        await cleanupUsageCreditFixture(fixture);
       }
     });
 
@@ -949,6 +1347,173 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: { in: [referrerMemberId, targetContainerMemberId] } },
         });
         await observer.$disconnect();
+      }
+    });
+
+    it("completes the direct-personal referral read-arm-read-cancel flow on one PostgreSQL pool connection", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_referral_direct_${fixtureId}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
+      const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
+      const sourceConversation = {
+        channel: "telegram" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: true,
+      };
+      const processWarningSpy = vi.spyOn(process, "emitWarning");
+      const consoleWarningSpy = vi.spyOn(console, "warn");
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingRef: {
+              create: {
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: "active",
+            hostedAiUsagePeriods: {
+              create: {
+                billingPlanCode: "launch_monthly",
+                limitUsdMicros:
+                  getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"),
+                periodEnd,
+                periodStart,
+                spentUsdMicros: 0n,
+              },
+            },
+            id: memberId,
+          },
+        });
+
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "read_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "read",
+            referral: {
+              active: null,
+              availablePolicies: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "new_person_activation_v1",
+                }),
+              ]),
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: {
+            action: "arm_usage_referral",
+            policyCode: "new_person_activation_v1",
+            sourceConversation,
+          },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "armed",
+            referral: {
+              active: {
+                destinationKind: "personal",
+                policyCode: "new_person_activation_v1",
+                state: "armed",
+              },
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "read_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "read",
+            referral: {
+              active: {
+                destinationKind: "personal",
+                policyCode: "new_person_activation_v1",
+                state: "armed",
+              },
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "cancel_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "canceled",
+            referral: { active: null },
+            status: "ok",
+          },
+        });
+
+        await expect(prisma.hostedUsageReferral.findMany({
+          select: {
+            beneficiaryMemberId: true,
+            referrerMemberId: true,
+            sourceConversationJson: true,
+            status: true,
+            terminalAt: true,
+            terminalReason: true,
+          },
+          where: { beneficiaryMemberId: memberId },
+        })).resolves.toEqual([{
+          beneficiaryMemberId: memberId,
+          referrerMemberId: memberId,
+          sourceConversationJson: null,
+          status: "canceled",
+          terminalAt: expect.any(Date),
+          terminalReason: "referrer_canceled",
+        }]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const concurrentQueryWarnings = [
+          ...processWarningSpy.mock.calls.map((call) =>
+            stringifyWarningValue(call[0])
+          ),
+          ...consoleWarningSpy.mock.calls.map((call) =>
+            call.map(stringifyWarningValue).join(" ")
+          ),
+        ].filter((message) =>
+          message.includes(
+            "client.query() when the client is already executing a query",
+          )
+        );
+        const databasePoolPressureWarnings =
+          consoleWarningSpy.mock.calls.filter((call) =>
+            call[0] === "Hosted web database pool pressure."
+          );
+        expect(concurrentQueryWarnings).toEqual([]);
+        for (const warning of databasePoolPressureWarnings) {
+          expect(warning[1]).toEqual(expect.objectContaining({
+            waitingRequests: 0,
+          }));
+        }
+      } finally {
+        consoleWarningSpy.mockRestore();
+        processWarningSpy.mockRestore();
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { beneficiaryMemberId: memberId },
+        });
+        await prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId } });
+        await prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
       }
     });
 
