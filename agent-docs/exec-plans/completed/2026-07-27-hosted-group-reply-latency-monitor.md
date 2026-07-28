@@ -1,6 +1,6 @@
 # Truthful hosted group reply latency outcomes
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -83,3 +83,4 @@ Updated: 2026-07-27
 - Direct scenario proof that committed silence receives bounded grace before
   delayed checkpointing, expired-unconsumed or invalid evidence reopens, durable
   consumption stays healthy, and stale replay cannot extend grace.
+Completed: 2026-07-27
