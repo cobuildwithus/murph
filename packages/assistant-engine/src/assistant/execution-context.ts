@@ -1,7 +1,7 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type {
-  AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
@@ -333,7 +333,7 @@ export interface AssistantHostedPrivateImageUrlPublisher {
 }
 
 export interface AssistantHostedImageGenerationResult {
-  media: AssistantResponseMedia | null
+  media: AssistantVaultImageResponseMedia | null
   runtimeIssue: AssistantRuntimeIssueInput | null
   savedImageRef: string | null
 }

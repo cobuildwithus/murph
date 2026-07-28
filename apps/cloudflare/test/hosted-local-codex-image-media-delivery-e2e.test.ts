@@ -179,7 +179,8 @@ describe("hosted local Codex image media delivery e2e", () => {
       ),
       generatedImageReplyText,
     ], {
-      matchInputContains: "hosted_image_result",
+      matchInputContains:
+        "Trusted hosted image completion (runtime-authored; authoritative):",
     });
     requireScenario().queueAssistantResponses([
       interveningConversationReplyText,
@@ -320,7 +321,8 @@ describe("hosted local Codex image media delivery e2e", () => {
         ),
         reuseReplyText,
       ], {
-        matchInputContains: "hosted_image_result",
+        matchInputContains:
+          "Trusted hosted image completion (runtime-authored; authoritative):",
       });
     } finally {
       await requireScenario().harness.releaseGeneratedImageProviderBarrierForTest(userId);
@@ -399,35 +401,41 @@ function readLatestSavedGeneratedImageRef(): string {
 }
 
 function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
-  const envelopes = [
+  const trustedCompletionContexts = [
     ...requestMatchText.matchAll(
-      /<hosted_image_result>(\{.*?\})<\/hosted_image_result>/gu,
+      /\n(\[\{"inputId":.*\}\])\nFor a ready result,/gu,
     ),
   ];
-  for (const match of envelopes.reverse()) {
+  for (const match of trustedCompletionContexts.reverse()) {
     const payload = match[1];
     if (!payload) {
       continue;
     }
     try {
       const parsed: unknown = JSON.parse(payload);
-      if (!isRecord(parsed) || !Array.isArray(parsed.media)) {
+      if (!Array.isArray(parsed)) {
         continue;
       }
-      if (
-        parsed.media.length === 1
-        && parsed.media.every((item) =>
-          isRecord(item)
-          && item.kind === "vault_image"
-          && typeof item.ref === "string"
-          && typeof item.sha256 === "string"
-        )
-      ) {
-        return parsed.media;
+      for (const completion of parsed) {
+        const result = isRecord(completion) ? completion.result : null;
+        if (
+          isRecord(result)
+          && result.status === "ready"
+          && Array.isArray(result.media)
+          && result.media.length === 1
+          && result.media.every((item) =>
+            isRecord(item)
+            && item.kind === "vault_image"
+            && typeof item.ref === "string"
+            && typeof item.sha256 === "string"
+          )
+        ) {
+          return result.media;
+        }
       }
     } catch {
-      // The raw JSON request contains an escaped copy before the decoded
-      // system-input string. Continue until the exact decoded envelope.
+      // The raw request body contains escaped copies before the decoded
+      // turn-context string. Continue until the normalized trusted context.
     }
   }
   throw new Error("Expected one trusted private generated-image descriptor.");

@@ -3146,9 +3146,10 @@ export async function executeMurphDynamicToolRequest(input: {
                 usageDraft: result.usageDraft,
               })
             }
+            const privateMedia = result.responseMedia?.[0] ?? null
             return {
-              media: result.rpcSuccess
-                ? result.responseMedia?.[0] ?? null
+              media: result.rpcSuccess && privateMedia?.kind === 'vault_image'
+                ? privateMedia
                 : null,
               runtimeIssue: null,
               savedImageRef: result.savedImageRef ?? null,
