@@ -102,32 +102,10 @@ describe('onboarding goal check-in automation', () => {
       slug: 'onboarding-goal-checkin',
       title: 'First health direction check-in',
     })
-    expect(seed?.instructions).toContain('This is a choice point, not a report card.')
-    expect(seed?.instructions).toContain(
-      'Canonical answered-onboarding authority has already been checked by the engine',
-    )
-    expect(seed?.instructions).toContain(
-      'bounded recent conversation and active-goal summary',
-    )
+    expect(seed?.instructions).toContain('engine-owned')
+    expect(seed?.instructions).toContain('immutable system policy')
     expect(seed?.instructions).not.toContain('vault-cli memory show')
     expect(seed?.instructions).not.toContain('vault-cli goal list')
-    expect(seed?.instructions).toContain('Do not seek or infer other health history')
-    expect(seed?.instructions).toContain(
-      'goals were unclear, not shared, explicitly left open, or the member chose an explore path',
-    )
-    expect(seed?.instructions).toContain(
-      'do not imply that they previously named a goal',
-    )
-    expect(seed?.instructions).toContain(
-      'Missing, stale, sparse, misclassified, or contradictory tracking is not evidence of failure.',
-    )
-    expect(seed?.instructions).toContain('exactly one easy question')
-    expect(seed?.instructions).toContain(
-      'Do not ask the member to produce a retrospective',
-    )
-    expect(seed?.instructions).toContain(
-      'Do not create, modify, complete, or archive goals',
-    )
     expect(seed?.instructions).not.toContain('you are making a lot of progress')
 
     expect(

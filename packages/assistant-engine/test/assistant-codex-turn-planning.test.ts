@@ -368,6 +368,17 @@ describe('assistant Codex turn planning', () => {
       ])
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).toContain('No active canonical goal is available.')
+      expect(plan.systemPrompt).toContain('This is a choice point, not a report card.')
+      expect(plan.systemPrompt).toContain(
+        'goals were unclear, unshared, deliberately open, or exploratory',
+      )
+      expect(plan.systemPrompt).toContain(
+        'do not imply that the member named a goal',
+      )
+      expect(plan.systemPrompt).toContain('exactly one easy question')
+      expect(plan.systemPrompt).toContain(
+        'Goals, plans, experiments, regimens, memories, and automations can change only in the normal conversation',
+      )
       expect(plan.systemPrompt).not.toContain('READ_ONLY_CLI_CONTRACT')
       expect(plan.systemPrompt).not.toContain('vault-cli memory show')
       expect(plan.systemPrompt).not.toContain('goal save')

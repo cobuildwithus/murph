@@ -133,7 +133,14 @@ Updated: 2026-07-28
   mutation-capability concern is resolved and found one material quiet-skip
   issue. The onboarding profile now starts no typing indicator, and focused
   coverage proves a skipped turn produces neither typing nor delivery. The
-  follow-up product verdict is pending.
+  follow-up product verdict returned no findings.
+- Completed: parent prompt review found that editable automation task text still
+  carried the detailed behavioral contract while the system layer correctly
+  treated that text as untrusted. The immutable dedicated system prompt now owns
+  the goal, skip rules, evidence branches, unclear/unshared/open/explore path,
+  message shape, and no-mutation boundary; the persisted task is a short
+  non-authoritative description. Focused planning and seed tests prove that
+  ownership split. The final product follow-up returned no findings.
 - The scoped canonical `test:diff` passed all repository guards, affected
   typechecks, 2,791 Assistant Engine tests, 128 Assistant CLI tests, 1,937
   Assistant Runtime tests, and 40 assistantd tests. Its unrelated CLI
