@@ -14868,6 +14868,62 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("preserves the post-scan cron wake through due provider cleanup", async () => {
+    const now = "2026-04-27T00:10:00.000Z";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: now,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 3,
+      enabledJobs: 7,
+      nextRunAt: now,
+      runningJobs: 0,
+      totalJobs: 7,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => now,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: now,
+      progressed: true,
+    }));
+    expect(
+      withoutAssistantTurnTimingLogs(logRequests)
+        .find((request) =>
+          request.entries[0]?.eventCode === "assistant.pass_finished"
+        )
+        ?.entries[0]?.redactedJson,
+    ).toEqual(expect.objectContaining({
+      nextWakeAtPresent: true,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledTimes(1);
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: now,
+      nextWakeReason: "assistant",
+    }));
+  });
+
   it("does not preserve a consumed provider cleanup wake after background delivery drains cleanup", async () => {
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
     const deliveryEffect = createDeliveryEffect();
