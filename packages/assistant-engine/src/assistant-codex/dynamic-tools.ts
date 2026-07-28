@@ -775,12 +775,6 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Required only for action="ask" or action="ask_member". Ask one self-contained natural-language question. ask may use a joined group\'s read-only context; ask_member produces a proposed answer whose outgoing information is checked against the selected disclosure grant before sharing.',
       },
-      messageRef: {
-        type: 'string',
-        pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
-        description:
-          'Required only for action="ask_current_sender". Select the exact accepted inbound group message whose authenticated author asked Murph to share their own information now. The host reopens that stored message and supplies all identity, route, question, and one-time disclosure authority.',
-      },
       permissionText: {
         type: 'string',
         minLength: 1,
@@ -1422,7 +1416,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask_current_sender'),
-      messageRef: z.string().regex(
+      message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
     })
@@ -5481,13 +5475,21 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask'
-    || parsed.data.action === 'ask_current_sender'
     || parsed.data.action === 'ask_member'
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'
     || parsed.data.action === 'arm_usage_referral'
   ) {
     return { ok: true, request: parsed.data }
+  }
+  if (parsed.data.action === 'ask_current_sender') {
+    return {
+      ok: true,
+      request: {
+        action: 'ask_current_sender',
+        messageRef: parsed.data.message_ref,
+      },
+    }
   }
   if (parsed.data.action === 'read_shared') {
     return {

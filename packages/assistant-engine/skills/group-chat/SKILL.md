@@ -299,7 +299,7 @@ claim that a reaction offer was posted in Telegram. Outside Telegram, use
 When an authenticated group participant explicitly asks Murph in one current
 message to tell the room something about that participant's own private data,
 call `murph.group action="ask_current_sender"` with that exact accepted
-message's `messageRef`. Do not paraphrase the question or select a different
+message's `message_ref`. Do not paraphrase the question or select a different
 message: Web reopens the stored input, proves its author and route, and sends
 that exact text to the author's personal Murph under a one-time, self-only
 outgoing disclosure review. After `accepted`, do not invent or preview an

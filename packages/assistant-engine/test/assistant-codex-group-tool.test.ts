@@ -358,6 +358,38 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("uses one message_ref model contract for exact-message group actions", () => {
+    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+      .not.toHaveProperty("messageRef");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.message_ref)
+      .toMatchObject({ pattern: "^ain_[0-9a-f]{32}$" });
+
+    for (const action of [
+      "ask_current_sender",
+      "revoke_own_email_share",
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+      }))).toEqual({
+        kind: "group",
+        request: {
+          action,
+          messageRef: FRESH_ASSISTANT_INPUT_ID,
+        },
+      });
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      }))).toMatchObject({ kind: "invalid-group-arguments" });
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        memberId: "model-supplied",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+      }))).toMatchObject({ kind: "invalid-group-arguments" });
+    }
+  });
+
   it("authorizes email-share revocation from one exact accepted group message", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
