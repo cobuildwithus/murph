@@ -19,12 +19,18 @@ const mocks = vi.hoisted(() => ({
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
-  requireHostedLinqMessageReceivedEvent: mocks.requireHostedLinqMessageReceivedEvent,
-  resolveHostedLinqRecipientPhoneNumber: mocks.resolveHostedLinqRecipientPhoneNumber,
-  sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
-  verifyAndParseHostedLinqWebhookRequest: mocks.verifyAndParseHostedLinqWebhookRequest,
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq")
+  >();
+  return {
+    ...actual,
+    requireHostedLinqMessageReceivedEvent: mocks.requireHostedLinqMessageReceivedEvent,
+    resolveHostedLinqRecipientPhoneNumber: mocks.resolveHostedLinqRecipientPhoneNumber,
+    sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
+    verifyAndParseHostedLinqWebhookRequest: mocks.verifyAndParseHostedLinqWebhookRequest,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,

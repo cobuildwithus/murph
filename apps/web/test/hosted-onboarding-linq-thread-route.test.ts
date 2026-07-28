@@ -966,6 +966,9 @@ function createStatefulThreadRoutePrisma() {
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+    hostedLinqFirstContactAdmissionDecision: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainer,
