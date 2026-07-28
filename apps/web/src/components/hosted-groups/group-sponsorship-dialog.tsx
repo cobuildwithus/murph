@@ -88,8 +88,8 @@ function GroupSponsorshipDialog({
           : { clientRequestKey, offerCode };
       }}
       renderPurchaseDetails={
-        recoveringFrozenPurchase && frozenSponsorship
-          ? <FrozenSponsorshipDetails sponsorship={frozenSponsorship} />
+        recoveringFrozenPurchase
+          ? <FrozenSponsorshipDetails sponsorship={frozenSponsorship ?? null} />
           : null
       }
       renderSelectionDetails={({ disabled, selectedOffer }) => {
@@ -176,36 +176,41 @@ function GroupSponsorshipDialog({
 function FrozenSponsorshipDetails({
   sponsorship,
 }: {
-  sponsorship: FrozenGroupSponsorship;
+  sponsorship: FrozenGroupSponsorship | null;
 }) {
-  const details = [
-    ["Sponsor name", sponsorship.publicAlias],
-    ["Note", sponsorship.sponsorMessage],
-    ["Running bit", sponsorship.runningBitRequest],
-  ].filter((entry): entry is [string, string] => entry[1] !== null);
-  if (details.length === 0) {
-    return null;
-  }
+  const details = sponsorship
+    ? [
+        ["Sponsor name", sponsorship.publicAlias],
+        ["Note", sponsorship.sponsorMessage],
+        ["Running bit", sponsorship.runningBitRequest],
+      ].filter((entry): entry is [string, string] => entry[1] !== null)
+    : [];
   return (
     <div className="rounded-2xl border border-border bg-muted/30 p-5">
       <p className="text-sm font-medium text-foreground">
-        Your original sponsor details are still attached
+        {details.length > 0
+          ? "Your original sponsor details are still attached"
+          : "No sponsor details were added"}
       </p>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        Cancel this payment before changing them.
+        {details.length > 0
+          ? "Cancel this payment before changing them."
+          : "No sponsor name, note, or running bit is attached. Cancel this payment before adding any."}
       </p>
-      <dl className="mt-3 space-y-2">
-        {details.map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {label}
-            </dt>
-            <dd className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      {details.length > 0 ? (
+        <dl className="mt-3 space-y-2">
+          {details.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {label}
+              </dt>
+              <dd className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
     </div>
   );
 }

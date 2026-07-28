@@ -64,7 +64,6 @@ describe("hosted group sponsorship store", () => {
       creatorMemberId: "member_sponsor",
       offerCode: "usage_10_usd",
       purchaseId: "purchase_123",
-      requestedDraft: draft,
       tx: harness.prisma as never,
     });
 
@@ -146,11 +145,6 @@ describe("hosted group sponsorship store", () => {
       creatorMemberId: "member_sponsor",
       offerCode: "usage_5_usd",
       purchaseId: "purchase_5",
-      requestedDraft: {
-        publicAlias: null,
-        runningBitRequest: "Make me CFO.",
-        sponsorMessage: null,
-      },
       tx: unauthorized.prisma as never,
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_SPONSORSHIP_BIT_NOT_AVAILABLE",

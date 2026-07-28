@@ -1532,6 +1532,18 @@ describe("createHostedUsageCreditCheckout", () => {
       runningBitRequestEncrypted: null,
       sponsorMessageEncrypted: null,
     });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "request_key_unauthorized_recovery",
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      recovered: true,
+      status: "checkout_open",
+    });
   });
 
   it("persists the purchase ambiguity fence before one-time Checkout creation", async () => {

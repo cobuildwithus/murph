@@ -129,7 +129,6 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
   creatorMemberId: string;
   offerCode: string;
   purchaseId: string;
-  requestedDraft: HostedGroupSponsorshipDraft | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   if (!isHostedGroupSponsorshipOfferCode(input.offerCode)) {
@@ -141,7 +140,7 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
   }
   const policy = getHostedGroupSponsorshipExperiencePolicy(input.offerCode);
   if (
-    input.requestedDraft?.runningBitRequest &&
+    input.authorizedDraft?.runningBitRequest &&
     policy.runningBitDurationMs === null
   ) {
     throw hostedOnboardingError({
@@ -177,7 +176,7 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
     data: {
       beneficiaryMemberId: input.beneficiaryMemberId,
       configurationDigest: digestHostedGroupSponsorshipDraft(
-        input.requestedDraft,
+        input.authorizedDraft,
       ),
       creatorMemberId: input.creatorMemberId,
       publicAliasEncrypted:

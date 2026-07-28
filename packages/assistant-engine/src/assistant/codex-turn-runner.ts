@@ -568,7 +568,7 @@ async function executeAssistantCodexAttempt(input: {
         ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
-        providerFetch: nativeCapabilitiesRestrictedTurn
+        providerFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,

@@ -578,7 +578,6 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
-
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
       supportsReasoningEffort: true,
@@ -716,6 +715,9 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
+    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
@@ -734,7 +736,7 @@ describe('Codex model catalog', () => {
           generatedImageUploaderRequired: true,
           materializeWorkspaceArtifacts: vi.fn(),
           memberId: 'member-creative-notification',
-          providerFetch: fetch,
+          providerFetch: hostedProviderFetch,
           publicInternetFetch: fetch,
           userEnvKeys: [],
         },
@@ -828,7 +830,7 @@ describe('Codex model catalog', () => {
       materializeWorkspaceArtifacts: null,
       processLifetime: 'one-shot',
       progressDelivery: null,
-      providerFetch: null,
+      providerFetch: hostedProviderFetch,
       publicInternetFetch: null,
       requireGeneratedImageUploader: false,
     })

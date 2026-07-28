@@ -111,7 +111,10 @@ If a payment is recovered, Web restores the authenticated payer's exact
 encrypted sponsor draft, shows that it is still attached, and resubmits it
 unchanged. Every active-purchase recovery compares the normalized draft,
 including omission, with the frozen digest before another Stripe operation.
-Canceling the active payment is the only way to replace that draft.
+The digest describes only the content that passed customization authorization
+and can therefore be restored or published. A failed encrypted-draft read does
+not enable payment retry, while an intentionally empty draft is shown
+explicitly. Canceling the active payment is the only way to replace that draft.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
 the card and saves it for a later group contribution.
@@ -145,7 +148,8 @@ fulfilled group purchase, Web idempotently:
    mailbox.
 
 The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, and uses the ordinary delivery path.
+output-only native-capability deny set, retains the bound provider transport
+required by that application-owned tool, and uses the ordinary delivery path.
 Its prompt tells the model to call that tool exactly once for one
 5–15-second original sponsor song.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the

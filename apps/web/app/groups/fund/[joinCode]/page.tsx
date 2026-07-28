@@ -141,7 +141,7 @@ export default async function GroupFundingPage({
           creatorMemberId: member.id,
           prisma,
           purchaseId: activePurchase.purchaseId,
-        }).catch(() => null)
+        })
       : undefined;
   const visibleActivePurchase = activePurchase
     ? activePurchaseMatchesTarget

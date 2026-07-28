@@ -127,11 +127,13 @@ Last verified: 2026-07-26
   committed group history in an isolated thread, projects only
   `generate_song`, and applies the output-only native-capability deny set:
   approval never, read-only sandbox, and no shell, browser, apps, plugins,
-  delegated agents, web search, provider/public fetch, artifact
-  materialization, generated-image upload, or progress delivery. Its prompt
-  asks for one short original song through exactly one `generate_song` call
-  and forbids separate contact, scheduling, state mutation, or disclosure of
-  private health, account, payment, or routing details. Running bits may reach only fresh
+  delegated agents, web search, public fetch, artifact materialization,
+  generated-image upload, or progress delivery. The bound provider transport
+  remains available only to the application-owned song tool so ElevenLabs and
+  Linq egress retain their runtime authority headers. Its prompt asks for one
+  short original song through exactly one `generate_song` call and forbids
+  separate contact, scheduling, state mutation, or disclosure of private
+  health, account, payment, or routing details. Running bits may reach only fresh
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.

@@ -684,6 +684,65 @@ test("shows and preserves exact frozen sponsor details when retrying payment", a
   }
 });
 
+test("shows and preserves an intentionally empty frozen sponsor draft", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(
+    (request: { method: string }) =>
+      request.method === "POST"
+        ? Promise.resolve({
+            purchaseId: "hucp_group_sponsorship_empty_recovery",
+            recovered: true,
+            status: "payment_pending",
+          })
+        : new Promise(() => undefined),
+  );
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_sponsorship_empty_recovery",
+        retryAllowed: true,
+        status: "reconciling",
+      },
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: false,
+      frozenSponsorship: null,
+      offers: [],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /No sponsor details were added/u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /No sponsor name, note, or running bit is attached/u,
+    );
+
+    await clickButton(rendered.container, rendered.window, "Retry payment");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_10_usd",
+        sponsorship: {},
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("names the exact Family beneficiary in the trigger and dialog", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"

@@ -238,6 +238,29 @@ describe("hosted group funding page", () => {
     );
   });
 
+  it("does not offer payment recovery when the frozen sponsor draft cannot be read", async () => {
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
+      offerCode: "usage_10_usd",
+      purchaseId: "hucp_groupactive12",
+      retryAllowed: true,
+      status: "reconciling",
+      target: {
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      },
+    });
+    mocks.readHostedGroupSponsorshipDraftForCreator.mockRejectedValueOnce(
+      new Error("secure box unavailable"),
+    );
+
+    await expect(GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    })).rejects.toThrow("secure box unavailable");
+
+    expect(mocks.HostedUsageTopUpDialog).not.toHaveBeenCalled();
+  });
+
   it("ignores a checkout return belonging to another funding target", async () => {
     mocks.readHostedUsageCreditPurchaseStatus.mockRejectedValueOnce(
       new Error("purchase target mismatch"),

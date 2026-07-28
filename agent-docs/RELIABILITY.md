@@ -185,6 +185,10 @@ Last verified: 2026-07-27
   deduplication. Running bits need no timer or cleanup job: Web reads
   only fulfilled rows whose `expiresAt` is still in the future, and the
   Assistant rechecks expiry before prompt construction.
+- Group payment recovery compares and resubmits the effective authorized
+  sponsor draft. Its digest never represents customization that authorization
+  discarded. An unreadable encrypted draft fails closed before the UI can offer
+  a retry, while an intentionally empty draft remains visible and replayable.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or

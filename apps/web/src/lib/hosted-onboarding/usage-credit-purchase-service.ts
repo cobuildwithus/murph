@@ -614,7 +614,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         creatorMemberId: target.payerMemberId,
         offerCode: offer.code,
         purchaseId,
-        requestedDraft: input.groupSponsorship ?? null,
         tx,
       });
     }
