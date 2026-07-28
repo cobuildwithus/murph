@@ -1345,7 +1345,11 @@ owning service primitive rather than hand-writing persisted runtime rows. Linq
 group-thread containers are no longer operator-provisioned: the Linq webhook
 planner auto-provisions the thread-container route through
 `ensureHostedThreadContainerRouteTx` when an attested group message arrives from
-an active member texting their own home line.
+an active member through a configured, enabled managed Linq line whose health
+is `healthy` or `unknown`. The webhook recipient only identifies the candidate
+line; the existing `HostedLinqLine` projection grants new-route authority.
+Established thread routes remain authoritative independently of current
+line-pool eligibility.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After

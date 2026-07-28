@@ -63,7 +63,7 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('gives collective human social bids first refusal without muting open requests', async () => {
+  it('gives human-source social questions first refusal without muting answerable requests', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain('## Collective human ownership')
@@ -97,8 +97,39 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).toContain(
       'even when it came from the same sender seconds later or arrived inside the same accepted provider turn',
     )
+    expect(normalized).toContain('### Floor follows authority, not punctuation')
     expect(normalized).toContain(
-      '"Does anyone know whether that gym still does day passes?" remains eligible under rule 4',
+      'Before treating a room-wide question as open, ask who can truthfully supply the answer.',
+    )
+    expect(normalized).toContain(
+      'Apply this gate before any live-volley watch.',
+    )
+    expect(normalized).toContain(
+      "private relationships, personal conduct, shared social history, recognition, or recollection",
+    )
+    expect(normalized).toContain(
+      'A question mark, tag question, or room-wide "does anyone know?" does not change that owner.',
+    )
+    expect(normalized).toContain(
+      'If the exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool, the request can be open.',
+    )
+    expect(normalized).toContain(
+      'use `finish_without_reply` immediately: do not reply, react, sleep, or watch',
+    )
+    expect(normalized).toContain(
+      'A comic abstention still interrupts the humans; it is not silence.',
+    )
+    expect(normalized).toContain(
+      'If Murph is directly asked about an unverified private fact about a person, answer with one plain uncertainty sentence and stop.',
+    )
+    expect(normalized).toContain(
+      'Question form does not reopen the floor.',
+    )
+    expect(normalized).toContain(
+      'This rule is evaluated before the room-wide human-private branch in rule 2.',
+    )
+    expect(normalized).toContain(
+      'Private facts about people whose truthful source is only the humans do not enter this rule.',
     )
     expect(normalized).toContain(
       'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat, and an audience-unclear unaddressed personal artifact is not genuinely unowned.',
@@ -241,6 +272,9 @@ describe('assistant group-chat style guidance', () => {
       'do not apologize, acknowledge, react, or make compliance a bit',
     )
     expect(normalized).toContain(
+      'A correction that Murph inserted itself is not a new comic premise, even when playful or exasperated.',
+    )
+    expect(normalized).toContain(
       'continue to rule 3 for the actual ask',
     )
     expect(normalized).toContain(
@@ -362,6 +396,9 @@ describe('assistant group-chat style guidance', () => {
 
     expect(normalized).toContain(
       'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+    )
+    expect(normalized).toContain(
+      'A direct ask, an open request with an exact authorized answer, and an unaddressed human-private question are already resolved and must not watch.',
     )
     // Waiting must never become an excuse to override the ladder's silence,
     // closed-room, and not-for-you rules.
