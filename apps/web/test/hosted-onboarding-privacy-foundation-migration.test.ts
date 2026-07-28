@@ -950,6 +950,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260724180000_device_connection_source_last_data_at",
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
+      "20260725190000_hosted_mailbox_content_retention",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726115900_hosted_usage_referral_entry_kind",
       "20260726120000_hosted_growth_aggregate",
