@@ -237,7 +237,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   lease generation takes over an unresolved trace's refresh ownership whether
   its deadline or terminal callback arrives first. Equal-generation callbacks
   merge only for that owner, while delayed prior-generation evidence and
-  milestone replay cannot reclaim the trace or roll either timestamp back.
+  milestone replay cannot reclaim the trace or roll either timestamp back. The
+  current attempt may also persist a reset deadline before its first terminal
+  projection; a different attempt cannot adopt that nonterminal trace.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one

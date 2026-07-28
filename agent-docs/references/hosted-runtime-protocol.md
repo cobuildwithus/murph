@@ -905,7 +905,9 @@ transfers the unresolved trace's runtime-attempt ownership, the same generation
 merges monotonically for that owner, and an older generation is a no-op. This
 makes a recovery terminal and its deadline converge in either callback order
 while preventing a delayed callback from the prior attempt from reclaiming the
-trace.
+trace. The trace's current attempt may publish its own deadline before terminal
+telemetry arrives; cross-attempt deadline adoption still requires terminal
+evidence, so an unrelated newer attempt cannot claim a merely staged trace.
 The terminal projection carries the runtime's current checkpoint-publication
 expectation. Whenever later dirty work restarts the idle window, the runtime
 publishes a monotonic `checkpoint_publication_expected_by` milestone across the

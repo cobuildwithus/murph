@@ -1832,11 +1832,16 @@ async function updateHostedIngressCheckpointPublicationExpectedByLocked(
 ): Promise<boolean> {
   return await prisma.$transaction(async (tx) => {
     const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
-    if (
-      !trace
-      || readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
+    if (!trace) {
+      return false;
+    }
+    const hasTerminalNonReplyEvidence =
+      readHostedRuntimeTerminalNonReplyCommittedAtEpochMs(
         trace.phaseBreakdownJson,
-      ) === null
+      ) !== null;
+    if (
+      !hasTerminalNonReplyEvidence
+      && trace.runtimeAttemptId !== input.runtimeAttemptId
     ) {
       return false;
     }
