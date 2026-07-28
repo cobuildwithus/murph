@@ -513,24 +513,23 @@ describe('assistant Codex turn planning', () => {
           role: 'assistant',
         },
       ])
-      expect(plan.systemPrompt).toContain('Text alone is valid.')
       expect(plan.systemPrompt).toContain(
-        'call exactly one of `murph.generate_song` or `murph.generate_voice_memo`',
+        'Call `murph.generate_song` exactly once.',
       )
-      expect(plan.systemPrompt).toContain('never a second attempt')
-      expect(plan.systemPrompt).toContain('murph.generate_voice_memo')
+      expect(plan.systemPrompt).toContain('do not call any other tool')
       expect(plan.systemPrompt).toContain('murph.generate_song')
+      expect(plan.systemPrompt).not.toContain('murph.generate_voice_memo')
       expect(plan.systemPrompt).toContain(
         'urgent, medical, serious, sensitive, or conflict-heavy',
       )
       expect(plan.systemPrompt).toContain(
-        'quiet, respectful text acknowledgment with no joke or media',
+        'keep the song gentle, respectful, and non-comedic',
       )
       expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).toContain(
-        'set `durationSeconds` to 5–15',
+        'Set `durationSeconds` to 5–15',
       )
       expect(plan.systemPrompt).toContain('at most four short lyric lines')
       expect(plan.systemPrompt).toContain(

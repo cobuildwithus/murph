@@ -140,10 +140,10 @@ fulfilled group purchase, Web idempotently:
    mailbox.
 
 The creative turn is isolated and uses the ordinary provider-turn tool and
-delivery path. Its prompt says text alone is valid and, when audio helps, to call
-exactly one short voice memo or original song, never both or a second attempt,
-and no other tool. Serious, urgent, medical, sensitive, or conflict-heavy recent
-context forces a quiet text-only acknowledgment. Notification failures follow
+delivery path. Its prompt tells the model to call `generate_song` exactly once
+for one 5–15-second original sponsor song and to use no other tool. Serious,
+urgent, medical, sensitive, or conflict-heavy recent context makes the song
+gentle and non-comedic. Notification failures follow
 the ordinary required-notification retry and delivery-deduplication path; there
 is no reservation, attempt counter, post-hoc media-attempt accounting, or
 media-specific retry state. The reconciler wakes newly paid usage work before

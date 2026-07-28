@@ -2882,7 +2882,7 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
   )
 })
 
-test('sendAssistantNotificationLocal accepts a text-only creative response', async () => {
+test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
@@ -2931,7 +2931,7 @@ test('sendAssistantNotificationLocal accepts a text-only creative response', asy
   }))
 })
 
-test('sendAssistantNotificationLocal accepts a text fallback when creative audio is unavailable', async () => {
+test('sendAssistantNotificationLocal accepts a text fallback when song generation fails', async () => {
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
@@ -2959,8 +2959,8 @@ test('sendAssistantNotificationLocal accepts a text fallback when creative audio
   expect(deliverMessage).toHaveBeenCalledOnce()
 })
 
-test('sendAssistantNotificationLocal delivers one successful creative attachment', async () => {
-  const voiceMemo = {
+test('sendAssistantNotificationLocal delivers one successful sponsor song', async () => {
+  const song = {
     filename: 'group-thanks.mp3',
     kind: 'voice_memo' as const,
     transcript: 'Thanks for keeping the group going.',
@@ -2975,7 +2975,7 @@ test('sendAssistantNotificationLocal delivers one successful creative attachment
       privateSummary: 'Celebrate the group contribution.',
       text: 'This challenge is now fiscally solvent.',
     }),
-    responseMedia: [voiceMemo],
+    responseMedia: [song],
     session: createAssistantSession({
       binding: {
         actorId: 'actor-group-sponsorship',
@@ -3006,7 +3006,7 @@ test('sendAssistantNotificationLocal delivers one successful creative attachment
     deliveryOutcome: { kind: 'sent' },
   })
   expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
-    media: [voiceMemo],
+    media: [song],
   }))
 })
 

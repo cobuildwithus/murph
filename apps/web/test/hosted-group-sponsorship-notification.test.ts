@@ -142,7 +142,10 @@ describe("group sponsorship notification", () => {
       "urgent, medical, serious, sensitive, or conflict-heavy",
     );
     expect(envelope.notification.instructions).toContain(
-      "quiet, respectful text acknowledgment with no joke or media",
+      "calling murph.generate_song exactly once",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "gentle, respectful, and non-comedic",
     );
     expect(JSON.stringify(envelope)).not.toContain("purchase_private_123");
     expect(envelope.notification).not.toHaveProperty("amount");

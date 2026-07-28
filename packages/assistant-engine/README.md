@@ -54,9 +54,9 @@ The `creative-response` notification prompt profile is an isolated system
 continuation for verified social moments. Its prompt is built only from the
 engine-supplied task and bounded committed conversation history. Planning
 uses the ordinary provider-turn tools and the ordinary response-media and
-outbox delivery owners. The prompt says text is valid and, only when audio
-helps, to call exactly one short voice-memo or song tool, never both or a
-second attempt, and no other tool. Notification failure remains on the normal
+outbox delivery owners. The prompt tells the model to call `generate_song`
+exactly once for one short original sponsor song and to use no other tool.
+Notification failure remains on the normal
 required-notification retry and delivery-deduplication path; no media-attempt
 state is inferred from provider events.
 

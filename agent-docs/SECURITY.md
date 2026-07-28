@@ -125,9 +125,9 @@ Last verified: 2026-07-26
   publication without weakening or reversing the verified usage grant. The
   creative notification prompt profile supplies only the task and bounded
   committed group history in an isolated thread, then uses the ordinary
-  provider-turn tools and delivery path. Its prompt permits text or exactly one
-  short voice-memo or original-song call when audio helps, forbids a second or
-  different tool call, and forbids commands, network use, separate contact,
+  provider-turn tools and delivery path. Its prompt asks for one short original
+  song through exactly one `generate_song` call, forbids any different tool,
+  and forbids commands, network use, separate contact,
   scheduling, state mutation, or disclosure of private health, account,
   payment, or routing details. Running bits may reach only fresh
   route-authorized non-direct Linq or Telegram input

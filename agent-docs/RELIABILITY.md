@@ -180,10 +180,10 @@ Last verified: 2026-07-27
   re-signaled rather than regenerated. The creative turn adds no reservation,
   attempt counter, or media-specific retry state: provider and delivery failures
   follow the ordinary required-notification retry and delivery-deduplication
-  path, while the prompt limits one model turn to at most one short song or
-  voice-memo call. Running bits need no timer or cleanup job: Web reads only
-  fulfilled rows whose `expiresAt` is still in the future, and the Assistant
-  rechecks expiry before prompt construction.
+  path, while the prompt tells the model to make one short original song with
+  one `generate_song` call. Running bits need no timer or cleanup job: Web reads
+  only fulfilled rows whose `expiresAt` is still in the future, and the
+  Assistant rechecks expiry before prompt construction.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or
