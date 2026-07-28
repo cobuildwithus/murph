@@ -301,21 +301,29 @@ group retain the existing Pulse and Edge onboarding journey.
 
 A persisted attempt remains a billing claim until Stripe proves its exact bound
 Session expired. The existing Family action retrieves a bound Session: it
-resumes an open Session, synchronously applies a completed Session through the
-existing reconciliation owner, and clears then restarts only an exact expired
-Session. A delayed expiry event remains scoped to the old attempt and Session
-key. An unbound attempt may reuse its original idempotency key only within the
-existing 24-hour safe-replay window; after that window it fails closed to
-support because a previous provider start is ambiguous. Once Checkout binds a
-subscription, that binding continues to claim the member even while the
-canceled group awaits subscription reconciliation; authoritative terminal
-reconciliation clears the binding and releases the claim.
+revalidates the exact attempt and Session under the owner lock after provider
+I/O, resumes an open Session, synchronously applies a completed Session through
+the existing reconciliation owner, and clears then restarts only an exact
+expired Session. If active or terminal subscription reconciliation wins during
+provider I/O, the continuation action preserves that authoritative result
+instead of rebinding stale Checkout state. A delayed expiry event remains scoped
+to the old attempt and Session key. An unbound attempt may reuse its original
+idempotency key only within the existing 24-hour safe-replay window; after that
+window it fails closed to support because a previous provider start is
+ambiguous. Once Checkout binds a subscription, that binding continues to claim
+the member even while the canceled group awaits subscription reconciliation;
+authoritative terminal reconciliation clears the binding and releases the
+claim.
 
 Cancel returns through Settings and dashboard auth to the resumable `/join`
 state. Success instead carries the bounded Stripe Session ID through `/join` to
 the existing invite success surface, which verifies Session ownership and
 reconciles it while the owner is present rather than showing the continuation
-action while webhook processing is delayed.
+action while webhook processing is delayed. The short Family Checkout redirect
+branches on Stripe Session status: `open` requires a provider URL, `complete`
+preserves the claim and enters that verified success surface, and only exact
+`expired` clears the matching attempt. Missing URLs, unknown status, and
+retrieval ambiguity preserve the claim and fail retryably.
 
 Regression coverage follows the production boundaries: terminal-before-active
 Stripe reconciliation releases the exact direct binding, dashboard auth returns

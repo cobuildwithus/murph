@@ -2258,13 +2258,12 @@ async function resumeHostedFamilyBillingCheckout(input: {
       input.checkoutInput.sessionId,
     ),
   );
-  const matchedGroup = await findHostedAccountGroupForStripeCheckoutSession({
-    prisma: input.prisma,
-    session,
-  });
   if (
-    matchedGroup?.id !== input.checkoutInput.group.id
-    || matchedGroup.ownerMemberId !== input.checkoutInput.group.ownerMemberId
+    !isHostedFamilyCheckoutSession(session)
+    || session.id !== input.checkoutInput.sessionId
+    || session.metadata?.accountGroupId !== input.checkoutInput.group.id
+    || session.metadata?.ownerMemberId !== input.checkoutInput.group.ownerMemberId
+    || session.metadata?.checkoutAttemptId !== input.checkoutInput.checkoutAttemptId
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -2284,6 +2283,17 @@ async function resumeHostedFamilyBillingCheckout(input: {
         retryable: true,
       });
     }
+    await input.prisma.$transaction(
+      (tx) => revalidateHostedFamilyCheckoutClaimTx({
+        checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
+        groupId: input.checkoutInput.group.id,
+        ownerMemberId: input.checkoutInput.group.ownerMemberId,
+        sessionId: session.id,
+        subscriptionId: null,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     return {
       alreadyActive: false,
       url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: session.url }) ??
@@ -2293,17 +2303,28 @@ async function resumeHostedFamilyBillingCheckout(input: {
 
   if (session.status === "expired") {
     await input.prisma.$transaction(
-      (tx) => applyHostedFamilyStripeCheckoutExpiredTx({
-        session,
-        tx,
-      }),
+      async (tx) => {
+        await revalidateHostedFamilyCheckoutClaimTx({
+          checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
+          groupId: input.checkoutInput.group.id,
+          ownerMemberId: input.checkoutInput.group.ownerMemberId,
+          sessionId: session.id,
+          subscriptionId: null,
+          tx,
+        });
+        await applyHostedFamilyStripeCheckoutExpiredTx({
+          session,
+          tx,
+        });
+      },
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
     return "restart";
   }
 
   if (session.status === "complete") {
-    if (!coerceStripeSubscriptionId(session.subscription)) {
+    const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+    if (!subscriptionId) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_BILLING_SYNCING",
         httpStatus: 409,
@@ -2312,11 +2333,24 @@ async function resumeHostedFamilyBillingCheckout(input: {
       });
     }
     const completed = await input.prisma.$transaction(
-      (tx) => applyHostedFamilyStripeCheckoutCompletedTx({
-        dispatchContext: { eventCreatedAt: null },
-        session,
-        tx,
-      }),
+      async (tx) => {
+        const claim = await revalidateHostedFamilyCheckoutClaimTx({
+          checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
+          groupId: input.checkoutInput.group.id,
+          ownerMemberId: input.checkoutInput.group.ownerMemberId,
+          sessionId: session.id,
+          subscriptionId,
+          tx,
+        });
+        if (claim === "subscription_bound") {
+          return { groupId: input.checkoutInput.group.id };
+        }
+        return applyHostedFamilyStripeCheckoutCompletedTx({
+          dispatchContext: { eventCreatedAt: null },
+          session,
+          tx,
+        });
+      },
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
     if (completed.groupId !== input.checkoutInput.group.id) {
@@ -2339,6 +2373,57 @@ async function resumeHostedFamilyBillingCheckout(input: {
     message: "Family checkout is unavailable and still syncing. Try again shortly.",
     retryable: true,
   });
+}
+
+async function revalidateHostedFamilyCheckoutClaimTx(input: {
+  checkoutAttemptId: string;
+  groupId: string;
+  ownerMemberId: string;
+  sessionId: string;
+  subscriptionId: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<"current" | "subscription_bound"> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: {
+      id: true,
+      ownerMemberId: true,
+    },
+    where: {
+      id: input.groupId,
+    },
+  });
+  if (!group || group.ownerMemberId !== input.ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message: "Family checkout changed before Stripe returned its status. Try again.",
+      retryable: true,
+    });
+  }
+
+  const billingRef = await readHostedAccountGroupStripeBillingRef({
+    groupId: input.groupId,
+    prisma: input.tx,
+  });
+  if (
+    input.subscriptionId
+    && billingRef?.stripeSubscriptionId === input.subscriptionId
+  ) {
+    return "subscription_bound";
+  }
+  if (
+    billingRef?.checkoutAttemptId !== input.checkoutAttemptId
+    || billingRef.stripeCheckoutSessionId !== input.sessionId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message: "Family checkout changed before Stripe returned its status. Try again.",
+      retryable: true,
+    });
+  }
+  return "current";
 }
 
 function buildHostedFamilyCheckoutRecoveryRequiredError() {
@@ -3106,7 +3191,7 @@ export function buildHostedFamilyCheckoutRedirectUrl(input: {
 }
 
 export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
-  prisma?: HostedOnboardingReadClient;
+  prisma?: PrismaClient;
   sessionId: string;
 }): Promise<string> {
   const sessionId = normalizeNullableString(input.sessionId);
@@ -3118,7 +3203,21 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  const session = await requireHostedStripeApi().checkout.sessions.retrieve(sessionId);
+  const stripe = requireHostedStripeApi();
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await withHostedStripeFailureLog(
+      "checkout.sessions.retrieve.family-redirect",
+      () => stripe.checkout.sessions.retrieve(sessionId),
+    );
+  } catch {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: 409,
+      message: "Family checkout could not be checked. Try again shortly.",
+      retryable: true,
+    });
+  }
   if (!isHostedFamilyCheckoutSession(session)) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
@@ -3144,47 +3243,46 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     prisma,
   });
 
-  const checkoutUrl = normalizeNullableString(session.url);
-  if (!checkoutUrl) {
-    await clearHostedFamilyCheckoutAttemptForSession({
-      groupId: group.id,
-      prisma,
-      sessionId,
+  if (session.status === "open") {
+    const checkoutUrl = normalizeNullableString(session.url);
+    if (checkoutUrl) {
+      return checkoutUrl;
+    }
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: 409,
+      message: "Family checkout is open but its URL is unavailable. Try again shortly.",
+      retryable: true,
     });
+  }
+
+  if (session.status === "complete") {
+    const successUrl = new URL("/join", requireHostedOnboardingPublicBaseUrl());
+    successUrl.searchParams.set("family_checkout", "success");
+    successUrl.searchParams.set("session_id", session.id);
+    return successUrl.toString();
+  }
+
+  if (session.status === "expired") {
+    await prisma.$transaction(
+      (tx) => applyHostedFamilyStripeCheckoutExpiredTx({
+        session,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
       httpStatus: 410,
-      message: "Family checkout session is no longer available. Start Family checkout again.",
+      message: "Family checkout expired. Start Family checkout again.",
     });
   }
 
-  return checkoutUrl;
-}
-
-async function clearHostedFamilyCheckoutAttemptForSession(input: {
-  groupId: string;
-  prisma: HostedOnboardingReadClient;
-  sessionId: string;
-}): Promise<void> {
-  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
-    input.sessionId,
-  );
-  if (!stripeCheckoutSessionLookupKey) {
-    return;
-  }
-
-  await input.prisma.hostedAccountGroupBillingRef.updateMany({
-    data: {
-      checkoutAttemptId: null,
-      checkoutCreatedAt: null,
-      checkoutSeatCount: null,
-      stripeCheckoutSessionIdEncrypted: null,
-      stripeCheckoutSessionLookupKey: null,
-    },
-    where: {
-      groupId: input.groupId,
-      stripeCheckoutSessionLookupKey,
-    },
+  throw hostedOnboardingError({
+    code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+    httpStatus: 409,
+    message: "Family checkout is still syncing. Try again shortly.",
+    retryable: true,
   });
 }
 
