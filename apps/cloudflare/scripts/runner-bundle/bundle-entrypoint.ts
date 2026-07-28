@@ -57,11 +57,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
-// The merged production assembly measured 9,690,052B total, while retention
-// remains the larger measured entry and static-closure owner. The combined graph
-// added no forbidden boot input; production assembly below still fails closed if
-// any dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_690_052 + 32_768;
+// The Junction live-source admission correction measured 9,726,180B total in CI
+// on 2026-07-28. The growth is authored code inside the existing lazy
+// device-sync provider graph; no forbidden input entered the static boot
+// closure. Retain the established 32KB allowance over that measured total.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_726_180 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_882_562;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
