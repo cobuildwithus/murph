@@ -445,8 +445,11 @@ Last verified: 2026-07-28
   ambient environment data into diagnostics. Only then may it move the metadata
   out of the worktree, reconstruct detached `HEAD`, and verify both admitted tree
   ids. The same entrypoint must stamp the `static-ssh` verification profile
-  internally after discarding caller profile and worker-tuning values. The local
-  artifact lock protects cooperating local producers and candidate capture only.
+  internally after discarding caller profile and worker-tuning values. That
+  profile may derive a bounded composed plan only from generic locally observed
+  CPU and physical-memory capacity; routing values, machine labels, and caller
+  tuning must not influence it. The local artifact lock protects cooperating
+  local producers and candidate capture only.
   A native macOS `lockf` descriptor inherited by the remote verifier is the sole
   static-worker capacity authority; its path must resolve above Crabbox's nested
   lease/repository directories so every run contends on the same kernel lock.
