@@ -1,0 +1,124 @@
+
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''      - name: Rearm inbound-message content retention snapshots
+        if: ${{ inputs.rearm_inbound_message_content_retention }}
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
+          MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS: ${{ inputs.inbound_message_content_retention_max_snapshots }}
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
+          MURPH_RUN_INBOUND_MESSAGE_CONTENT_RETENTION_REARM: "1"
+        run: >-
+          pnpm --dir apps/web exec tsx
+          scripts/rearm-inbound-message-content-retention.ts
+''',
+    '''      - name: Wait for prior runner containers to become impossible
+        if: ${{ inputs.rearm_inbound_message_content_retention }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          generated_config="apps/cloudflare/.deploy/wrangler.generated.jsonc"
+          rollout_grace_seconds="$(node - "${generated_config}" <<'NODE'
+          const fs = require("node:fs");
+          const configPath = process.argv[2];
+          const text = fs.readFileSync(configPath, "utf8");
+          const runnerStart = text.indexOf('"class_name": "RunnerContainer"');
+          const smokeStart = text.indexOf('"class_name": "DeploySmokeRunnerContainer"');
+          if (runnerStart < 0 || smokeStart <= runnerStart) {
+            throw new Error("Generated deploy config is missing the user runner container block.");
+          }
+          const runnerBlock = text.slice(runnerStart, smokeStart);
+          const match = runnerBlock.match(/"rollout_active_grace_period"\s*:\s*(\d+)/u);
+          if (!match) {
+            throw new Error("Generated deploy config is missing the user runner rollout grace.");
+          }
+          const value = Number(match[1]);
+          if (!Number.isSafeInteger(value) || value < 0 || value > 3600) {
+            throw new Error("Generated user runner rollout grace is outside the audited bound.");
+          }
+          process.stdout.write(String(value));
+          NODE
+          )"
+          # Cloudflare sends SIGTERM only after the configured active grace and
+          # permits up to 15 more minutes before SIGKILL. Waiting through both
+          # bounds plus one minute of scheduling headroom makes it impossible
+          # for a pre-retention image to accept the newly rearmed wake.
+          shutdown_backstop_seconds=900
+          scheduling_headroom_seconds=60
+          convergence_wait_seconds=$((
+            rollout_grace_seconds
+            + shutdown_backstop_seconds
+            + scheduling_headroom_seconds
+          ))
+          echo "Waiting ${convergence_wait_seconds}s for complete RunnerContainer convergence."
+          sleep "${convergence_wait_seconds}"
+
+      - name: Rearm inbound-message content retention snapshots
+        if: ${{ inputs.rearm_inbound_message_content_retention }}
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
+          MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS: ${{ inputs.inbound_message_content_retention_max_snapshots }}
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
+          MURPH_RUN_INBOUND_MESSAGE_CONTENT_RETENTION_REARM: "1"
+        run: >-
+          pnpm --dir apps/web exec tsx
+          scripts/rearm-inbound-message-content-retention.ts
+''',
+)
+
+replace_once(
+    "apps/cloudflare/test/deploy-automation.test.ts",
+    '''      "name: Rearm inbound-message content retention snapshots",
+      "DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}",
+''',
+    '''      "name: Wait for prior runner containers to become impossible",
+      'shutdown_backstop_seconds=900',
+      'scheduling_headroom_seconds=60',
+      'rollout_active_grace_period',
+      "name: Rearm inbound-message content retention snapshots",
+      "DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}",
+''',
+)
+
+replace_once(
+    "apps/cloudflare/test/deploy-automation.test.ts",
+    '''    expect(workflow.indexOf("name: Smoke test deployed endpoints")).toBeLessThan(
+      workflow.indexOf("name: Rearm inbound-message content retention snapshots"),
+    );
+''',
+    '''    expect(workflow.indexOf("name: Smoke test deployed endpoints")).toBeLessThan(
+      workflow.indexOf("name: Wait for prior runner containers to become impossible"),
+    );
+    expect(
+      workflow.indexOf("name: Wait for prior runner containers to become impossible"),
+    ).toBeLessThan(
+      workflow.indexOf("name: Rearm inbound-message content retention snapshots"),
+    );
+''',
+)
+
+replace_once(
+    "apps/cloudflare/DEPLOY.md",
+    '''   workflow with `deploy_worker=true`, `container_rollout=immediate`,
+   `skip_predeploy_e2e=false`,
+   `rearm_inbound_message_content_retention=true`, and the confirmed capacity
+   ceiling. The workflow first deploys and smokes the stamping-capable runner;
+   only after that smoke succeeds does the same production job take the direct
+   database lock and re-arm persisted snapshots. A failed deploy, failed smoke,
+   missing direct database secret, or exceeded capacity leaves every workspace
+   untouched.
+''',
+    '''   workflow with `deploy_worker=true`, `container_rollout=immediate`,
+   `skip_predeploy_e2e=false`,
+   `rearm_inbound_message_content_retention=true`, and the confirmed capacity
+   ceiling. The workflow first deploys and smokes the stamping-capable runner,
+   then waits through the generated user-runner active grace, Cloudflare's full
+   15-minute SIGTERM-to-SIGKILL backstop, and scheduling headroom. Only after a
+   pre-retention runner image can no longer accept work does the same production
+   job take the direct database lock and re-arm persisted snapshots. A failed
+   deploy, failed smoke, malformed rollout config, missing direct database
+   secret, or exceeded capacity leaves every workspace untouched.
+''',
+)
+
+print("Added full Cloudflare runner-convergence gate.")
