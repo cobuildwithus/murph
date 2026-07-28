@@ -2864,6 +2864,49 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
   });
 
+  it("rechecks the no-existing-customer policy after acquiring the member lock", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: {
+          currentBillingPhase: null,
+          currentBillingPlanCode: null,
+          currentCheckoutOffer: null,
+          currentPeriodEnd: null,
+          currentPeriodStart: null,
+          currentTrialEndsAt: null,
+          currentTrialStartedAt: null,
+          lastStripeEventCreatedAt: null,
+          memberId: "member_123",
+          pulseTrialPolicyVersion: null,
+          pulseTrialRedeemedAt: null,
+          stripeCustomerId: "cus_bound_during_lock_wait",
+          stripeSubscriptionId: null,
+        },
+      }));
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_EXISTING_STRIPE_CUSTOMER",
+      httpStatus: 409,
+    });
+
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
   it("rejects members without a messaging channel before Stripe or billing writes", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValueOnce(makeInvite({
       member: {
