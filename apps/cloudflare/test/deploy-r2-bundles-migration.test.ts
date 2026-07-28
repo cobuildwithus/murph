@@ -675,6 +675,7 @@ const FAKE_AWS_FUNCTION = [
   "    return",
   "  fi",
   '  if [[ "$operation" == "get-object" ]]; then',
+  '    [[ "${AWS_RESPONSE_CHECKSUM_VALIDATION:-}" == "WHEN_REQUIRED" ]] || return 27',
   '    [[ "$if_match" == \'"0123456789abcdef0123456789abcdef"\' ]] || return 25',
   '    cp "$RUNBOOK_PROOF_FIXTURE_ROOT/${kind}.body" "$output"',
   "    return",

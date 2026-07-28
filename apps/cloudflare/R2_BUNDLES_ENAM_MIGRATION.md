@@ -386,6 +386,7 @@ metadata, object bytes, or digest; do not use shell tracing:
       '{CacheControl,ChecksumCRC32,ChecksumCRC32C,ChecksumSHA1,ChecksumType,ContentDisposition,ContentEncoding,ContentLanguage,ContentLength,ContentType,ETag,Expires,Metadata}'
   }
   get_snapshot() {
+    AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED \
     AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID" \
     AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY" \
       aws s3api get-object --bucket "$1" --key "$SNAPSHOT_KEY" \
