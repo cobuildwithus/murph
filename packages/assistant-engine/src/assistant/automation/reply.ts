@@ -66,6 +66,9 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import {
+  stripAssistantImageResponseTranscriptMarker,
+} from '../response-media.js'
+import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
@@ -4056,7 +4059,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
       }
 
       textCandidates.push({
-        message: entry.text,
+        message: stripAssistantImageResponseTranscriptMarker(entry.text),
         messageTime: entryTime,
       })
     }

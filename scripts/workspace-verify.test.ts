@@ -110,10 +110,15 @@ resolve_composed_acceptance_parallel_default
 CI=1
 verification_command=verify:acceptance
 resolve_composed_acceptance_parallel_default
+
+CI=
+verification_profile=static-ssh
+detected_cpus=64
+resolve_composed_acceptance_parallel_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("0\n0\n1\n1\n1\n0\n0\n");
+    expect(result.stdout).toBe("0\n0\n1\n1\n1\n0\n0\n0\n");
   });
 
   it("resolves package coverage concurrency to one value in every environment", () => {
@@ -172,10 +177,13 @@ resolve_package_coverage_cli_active_concurrency_default
 
 composed_acceptance_parallel=1
 resolve_package_coverage_cli_active_concurrency_default
+
+verification_profile=static-ssh
+resolve_package_coverage_cli_active_concurrency_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("1\n1\n4\n2\n");
+    expect(result.stdout).toBe("1\n1\n4\n2\n1\n");
   });
 
   it("reserves capable-host CPU headroom for overlapping app work", () => {
@@ -213,7 +221,7 @@ resolve_acceptance_app_vitest_max_workers_default
     expect(result.stdout).toBe("2\n2\n1\n1\n");
   });
 
-  it("gives the protected CLI phase a bounded quarter-host worker pool", () => {
+  it("bounds CLI workers during composed acceptance", () => {
     const resolveCliWorkers = extractWorkspaceVerifyFunction(
       "resolve_package_coverage_cli_vitest_max_workers_default",
     );
@@ -249,6 +257,143 @@ resolve_package_coverage_cli_vitest_max_workers_default
     expect(result.stdout).toBe("4\n3\n2\n4\n");
   });
 
+  it("reports an internally controlled CLI-first static SSH profile", () => {
+    const normalizePositiveInteger = extractWorkspaceVerifyFunction(
+      "normalize_positive_integer",
+    );
+    const localConcurrencyDefault = extractWorkspaceVerifyFunction(
+      "local_concurrency_default",
+    );
+    const localWorkerBudgetDefault = extractWorkspaceVerifyFunction(
+      "local_worker_budget_default",
+    );
+    const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
+      "resolve_composed_acceptance_parallel_default",
+    );
+    const resolvePackageConcurrencyDefault = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_concurrency_default",
+    );
+    const resolvePackageWorkersDefault = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_vitest_max_workers_default",
+    );
+    const resolveCliWorkersDefault = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_cli_vitest_max_workers_default",
+    );
+    const resolveAppWorkersDefault = extractWorkspaceVerifyFunction(
+      "resolve_acceptance_app_vitest_max_workers_default",
+    );
+    const resolveLocalParallelDefault = extractWorkspaceVerifyFunction(
+      "resolve_local_parallel_default",
+    );
+    const resolveCliActiveConcurrencyDefault = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_cli_active_concurrency_default",
+    );
+    const resolveProfileControlledValue = extractWorkspaceVerifyFunction(
+      "resolve_profile_controlled_value",
+    );
+    const logAcceptanceResourcePlan = extractWorkspaceVerifyFunction(
+      "log_acceptance_resource_plan",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+${normalizePositiveInteger}
+${localConcurrencyDefault}
+${localWorkerBudgetDefault}
+${resolveComposedAcceptanceDefault}
+${resolvePackageConcurrencyDefault}
+${resolvePackageWorkersDefault}
+${resolveCliWorkersDefault}
+${resolveAppWorkersDefault}
+${resolveLocalParallelDefault}
+${resolveCliActiveConcurrencyDefault}
+${resolveProfileControlledValue}
+${logAcceptanceResourcePlan}
+
+detect_logical_cpu_count() { printf '64\\n'; }
+verify_log() { printf '[workspace-verify] %s\\n' "$*"; }
+
+CI=
+shared_host_mode=0
+verification_command=verify:acceptance
+verification_profile=static-ssh
+composed_acceptance_parallel="$(resolve_composed_acceptance_parallel_default)"
+package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
+package_coverage_concurrency_limit="$(resolve_profile_controlled_value 99 "$package_coverage_concurrency_default")"
+package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
+package_coverage_cli_active_concurrency_limit="$(resolve_profile_controlled_value 99 "$package_coverage_cli_active_concurrency_default")"
+unset MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS
+package_coverage_vitest_max_workers_default="$(resolve_package_coverage_vitest_max_workers_default)"
+package_coverage_vitest_max_workers="$(resolve_profile_controlled_value 99 "$package_coverage_vitest_max_workers_default")"
+package_coverage_cli_vitest_max_workers_default="$(resolve_package_coverage_cli_vitest_max_workers_default)"
+package_coverage_cli_vitest_max_workers="$(resolve_profile_controlled_value 99 "$package_coverage_cli_vitest_max_workers_default")"
+acceptance_app_vitest_max_workers="$(resolve_acceptance_app_vitest_max_workers_default)"
+app_verify_parallel_default="$(resolve_local_parallel_default)"
+app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+
+log_acceptance_resource_plan
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "[workspace-verify] resources cpus=64 composed_parallel=0 package_processes=2 cli_package_processes=1 package_workers=2 cli_workers=2 app_workers=2 app_overlap=0 profile=static-ssh test_lanes=0 app_parallel=0\n",
+    );
+  });
+
+  it("runs static package coverage before app and fixture verification", () => {
+    const runTestCoverage = extractWorkspaceVerifyFunction("run_test_coverage");
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$sandbox"' EXIT
+event_log="$sandbox/events"
+
+verify_log() { return 0; }
+bash() { return 0; }
+run_timed_step() {
+  local label="$1"
+  shift
+  printf '%s\\n' "$label" >>"$event_log"
+  "$@"
+}
+run_repo_acceptance_guards() { return 0; }
+prepare_repo_vitest_runtime_artifacts() { return 0; }
+run_package_coverage_cleanup_and_hygiene() { return 0; }
+run_test_packages_coverage() {
+  [[ ! -f "$event_log.app" && ! -f "$event_log.fixture" ]]
+  : >"$event_log.package"
+}
+run_test_apps() {
+  [[ -f "$event_log.package" && ! -f "$event_log.fixture" ]]
+  : >"$event_log.app"
+}
+run_fixture_smoke_verification() {
+  [[ -f "$event_log.app" ]]
+  : >"$event_log.fixture"
+}
+
+${runTestCoverage}
+
+test_lane_parallel=0
+composed_acceptance_parallel=0
+acceptance_app_verify_with_coverage=0
+acceptance_early_cloudflare_verify=0
+run_test_coverage 1
+cat "$event_log"
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "Doc gardening\n" +
+        "Package coverage suite\n" +
+        "App verification\n" +
+        "Fixture smoke coverage\n",
+    );
+  });
+
   it("keeps ordinary shared-host and CI lanes conservative", () => {
     const resolveLocalParallelDefault = extractWorkspaceVerifyFunction(
       "resolve_local_parallel_default",
@@ -271,10 +416,14 @@ resolve_local_parallel_default
 
 CI=1
 resolve_local_parallel_default
+
+CI=
+verification_profile=static-ssh
+resolve_local_parallel_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("0\n1\n1\n0\n");
+    expect(result.stdout).toBe("0\n1\n1\n0\n0\n");
   });
 
   it("overlaps independent capable-host acceptance preparation", () => {
@@ -599,6 +748,34 @@ run_app_verify_command_with_retry apps/cloudflare 1 1 1
     expect(cloudflare).toContain("MURPH_APP_VITEST_MAX_WORKERS=2");
     expect(cloudflare).toContain("MURPH_VERIFY_STEP_PARALLEL=0");
     expect(cloudflare).toContain("MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE=/tmp/murph-cli-ready-test");
+  });
+
+  it("forces the static app worker budget over caller tuning", () => {
+    const runAppVerify = extractWorkspaceVerifyFunction(
+      "run_app_verify_command_with_retry",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -uo pipefail
+
+export MURPH_APP_VITEST_MAX_WORKERS=99
+verification_profile=static-ssh
+composed_acceptance_parallel=0
+acceptance_app_vitest_max_workers=2
+acceptance_cli_coverage_ready_file=
+
+run_command_with_retry() {
+  shift
+  printf '%s\\n' "$*"
+}
+
+${runAppVerify}
+
+run_app_verify_command_with_retry apps/web 1 1 1
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("MURPH_APP_VITEST_MAX_WORKERS=2");
+    expect(result.stdout).not.toContain("MURPH_APP_VITEST_MAX_WORKERS=99");
   });
 
   it("holds Cloudflare tests, but not setup, until CLI coverage completes", () => {
