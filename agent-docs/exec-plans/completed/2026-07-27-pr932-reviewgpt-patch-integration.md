@@ -1,6 +1,6 @@
 # PR 932 ReviewGPT Patch Integration
 
-Status: active
+Status: completed
 
 ## Goal
 
@@ -29,4 +29,5 @@ smallest correct combination of the local candidate and the returned patch.
   exact reply occurrence time, quiet hours, line limits, deletion, and provider
   idempotency.
 
-Updated: 2026-07-27
+Updated: 2026-07-28
+Completed: 2026-07-28

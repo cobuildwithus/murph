@@ -39,7 +39,31 @@ const accountDeletionMocks = vi.hoisted(() => ({
     notFound: false,
     terminated: true,
   }),
-  pendingHostedAccountDeletionCleanupResult: vi.fn(),
+  pendingHostedAccountDeletionCleanupResult: vi.fn().mockReturnValue({
+    cleanupPending: true,
+    cloudflare: {
+      alarmCleared: null,
+      configured: false,
+      deleteAllCompleted: null,
+      deleted: false,
+      errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+      r2DeletedObjectCount: null,
+      r2SkippedUserScopedPrefixes: null,
+      r2Supported: null,
+      r2UserScopedSkipReason: null,
+      runnerStateDeleted: null,
+    },
+    vendorAccounts: {
+      privyUser: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+        status: "failed",
+      },
+      stripeCustomer: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+        status: "failed",
+      },
+    },
+  }),
   persistHostedAccountDeletionCleanupTx: vi.fn().mockResolvedValue(undefined),
   prepareHostedAccountDeletionCleanup: vi.fn().mockImplementation(
     async (input: {
@@ -62,25 +86,6 @@ const accountDeletionMocks = vi.hoisted(() => ({
       stripeSubscriptionIds: [...(input.stripeSubscriptionIds ?? [])],
     }),
   ),
-  runHostedAccountDeletionCleanup: vi.fn().mockResolvedValue({
-    cleanupPending: false,
-    cloudflare: {
-      alarmCleared: true,
-      configured: true,
-      deleteAllCompleted: true,
-      deleted: true,
-      errorCode: null,
-      r2DeletedObjectCount: 0,
-      r2SkippedUserScopedPrefixes: false,
-      r2Supported: true,
-      r2UserScopedSkipReason: null,
-      runnerStateDeleted: true,
-    },
-    vendorAccounts: {
-      privyUser: { errorCode: null, status: "skipped_no_record" },
-      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
-    },
-  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
@@ -144,8 +149,6 @@ vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
     accountDeletionMocks.persistHostedAccountDeletionCleanupTx,
   prepareHostedAccountDeletionCleanup:
     accountDeletionMocks.prepareHostedAccountDeletionCleanup,
-  runHostedAccountDeletionCleanup:
-    accountDeletionMocks.runHostedAccountDeletionCleanup,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/workflow-termination", async () => {
@@ -1451,9 +1454,9 @@ describe.skipIf(!runPostgresProof)(
           reportDeletionCrossedFence();
           return makePreparedDeletionCleanup(input);
         });
-      accountDeletionMocks.runHostedAccountDeletionCleanup
+      accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
         .mockReset()
-        .mockResolvedValue(makeDeletionCleanupRunResult());
+        .mockReturnValue(makePendingDeletionCleanupResult());
       let drainPromise: ReturnType<typeof drainOneHostedGroupJoinOutreach> | null =
         null;
       let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
@@ -1506,9 +1509,9 @@ describe.skipIf(!runPostgresProof)(
         accountDeletionMocks.prepareHostedAccountDeletionCleanup
           .mockReset()
           .mockImplementation(async (input) => makePreparedDeletionCleanup(input));
-        accountDeletionMocks.runHostedAccountDeletionCleanup
+        accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
           .mockReset()
-          .mockResolvedValue(makeDeletionCleanupRunResult());
+          .mockReturnValue(makePendingDeletionCleanupResult());
         await cleanupOpenerRaceFixture(fixture);
       }
     });
@@ -1529,9 +1532,9 @@ describe.skipIf(!runPostgresProof)(
           reportSuspensionFenceCommitted();
           await deletionMayContinue;
         });
-      accountDeletionMocks.runHostedAccountDeletionCleanup
+      accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
         .mockReset()
-        .mockResolvedValue(makeDeletionCleanupRunResult());
+        .mockReturnValue(makePendingDeletionCleanupResult());
       providerMocks.createHostedLinqChat.mockReset();
       let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
 
@@ -1571,9 +1574,9 @@ describe.skipIf(!runPostgresProof)(
         accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
           .mockReset()
           .mockResolvedValue(undefined);
-        accountDeletionMocks.runHostedAccountDeletionCleanup
+        accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
           .mockReset()
-          .mockResolvedValue(makeDeletionCleanupRunResult());
+          .mockReturnValue(makePendingDeletionCleanupResult());
         providerMocks.createHostedLinqChat.mockReset();
         await cleanupOpenerRaceFixture(fixture);
       }
@@ -1604,11 +1607,11 @@ describe.skipIf(!runPostgresProof)(
           reportDeletionCrossedFence();
           return makePreparedDeletionCleanup(input);
         });
-      accountDeletionMocks.runHostedAccountDeletionCleanup
+      accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
         .mockReset()
-        .mockImplementation(async () => {
+        .mockImplementation(() => {
           cleanupCalls += 1;
-          return makeDeletionCleanupRunResult();
+          return makePendingDeletionCleanupResult();
         });
       providerMocks.sendHostedLinqChatMessage
         .mockReset()
@@ -1671,9 +1674,9 @@ describe.skipIf(!runPostgresProof)(
           .mockImplementation(async (input) =>
             makePreparedDeletionCleanup(input)
           );
-        accountDeletionMocks.runHostedAccountDeletionCleanup
+        accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
           .mockReset()
-          .mockResolvedValue(makeDeletionCleanupRunResult());
+          .mockReturnValue(makePendingDeletionCleanupResult());
         providerMocks.sendHostedLinqChatMessage.mockReset();
         vi.unstubAllEnvs();
       }
@@ -1708,11 +1711,11 @@ describe.skipIf(!runPostgresProof)(
       vi.stubEnv("LINQ_API_TOKEN", "test-token");
       clearHostedOnboardingEnvCache();
       let cleanupCalls = 0;
-      accountDeletionMocks.runHostedAccountDeletionCleanup
+      accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
         .mockReset()
-        .mockImplementation(async () => {
+        .mockImplementation(() => {
           cleanupCalls += 1;
-          return makeDeletionCleanupRunResult();
+          return makePendingDeletionCleanupResult();
         });
       providerMocks.sendHostedLinqChatMessage
         .mockReset()
@@ -1770,9 +1773,9 @@ describe.skipIf(!runPostgresProof)(
         errorSpy.mockRestore();
         await closeTestServer(server);
         await cleanupDeletionReplyRaceFixture(fixture);
-        accountDeletionMocks.runHostedAccountDeletionCleanup
+        accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
           .mockReset()
-          .mockResolvedValue(makeDeletionCleanupRunResult());
+          .mockReturnValue(makePendingDeletionCleanupResult());
         providerMocks.sendHostedLinqChatMessage.mockReset();
         vi.unstubAllEnvs();
         clearHostedOnboardingEnvCache();
@@ -1962,11 +1965,11 @@ describe.skipIf(!runPostgresProof)(
           reportSuspensionFence();
           await deletionMayContinue;
         });
-      accountDeletionMocks.runHostedAccountDeletionCleanup
+      accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
         .mockReset()
-        .mockImplementation(async () => {
+        .mockImplementation(() => {
           cleanupCalls += 1;
-          return makeDeletionCleanupRunResult();
+          return makePendingDeletionCleanupResult();
         });
       providerMocks.sendHostedLinqChatMessage.mockReset();
 
@@ -2008,9 +2011,9 @@ describe.skipIf(!runPostgresProof)(
         accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
           .mockReset()
           .mockResolvedValue(undefined);
-        accountDeletionMocks.runHostedAccountDeletionCleanup
+        accountDeletionMocks.pendingHostedAccountDeletionCleanupResult
           .mockReset()
-          .mockResolvedValue(makeDeletionCleanupRunResult());
+          .mockReturnValue(makePendingDeletionCleanupResult());
         providerMocks.sendHostedLinqChatMessage.mockReset();
         vi.unstubAllEnvs();
       }
@@ -2228,24 +2231,30 @@ function makePreparedDeletionCleanup(input: {
   };
 }
 
-function makeDeletionCleanupRunResult() {
+function makePendingDeletionCleanupResult() {
   return {
-    cleanupPending: false,
+    cleanupPending: true,
     cloudflare: {
-      alarmCleared: true,
-      configured: true,
-      deleteAllCompleted: true,
-      deleted: true,
-      errorCode: null,
-      r2DeletedObjectCount: 0,
-      r2SkippedUserScopedPrefixes: false,
-      r2Supported: true,
+      alarmCleared: null,
+      configured: false,
+      deleteAllCompleted: null,
+      deleted: false,
+      errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+      r2DeletedObjectCount: null,
+      r2SkippedUserScopedPrefixes: null,
+      r2Supported: null,
       r2UserScopedSkipReason: null,
-      runnerStateDeleted: true,
+      runnerStateDeleted: null,
     },
     vendorAccounts: {
-      privyUser: { errorCode: null, status: "skipped_no_record" },
-      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+      privyUser: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+        status: "failed",
+      },
+      stripeCustomer: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
+        status: "failed",
+      },
     },
   };
 }
