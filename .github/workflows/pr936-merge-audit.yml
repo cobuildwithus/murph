@@ -1,71 +1,156 @@
-name: PR 936 Merge Conflict Audit
+name: PR 936 Merge Resolution
 
 on:
   push:
     branches:
       - agent/pr936-merge-audit-20260727
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
-    name: Capture real merge conflicts
-    if: github.head_ref == 'agent/pr936-merge-audit-20260727' || github.ref == 'refs/heads/agent/pr936-merge-audit-20260727'
+  resolve:
+    name: Resolve, verify, and push PR 936
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Check out merge helper inputs
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: agent/pr936-merge-audit-20260727
+          path: helper
+          persist-credentials: false
+
+      - name: Check out PR 936 head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: message-retention-14d
           fetch-depth: 0
-          persist-credentials: false
+          path: murph
 
-      - name: Merge current main and capture each Git stage
+      - name: Reproduce and resolve the exact merge
+        id: merge
         shell: bash
         run: |
           set -euo pipefail
+          cd murph
+
+          expected_head="05f5c993d5912582f118a06bd11573a2a7425765"
+          actual_head="$(git rev-parse HEAD)"
+          if [ "$actual_head" != "$expected_head" ]; then
+            echo "PR #936 head moved from $expected_head to $actual_head; refusing a stale resolution." >&2
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-
-          out="$RUNNER_TEMP/pr936-conflicts"
-          mkdir -p "$out/base" "$out/ours" "$out/theirs" "$out/worktree"
-          git rev-parse HEAD > "$out/head-sha.txt"
-          git rev-parse origin/main > "$out/main-sha.txt"
-          git merge-base HEAD origin/main > "$out/merge-base-sha.txt"
+          main_sha="$(git rev-parse origin/main)"
+          printf '%s\n' "$main_sha" > "$RUNNER_TEMP/pr936-main-sha"
 
           set +e
-          git merge --no-commit --no-ff origin/main > "$out/merge-output.txt" 2>&1
+          git merge --no-commit --no-ff origin/main
           merge_status=$?
           set -e
-          printf '%s\n' "$merge_status" > "$out/merge-status.txt"
-          git status --porcelain=v2 > "$out/status.txt"
-          git diff --name-only --diff-filter=U > "$out/conflicts.txt"
+          if [ "$merge_status" -ne 1 ]; then
+            echo "Expected a three-file conflicted merge, got status $merge_status." >&2
+            exit 1
+          fi
 
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            mkdir -p \
-              "$out/base/$(dirname "$path")" \
-              "$out/ours/$(dirname "$path")" \
-              "$out/theirs/$(dirname "$path")" \
-              "$out/worktree/$(dirname "$path")"
-            git show ":1:$path" > "$out/base/$path" 2>/dev/null || true
-            git show ":2:$path" > "$out/ours/$path" 2>/dev/null || true
-            git show ":3:$path" > "$out/theirs/$path" 2>/dev/null || true
-            cp -- "$path" "$out/worktree/$path"
-          done < "$out/conflicts.txt"
+          expected_conflicts="$RUNNER_TEMP/pr936-expected-conflicts"
+          actual_conflicts="$RUNNER_TEMP/pr936-actual-conflicts"
+          cat > "$expected_conflicts" <<'EOF'
+          apps/web/src/lib/hosted-retention/cleanup.ts
+          apps/web/test/hosted-retention-cleanup.test.ts
+          packages/cli/test/release-script-coverage-audit.test.ts
+          EOF
+          git diff --name-only --diff-filter=U | sort > "$actual_conflicts"
+          if ! diff -u "$expected_conflicts" "$actual_conflicts"; then
+            echo "The conflict set changed; refusing to apply the audited resolution." >&2
+            exit 1
+          fi
 
-          tar -C "$out" -czf "$RUNNER_TEMP/pr936-conflicts.tar.gz" .
-          git merge --abort >/dev/null 2>&1 || true
+          patch --dry-run -p1 --batch < ../helper/.github/pr936-resolution.patch
+          patch -p1 --batch < ../helper/.github/pr936-resolution.patch
+          git add \
+            apps/web/src/lib/hosted-retention/cleanup.ts \
+            apps/web/test/hosted-retention-cleanup.test.ts \
+            packages/cli/test/release-script-coverage-audit.test.ts
 
-      - name: Upload conflict bundle
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Unmerged paths remain after applying the resolution." >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+          if grep -nE '^(<<<<<<<|=======|>>>>>>>)' \
+            apps/web/src/lib/hosted-retention/cleanup.ts \
+            apps/web/test/hosted-retention-cleanup.test.ts \
+            packages/cli/test/release-script-coverage-audit.test.ts; then
+            echo "Conflict markers remain in a resolved path." >&2
+            exit 1
+          fi
+          git diff --cached --check
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          name: pr936-merge-conflicts
-          path: ${{ runner.temp }}/pr936-conflicts.tar.gz
-          retention-days: 1
-          if-no-files-found: error
+          node-version-file: murph/.nvmrc
+          cache: pnpm
+          cache-dependency-path: murph/pnpm-lock.yaml
+
+      - name: Install exact dependencies
+        working-directory: murph
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare hosted Web Prisma client
+        working-directory: murph
+        run: pnpm --dir apps/web prisma:generate
+
+      - name: Run focused Web retention tests
+        working-directory: murph
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-retention-cleanup.test.ts
+
+      - name: Run focused CLI release audit
+        working-directory: murph
+        run: >-
+          pnpm exec vitest run
+          --config packages/cli/vitest.workspace.ts
+          --no-coverage
+          packages/cli/test/release-script-coverage-audit.test.ts
+
+      - name: Commit and push the verified merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd murph
+          expected_head="05f5c993d5912582f118a06bd11573a2a7425765"
+          main_sha="$(cat "$RUNNER_TEMP/pr936-main-sha")"
+
+          git fetch origin main message-retention-14d
+          if [ "$(git rev-parse origin/main)" != "$main_sha" ]; then
+            echo "main advanced during verification; refusing to push a stale merge." >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse origin/message-retention-14d)" != "$expected_head" ]; then
+            echo "PR #936 advanced during verification; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          git commit -m "Merge current main into PR #936"
+          if [ "$(git rev-parse HEAD^1)" != "$expected_head" ]; then
+            echo "Unexpected first merge parent." >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD^2)" != "$main_sha" ]; then
+            echo "Unexpected second merge parent." >&2
+            exit 1
+          fi
+          git diff-tree --check HEAD^
+          git push origin HEAD:message-retention-14d
