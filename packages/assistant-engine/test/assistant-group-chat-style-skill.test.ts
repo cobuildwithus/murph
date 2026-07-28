@@ -44,7 +44,13 @@ describe('assistant group-chat style guidance', () => {
       'Murph is the visible recipient, but the room is often the real audience.',
     )
     expect(normalized).toContain(
+      'When the person actually routes the bid through Murph',
+    )
+    expect(normalized).toContain(
       'a low-risk reason to share a photo, admit something, ask for attention, or make an ordinary life moment replyable',
+    )
+    expect(normalized).toContain(
+      'Do not manufacture this social alibi after the person addressed the humans directly.',
     )
     expect(normalized).toContain('social alibi')
     expect(normalized).toContain('shared third object')
@@ -54,6 +60,51 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'The handoff is beat-local, not a permanent exit',
+    )
+  })
+
+  it('gives collective human social bids first refusal without muting open requests', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Collective human ownership')
+    expect(normalized).toContain(
+      'belongs to the humans collectively on its first beat',
+    )
+    expect(normalized).toContain(
+      '"Y\'all remember this place?" is human-owned, not an open ensemble invitation to Murph.',
+    )
+    expect(normalized).toContain(
+      'Give the humans first refusal. Send no text or reaction on that initial bid',
+    )
+    expect(normalized).toContain(
+      'Read the whole beat, not only the newest bubble.',
+    )
+    expect(normalized).toContain(
+      "An immediate same-purpose same-sender elaboration, statistic, or caption inherits the setup's audience",
+    )
+    expect(normalized).toContain(
+      'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, call `finish_without_reply` immediately and do not react.',
+    )
+    expect(normalized).toContain(
+      "Do not sleep or watch for a follow-up: native replies and other participants' responses belong to later causal turns",
+    )
+    expect(normalized).toContain(
+      'A later same-purpose caption stays human-owned; a later clear factual or task request or direct Murph address is a new decision unit.',
+    )
+    expect(normalized).toContain(
+      'A new factual or task request or a direct Murph address is evaluated under rule 4 or rule 3',
+    )
+    expect(normalized).toContain(
+      'even when it came from the same sender seconds later or arrived inside the same accepted provider turn',
+    )
+    expect(normalized).toContain(
+      '"Does anyone know whether that gym still does day passes?" remains eligible under rule 4',
+    )
+    expect(normalized).toContain(
+      'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat, and an audience-unclear unaddressed personal artifact is not genuinely unowned.',
+    )
+    expect(normalized).not.toContain(
+      'Use the existing short foreground watch',
     )
   })
 
@@ -136,7 +187,7 @@ describe('assistant group-chat style guidance', () => {
   it('protects human-owned turns while preserving open ensemble banter', async () => {
     const normalized = await readNormalizedGroupChatSkill()
     const boundary = normalized.indexOf('1. **A participation boundary applies.**')
-    const human = normalized.indexOf('2. **Another human owns this turn.**')
+    const human = normalized.indexOf('2. **One or more humans own this turn.**')
     const addressed = normalized.indexOf('3. **Murph was addressed.**')
     const banter = normalized.indexOf('5. **An open ensemble banter beat.**')
 
@@ -148,7 +199,7 @@ describe('assistant group-chat style guidance', () => {
       'A question was addressed to a specific human.',
     )
     expect(normalized).toContain(
-      'This is a current-turn floor rule, not a ban on a later open beat.',
+      'This is a beat-local floor rule, not a ban on a later open beat.',
     )
     expect(normalized).toContain(
       'Direct address is not required.',

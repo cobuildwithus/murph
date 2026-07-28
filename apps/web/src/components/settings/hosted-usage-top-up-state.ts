@@ -27,6 +27,7 @@ interface HostedUsageTopUpSelectionScreen {
   attempt: HostedUsageTopUpSelectionAttempt;
   kind: "selection";
   selectedOfferCode: string | null;
+  unresolvedRequestKey: string | null;
 }
 
 interface HostedUsageTopUpPurchaseScreen {
@@ -40,6 +41,7 @@ interface HostedUsageTopUpPurchaseScreen {
   restartAt: string | null;
   retryOfferCode: string | null;
   retryRequestKey: string | null;
+  selectionConflict: HostedUsageTopUpPurchaseResponse["selectionConflict"];
   status: HostedUsageTopUpPurchaseStatus | null;
   targetConflict: boolean;
 }
@@ -48,10 +50,6 @@ type HostedUsageTopUpScreen =
   | HostedUsageTopUpSelectionScreen
   | HostedUsageTopUpPurchaseScreen;
 interface HostedUsageTopUpState {
-  // The amount the picker opens on, so the primary action is never a dead
-  // disabled button. Held on state because every reset back to the picker has
-  // to land on the same amount the dialog first offered.
-  defaultOfferCode: string | null;
   open: boolean;
   screen: HostedUsageTopUpScreen;
 }
@@ -74,6 +72,11 @@ type HostedUsageTopUpAction =
     }
   | {
       type: "selection_checkout_redirected";
+      offerCode: string;
+      requestKey: string;
+    }
+  | {
+      type: "checkout_recovery_missed";
       offerCode: string;
       requestKey: string;
     }
@@ -122,7 +125,6 @@ type HostedUsageTopUpAction =
 
 function createHostedUsageTopUpState(input: {
   activePurchase: HostedUsageTopUpActivePurchase | null;
-  defaultOfferCode: string | null;
   initialOpen: boolean;
   purchaseReturn: HostedUsageTopUpReturn | null;
 }): HostedUsageTopUpState {
@@ -130,16 +132,14 @@ function createHostedUsageTopUpState(input: {
     input.purchaseReturn?.purchaseId ?? input.activePurchase?.purchaseId ?? null;
   if (!purchaseId) {
     return {
-      defaultOfferCode: input.defaultOfferCode,
       open: input.initialOpen,
-      screen: createSelectionScreen(input.defaultOfferCode),
+      screen: createSelectionScreen(),
     };
   }
   const status = input.purchaseReturn
     ? null
     : input.activePurchase?.status ?? null;
   return {
-    defaultOfferCode: input.defaultOfferCode,
     open: input.purchaseReturn !== null || input.initialOpen,
     screen: {
       ...createPurchaseScreen(purchaseId),
@@ -178,7 +178,7 @@ function hostedUsageTopUpReducer(
         ...state,
         open: true,
         screen: action.reset
-          ? createSelectionScreen(state.defaultOfferCode)
+          ? createSelectionScreen()
           : state.screen,
       };
     case "offer_selected":
@@ -189,7 +189,7 @@ function hostedUsageTopUpReducer(
       );
     case "amount_change_requested":
       return updateSelectionScreen(state, () =>
-        createSelectionScreen(state.defaultOfferCode),
+        createSelectionScreen(),
       );
     case "selection_checkout_started":
       return updateSelectionScreen(state, (screen) => ({
@@ -220,6 +220,8 @@ function hostedUsageTopUpReducer(
           requestKey: action.requestKey,
         },
       }));
+    case "checkout_recovery_missed":
+      return applyCheckoutRecoveryMiss(state, action);
     case "purchase_checkout_started":
       return updatePurchaseScreen(state, action.purchaseId, (screen) => ({
         ...screen,
@@ -323,7 +325,7 @@ function hostedUsageTopUpReducer(
         state.screen.purchaseId === action.purchaseId
         ? {
             ...state,
-            screen: createSelectionScreen(state.defaultOfferCode),
+            screen: createSelectionScreen(),
           }
         : state;
   }
@@ -387,6 +389,28 @@ function applyCheckoutResponse(
   };
 }
 
+function applyCheckoutRecoveryMiss(
+  state: HostedUsageTopUpState,
+  action: Extract<
+    HostedUsageTopUpAction,
+    { type: "checkout_recovery_missed" }
+  >,
+): HostedUsageTopUpState {
+  const selectionMatches =
+    state.screen.kind === "selection" &&
+    state.screen.attempt.kind === "opening" &&
+    state.screen.attempt.offerCode === action.offerCode &&
+    state.screen.attempt.requestKey === action.requestKey;
+  const purchaseMatches =
+    state.screen.kind === "purchase" &&
+    state.screen.operation === "opening_checkout" &&
+    state.screen.retryOfferCode === action.offerCode &&
+    state.screen.retryRequestKey === action.requestKey;
+  return selectionMatches || purchaseMatches
+    ? { ...state, screen: createSelectionScreen(action.requestKey) }
+    : state;
+}
+
 function screenFromResponse(
   previous: HostedUsageTopUpPurchaseScreen | null,
   response: HostedUsageTopUpPurchaseResponse,
@@ -402,7 +426,9 @@ function screenFromResponse(
     ...createPurchaseScreen(response.purchaseId),
     cancelAllowed: response.cancelAllowed,
     checkoutUrl:
-      !response.targetConflict && response.status === "checkout_open"
+      !response.selectionConflict &&
+      !response.targetConflict &&
+      response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
         : null,
     poll:
@@ -412,21 +438,29 @@ function screenFromResponse(
           ? previousPoll
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
-    retryOfferCode: response.targetConflict ? null : retryOfferCode,
+    retryOfferCode:
+      response.selectionConflict || response.targetConflict
+        ? null
+        : retryOfferCode,
     retryRequestKey:
-      response.targetConflict || !retryOfferCode ? null : retryRequestKey,
+      response.selectionConflict || response.targetConflict || !retryOfferCode
+        ? null
+        : retryRequestKey,
+    selectionConflict:
+      response.selectionConflict ?? previous?.selectionConflict ?? null,
     status: response.status,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };
 }
 
 function createSelectionScreen(
-  defaultOfferCode: string | null,
+  unresolvedRequestKey: string | null = null,
 ): HostedUsageTopUpSelectionScreen {
   return {
     attempt: { kind: "idle" },
     kind: "selection",
-    selectedOfferCode: defaultOfferCode,
+    selectedOfferCode: null,
+    unresolvedRequestKey,
   };
 }
 
@@ -444,6 +478,7 @@ function createPurchaseScreen(
     restartAt: null,
     retryOfferCode: null,
     retryRequestKey: null,
+    selectionConflict: null,
     status: null,
     targetConflict: false,
   };

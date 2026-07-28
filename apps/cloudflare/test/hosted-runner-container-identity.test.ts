@@ -480,6 +480,7 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
       }),
       runnerContainerName: input.token.runnerContainerName ?? input.input.userId,
       token: input.token,
+      workspaceCheckpointedAt: null,
       workspaceVersion: "0",
     };
   }

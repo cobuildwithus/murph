@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+  materializeHostedGroupSponsorshipIfApplicable: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
@@ -200,6 +201,11 @@ vi.mock(
   },
 );
 
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-notification", () => ({
+  materializeHostedGroupSponsorshipIfApplicable:
+    mocks.materializeHostedGroupSponsorshipIfApplicable,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
@@ -295,6 +301,7 @@ describe("hosted Stripe event reconciliation", () => {
       core: { id: "member_123" },
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.materializeHostedGroupSponsorshipIfApplicable.mockResolvedValue(true);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
       new Map(),
@@ -520,6 +527,12 @@ describe("hosted Stripe event reconciliation", () => {
       event,
       prisma: prisma.client,
     });
+    expect(
+      mocks.materializeHostedGroupSponsorshipIfApplicable,
+    ).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      purchaseId: "hucp_purchase_123",
+    });
     expect(mocks.findMemberForStripeCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.prepareHostedLegacySyntheticFamilyCleanupTx).not.toHaveBeenCalled();
     expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
@@ -527,6 +540,87 @@ describe("hosted Stripe event reconciliation", () => {
       abortSignal: expect.any(AbortSignal),
       prisma: prisma.client,
       userId: "member_123",
+    });
+  });
+
+  it("wakes paid usage work before attempting the optional sponsorship moment", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const ordering: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(async () => {
+      ordering.push("usage-recheck");
+      return {
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_123",
+      };
+    });
+    mocks.materializeHostedGroupSponsorshipIfApplicable.mockImplementationOnce(
+      async () => {
+        ordering.push("sponsorship-moment");
+        throw new Error("Sponsorship moment unavailable");
+      },
+    );
+
+    try {
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "failed" });
+
+      expect(ordering).toEqual(["usage-recheck", "sponsorship-moment"]);
+      expect(prisma.rows[0]).toEqual(expect.objectContaining({
+        processedAt: null,
+        status: HostedStripeEventStatus.failed,
+      }));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("materializes a replayed direct PaymentIntent success through the same owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = {
+      ...makeCheckoutCompletedEvent(),
+      data: {
+        object: {
+          id: "pi_usage_credit_123",
+          object: "payment_intent",
+          status: "succeeded",
+        },
+      },
+      id: "evt_usage_credit_payment_intent_succeeded",
+      type: "payment_intent.succeeded",
+    } as Stripe.Event;
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: false,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: false,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(
+      mocks.materializeHostedGroupSponsorshipIfApplicable,
+    ).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      purchaseId: "hucp_purchase_123",
     });
   });
 

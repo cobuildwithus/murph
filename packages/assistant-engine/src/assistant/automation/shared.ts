@@ -57,6 +57,27 @@ export interface AssistantInboxScanResult {
   skipped: number
 }
 
+export interface AssistantAutoReplyTerminalNonReply {
+  inputIds: string[]
+  recordedAt: string
+  source: string
+}
+
+export type AssistantAutoReplyTerminalNonReplyHook = (
+  event: AssistantAutoReplyTerminalNonReply,
+) => void
+
+export function emitAssistantAutoReplyTerminalNonReplyBestEffort(input: {
+  event: AssistantAutoReplyTerminalNonReply
+  hook?: AssistantAutoReplyTerminalNonReplyHook | null
+}): void {
+  try {
+    input.hook?.(input.event)
+  } catch {
+    // Observability projection must never affect canonical reply handling.
+  }
+}
+
 export interface AssistantAutoReplyScanResult {
   checkpointRequired?: true
   considered: number

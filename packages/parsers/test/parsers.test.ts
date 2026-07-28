@@ -2451,6 +2451,9 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
   const runtime: InboxRuntimeStore = {
     databasePath: path.join(vaultRoot, ".runtime", "inboxd.sqlite"),
     close() {},
+    redactCaptureText() {
+      return false;
+    },
     getCursor() {
       return null;
     },

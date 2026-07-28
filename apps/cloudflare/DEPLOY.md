@@ -593,6 +593,55 @@ Opt-in execution integrations:
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
+### Inbound message-content retention rollout
+
+This rollout has an irreversible transcript cutover and must use two phases:
+
+1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
+   `container_rollout=immediate`. Drain old warm bundles, prove the deployed
+   fingerprint, and verify that newly written user transcript entries carry
+   `contentReceivedAt`. This Worker/runner version is also the rollout floor:
+   its ambiguous-completion recovery requires both a workspace-version advance
+   and a changed checkpoint timestamp before it releases a runtime fence.
+2. Before the Web migration, count persisted workspace snapshots and compare
+   the aggregate with the existing retention-cron capacity of five snapshots
+   per successful hourly run plus an explicit full-run signal-failure
+   allowance. Stop if that queue cannot drain safely in the rollout window; do
+   not add a second dispatcher as part of this release.
+3. Record the verified runner-convergence instant, then deploy Web with the
+   additive mailbox retention columns. The phase-one migration re-arms every
+   persisted workspace snapshot once, advances the workspace CAS version, and
+   leaves checkpoint time unchanged. A runtime that read the pre-rearm version
+   must conflict and retry instead of clearing the wake; the Worker must not
+   treat that migration-only version advance as runtime progress. Monitor the
+   existing cron until no due snapshot remains; each restored runtime scrubs
+   receipt-backed captures, parser output, projections, inputs, and stamped
+   transcripts while preserving every unstamped legacy transcript entry.
+   Phase one is incomplete until the queue reaches zero.
+   If the Web migration was applied before runner convergence, first prove the
+   stamping-capable runner fingerprint across the fleet, then ship the additive
+   `20260728050000_rearm_hosted_mailbox_content_retention` recovery migration.
+   It repeats only the wake, attempt-marker reset, and CAS advance; it does not
+   alter content or checkpoint time. Start the drain window from that recovery
+   migration and keep monitoring the same due queue to zero.
+4. Keep legacy unstamped transcript entries intact for 14 complete days after
+   the convergence instant and until phase one has drained, whichever is later.
+   Newly stamped entries and the other receipt-owned message carriers use their
+   exact inclusive 14-day deadlines after their initial snapshot drain.
+5. Only after both gates, ship a separate phase-two migration that
+   re-arms persisted snapshots again and enables retirement of every remaining
+   unstamped user transcript entry. Verify retention wake convergence,
+   checkpoint publication, policy-non-reply counts, and content-retirement
+   counts before declaring the cutover complete.
+
+Do not infer legacy receipt time from transcript creation, accepted-turn
+journals, or input events, and do not enable the phase-two legacy scrub early.
+Normal snapshot cleanup can discard those joins, so an early scrub can
+irreversibly erase recent user context while leaving the paired assistant
+reply. The phase-one rearm and drain gate are required: omitting either one
+strands other receipt-backed message carriers in dormant snapshots beyond
+their deadline.
+
 ### Retired WhatsApp configuration
 
 Removing WhatsApp bindings from the deploy workflow does not delete values that

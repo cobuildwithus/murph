@@ -132,6 +132,7 @@ export type {
 } from "./experiment-progress-card.ts";
 export {
   resolveAdherenceObservationActivityKind,
+  resolveExperimentAdherenceTargets,
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
 export type {

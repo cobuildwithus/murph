@@ -129,7 +129,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -167,7 +167,6 @@ const groupChatRoute = {
 const EXPECTED_MANAGED_SPREAD_CRONS = {
   digest: { kind: 'cron', expression: '30 10 * * 2' },
   insight: { kind: 'cron', expression: '0 13 * * 0' },
-  improvementCoach: { kind: 'cron', expression: '30 17 * * 2' },
   researchScout: { kind: 'cron', expression: '0 14 * * 3' },
 } as const
 
@@ -852,35 +851,35 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-28T16:00:00.000Z')
   })
 
-  it('keeps the managed weekly improvement coach seed as the baseline Tuesday early-evening recurrence', () => {
+  it('keeps the managed monthly improvement coach seed on the first day of each month', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
-      (entry) => entry.automationId === MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      (entry) => entry.automationId === MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
     )
     if (!seed || seed.schedule.kind !== 'cron') {
-      throw new Error('Expected the weekly improvement coach to use a cron schedule.')
+      throw new Error('Expected the monthly improvement coach to use a cron schedule.')
     }
 
-    expect(seed.schedule.expression).toBe('0 17 * * 2')
-    expect(seed.slug).toBe('weekly-improvement-coach')
-    expect(seed.title).toBe('Weekly improvement coach')
+    expect(seed.schedule.expression).toBe('0 17 1 * *')
+    expect(seed.slug).toBe('monthly-improvement-coach')
+    expect(seed.title).toBe('Monthly improvement coach')
     expect(seed.summary).toBe(
-      'A weekly check for one clearly actionable health improvement worth working on.',
+      'A monthly check for one user-relevant health friction worth offering help with.',
     )
     expect(seed.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
-    expect(seed.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(seed.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(seed.instructions).toContain('knowledge show improvement-opportunities')
     expect(seed.instructions).toContain(
       'knowledge append-section improvement-opportunities YYYY-MM-DD',
     )
     expect(seed.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar and no open check-in was due."}',
+      '{"kind":"skip","privateSummary":"No monthly improvement opportunity cleared the evidence and taste bars, and no open check-in was due."}',
     )
     expect(seed.instructions).toContain('Every completed run must leave one compact private decision record')
     expect(seed.instructions).toContain('only run and outreach ledger')
-    expect(seed.instructions).toContain('at most once in any 14-day window')
+    expect(seed.instructions).toContain('at most once in any 30-day window')
     expect(seed.instructions).toContain(
       'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
     )
@@ -917,13 +916,16 @@ describe('applyMurphManagedAutomations', () => {
       'Never infer absence of a behavior from absence of data',
     )
     expect(seed.instructions).toContain(
-      'Repeatedly short sleep opportunity, materially irregular sleep timing, or disrupted sleep paired with daytime impact.',
+      'Start from an explicit active goal, concern, symptom, experiment, request for help, or recurring friction',
+    )
+    expect(seed.instructions).toContain(
+      'Describe a practical friction, mismatch, or design problem—not a deficit, failure, slip, lack of discipline, or compliance problem.',
     )
     expect(seed.instructions).toContain(
       'consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own',
     )
     expect(seed.instructions).toContain(
-      'Do not use population sleep-stage targets as the rationale.',
+      'A metric being lower than a population target or lower than months ago does not create permission to coach.',
     )
     expect(seed.instructions).not.toContain(
       'Deep sleep or total sleep consistently well below typical reference ranges.',
@@ -935,15 +937,15 @@ describe('applyMurphManagedAutomations', () => {
       new Date('2026-06-18T16:00:00.000Z'),
       'America/New_York',
     )
-    expect(nextRunAt).toBe('2026-06-23T21:00:00.000Z')
+    expect(nextRunAt).toBe('2026-07-01T21:00:00.000Z')
     if (!nextRunAt) {
-      throw new Error('Expected the weekly improvement coach cron to have a next run.')
+      throw new Error('Expected the monthly improvement coach cron to have a next run.')
     }
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date(nextRunAt),
       'America/New_York',
-    )).toBe('2026-06-30T21:00:00.000Z')
+    )).toBe('2026-08-01T21:00:00.000Z')
   })
 
   it('keeps the managed weekly health research scout seed as the baseline Wednesday evening recurrence', () => {
@@ -1276,7 +1278,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.tags).toContain('murph-managed:weekly-health-digest')
     expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
-    expect(digestRecord?.instructions).toContain('New data alone is not substance')
+    expect(digestRecord?.instructions).toContain('New data or a decline alone is not substance')
     expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
     expect(digestRecord?.instructions).toContain('what was probably noise')
@@ -1369,22 +1371,24 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
 
     const improvementCoachRecord = managedAutomationMocks.records.get(
-      MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
     )
     expect(improvementCoachRecord).toMatchObject({
-      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       route: defaultRoute,
-      slug: 'weekly-improvement-coach',
+      slug: 'monthly-improvement-coach',
       status: 'active',
-      title: 'Weekly improvement coach',
+      title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
-    expect(improvementCoachRecord?.schedule)
-      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.improvementCoach)
-    expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(improvementCoachRecord?.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 17 1 * *',
+    })
+    expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(improvementCoachRecord?.instructions).toContain(
       'knowledge show improvement-opportunities',
@@ -1393,13 +1397,13 @@ describe('applyMurphManagedAutomations', () => {
       'knowledge append-section improvement-opportunities YYYY-MM-DD',
     )
     expect(improvementCoachRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar and no open check-in was due."}',
+      '{"kind":"skip","privateSummary":"No monthly improvement opportunity cleared the evidence and taste bars, and no open check-in was due."}',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'Every completed run must leave one compact private decision record',
     )
     expect(improvementCoachRecord?.instructions).toContain(
-      'at most once in any 14-day window',
+      'at most once in any 30-day window',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
@@ -2166,8 +2170,8 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
@@ -2183,13 +2187,18 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
-      skipped: 4,
+      created: 2,
+      skipped: 3,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
+      .toEqual({
+        kind: 'cron',
+        expression: '0 17 1 * *',
+      })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
 
@@ -2201,8 +2210,8 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
-      skipped: 1,
+      created: 3,
+      skipped: 2,
       updated: 0,
     })
 
@@ -2210,8 +2219,11 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.improvementCoach)
+    expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
+      .toEqual({
+        kind: 'cron',
+        expression: '0 17 1 * *',
+      })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
@@ -2295,7 +2307,7 @@ describe('applyMurphManagedAutomations', () => {
       .toBe(true)
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
       .toBe(true)
-    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID))
+    expect(managedAutomationMocks.records.has(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID))
       .toBe(true)
     expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
       .toBe(false)

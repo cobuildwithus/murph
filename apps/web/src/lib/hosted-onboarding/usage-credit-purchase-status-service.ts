@@ -17,6 +17,8 @@ import {
 import { cancelHostedUsageCreditDirectPayment } from
   "./usage-credit-saved-card-payment";
 import {
+  hostedUsageCreditPolicySupportsSavedCardTarget,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedUsageCreditOfferCode,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
@@ -46,12 +48,17 @@ export const HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES = [
 export type HostedUsageCreditPublicPurchaseStatus =
   (typeof HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES)[number];
 
+export type HostedUsageCreditSelectionConflict = "offer" | "sponsorship";
+
 export interface HostedUsageCreditCheckoutResult {
   cancelAllowed?: true;
   purchaseId: string;
   recovered?: true;
+  /** The returned purchase is durably bound to the submitted request key. */
+  requestKeyMatched?: true;
   restartAt?: string;
   retryAllowed?: true;
+  selectionConflict?: HostedUsageCreditSelectionConflict;
   status: HostedUsageCreditPublicPurchaseStatus;
   targetConflict?: true;
   url?: string;
@@ -260,10 +267,7 @@ export async function projectHostedUsageCreditCheckoutCapability(input: {
           now: input.now,
           purchase: input.purchase,
         }) ||
-        (
-          target.kind === "group" &&
-          canRetryHostedUsageCreditSavedCardPayment(input.purchase)
-        )
+        canRetryHostedUsageCreditSavedCardPayment(input.purchase)
       ),
     target,
     targetAuthorized:
@@ -490,13 +494,27 @@ export function canRetryHostedUsageCreditCheckoutCreate(input: {
 export function canRetryHostedUsageCreditSavedCardPayment(
   purchase: Pick<
     HostedUsageCreditPurchase,
+    | "beneficiaryMemberId"
+    | "checkoutRequestPolicyVersion"
+    | "checkoutSuccessUrl"
+    | "id"
+    | "payerMemberId"
     | "status"
     | "stripeCheckoutSessionLookupKey"
     | "stripePaymentIntentIdEncrypted"
     | "stripePaymentIntentLookupKey"
   >,
 ): boolean {
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    purchase.checkoutRequestPolicyVersion,
+  );
+  const target = projectHostedUsageCreditPurchaseTarget(purchase);
   return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    policyVersion !== null &&
+    hostedUsageCreditPolicySupportsSavedCardTarget({
+      policyVersion,
+      targetKind: target.kind,
+    }) &&
     !purchase.stripeCheckoutSessionLookupKey &&
     Boolean(
       purchase.stripePaymentIntentIdEncrypted &&

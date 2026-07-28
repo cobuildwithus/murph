@@ -77,6 +77,41 @@ describe("hosted Resend plain-text email sender", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(1_000);
   });
 
+  it("combines the caller abort with the timeout for a local E2E origin", async () => {
+    const callerSignal = new AbortController().signal;
+    const timeoutSignal = new AbortController().signal;
+    const combinedSignal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(timeoutSignal);
+    const anySpy = vi.spyOn(AbortSignal, "any")
+      .mockReturnValue(combinedSignal);
+    const fetchMock: typeof fetch = async (input, init) => {
+      expect(input).toBe("http://127.0.0.1:4321/emails");
+      expect(init?.signal).toBe(combinedSignal);
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    await sendHostedResendPlainTextEmail({
+      config: {
+        apiBaseUrl: "http://127.0.0.1:4321",
+        apiKey: "re_test",
+        from: "Murph <founder@example.com>",
+        timeoutMs: 1_000,
+      },
+      fetchImpl: fetchMock,
+      idempotencyKey: "message/idempotency-key",
+      signal: callerSignal,
+      subject: "Subject",
+      text: "Plain text only.",
+      to: ["member@example.com"],
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(1_000);
+    expect(anySpy).toHaveBeenCalledWith([callerSignal, timeoutSignal]);
+  });
+
   it("tolerates successful Resend responses without a parseable provider id", async () => {
     await expect(sendHostedResendPlainTextEmail({
       config: {

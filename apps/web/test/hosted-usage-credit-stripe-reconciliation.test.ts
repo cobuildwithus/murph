@@ -82,26 +82,27 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApiMode: mocks.stripeApiMode,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-stripe", () => ({
-  decryptHostedUsageCreditPurchaseStripeField: mocks.decryptStripeField,
-  encryptHostedUsageCreditPurchaseStripeField: mocks.encryptStripeField,
-  HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS: {
-    chargeId: "hosted_usage_credit_purchase.stripe_charge_id",
-    checkoutSessionId: "hosted_usage_credit_purchase.stripe_checkout_session_id",
-    checkoutUrl: "hosted_usage_credit_purchase.stripe_checkout_url",
-    customerId: "hosted_usage_credit_purchase.stripe_customer_id",
-    paymentIntentId: "hosted_usage_credit_purchase.stripe_payment_intent_id",
-    priceId: "hosted_usage_credit_purchase.stripe_price_id",
+vi.mock(
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe",
+  async (importOriginal) => {
+    const original = await importOriginal<typeof import(
+      "../src/lib/hosted-onboarding/usage-credit-purchase-stripe"
+    )>();
+    return {
+      ...original,
+      decryptHostedUsageCreditPurchaseStripeField: mocks.decryptStripeField,
+      encryptHostedUsageCreditPurchaseStripeField: mocks.encryptStripeField,
+      requireHostedUsageCreditPurchasePayerMemberId: (purchase: {
+        payerMemberId: string | null;
+      }) => {
+        if (!purchase.payerMemberId) {
+          throw new Error("payer detached");
+        }
+        return purchase.payerMemberId;
+      },
+    };
   },
-  requireHostedUsageCreditPurchasePayerMemberId: (purchase: {
-    payerMemberId: string | null;
-  }) => {
-    if (!purchase.payerMemberId) {
-      throw new Error("payer detached");
-    }
-    return purchase.payerMemberId;
-  },
-}));
+);
 
 import {
   HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
@@ -350,16 +351,24 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     }));
   });
 
-  it("grants once from an owned saved-card PaymentIntent without Checkout", async () => {
+  it.each([
+    "hosted-usage-credit-checkout-v2",
+    "hosted-usage-credit-checkout-v3",
+  ])("grants once from an owned %s saved-card PaymentIntent without Checkout", async (
+    policyVersion,
+  ) => {
     const harness = createUsageCreditStripePrismaHarness({
-      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      checkoutRequestPolicyVersion: policyVersion,
       status: HostedUsageCreditPurchaseStatus.payment_pending,
       stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
       stripeCheckoutSessionIdEncrypted: null,
       stripeCheckoutSessionLookupKey: null,
       stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
     });
-    const paymentIntent = makePaymentIntent({ purpose: "saved_card" });
+    const paymentIntent = makePaymentIntent({
+      policyVersion,
+      purpose: "saved_card",
+    });
     mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
 
     await expect(reconcileHostedUsageCreditStripeEvent({
@@ -381,6 +390,35 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       stripeCheckoutSessionLookupKey: null,
       stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
     }));
+  });
+
+  it("rejects v2 saved-card proof for a personal purchase", async () => {
+    const personalSuccessUrl =
+      "https://murph.example/settings?usageCheckout=success&usagePurchase=hucp_purchase_123#subscription";
+    const harness = createUsageCreditStripePrismaHarness({
+      beneficiaryMemberId: "member_payer",
+      checkoutCancelUrl:
+        "https://murph.example/settings?usageCheckout=cancel&usagePurchase=hucp_purchase_123#subscription",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      checkoutSuccessUrl: personalSuccessUrl,
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    const paymentIntent = makePaymentIntent({
+      policyVersion: "hosted-usage-credit-checkout-v2",
+      purpose: "saved_card",
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.succeeded", paymentIntent),
+      prisma: harness.client,
+    })).rejects.toThrow("Usage-credit payment policy did not match.");
+
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
   it("keeps an owned processing saved-card PaymentIntent pending", async () => {
@@ -1682,7 +1720,10 @@ function createUsageCreditStripePrismaHarness(
 
 function makeUsageCreditPurchase(
   overrides?: Partial<{
+    beneficiaryMemberId: string;
+    checkoutCancelUrl: string;
     checkoutRequestPolicyVersion: string;
+    checkoutSuccessUrl: string;
     payerMemberId: string | null;
     status: HostedUsageCreditPurchaseStatus;
     stripeChargeLookupKey: string | null;
@@ -1692,16 +1733,24 @@ function makeUsageCreditPurchase(
     terminalAt: Date | null;
   }>,
 ) {
+  const isVersionTwo =
+    overrides?.checkoutRequestPolicyVersion ===
+      "hosted-usage-credit-checkout-v2";
   return {
-    beneficiaryMemberId: "member_beneficiary",
+    beneficiaryMemberId: overrides?.beneficiaryMemberId ??
+      "member_beneficiary",
     cashAmountMinor: 500,
     cashCurrency: "usd",
-    checkoutCancelUrl: "https://murph.example/settings?usageCredit=cancel",
+    checkoutCancelUrl: overrides?.checkoutCancelUrl ?? (isVersionTwo
+      ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=cancel"
+      : "https://murph.example/settings?usageCredit=cancel"),
     checkoutExpiresAt: new Date("2026-07-16T04:50:00.456Z"),
     checkoutRequestPolicyVersion:
       overrides?.checkoutRequestPolicyVersion ??
       "hosted-usage-credit-checkout-v1",
-    checkoutSuccessUrl: "https://murph.example/settings?usageCredit=success",
+    checkoutSuccessUrl: overrides?.checkoutSuccessUrl ?? (isVersionTwo
+      ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=success"
+      : "https://murph.example/settings?usageCredit=success"),
     createdAt: new Date("2026-07-16T03:20:00.000Z"),
     grantUsdMicros: 5_000_000n,
     id: "hucp_purchase_123",
@@ -1916,6 +1965,7 @@ function makeCheckoutLineItems(overrides?: {
 function makePaymentIntent(overrides?: {
   amountReceived?: number;
   latestCharge?: Stripe.Charge | string | null;
+  policyVersion?: string;
   purpose?: "checkout" | "saved_card";
   status?: Stripe.PaymentIntent.Status;
 }): Stripe.PaymentIntent {
@@ -1935,7 +1985,7 @@ function makePaymentIntent(overrides?: {
       : overrides.latestCharge,
     livemode: false,
     metadata: overrides?.purpose === "saved_card"
-      ? makeSavedCardUsageCreditMetadata()
+      ? makeSavedCardUsageCreditMetadata(overrides.policyVersion)
       : makeUsageCreditMetadata(),
     object: "payment_intent",
     status: overrides?.status ?? "succeeded",
@@ -2102,9 +2152,11 @@ function makeUsageCreditMetadata(): Record<string, string> {
   };
 }
 
-function makeSavedCardUsageCreditMetadata(): Record<string, string> {
+function makeSavedCardUsageCreditMetadata(
+  policyVersion = "hosted-usage-credit-checkout-v2",
+): Record<string, string> {
   return {
-    policyVersion: "hosted-usage-credit-checkout-v2",
+    policyVersion,
     purchaseId: "hucp_purchase_123",
     purpose: "hosted_usage_credit_saved_card",
   };

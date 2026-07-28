@@ -1,7 +1,8 @@
 import { normalizeNullableString, parseInteger } from "../primitives";
 
-const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
-const RESEND_BATCH_EMAILS_ENDPOINT = "https://api.resend.com/emails/batch";
+const RESEND_API_BASE_URL = "https://api.resend.com";
+const RESEND_EMAILS_PATH = "/emails";
+const RESEND_BATCH_EMAILS_PATH = "/emails/batch";
 const HOSTED_RESEND_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
 const HOSTED_RESEND_EMAIL_MIN_TIMEOUT_MS = 1_000;
 const HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS = 30_000;
@@ -9,6 +10,7 @@ const HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS = 30_000;
 export type HostedResendPlainTextEmailEnv = Readonly<Record<string, string | undefined>>;
 
 export type HostedResendPlainTextEmailConfig = {
+  apiBaseUrl?: string;
   apiKey: string;
   from: string;
   timeoutMs: number;
@@ -55,25 +57,34 @@ export async function sendHostedResendPlainTextEmail(input: {
   config: HostedResendPlainTextEmailConfig;
   fetchImpl?: typeof fetch;
   idempotencyKey: string;
+  signal?: AbortSignal;
   subject: string;
   text: string;
   to: string[];
 }): Promise<HostedResendPlainTextEmailResult> {
-  const response = await (input.fetchImpl ?? fetch)(RESEND_EMAILS_ENDPOINT, {
-    body: JSON.stringify({
-      from: input.config.from,
-      subject: input.subject,
-      text: input.text,
-      to: input.to,
-    }),
-    headers: {
-      Authorization: `Bearer ${input.config.apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": input.idempotencyKey,
+  const response = await (input.fetchImpl ?? fetch)(
+    buildHostedResendPlainTextEmailEndpoint(input.config, RESEND_EMAILS_PATH),
+    {
+      body: JSON.stringify({
+        from: input.config.from,
+        subject: input.subject,
+        text: input.text,
+        to: input.to,
+      }),
+      headers: {
+        Authorization: `Bearer ${input.config.apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": input.idempotencyKey,
+      },
+      method: "POST",
+      signal: input.signal
+        ? AbortSignal.any([
+            input.signal,
+            AbortSignal.timeout(input.config.timeoutMs),
+          ])
+        : AbortSignal.timeout(input.config.timeoutMs),
     },
-    method: "POST",
-    signal: AbortSignal.timeout(input.config.timeoutMs),
-  });
+  );
 
   if (!response.ok) {
     throw new HostedResendPlainTextEmailError("Hosted Resend email send failed.", {
@@ -99,21 +110,27 @@ export async function sendHostedResendPlainTextEmailBatch(input: {
   fetchImpl?: typeof fetch;
   idempotencyKey: string;
 }): Promise<HostedResendPlainTextEmailBatchResult> {
-  const response = await (input.fetchImpl ?? fetch)(RESEND_BATCH_EMAILS_ENDPOINT, {
-    body: JSON.stringify(input.emails.map((email) => ({
-      from: input.config.from,
-      subject: email.subject,
-      text: email.text,
-      to: email.to,
-    }))),
-    headers: {
-      Authorization: `Bearer ${input.config.apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": input.idempotencyKey,
+  const response = await (input.fetchImpl ?? fetch)(
+    buildHostedResendPlainTextEmailEndpoint(
+      input.config,
+      RESEND_BATCH_EMAILS_PATH,
+    ),
+    {
+      body: JSON.stringify(input.emails.map((email) => ({
+        from: input.config.from,
+        subject: email.subject,
+        text: email.text,
+        to: email.to,
+      }))),
+      headers: {
+        Authorization: `Bearer ${input.config.apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": input.idempotencyKey,
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(input.config.timeoutMs),
     },
-    method: "POST",
-    signal: AbortSignal.timeout(input.config.timeoutMs),
-  });
+  );
 
   if (!response.ok) {
     throw new HostedResendPlainTextEmailError(
@@ -145,6 +162,13 @@ function readHostedResendPlainTextEmailTimeoutMs(
     Math.max(configured, HOSTED_RESEND_EMAIL_MIN_TIMEOUT_MS),
     HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS,
   );
+}
+
+function buildHostedResendPlainTextEmailEndpoint(
+  config: HostedResendPlainTextEmailConfig,
+  path: string,
+): string {
+  return `${config.apiBaseUrl ?? RESEND_API_BASE_URL}${path}`;
 }
 
 async function readResendJsonPayload(response: Response): Promise<unknown> {
