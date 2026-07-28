@@ -3926,6 +3926,7 @@ describe("hosted Family plan", () => {
         tx,
       })).resolves.toEqual({
         activations: [],
+        billingModeChangedMemberIds: [],
         groupId: "hbag_family",
       });
 
@@ -3967,7 +3968,7 @@ describe("hosted Family plan", () => {
     },
   );
 
-  it("releases direct and Family retry after incomplete_expired without allowing an older reclaim", async () => {
+  it("releases direct and Family retry when terminal state wins before active handoff", async () => {
     const terminalEventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
     const group = {
       billingStatus: HostedBillingStatus.incomplete,
@@ -3979,6 +3980,17 @@ describe("hosted Family plan", () => {
     let currentBillingRef = createBillingRefMock({
       group,
       lastStripeEventCreatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      stripeSubscriptionIdEncrypted: null,
+    });
+    let ownerBillingStatus = HostedBillingStatus.active;
+    const directBillingRef = createMemberBillingRefMock({
+      checkoutAttemptId: "attempt_A",
+      checkoutCreatedAt: new Date("2026-06-18T11:55:00.000Z"),
+      checkoutIntentHash: "intent_A",
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_S",
+      stripeCheckoutSessionLookupKey: "hbidx:stripe-checkout-session:v1:S",
+      stripeCustomerIdEncrypted: "encrypted:cus_family",
+      stripeSubscriptionIdEncrypted: "encrypted:sub_family",
     });
     tx.hostedAccountGroup.findUnique.mockImplementation(async () => ({
       ...group,
@@ -4011,6 +4023,26 @@ describe("hosted Family plan", () => {
         return currentBillingRef;
       },
     );
+    tx.hostedMember.findUnique.mockImplementation(async () => ({
+      billingRef: directBillingRef,
+      billingStatus: ownerBillingStatus,
+      suspendedAt: null,
+    }));
+    tx.hostedMember.update.mockImplementation(async ({ data }) => {
+      ownerBillingStatus = data.billingStatus;
+      return {
+        billingStatus: ownerBillingStatus,
+        id: group.ownerMemberId,
+        suspendedAt: null,
+      };
+    });
+    tx.hostedMemberBillingRef.findUnique.mockImplementation(
+      async () => directBillingRef,
+    );
+    tx.hostedMemberBillingRef.updateMany.mockImplementation(async ({ data }) => {
+      Object.assign(directBillingRef, data);
+      return { count: 1 };
+    });
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: { eventCreatedAt: terminalEventCreatedAt },
@@ -4020,14 +4052,27 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toEqual({
       activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
     });
 
     expect(group.billingStatus).toBe(HostedBillingStatus.canceled);
+    expect(ownerBillingStatus).toBe(HostedBillingStatus.not_started);
     expect(currentBillingRef).toMatchObject({
       lastStripeEventCreatedAt: terminalEventCreatedAt,
       stripeSubscriptionIdEncrypted: null,
       stripeSubscriptionItemIdEncrypted: null,
+    });
+    expect(directBillingRef).toMatchObject({
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeCustomerIdEncrypted: null,
+      stripeCustomerLookupKey: null,
+      stripeSubscriptionIdEncrypted: null,
+      stripeSubscriptionLookupKey: null,
     });
 
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
@@ -4080,6 +4125,7 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
     });
     expect(tx.hostedAccountGroup.update).toHaveBeenCalledTimes(groupWriteCount);
+    expect(tx.hostedMember.update).toHaveBeenCalledOnce();
 
     const checkoutCreate = vi.fn().mockResolvedValue({
       id: "cs_test_familyRecovery123",

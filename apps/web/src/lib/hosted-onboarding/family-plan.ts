@@ -1766,11 +1766,19 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       stripeSubscriptionId: null,
       tx: input.tx,
     });
+    const billingModeChanged = await clearHostedFamilyOwnerDirectPaidBillingTx({
+      ownerMemberId: group.ownerMemberId,
+      stripeSubscriptionId: input.subscription.id,
+      tx: input.tx,
+    });
     await input.tx.hostedAccountGroupPlanCapacity.deleteMany({
       where: { groupId: group.id },
     });
     return {
       activations: [],
+      billingModeChangedMemberIds: billingModeChanged
+        ? [group.ownerMemberId]
+        : [],
       groupId: group.id,
     };
   }
