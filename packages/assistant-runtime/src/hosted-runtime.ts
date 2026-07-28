@@ -73,6 +73,10 @@ import {
   type HostedIdleMaintenanceOutcome,
 } from "./hosted-runtime/idle-maintenance.ts";
 import {
+  resolveHostedRuntimeCheckpointPublicationExpectedByMs,
+  resolveHostedRuntimeIdleCheckpointDelayMs,
+} from "./hosted-runtime/checkpoint-publication.ts";
+import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import {
@@ -2049,13 +2053,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         activeWorkspace?.redactedStatus ?? null,
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
-    let idleCheckpointStartByMs: number | null = runtimeStateDirty
-      ? Date.now() + idleCheckpointDelayMs
-      : null;
+    let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
-    const markIdleCheckpointTimerAfterDirtyWork = () => {
-      idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
+    const publishCheckpointPublicationExpectation = (
+      checkpointStartByMs: number,
+    ) => {
+      recordHostedRuntimeLatencyMilestoneBestEffort({
+        at: new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
+          checkpointStartByMs,
+          commitTimeoutMs: runtime.commitTimeoutMs,
+        })).toISOString(),
+        latencyTracePort: runtime.platform.latencyTracePort,
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: input.request.attemptId,
+      });
     };
+    const setIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      idleCheckpointStartByMs = checkpointStartByMs;
+      publishCheckpointPublicationExpectation(checkpointStartByMs);
+    };
+    const ensureIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      if (idleCheckpointStartByMs === null) {
+        setIdleCheckpointStartBy(checkpointStartByMs);
+      }
+    };
+    const markIdleCheckpointTimerAfterDirtyWork = () => {
+      setIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+    };
+    if (runtimeStateDirty) {
+      markIdleCheckpointTimerAfterDirtyWork();
+    }
     const imageGenerationSignal = options.shutdownSignal
       ? AbortSignal.any([
           runtimeAbortController.signal,
@@ -2320,7 +2347,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       invocationLocalProjectedAssistantWakeKey = null;
       durableCheckpointFollowUpPending = true;
       runtimeStateDirty = true;
-      idleCheckpointStartByMs ??= Date.now();
+      ensureIdleCheckpointStartBy(Date.now());
     };
     const reconcilePendingWakeAfterDueAssistantPass = (input: {
       preservedDueAssistantWakeOnNoProgress: boolean;
@@ -2333,7 +2360,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         pendingWake = copyHostedRuntimePendingWake(heldWake.durableWake);
         pendingWakeAfterDueAssistantService = null;
         runtimeStateDirty = true;
-        idleCheckpointStartByMs ??= Date.now();
+        ensureIdleCheckpointStartBy(Date.now());
         return;
       }
       const pendingAssistantWakeMs = pendingWake.nextWakeAt === null
@@ -2366,7 +2393,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingWakeAfterDueAssistantService = null;
       if (wakeChanged) {
         runtimeStateDirty = true;
-        idleCheckpointStartByMs ??= Date.now();
+        ensureIdleCheckpointStartBy(Date.now());
       }
     };
     const drainCleanDurableCheckpointEffects = async (): Promise<boolean> => {
@@ -3162,7 +3189,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (runtimeDirtyAfterForeground) {
         markIdleCheckpointTimerAfterDirtyWork();
       } else if (committedInboxMediaRetentionWakeDue) {
-        idleCheckpointStartByMs = Date.now();
+        setIdleCheckpointStartBy(Date.now());
       }
       if (!runtimeStateDirty) {
         const vaultShareOfferWakeLatencySeed =
@@ -4166,7 +4193,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   };
 }
 
-const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 const activeHostedRuntimeDeferredUsageCaptures =
   new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
@@ -4547,14 +4573,6 @@ function readHostedWorkspaceInvocationStatusPriority(
   }
 
   return 0;
-}
-
-function resolveHostedRuntimeIdleCheckpointDelayMs(value: number | null | undefined): number {
-  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
-    return Math.min(Math.trunc(value), HOSTED_RUNTIME_MAX_TIMER_DELAY_MS);
-  }
-
-  return DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 function buildHostedRuntimeWakeKey(input: {

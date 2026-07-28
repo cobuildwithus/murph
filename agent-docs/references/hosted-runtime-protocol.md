@@ -702,7 +702,13 @@ causal-sequence action. The first sequence-aware Cloudflare consumer and that
 Web build are rollback floors while preference items or personality watermarks
 exist. Deploy behavior-changing consumer updates with immediate runner rollout
 and prove fleet convergence; prefer a forward fix over restoring a legacy
-producer or parser.
+producer or parser. Hourly mailbox retention may encounter a sequence-less
+preference row that predates the hard cut and was deliberately exempted from
+constraint validation because its lane sequence was already consumed.
+Retention deletes that expired legacy tombstone only while it remains at or
+below the authoritative consumed watermark. It never updates the row under the
+new constraint or fabricates a causal sequence; current sequence-bearing rows
+continue to retire in place.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -900,12 +906,33 @@ be labeled row-insert or commit latency. The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. Web accepts those milestones only for
-the exact staged runtime attempt and merges them into the existing phase
-document under a row lock. Emission is queued off the reply path and may retry
-only the bounded staging/trace-row race; it carries no message, prompt,
-response, reasoning, or provider payload. Post-generation delivery guards must
-never create or overwrite the local Codex start milestone.
+first locally observed Codex output/text. It projects
+`terminal_non_reply_committed` only from the assistant engine's existing durable
+`suppressed` terminal evidence for the named input set, either immediately after
+that write succeeds or when a replay reads the completed evidence. That marker
+is an observability projection of the existing terminal owner; it is not a
+second disposition record and does not advance mailbox consumption. Web keeps
+in-flight timing milestones scoped to the exact staged runtime attempt. The
+terminal marker may converge across a later attempt because authenticated user,
+source, and assistant input ID identify the durable disposition being projected.
+Terminal convergence and deadline refreshes carry the authenticated runtime
+lease generation in the existing phase document. A strictly newer generation
+transfers the unresolved trace's runtime-attempt ownership, the same generation
+merges monotonically for that owner, and an older generation is a no-op. This
+makes a recovery terminal and its deadline converge in either callback order
+while preventing a delayed callback from the prior attempt from reclaiming the
+trace. The trace's current attempt may publish its own deadline before terminal
+telemetry arrives; cross-attempt deadline adoption still requires terminal
+evidence, so an unrelated newer attempt cannot claim a merely staged trace.
+The terminal projection carries the runtime's current checkpoint-publication
+expectation. Whenever later dirty work restarts the idle window, the runtime
+publishes a monotonic `checkpoint_publication_expected_by` milestone across the
+same fenced attempt so every earlier terminal trace observes the reset.
+All milestones merge into the existing phase document under a row lock. Emission
+is queued off the reply path and may retry only the bounded staging/trace-row
+race; it carries no message, prompt, response, reasoning, or provider payload.
+Post-generation delivery guards must never create or overwrite the local Codex
+start milestone.
 
 The existing App Server `turn-completed` diagnostic additionally carries
 cumulative, assign-once local offsets from that `turn/start` write to the local
@@ -960,7 +987,11 @@ The cooldown is a per-member claim on `HostedWorkspace`
 concurrent first-failure callbacks produce at most one immediate recheck and
 cannot all suppress each other. Recovery therefore does not depend on the
 diagnostic row having been written or read back: runtime logs stay purely
-diagnostic and remain subject to ordinary retention.
+diagnostic and remain subject to ordinary retention. The callback reports the
+number of rows actually persisted. If account deletion removes the member
+before a draining runtime's diagnostic batch arrives, Web treats only the exact
+`hosted_runtime_log_user_id_fkey` failure as a successful zero-row diagnostic
+drop; every other database failure remains visible.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
@@ -2053,10 +2084,31 @@ provider payloads, secrets, local paths, or direct personal identifiers.
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous; a trace at or
-above the boundary is unresolved only when it has neither accepted delivery nor
-durable consumed evidence. This second condition prevents a best-effort missing
-delivery link from becoming a false page after handling is already known.
+recent accepted delivery at or above that boundary is anomalous. A trace at or
+above the boundary with no accepted delivery and no durable consumed evidence
+is provisionally resolved only when it has valid
+`terminal_non_reply_committed` evidence and the runtime's latest
+checkpoint-publication expectation has not elapsed. The expectation includes
+the configured idle window plus the bounded idle-maintenance, snapshot
+construction/upload, and checkpoint-control envelope. Later dirty work moves it
+forward through the attempt-wide runtime milestone; a crashed runtime stops
+refreshing it, so the trace becomes unresolved after the last published
+expectation. The marker never pretends a reply was delivered or consumes the
+mailbox item early. Missing, expired, or chronologically invalid expectation
+data cannot hide still-unconsumed work. The terminal and publication-expectation
+leaves alone use max-timestamp merge semantics. Every other latency leaf remains
+assign-once.
+Durable consumption remains the long-term terminal proof and the rolling-deploy
+or best-effort-link fallback after handling is otherwise known.
+Accepted grouped Linq replies keep the complete answered mailbox-item set on the
+existing outbox intent: replay of the same pending or retryable effect retains
+the existing set and adds newly observed items instead of replacing it. The
+transition to `sending` freezes that set for the provider dispatch, and later
+items receive an uncovered/retryable result rather than inheriting that intent's
+terminal evidence. They remain pending until the frozen dispatch settles and a
+new follow-up effect can own them. The accepted delivery links every mailbox item
+carried by its dispatch; a sending or terminal outbox intent is never widened
+retroactively.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
 idempotency identity, last provider-attempt boundary, and active state. A
 healthy scan silently clears the claim so a later incident receives a new

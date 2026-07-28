@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Non-Negotiable Rules
 
@@ -123,7 +123,10 @@ Last verified: 2026-07-27
   encrypted through the hosted member secure-box owner, omitted from logs, and
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
-  creative notification prompt profile supplies only the task and bounded
+  frozen digest remains strict while payment can start or continue. A terminal
+  exact-key replay may acknowledge a changed remounted draft only as a
+  nonpayable selection conflict; it never rewrites or activates that content.
+  The creative notification prompt profile supplies only the task and bounded
   committed group history in an isolated thread, projects only
   `generate_song`, and applies the output-only native-capability deny set:
   approval never, read-only sandbox, and no shell, browser, apps, plugins,
@@ -137,9 +140,11 @@ Last verified: 2026-07-27
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
-- Saved-card group funding may select only one canonical card already attached
-  to the authenticated payer's verified Stripe Customer: one consistent
-  Customer or nonterminal Subscription default, or the sole attached card.
+- Current-policy saved-card personal, Family, and group funding may select only
+  one canonical card already attached to the authenticated payer's verified
+  Stripe Customer: one consistent Customer or nonterminal Subscription
+  default, or the sole attached card. Frozen v2 purchases retain this behavior
+  for group targets only; v1 retains no saved-card path.
   The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
   attached cards must use Checkout. The server creates the PaymentIntent
   unconfirmed, stores its encrypted exact reference on the frozen purchase,
@@ -149,10 +154,34 @@ Last verified: 2026-07-27
   confirmation remains bound and
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
-  to its frozen offer and original client request; a different submitted amount
-  fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
-  explicit **Add messages** click authorizes only the selected one-time charge.
-  No raw card data enters Murph.
+  to its frozen offer and original client request. A different submitted amount
+  returns the frozen purchase's status/cancel-only projection. If that response
+  is lost or dismissed, the browser can reuse the rejected key only with the
+  server's recovery-only capability. The payer lock may continue an existing
+  matching purchase but cannot create one; when none exists, it returns a miss
+  before resolving a new Customer or entering Stripe. The miss clears the
+  visible amount but retains the unresolved key in payer-and-target-scoped
+  browser session storage. The authenticated server-rendered payer identity
+  selects the browser slot, so another account using the same target in that
+  tab cannot consume or clear the first payer's unresolved key. The browser
+  verifies storage before the first request,
+  hydrates it before enabling a remounted picker, and fails closed rather than
+  minting another create-capable identity when storage is unavailable. The next
+  explicit authorization reuses that key without the recovery-only capability,
+  so payer-lock and request-key uniqueness serialize it with any delayed
+  original request instead of authorizing a second purchase. Only a durable
+  selection response with server-owned proof that its submitted request key
+  matched clears the stored key; mounted active-purchase and return
+  projections, projected-purchase retries, and different-key recovery cannot
+  release it. The opaque key and payer-and-target-scoped browser slot are
+  navigation and idempotency hints only; every request rederives authenticated
+  payer and target authority. If the newly
+  selected amount differs from the delayed winner, the server returns the
+  winner's nonpayable status/cancel projection. Choosing an amount has no
+  payment effect, and each
+  explicit **Add usage** or **Add messages** click authorizes only the selected
+  one-time charge. Current-policy Checkout fallback saves the entered card for
+  later explicit top-ups. No raw card data enters Murph.
 - Direct-purchase cancellation requires only authenticated payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target
   authority may gate retry but must not gate cancellation. Payer deletion may
@@ -229,6 +258,10 @@ Last verified: 2026-07-27
   normalized error code/type and booleans/counts, never callback state/code,
   tokens, patient ids, URLs, or provider response bodies.
 - AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize any assistant-style mutation, whether personal or room-owned.
+- The companion legal-consent route is shared by the iOS and Android apps. It
+  records the generic server-owned `native-companion` audit source because
+  member authentication does not attest the client platform; a request's
+  client-supplied source label must never become audit authority.
 - Cloudflare-hosted reply aliases are private signed routing capabilities, not SMTP sender-identity proof. Hosted email ingress may accept the current per-user signed reply alias after the web-owned callback resolves its alias key to an active member, and it must do that before persisting the raw `.eml` or dispatching hosted execution; leaked aliases must not route to another member or be described as verified email ownership. Web is allowed to derive and display the same deterministic per-member alias as Cloudflare because web owns member routing state; verified-email sync should persist the alias lookup key before settings presents the alias as reachable. Treat hosted email signing-secret rotation as a compatibility event because deterministic displayed aliases and stored lookup keys are derived from that secret. Direct mail to the fixed public sender address must remain fail-closed unless a trusted runtime seam supplies a provider-authenticated sender verdict with aligned SPF, DKIM, or DMARC proof, then resolves only through a synced verified-owner index that stores secret-derived sender hashes instead of raw verified emails. The direct-public path must require matching envelope and `From` sender values plus authenticated sender proof before lookup, public-sender misses or failed owner authorization should be accepted-and-dropped instead of bounced so the mailbox leaks less account state, new outbound mail should reuse one stable per-user reply alias instead of minting fresh per-thread route state, and any accepted reply-alias message must remain scoped to the alias owner. The hosted worker must never treat envelope/header `From` fields or raw `Authentication-Results` / `ARC-*` headers as authentication proof.
 - Companion (iOS) device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The Messages enrollment route follows that rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only explicit hosted `connect` authority may run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume` and omitted-intent reconciliation may not ensure or reactivate a row. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
 - The companion address-book route accepts only a 192 KiB closed projection of 1-1,000 canonical international phones with one safe first-name token and an optional last-initial advisory label; sentence-shaped labels and empty enabled projections fail closed. An empty contact list is valid only as an exact replay probe for an already-committed replacement and can never create or replace a projection. Replacement requires active access and current launch consent; authenticated status and self-deletion remain available without active billing so cleanup is not trapped. Web must immediately replace each phone with a member-scoped HMAC token derived through the dedicated non-exportable KMS MAC keyring, and Postgres must store only token/version plus a member-bound encrypted label. Do not reuse the web wrap key, app-session HMAC, existing global contact blind index, or any content-encryption key for these tokens. A database or ordinary-content-key compromise must not be enough to test phone candidates. This is not zero knowledge: live Web MAC authority and live roster processing remain sensitive boundaries. Only route-authorized `read_chat_participants` may consult the human group owner's enabled projection, only for canonical current phone participants, and only as bounded current-turn unverified presentation text. Before KMS or token lookup, each advisory read must confirm that the owner still exists, is unsuspended, and holds current launch consent. The read must not reapply personal or sponsored billing access to an already-enabled projection; the authorized live group route is its access boundary. The participant's durable activation result remains independent; a label for a registered participant must never replace or modify their Murph identity. Labels must never grant identity, membership, consent, route, delivery, invite, signup, or profile authority, and optional lookup failure must leave the truthful roster unchanged. Replacement/deletion must remain CAS/replay safe; the projection remains active until explicit stop, account deletion, or the companion's next foreground reconciliation after Contacts permission loss removes it, and account deletion must remove both owner tables. No-expiry projections may pin the prior readable MAC version indefinitely; routine retirement must wait for the indexed row count to reach zero. Emergency retirement must deploy both gates Off, retire and drain every old Web writer for at least the route's explicit maximum duration, disable the affected key, reset each complete affected projection through the locked delete-shaped lifecycle so status is truthfully Off and revision/CAS history remains, prove zero affected rows, deploy the new keyring before reopening replacement, require explicit re-sharing, and reopen advisory reads last.

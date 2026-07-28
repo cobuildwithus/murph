@@ -10,6 +10,7 @@ import {
 } from "@murphai/hosted-execution/assistant-identifiers";
 
 const encryptionMocks = vi.hoisted(() => ({
+  decryptHostedWebNullableFields: vi.fn(),
   decryptHostedWebNullableString: vi.fn(),
   encryptHostedWebNullableString: vi.fn(),
 }));
@@ -42,6 +43,7 @@ const groupJoinConfirmationMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
+  decryptHostedWebNullableFields: encryptionMocks.decryptHostedWebNullableFields,
   decryptHostedWebNullableString: encryptionMocks.decryptHostedWebNullableString,
   encryptHostedWebNullableString: encryptionMocks.encryptHostedWebNullableString,
 }));
@@ -221,6 +223,13 @@ describe("hosted Family plan", () => {
       typeof value === "string" && value.startsWith("encrypted:")
         ? value.slice("encrypted:".length)
         : null
+    );
+    encryptionMocks.decryptHostedWebNullableFields.mockImplementation(async ({ entries }) =>
+      entries.map(({ value }: { value: string | null | undefined }) =>
+        typeof value === "string" && value.startsWith("encrypted:")
+          ? value.slice("encrypted:".length)
+          : null
+      )
     );
     activationMocks.activateHostedMemberForFamilySponsorshipTx.mockImplementation(async ({ memberId }) => ({
       activated: true,

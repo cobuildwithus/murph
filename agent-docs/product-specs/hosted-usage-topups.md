@@ -6,10 +6,10 @@ Last verified: 2026-07-27
 ## Decision
 
 Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
-to decide who receives the usage and how it is consumed. Personal and Family
-funding use Stripe-hosted Checkout. Group funding first reuses one canonical
-card attached to the authenticated payer's Stripe Customer and falls back to
-Checkout for card collection or authentication.
+to decide who receives the usage and how it is consumed. Current-policy
+personal, Family, and group funding first reuse one canonical card attached to
+the authenticated payer's Stripe Customer and fall back to Checkout for card
+collection or authentication.
 
 The personal and Family offer catalog is:
 
@@ -89,7 +89,9 @@ An eligible paid Pulse or Edge member can:
 1. See one overall percentage for all currently available usage.
 2. Open a small **Add usage** dialog over Settings.
 3. Choose $5, $10, or $25 without a preselected or promoted option.
-4. Continue to Stripe-hosted Checkout.
+4. Explicitly authorize the selected amount. Murph charges one canonical saved
+   card when available; otherwise Stripe Checkout collects card details or
+   verification.
 5. Return to Settings with an honest pending state while webhook fulfillment
    completes.
 6. See fulfilled credit move that same usage bar immediately without exposing
@@ -104,7 +106,9 @@ group's coarse `healthy`, `low`, or `exhausted` usage state, and sponsor one of
 the fixed group packs for that group's synthetic runtime beneficiary. This
 does not require the payer to have an individual paid plan. The browser still
 submits only an offer code, request key, and bounded optional sponsorship
-draft; Web resolves payer, beneficiary, amount, grant, and sponsorship policy.
+draft for creation; a recovery attempt adds only the literal recovery-only
+capability. Web resolves payer, beneficiary, amount, grant, and sponsorship
+policy.
 Pressing **Sponsor ~100 messages · $5** authorizes exactly one charge for the
 selected fixed amount.
 If a payment is recovered, Web restores the authenticated payer's exact
@@ -115,6 +119,12 @@ The digest describes only the content that passed customization authorization
 and can therefore be restored or published. A failed encrypted-draft read does
 not enable payment retry, while an intentionally empty draft is shown
 explicitly. Canceling the active payment is the only way to replace that draft.
+Once the purchase is terminal, an exact request-key recovery with a remounted
+or changed draft returns the frozen purchase as a nonpayable sponsorship
+selection conflict and acknowledges the durable key match. The new draft is
+not applied. A `created` purchase past its checkout deadline is first closed by
+the existing expiry owner, so a lost response cannot pin the browser in a
+request-key conflict loop.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
 the card and saves it for a later group contribution.
@@ -122,7 +132,8 @@ the card and saves it for a later group contribution.
 An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
-shared nor transferable.
+shared nor transferable. The same conservative saved-card selection and
+Checkout fallback apply.
 
 ## Group Sponsorship Moment
 
@@ -236,22 +247,33 @@ do not add a generic payment-modal framework.
 The target composition is:
 
 - Title: **Add usage**
-- Description: **Choose a one-time credit amount for your account.**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
-- Primary action after selection: **Continue to checkout · $10**
-- Pending action: **Opening checkout…**
+- Description: **Choose a one-time credit amount for your account. We’ll use
+  your saved card when available. Stripe will ask when card details or
+  verification are needed.**
+- Primary action after selection: **Add usage · $10**
+- Pending action: **Adding usage…**
 - Secondary action: **Cancel**
 - An inline accessible error for checkout-creation failure
 
-Offer descriptors come from the server projection. The browser submits only an
-opaque offer code and a single-use client request key, never a dollar amount,
-grant amount, Stripe Price ID, payer ID, or beneficiary ID.
+Offer descriptors come from the server projection. A normal authorization
+submits only an opaque offer code and a single-use client request key. An
+ambiguous-response check adds the literal recovery-only capability, never a
+dollar amount, grant amount, Stripe Price ID, payer ID, or beneficiary ID.
+Before request entry, the browser stores that key in session storage scoped by
+the authenticated server-rendered payer identity and server-owned checkout
+target. Another account using the same target in that tab receives an
+independent slot and cannot consume or clear the first payer's unresolved key.
+The stored identity is an idempotency hint, not payer, target, offer, or payment
+authority.
 
 Home or a private assistant handoff opens the same dialog through a one-shot
-Settings URL such as `/settings?addUsage=true#subscription`. Settings removes
-the query parameter after initializing the dialog so refresh and Back do not
-replay it. If current authority returns no offers, that deep link still opens an
+Settings URL such as `/settings?addUsage=true#subscription`. An explicit
+request for that page may receive the link after a current paid-access read
+even below the threshold for a proactive recommendation. Settings removes the
+query parameter after initializing the dialog so refresh and Back do not replay
+it. If current authority returns no offers, that deep link still opens an
 honest **Usage credit unavailable** state with no purchase control.
 
 ### Checkout Return
@@ -311,8 +333,13 @@ never marks the purchase expired.
 The assistant may explain the server-projected state and offer the first-party
 Settings handoff. For Family management, it must first read current Family
 status and require the explicit active owner, active billing, and exact active
-member. It cannot select an offer, create Checkout, choose a payer or
-beneficiary, or claim that a purchase completed.
+member. The owner's own active seat receives the stable
+`/settings?addUsage=family#family` handoff; Settings resolves it against the
+authenticated owner's current Family rather than accepting identifiers from
+the model. Another active member receives `/settings#family` so the owner
+selects the member inside Settings. The assistant cannot select an offer,
+create Checkout, choose a payer or beneficiary, or claim that a purchase
+completed.
 
 A stored reply-anchored personal exhaustion message is neutral, for example:
 
@@ -420,7 +447,7 @@ One row represents one intentional attempt to purchase one offer.
 | `cashCurrency` / `cashAmountMinor` | Expected Checkout subtotal, initially USD cents. |
 | `grantUsdMicros` | Usage capacity promised by the offer. |
 | `remainingCreditUsdMicros` | Rebuildable per-purchase unused-credit projection for settlement and financial adjustments. |
-| `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely retryable. |
+| `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely recoverable without granting a later create-capable retry. |
 | `checkoutRequestPolicyVersion` | Version of the fixed Checkout builder used to reconstruct provider parameters. |
 | `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, or `payment_failed`. Refund/dispute adjustments remain ledger entries. |
 | Stripe references | Checkout Session, PaymentIntent, Charge, and Customer lookup/encrypted references using the existing hosted billing-ref pattern. |
@@ -438,15 +465,36 @@ or drain `created` purchases that use it.
 
 The initial authenticated transaction authorizes and persists one purchase
 before Stripe I/O. That `created` row is the durable ambiguity fence. Replaying
-the same payer/request-key/offer and funding target continues the same purchase
-with the same purchase-derived Stripe idempotency key; using the key for a
-different offer or target conflicts. Replay must not reinterpret the purchase
-against the mutable catalog, mint a replacement attempt, or require a second
-browser authorization. While a group purchase is nonterminal, a fresh request
+the same payer/request key and funding target continues the same purchase with
+the same purchase-derived Stripe idempotency key. Reusing that key for another
+target conflicts; reusing it for another offer returns the winning purchase's
+status/cancel-only projection. Replay must not reinterpret the purchase against
+the mutable catalog, mint a replacement attempt, or require a second browser
+authorization. While a purchase is nonterminal, a fresh request
 key for that same target may recover it only when the submitted offer still
-matches the frozen offer; a different amount conflicts instead of continuing
-the earlier payment under new button copy. Account deletion suspends new
-payment creation. A direct intent that already won the payer-lock binding
+matches the frozen offer. A different amount returns the earlier purchase's
+status/cancel-only projection instead of continuing it under new button copy;
+the rejected fresh key has no create authority. If that response is lost,
+times out, or is dismissed, **Check payment** resends the key only in
+recovery-only mode. Under the payer lock, recovery-only may continue an exact
+persisted request or return the current nonterminal purchase. When neither
+exists, it returns a typed miss before offer authorization, Customer creation,
+purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
+but retains that unresolved key in payer-and-target-scoped browser session
+storage across dismissal, reload, remount, tab restoration, and same-tab
+account switches. The authenticated server-rendered payer identity selects the
+slot, so another payer using the same target receives an independent key and
+cannot clear the first payer's unresolved identity. A remounted picker hydrates
+the key before enabling selection. The next explicit Add action reuses the key
+in normal create-capable mode, so the payer lock and request-key uniqueness
+serialize it with any delayed original request. Only a durable purchase
+response with server-owned proof that the submitted selection key matched for
+that payer clears the stored key. Mounted active-purchase and return
+projections, projected-purchase retries, and different-key active-purchase
+recovery cannot release it. Unavailable or unverifiable storage fails closed
+before request entry. If the newly selected offer differs from the winner, only
+the winner's nonpayable status/cancel projection is returned. Account deletion
+suspends new payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The
 payer-owned cancel endpoint can retrieve and cancel that exact sessionless
@@ -590,19 +638,32 @@ The authenticated personal Settings route, Family member route, and group
 funding route share this sequence:
 
 1. Verify same-origin/CSRF protections and the hosted app session.
-2. Parse a strict bounded body containing only offer code and client request
-   key.
+2. Parse a strict bounded body containing offer code and client request key,
+   plus only the literal `recoveryOnly: true` capability when recovering an
+   unparsed response.
 3. Derive the payer from the app session and resolve the beneficiary server
    side: the payer for personal funding, the exact active member selected from
    the payer's active Family roster, or the active group's synthetic member for
    `/groups/fund/[joinCode]`.
-4. Continue an exact existing request-key purchase; reuse with a different
-   offer is a conflict.
+4. Continue an exact existing request-key purchase. Reuse for another target is
+   a conflict; reuse for another offer returns the winning purchase's
+   status/cancel-only projection.
 5. Under the payer lock, expire an unattached purchase whose frozen window
    ended, then recover a nonterminal purchase only when its payer and
    beneficiary match the requested target. A purchase for another target
    conflicts. Only one created, open, or payment-pending purchase may exist for
-   one payer at a time.
+   one payer at a time. If recovery-only finds neither an exact-key purchase nor
+   a current nonterminal payer purchase, return a typed miss without resolving
+   a Customer, inserting a purchase, or entering Stripe. The browser retains
+   that key in payer-and-target-scoped session storage for the next explicit
+   normal authorization, including after remount or a same-tab account switch,
+   which serializes with any delayed original request under the same payer lock.
+   The authenticated server-rendered member ID scopes the browser slot; another
+   payer using the same target in that tab receives an independent key and
+   cannot clear the first payer's unresolved identity. Only a durable response
+   carrying server-owned proof that the submitted selection key matched for
+   that payer clears it; mounted active or return projections,
+   projected-purchase retries, and different-key recovery do not.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
    funding also requires the direct-paid eligibility projection. Family
    funding requires the current active owner, active group and billing, and an
@@ -619,9 +680,10 @@ funding route share this sequence:
     configured Stripe Price, and verify its live/test mode, active state,
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
-11. For current-policy group purchases only, resolve one canonical reusable
-    card attached to the payer Customer. Conflicting Customer/Subscription
-    defaults or multiple cards without one canonical choice skip this path.
+11. For current-policy personal, Family, and group purchases, resolve one
+    canonical reusable card attached to the payer Customer. Conflicting
+    Customer/Subscription defaults or multiple cards without one canonical
+    choice skip this path.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase, bind only an active payer's still-`created` purchase to
@@ -649,8 +711,9 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
-- `setup_future_usage=off_session` only for current-policy group Checkout, so
-  the collected card can be reused for a later explicit group contribution;
+- `setup_future_usage=off_session` for current-policy personal, Family, and
+  group Checkout, so the collected card can be reused for a later explicit
+  top-up;
 - a frozen `expires_at` 90 minutes after purchase creation;
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
@@ -679,9 +742,11 @@ unique ledger sources provide convergence.
 
 Request policy `hosted-usage-credit-checkout-v1` remains reconstructible
 without card saving so an in-flight idempotent Checkout request never changes
-shape. New purchases freeze `hosted-usage-credit-checkout-v2`; only v2 group
-Checkout adds future-use saving and only v2 group purchases may attempt the
-direct saved-card path.
+shape. Version two remains reconstructible with future-use saving and direct
+saved-card payment for group purchases only. New purchases freeze
+`hosted-usage-credit-checkout-v3`, which enables both behaviors for personal,
+Family, and group targets. Every retry and Stripe proof check uses the
+purchase's frozen policy version rather than the latest global version.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -865,6 +930,15 @@ roster before locking the beneficiary, then re-reads membership and member
 eligibility under that lock. A foreign selector therefore cannot contend on or
 fund an unrelated member.
 
+Murph may deep-link the active owner's own seat with the stable
+`/settings?addUsage=family#family` selector only after a current Family status
+read proves owner, active billing, and exactly one active owner row. Settings
+resolves that hint to the authenticated owner's current active group and seat;
+malformed or repeated selectors, stale groups, inactive rows, and non-owners
+open nothing. Other members remain selected inside authenticated Family
+Settings. The purchase mutation repeats the full authorization regardless of
+how the dialog was opened.
+
 The purchase freezes the exact Family group and beneficiary in its
 server-generated return URLs. This distinguishes an owner's personal target
 from that same owner as a Family member and prevents a historical group from
@@ -999,9 +1073,10 @@ Current focused unit and component coverage exercises:
   one-time-versus-subscription dispatch cases;
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and
-- the Settings dialog's no-default selection, exact offer post, stable-key
-  retry, group payment-ambiguity copy and amount lock, redirect, read-only
-  return polling, cancel expiry, and delayed state;
+- the Settings dialog's no-default selection, exact offer post, payer-and-target
+  session-stable key retry across remount and same-tab account switching, group
+  payment-ambiguity copy and amount lock, redirect, read-only return polling,
+  cancel expiry, and delayed state;
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;

@@ -55,8 +55,10 @@ type HostedRuntimeLatencySend = (input: {
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
+  checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
+  terminalNonReplyCommittedAt: Date | null;
 }
 
 export interface HostedRuntimeLatencyHealth {
@@ -211,6 +213,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
           consumedAt: true,
         },
       },
+      phaseBreakdownJson: true,
     },
     take: HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1,
     where: {
@@ -230,8 +233,12 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
+      checkpointPublicationExpectedBy:
+        readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.mailboxItem.consumedAt,
       deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
+      terminalNonReplyCommittedAt:
+        readHostedRuntimeTerminalNonReplyCommittedAt(row.phaseBreakdownJson),
     })),
     scanTruncated,
   });
@@ -253,7 +260,11 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 
   for (const row of input.rows) {
     const acceptedAtMs = row.acceptedAt.getTime();
+    const checkpointPublicationExpectedByMs =
+      row.checkpointPublicationExpectedBy?.getTime() ?? null;
     const deliveryAcceptedAtMs = row.deliveryAcceptedAt?.getTime() ?? null;
+    const terminalNonReplyCommittedAtMs =
+      row.terminalNonReplyCommittedAt?.getTime() ?? null;
 
     if (deliveryAcceptedAtMs !== null) {
       if (deliveryAcceptedAtMs < acceptedAtMs || deliveryAcceptedAtMs > nowMs) {
@@ -274,6 +285,30 @@ export function summarizeHostedRuntimeLatencyRows(input: {
         );
       }
       continue;
+    }
+
+    if (terminalNonReplyCommittedAtMs !== null) {
+      if (
+        terminalNonReplyCommittedAtMs < acceptedAtMs
+        || terminalNonReplyCommittedAtMs > nowMs
+      ) {
+        invalidChronologyCount += 1;
+      } else if (
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs >= terminalNonReplyCommittedAtMs
+        && nowMs <= checkpointPublicationExpectedByMs
+      ) {
+        // The runtime refreshes this expectation whenever later dirty work
+        // restarts the idle checkpoint window. A crashed runtime stops
+        // refreshing it, so the row becomes unresolved after the last
+        // published expectation instead of being hidden indefinitely.
+        continue;
+      } else if (
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs < terminalNonReplyCommittedAtMs
+      ) {
+        invalidChronologyCount += 1;
+      }
     }
 
     const ageMs = nowMs - acceptedAtMs;
@@ -299,6 +334,53 @@ export function summarizeHostedRuntimeLatencyRows(input: {
     unresolvedReplyCount,
     windowMinutes: HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS / 60_000,
   };
+}
+
+function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "terminalNonReplyCommittedAtEpochMs",
+  );
+}
+
+function readHostedRuntimeCheckpointPublicationExpectedBy(
+  value: unknown,
+): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "checkpointPublicationExpectedByEpochMs",
+  );
+}
+
+function readHostedRuntimeAssistantEpochDate(
+  value: unknown,
+  leaf:
+    | "checkpointPublicationExpectedByEpochMs"
+    | "terminalNonReplyCommittedAtEpochMs",
+): Date | null {
+  if (!isHostedRuntimeLatencyPhaseRecord(value)) {
+    return null;
+  }
+  const assistant = value.assistant;
+  if (!isHostedRuntimeLatencyPhaseRecord(assistant)) {
+    return null;
+  }
+  const epochMs = assistant[leaf];
+  if (
+    typeof epochMs !== "number"
+    || !Number.isSafeInteger(epochMs)
+    || epochMs < 0
+  ) {
+    return null;
+  }
+  const recordedAt = new Date(epochMs);
+  return Number.isFinite(recordedAt.getTime()) ? recordedAt : null;
+}
+
+function isHostedRuntimeLatencyPhaseRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function ensureHostedRuntimeLatencyMonitorState(input: {

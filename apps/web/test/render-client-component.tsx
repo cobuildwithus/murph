@@ -24,6 +24,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
 type RenderClientComponentOptions = {
   historyState?: unknown;
   location?: Record<string, string>;
+  sessionStorage?: Storage;
 };
 
 export async function renderClientComponent(
@@ -93,6 +94,10 @@ export async function renderClientComponent(
     configurable: true,
     value: open,
   });
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: options.sessionStorage ?? createMemoryStorage(),
+  });
 
   const container = document.getElementById("root");
   assert.ok(container);
@@ -144,6 +149,30 @@ export async function renderClientComponent(
       }
     },
     window,
+  };
+}
+
+export function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.get(key) ?? null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    get length() {
+      return values.size;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
   };
 }
 

@@ -85,8 +85,16 @@ describe('assistant hosted low-usage skill', () => {
       'a less capable model that uses less AI usage',
     )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
-    expect(skill).toContain('matches exactly one `members` row')
-    expect(skill).toContain('navigation to Settings > Family')
+    expect(skill).toContain('matches')
+    expect(skill).toContain('exactly one `members` row')
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=true#subscription`',
+    )
+    expect(skill).toContain('Never put a member ID or')
+    expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(skill).toContain('This only offers')
@@ -149,9 +157,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('Do not say "sign up your mom"')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
-    expect(skill).toContain(
-      'Never choose an amount, start Checkout, or claim usage was added',
-    )
+    expect(skill).toContain('Never choose an amount, start')
+    expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
       'never reveal who paid, amounts, or',
     )
