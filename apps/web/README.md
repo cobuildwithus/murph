@@ -115,6 +115,39 @@ Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
 
+## Device-sync wake epoch rollout
+
+Connection-scoped `device-sync.wake` items carry the connection row's
+`connectedAt` epoch. The runtime consumes a missing or mismatched epoch as
+superseded after snapshot hydration and before running the hint or jobs. It also
+echoes the hydrated epoch as `observedConnectedAt` on control-plane applies, so
+Web rejects connection, credential, local-state, and source writes after OAuth
+replacement changes the epoch.
+
+The epoch also fences the durable work behind a wake. Webhook acceptance
+rechecks the active provider and `connectedAt` under the existing connection
+mutation lock before writing dirty state; a stale claim completes as a
+superseded no-op. Replacing the connection epoch under that same lock marks
+compact credential-scoped dirty work processed under its row lock and deletes
+its encrypted payload rows. A simultaneous runtime acknowledgement therefore
+finishes first or observes the supersession on retry instead of aborting
+reconnect. Already-accepted companion-HRV payloads remain pending because their
+canonical import is authorization-independent.
+
+For the first production rollout, deploy Cloudflare and the runner with
+`container_rollout=immediate`, prove the exact new runner fingerprint, and then
+deploy Web. The short runner-first window fails closed for legacy
+connection-scoped hints while still hydrating the current snapshot; later
+scheduled, manual, or provider wakes emitted by the new Web producer carry the
+epoch and resume normal work. Never deploy Web first because an old runner does
+not enforce the new authority field.
+
+Once Web has emitted an epoch-bearing wake, do not independently roll the runner
+below the epoch-aware bundle while that wake or in-flight work may remain.
+Prefer a forward fix. A temporary Web-only rollback with the new runner retained
+is safety preserving but degrades legacy connection-scoped work and may fail
+old-Web apply parsing, so restore the compatible Web release promptly.
+
 Hosted E2E orchestration helpers live under `apps/web/test/support`, not
 `apps/web/src`. Application source should expose production runtime seams such
 as client factories and dependency-bearing functions; the testkit owns smoke-env
@@ -242,8 +275,16 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedAiUsage` owns the canonical hosted usage ledger
 - `HostedUsageCreditPurchase` owns the immutable payer, beneficiary, offer,
   frozen Checkout request, and reconciliation state for one intentional
-  top-up. `HostedUsageCreditEntry` is the append-only credit source of truth;
-  `HostedMember` holds only its bounded balance/version projection.
+  top-up. `HostedUsageCreditEntry` owns the immutable purchase or referral
+  accounting history, `HostedUsageCreditGrant` stores only each positive
+  entry's remaining-capacity projection, and `HostedMember` holds only its
+  bounded balance/version projection.
+- `HostedUsageReferral` owns one explicitly armed personal referrer, frozen
+  personal-or-group beneficiary, versioned policy, next-new-group binding,
+  bounded provider-neutral qualification evidence, a derived 25-hour
+  late-evidence cutoff for bound rows, and terminal reward receipt. Provider
+  adapters normalize Linq and Telegram evidence into this Web-owned state; the
+  assistant and browser never own attribution or grant authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
@@ -451,6 +492,14 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
+Rollout gates:
+
+- `HOSTED_USAGE_REFERRALS_ENABLED=1` enables referral arming, fresh-group
+  binding, and qualification observation. Every other value fails closed. Do
+  not enable it until the additive migration is live, the previous Vercel
+  function window has drained, and contract migration
+  `20260726123000_allow_hosted_usage_referral_credit_entries` has applied.
 
 Required when hosted computer-use is enabled:
 
@@ -670,13 +719,34 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and purchased usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
-- Purchased usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then append-only credit grants in order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement.
+- Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
-- Usage-credit Checkout accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- A browser return never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout, line-item, PaymentIntent, and Charge facts and commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
+- Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
+- Personal and Family funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy group funding first selects one canonical card attached to the authenticated payer's Customer. It creates an unconfirmed PaymentIntent, then rechecks active payer and still-created purchase state while durably binding that exact intent under the payer lock before off-session confirmation; a deletion or terminal-state race cancels the unbound intent and never confirms it. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Group Checkout saves the entered card for a later explicit contribution. Murph stores no raw card data and never charges from amount selection alone.
+- A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
+- Conversational usage referrals reserve their fixed server-catalog reward
+  against referrer and beneficiary caps when armed, bind only the exact
+  referrer's next new group, and freeze pre-expiry qualification in the
+  provider-ingress transaction. Bound commitments remain reserved for a
+  25-hour late-evidence grace before referrer-serialized expiry becomes final.
+  The assistant-facing reward label is an approximate current-model message
+  estimate recomputed at each read and again at celebration; Luna uses a generic
+  fallback. Exact qualification counters remain server-only.
+  Immediate post-commit reconciliation and the bounded minute recovery cron
+  converge on one final referral grant and one atomic source-mailbox
+  celebration fence. Recovery also re-signals bounded oldest unconsumed
+  celebration items after a failed Temporal signal. Personal arming freezes
+  only the source channel, blinded exact-thread locator, and directness fact;
+  celebration requires the same direct thread, and personal Linq delivery uses
+  an explicit source target that cannot fall back to a newer home route. Group
+  celebration carries live thread authority. The isolated completion formatter
+  receives only resolved tone, Humor, and Unhinged values, never transcript
+  history.
+  Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
+  silent and outside assistant access; direct setup behavior is unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
@@ -969,6 +1039,18 @@ deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
 
+The exact
+`20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
+narrow predeploy exception to that default. It replaces only the two existing
+usage-credit detached-payer checks with a backward-compatible relaxation:
+fulfilled direct payments may retain PaymentIntent and Charge lookup proof
+without a Checkout Session, while payer-owned rows, other payerless terminal
+states, and ciphertext clearing retain their existing requirements. Running it
+before the application serves is necessary because the new application can
+create that sessionless fulfilled shape. The migration guard permits only its
+proved constraint drop/add operations and still rejects any additional
+incompatible DDL.
+
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
 Postgres endpoint for migrations and other session-scoped administration. The
@@ -1037,6 +1119,13 @@ without letting stale events replace valid pending runs. After those gates, it c
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
+The historical
+`20260720233000_hosted_group_usage_funding_invariants` contract migration is
+retained for audit history but omitted by the runner because the later
+`20260727040000_relax_hosted_usage_credit_detached_direct_proof` Prisma
+migration now owns both constraints on fresh and upgraded databases. It must
+not run after promotion or it would tighten fulfilled direct payments back to
+requiring a Checkout Session.
 The merged
 `20260715120000_delete_orphaned_linq_invite_deliveries` Prisma migration is an
 unchanged historical first pass because production may already have recorded
@@ -1326,6 +1415,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
+- `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
 
 The old staged-payload and deleted import completion/release callback routes
@@ -1422,7 +1512,7 @@ Current hosted billing assumptions:
   runtime's canonical allowance gate. A row reset verifies the displayed
   current-period and usage-credit versions, then atomically clears current
   included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, purchased credit, billing
+  logical notice claim. It preserves immutable usage, usage credit, billing
   state, mailbox rows, and delivery history, and refuses to race an in-flight
   notice dispatch. After commit it signals the existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result

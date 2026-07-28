@@ -28,7 +28,7 @@ Last verified: 2026-07-26
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | The final daily slot admits exactly one claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition, reversal freshness/suspension ownership, and the Privy deletion/authentication handoff. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits; full-refund and withdrawn-dispute progress commits and exact replay stays idempotent; two distinct reversals defeat an older restore in sequential and concurrent schedules; terminal Privy cleanup deletes the provider principal and receipt before stale authentication resumes, after which live-provider authority rejects replacement member, identity, and session state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for concurrent hosted Telegram routing writes. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | In both writer orders, hosted-member serialization makes identity-only sync and the production webhook planner converge on the exact inbound thread. A completed relink also rejects the stale account before any mailbox write. |
-| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, referral grant, cap-reservation, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent purchase-grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, deletion-first ordering cannot append an orphaned grant, a pre-expiry qualification reconciles after expiry into one purchase-free grant that the ordinary FIFO settlement consumes, the replay-safe group celebration resolves its live source route, and different group referrers serialize so only one can reserve the destination's final cap capacity |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 
 The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
@@ -69,7 +69,13 @@ included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
-request idempotency. Family coverage additionally proves owner/group/member
+request idempotency. Group purchase-service coverage additionally proves
+canonical saved-card selection, durable PaymentIntent binding before
+confirmation, exact-intent recovery after an ambiguous confirmation, verified
+cancellation before Checkout fallback, account-deletion-before-bind
+cancellation, sessionless payer-owned cancel resolution, and group-only card
+saving. Family
+coverage additionally proves owner/group/member
 authorization, use of the Family billing Customer, distinct owner-self target
 identity, exact frozen replay after membership changes, per-member Settings
 routing, all ordered cross-target conflict directions, and server-withheld
@@ -78,12 +84,22 @@ authority during deferred Stripe creation, exact-key replay, and ambiguous
 provider retry recovery to prove that URL and retry capability remain withheld;
 page and dialog suites prove payer-wide
 offer suppression and status/cancel-only cross-target recovery. Reconciliation
-suites exercise live Stripe re-fetch,
-one-time/subscription dispatch separation, replay-safe grants, refund/dispute
-signed adjustments in both directions; component suites exercise the Settings
-dialog selection, redirect, return polling, and error states. A guarded
+suites exercise live Stripe re-fetch, Checkout-free direct PaymentIntent
+success and processing, late terminal direct events after safe fallback,
+retryable unbound success events, one-time/subscription dispatch separation,
+replay-safe grants, and refund/dispute signed adjustments in both directions
+after direct payer detachment; component suites
+exercise the Settings dialog selection, redirect, return polling, and error
+states. A guarded
 real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
-grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
+grant/debit serialization, purchase/referral FIFO over entry-keyed projections,
+purchase-only reversal, and deletion-first cleanup. Referral
+coverage additionally proves exact threshold boundaries, provider-event
+dedupe, next-new-container binding, trusted runtime sender injection,
+unlinked-Telegram evidence isolation, dynamic-tool/parser contracts, source
+celebration replay, and deletion-time anonymization without group-credit
+clawback. Provider-normalization fixtures contain no Linq SDK or Telegram
+payload types in the shared policy assertions. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
 
@@ -206,6 +222,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
   accepted operator alert through a paced lost-ack retry, active-incident
   coalescing, silent healthy reset, and a paced new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- That matrix starts from the hosted-local harness's intentional `prisma db
+  push` schema. The usage-credit PostgreSQL suite therefore applies the exact
+  checked-in detached direct-payment migration before creating fixtures, so
+  its positive detachment and missing-proof rejections exercise migration-only
+  constraints instead of silently testing the unconstrained Prisma schema.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command
   `pnpm release:production:migrate && pnpm build`, so the guarded migration
@@ -227,7 +248,12 @@ not enter evidence; and attachment-only input fails closed before provider work.
   successful predeploy migration can outlive a later build failure. Required
   columns, renames, `SET NOT NULL`, and incompatible type changes require
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
-  `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
+  `apps/web/prisma/contract-migrations`. The exact detached direct-payment proof
+  migration is a tested backward-compatible exception: migration-guard tests
+  restrict it to its constraint replacement, static migration tests pin the
+  required shape, and the opt-in real-PostgreSQL suite proves sessionless
+  fulfilled detachment succeeds while missing PaymentIntent or Charge lookup
+  proof is rejected. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from

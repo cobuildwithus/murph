@@ -635,7 +635,6 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
         return Boolean(
           input.paidAt
           && input.stripeChargeLookupKey
-          && input.stripeCheckoutSessionLookupKey
           && input.stripePaymentIntentLookupKey,
         );
       case HostedUsageCreditPurchaseStatus.created:
@@ -663,7 +662,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
       return hasSessionProof;
     case HostedUsageCreditPurchaseStatus.fulfilled:
       return Boolean(
-        hasSessionProof &&
+        (hasSessionProof || hasNoSessionProof) &&
         input.paidAt &&
         input.stripeChargeIdEncrypted &&
         input.stripeChargeLookupKey &&

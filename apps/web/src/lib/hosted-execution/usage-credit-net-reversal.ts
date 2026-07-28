@@ -23,7 +23,10 @@ export interface HostedUsageCreditNetReversalResult
 }
 
 interface LockedHostedUsageCreditReversiblePurchase {
-  grantEntryId: string;
+  grant: {
+    grantEntryId: string;
+    remainingUsdMicros: bigint;
+  };
   projection: LockedHostedUsageCreditBeneficiary;
   purchase: LockedHostedUsageCreditPurchase;
 }
@@ -124,17 +127,14 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
   const currentNetReversedUsdMicros = sumHostedUsageCreditAdjustmentEntries({
     beneficiaryMemberId: locked.purchase.beneficiaryMemberId,
     entries: adjustmentEntries,
-    grantEntryId: locked.grantEntryId,
+    grantEntryId: locked.grant.grantEntryId,
   });
 
   if (currentNetReversedUsdMicros < 0n) {
     throw new TypeError("Hosted usage-credit adjustment restored more than it reversed.");
   }
-  if (
-    locked.projection.balanceUsdMicros
-    < locked.purchase.remainingCreditUsdMicros
-  ) {
-    throw new TypeError("Hosted usage-credit purchase remaining exceeds its beneficiary balance.");
+  if (locked.projection.balanceUsdMicros < locked.grant.remainingUsdMicros) {
+    throw new TypeError("Hosted usage-credit grant remaining exceeds its beneficiary balance.");
   }
 
   if (input.targetNetReversalUsdMicros === currentNetReversedUsdMicros) {
@@ -156,7 +156,7 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
   const appliedDeltaUsdMicros = increasing
     ? minHostedUsageCreditBigInt(
         desiredDeltaUsdMicros,
-        locked.purchase.remainingCreditUsdMicros,
+        locked.grant.remainingUsdMicros,
         locked.projection.balanceUsdMicros,
       )
     : desiredDeltaUsdMicros;
@@ -172,13 +172,25 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
     });
   }
 
-  const nextRemainingCreditUsdMicros = increasing
-    ? locked.purchase.remainingCreditUsdMicros - appliedDeltaUsdMicros
-    : locked.purchase.remainingCreditUsdMicros + appliedDeltaUsdMicros;
-  if (nextRemainingCreditUsdMicros > locked.purchase.grantUsdMicros) {
+  const nextRemainingUsdMicros = increasing
+    ? locked.grant.remainingUsdMicros - appliedDeltaUsdMicros
+    : locked.grant.remainingUsdMicros + appliedDeltaUsdMicros;
+  if (nextRemainingUsdMicros > locked.purchase.grantUsdMicros) {
     throw new TypeError("Hosted usage-credit restoration exceeds its purchase grant.");
   }
 
+  const grantUpdated = await input.tx.hostedUsageCreditGrant.updateMany({
+    where: {
+      entryId: locked.grant.grantEntryId,
+      remainingUsdMicros: locked.grant.remainingUsdMicros,
+    },
+    data: { remainingUsdMicros: nextRemainingUsdMicros },
+  });
+  if (grantUpdated.count !== 1) {
+    throw new TypeError(
+      "Hosted usage-credit net reversal lost its locked grant projection.",
+    );
+  }
   const purchaseUpdated = await input.tx.hostedUsageCreditPurchase.updateMany({
     where: {
       beneficiaryMemberId: locked.purchase.beneficiaryMemberId,
@@ -186,12 +198,10 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
       remainingCreditUsdMicros: locked.purchase.remainingCreditUsdMicros,
       status: "fulfilled",
     },
-    data: {
-      remainingCreditUsdMicros: nextRemainingCreditUsdMicros,
-    },
+    data: { remainingCreditUsdMicros: nextRemainingUsdMicros },
   });
   if (purchaseUpdated.count !== 1) {
-    throw new TypeError("Hosted usage-credit net reversal lost its locked purchase.");
+    throw new TypeError("Hosted usage-credit net reversal lost its purchase projection.");
   }
 
   const projection = await applyHostedUsageCreditProjectionDeltaTx({
@@ -215,7 +225,7 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
       effectiveAt: input.effectiveAt,
       id: entryId,
       kind: input.kind,
-      parentGrantEntryId: locked.grantEntryId,
+      parentGrantEntryId: locked.grant.grantEntryId,
       purchaseId: locked.purchase.id,
       semanticSourceKey: buildHostedUsageCreditNetReversalSemanticSourceKey({
         beforeNetReversedUsdMicros: currentNetReversedUsdMicros,
@@ -282,28 +292,39 @@ async function lockHostedUsageCreditReversiblePurchaseTx(input: {
   ) {
     throw new TypeError("Hosted usage-credit purchase remaining invariant failed.");
   }
-
-  const grant = await input.tx.hostedUsageCreditEntry.findFirst({
-    where: {
-      kind: "purchase_grant",
-      purchaseId: input.purchaseId,
-    },
+  const grantEntry = await input.tx.hostedUsageCreditEntry.findFirst({
     select: {
       amountUsdMicros: true,
       beneficiaryMemberId: true,
       id: true,
     },
+    where: {
+      kind: "purchase_grant",
+      purchaseId: input.purchaseId,
+    },
   });
+  const grantProjection = grantEntry
+    ? await input.tx.hostedUsageCreditGrant.findUnique({
+        where: { entryId: grantEntry.id },
+        select: { remainingUsdMicros: true },
+      })
+    : null;
   if (
-    !grant
-    || grant.amountUsdMicros !== purchase.grantUsdMicros
-    || grant.beneficiaryMemberId !== purchase.beneficiaryMemberId
+    !grantEntry
+    || !grantProjection
+    || grantProjection.remainingUsdMicros
+      !== purchase.remainingCreditUsdMicros
+    || grantEntry.amountUsdMicros !== purchase.grantUsdMicros
+    || grantEntry.beneficiaryMemberId !== purchase.beneficiaryMemberId
   ) {
     throw new TypeError("Hosted usage-credit fulfilled purchase grant invariant failed.");
   }
 
   return {
-    grantEntryId: grant.id,
+    grant: {
+      grantEntryId: grantEntry.id,
+      remainingUsdMicros: grantProjection.remainingUsdMicros,
+    },
     projection,
     purchase,
   };

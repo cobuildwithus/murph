@@ -10,6 +10,7 @@ import {
   createHostedExternalThreadLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
+  assertHostedAssistantNotificationRouteAuthority,
   isHostedThreadContainerNotificationDestination,
   resolveHostedAssistantNotificationDestination,
 } from "../src/lib/hosted-routing/assistant-notification-destination";
@@ -180,6 +181,93 @@ describe("hosted assistant notification destination", () => {
     expect(destination?.route.threadIsDirect).toBe(true);
     expect(destination && isHostedThreadContainerNotificationDestination(destination)).toBe(false);
     expect(destinationMocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+  });
+
+  it("resolves an explicitly frozen direct channel instead of the preferred one", async () => {
+    destinationMocks.readHostedMemberAssistantNotificationState.mockResolvedValue({
+      identity: {
+        phoneLookupKey: "member-phone-lookup",
+        phoneNumber: "+15555550100",
+      },
+      routing: {
+        linqChatId: "direct-linq-chat",
+        linqRecipientPhone: "+15555550999",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: "telegram-direct-chat",
+        telegramUserId: "telegram-user",
+      },
+    });
+    const prisma = createPrisma({
+      containerMemberId: null,
+      rows: [],
+    });
+
+    const preferred = await resolveHostedAssistantNotificationDestination({
+      memberId: "direct-member",
+      prisma,
+    });
+    const frozen = await resolveHostedAssistantNotificationDestination({
+      directChannel: "telegram",
+      memberId: "direct-member",
+      prisma,
+    });
+
+    expect(preferred?.route.channel).toBe("linq");
+    expect(frozen?.route).toMatchObject({
+      channel: "telegram",
+      delivery: { kind: "thread", target: "telegram-direct-chat" },
+      threadIsDirect: true,
+    });
+  });
+
+  it("rechecks a direct Telegram route for provider-entry authority", async () => {
+    destinationMocks.readHostedMemberAssistantNotificationState
+      .mockResolvedValueOnce({
+        identity: null,
+        routing: {
+          linqChatId: null,
+          linqRecipientPhone: null,
+          pendingLinqChatId: null,
+          pendingLinqParticipantContact: null,
+          pendingLinqRecipientPhone: null,
+          telegramThreadId: "telegram-direct-chat",
+          telegramUserId: "telegram-user",
+        },
+      })
+      .mockResolvedValueOnce({
+        identity: null,
+        routing: {
+          linqChatId: null,
+          linqRecipientPhone: null,
+          pendingLinqChatId: null,
+          pendingLinqParticipantContact: null,
+          pendingLinqRecipientPhone: null,
+          telegramThreadId: null,
+          telegramUserId: "telegram-user",
+        },
+      });
+    const prisma = createPrisma({
+      containerMemberId: null,
+      rows: [],
+    });
+    const authority = {
+      channel: "telegram" as const,
+      containerMemberId: "direct-member",
+      threadId: "telegram-direct-chat",
+    };
+
+    await expect(assertHostedAssistantNotificationRouteAuthority({
+      authority,
+      prisma,
+    })).resolves.toBeUndefined();
+    await expect(assertHostedAssistantNotificationRouteAuthority({
+      authority,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
   });
 
   it("fails closed on a missing route without falling back to member routing", async () => {

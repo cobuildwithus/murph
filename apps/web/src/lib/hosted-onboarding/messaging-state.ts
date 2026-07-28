@@ -41,6 +41,7 @@ export type HostedMemberAssistantNotificationRoute =
   | null;
 
 type HostedMemberAssistantNotificationRouteInput = {
+  channel?: "linq" | "telegram";
   linqChatId: string | null;
   linqContactLookupKey?: string | null;
   linqRecipientPhone?: string | null;
@@ -120,7 +121,11 @@ export function resolveHostedMemberAssistantNotificationRoute(
     ?? input.messaging.linqContactLookupKey
     ?? input.messaging.phoneLookupKey;
 
-  if (input.linqChatId && linqContactLookupKey) {
+  if (
+    input.channel !== "telegram"
+    && input.linqChatId
+    && linqContactLookupKey
+  ) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: linqContactLookupKey,
       userId: input.memberId,
@@ -148,7 +153,8 @@ export function resolveHostedMemberAssistantNotificationRoute(
   }
 
   if (
-    linqRecipientPhone
+    input.channel !== "telegram"
+    && linqRecipientPhone
     && memberPhoneNumber
     && input.messaging.phoneLookupKey
   ) {
@@ -179,7 +185,10 @@ export function resolveHostedMemberAssistantNotificationRoute(
     };
   }
 
-  if (input.messaging.telegramTarget) {
+  if (
+    input.channel !== "linq"
+    && input.messaging.telegramTarget
+  ) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: input.messaging.telegramTarget,
       userId: input.memberId,

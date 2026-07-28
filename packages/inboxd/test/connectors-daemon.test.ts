@@ -146,6 +146,9 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
         searchCaptures() {
           return [];
         },
+        redactCaptureText() {
+          return false;
+        },
         getCapture() {
           return null;
         },
@@ -237,6 +240,9 @@ test("runPollConnector uses connector-supplied checkpoints when emitting capture
         searchCaptures() {
           return [];
         },
+        redactCaptureText() {
+          return false;
+        },
         getCapture() {
           return null;
         },
@@ -325,6 +331,9 @@ test("runPollConnectorBackfill preserves the latest emitted checkpoint when the 
         },
         searchCaptures() {
           return [];
+        },
+        redactCaptureText() {
+          return false;
         },
         getCapture() {
           return null;
@@ -467,6 +476,9 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
         searchCaptures() {
           return [];
         },
+        redactCaptureText() {
+          return false;
+        },
         getCapture() {
           return null;
         },
@@ -572,6 +584,9 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
             searchCaptures() {
               return [];
             },
+            redactCaptureText() {
+              return false;
+            },
             getCapture() {
               return null;
             },
@@ -650,6 +665,9 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
             },
             searchCaptures() {
               return [];
+            },
+            redactCaptureText() {
+              return false;
             },
             getCapture() {
               return null;
@@ -766,6 +784,9 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
         },
         searchCaptures() {
           return [];
+        },
+        redactCaptureText() {
+          return false;
         },
         getCapture() {
           return null;
@@ -969,6 +990,9 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
             searchCaptures() {
               return [];
             },
+            redactCaptureText() {
+              return false;
+            },
             getCapture() {
               return null;
             },
@@ -1036,6 +1060,9 @@ function createStubInboxPipeline(): InboxPipeline {
       },
       searchCaptures() {
         return [];
+      },
+      redactCaptureText() {
+        return false;
       },
       getCapture() {
         return null;

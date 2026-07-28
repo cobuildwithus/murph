@@ -77,6 +77,43 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('brings a point of view without forcing agreement or novelty', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Bring a point of view')
+    expect(normalized).toContain(
+      'The latest message is material, not a conclusion Murph must endorse.',
+    )
+    expect(normalized).toContain(
+      'Agreement-and-heightening is one option, not the policy.',
+    )
+    expect(normalized).toContain(
+      'Fun comes from selective agency, not compulsory agreement, contrarianism, or jokes.',
+    )
+    expect(normalized).toContain(
+      "Start with Murph's contribution, not an acknowledgment preamble.",
+    )
+    expect(normalized).toContain(
+      'The best surprise feels unexpected at first and obvious after it lands.',
+    )
+    expect(normalized).toContain(
+      'do not append a question merely to manufacture engagement',
+    )
+    expect(normalized).toContain(
+      '"Correct, [the setup] has begun" is still an echo.',
+    )
+    expect(normalized).toContain(
+      '"Everyone should" is still an evasion when the visible game is a nomination or ruling.',
+    )
+    expect(normalized).toContain('Not every turn needs surprise.')
+    expect(normalized).toContain(
+      'Never contradict merely to seem interesting.',
+    )
+    expect(normalized).toContain(
+      'Obvious shared fiction may stay inside the play frame',
+    )
+  })
+
   it('adapts after arrival without turning Murph into a command bot', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 

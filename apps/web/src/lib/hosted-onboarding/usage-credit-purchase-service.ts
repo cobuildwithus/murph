@@ -40,6 +40,7 @@ import {
 import {
   buildHostedUsageCreditPurchaseNotFoundError,
   canRetryHostedUsageCreditCheckoutCreate,
+  canRetryHostedUsageCreditSavedCardPayment,
   closeExpiredUnattachedHostedUsageCreditPurchasesTx,
   projectHostedUsageCreditCheckoutCapability,
   projectHostedUsageCreditPurchaseStatusResult,
@@ -61,10 +62,11 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
+import { tryChargeHostedUsageCreditSavedCard } from
+  "./usage-credit-saved-card-payment";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
-  normalizeHostedGroupUsageJoinCode,
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByLocator,
 } from "../hosted-groups/group-usage-funding";
@@ -355,6 +357,17 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: existingActive,
         target,
       })) {
+        if (
+          target.kind === "group" &&
+          existingActive.offerCode !== input.offerCode
+        ) {
+          throw hostedOnboardingError({
+            code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
+            httpStatus: 409,
+            message:
+              "Finish the unfinished usage-credit payment before choosing another amount.",
+          });
+        }
         return {
           purchase: existingActive,
           recovered: true,
@@ -580,12 +593,17 @@ async function continueHostedUsageCreditCheckout(input: {
     prisma: input.prisma,
     purchase,
   });
+  const target = projectHostedUsageCreditPurchaseTarget(purchase);
+  const canRetryCheckoutCreate = canRetryHostedUsageCreditCheckoutCreate({
+    now: input.now,
+    purchase,
+  });
+  const canRetrySavedCardPayment =
+    target.kind === "group" &&
+    canRetryHostedUsageCreditSavedCardPayment(purchase);
   if (
-    purchase.status !== HostedUsageCreditPurchaseStatus.created ||
-    !canRetryHostedUsageCreditCheckoutCreate({
-      now: input.now,
-      purchase,
-    })
+    !canRetryCheckoutCreate &&
+    !canRetrySavedCardPayment
   ) {
     return initialProjection.checkout;
   }
@@ -608,6 +626,43 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     stripe,
   });
+  let checkoutPurchase = purchase;
+  if (target.kind === "group") {
+    const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
+      checkoutRequest,
+      now: input.now,
+      prisma: input.prisma,
+      purchase,
+      stripe,
+    });
+    if (directPaymentPurchase) {
+      const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+        now: input.now,
+        prisma: input.prisma,
+        purchase: directPaymentPurchase,
+      });
+      return projection.checkout;
+    }
+    checkoutPurchase = await prepareHostedUsageCreditPurchaseForCheckout({
+      now: input.now,
+      prisma: input.prisma,
+      purchase,
+    });
+    if (
+      checkoutPurchase.status !== HostedUsageCreditPurchaseStatus.created ||
+      !canRetryHostedUsageCreditCheckoutCreate({
+        now: input.now,
+        purchase: checkoutPurchase,
+      })
+    ) {
+      const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+        now: input.now,
+        prisma: input.prisma,
+        purchase: checkoutPurchase,
+      });
+      return projection.checkout;
+    }
+  }
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create(checkoutRequest, {
@@ -625,13 +680,13 @@ async function continueHostedUsageCreditCheckout(input: {
   }
 
   assertHostedUsageCreditStripeSessionMatchesPurchase({
-    purchase,
+    purchase: checkoutPurchase,
     session,
   });
   const attached = await bindHostedUsageCreditCheckoutSession({
     now: input.now,
     prisma: input.prisma,
-    purchase,
+    purchase: checkoutPurchase,
     session,
   });
   const finalProjection = await projectHostedUsageCreditCheckoutForCurrentTarget({

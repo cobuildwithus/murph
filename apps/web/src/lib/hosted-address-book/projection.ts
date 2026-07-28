@@ -393,16 +393,23 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
 
   const signal = AbortSignal.timeout(HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
   const container = await input.prisma.hostedThreadContainer.findUnique({
-    select: { ownerMemberId: true },
+    select: {
+      owner: {
+        select: { suspendedAt: true },
+      },
+      ownerMemberId: true,
+    },
     where: { memberId: input.containerMemberId },
   });
-  if (!container) {
+  if (!container || container.owner.suspendedAt !== null) {
     return new Map();
   }
-  if (!await readOwnerCanUseAddressBookProjection({
-    memberId: container.ownerMemberId,
-    prisma: input.prisma,
-  })) {
+  try {
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: container.ownerMemberId,
+      prisma: input.prisma,
+    });
+  } catch {
     return new Map();
   }
 
@@ -615,21 +622,6 @@ async function deriveHostedAddressBookPhoneTokens(input: {
     }
   }
   return result;
-}
-
-async function readOwnerCanUseAddressBookProjection(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  try {
-    await Promise.all([
-      assertActiveHostedMemberAccessAllowed(input),
-      assertHostedLaunchRequiredConsentGranted(input),
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function projectAddressBookStatus(input: {

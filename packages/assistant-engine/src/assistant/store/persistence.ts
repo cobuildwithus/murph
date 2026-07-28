@@ -58,6 +58,16 @@ import type { ResolvedAssistantSession } from './types.js'
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
+/**
+ * How long an inbound message's verbatim text may survive in a transcript.
+ *
+ * The audit limit above is a count, not a clock: a low-volume thread keeps its
+ * hundred most recent entries forever. Ordinary attachment-free messages never
+ * produce an inbox capture, so for those the transcript is the only durable
+ * copy of what the member wrote and a count cap alone leaves it indefinitely.
+ * This matches the capture-ledger window so one deadline covers both paths.
+ */
+export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
@@ -312,18 +322,28 @@ export async function replaceTranscriptEntries(
 
 export async function pruneAssistantTranscriptRetention(
   paths: AssistantStatePaths,
+  options: { now?: Date; signal?: AbortSignal | null } = {},
 ): Promise<{
+  entriesRedacted: number
   entriesTrimmed: number
+  nextEligibleAt: string | null
   transcriptsTrimmed: number
 }> {
+  options.signal?.throwIfAborted()
+  const now = options.now ?? new Date()
   await ensureAssistantStateDirectory(paths.transcriptsDirectory)
+  options.signal?.throwIfAborted()
   const entries = await readdir(paths.transcriptsDirectory, {
     withFileTypes: true,
   })
+  options.signal?.throwIfAborted()
+  let entriesRedacted = 0
   let entriesTrimmed = 0
+  let nextEligibleAt: string | null = null
   let transcriptsTrimmed = 0
 
   for (const entry of entries) {
+    options.signal?.throwIfAborted()
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
       continue
     }
@@ -332,7 +352,9 @@ export async function pruneAssistantTranscriptRetention(
     let raw: string
     try {
       raw = await readFile(transcriptPath, 'utf8')
+      options.signal?.throwIfAborted()
     } catch (error) {
+      options.signal?.throwIfAborted()
       if (isMissingFileError(error)) {
         continue
       }
@@ -347,25 +369,110 @@ export async function pruneAssistantTranscriptRetention(
     }
 
     const retained = trimAssistantTranscriptEntriesForAudit(parsed.values)
-    if (retained.length === parsed.values.length) {
+    const redaction = redactExpiredAssistantTranscriptEntries(retained, now)
+    nextEligibleAt = selectEarlierAssistantRetentionWake(
+      nextEligibleAt,
+      redaction.nextEligibleAt,
+    )
+    const trimmedCount = parsed.values.length - retained.length
+    if (
+      trimmedCount === 0
+      && redaction.redactedCount === 0
+    ) {
       continue
     }
 
-    const trimmedCount = parsed.values.length - retained.length
+    options.signal?.throwIfAborted()
     await writeTextFileAtomic(
       transcriptPath,
-      retained.length > 0
-        ? `${retained.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
+      redaction.entries.length > 0
+        ? `${redaction.entries.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
         : '',
     )
+    options.signal?.throwIfAborted()
+    entriesRedacted += redaction.redactedCount
     entriesTrimmed += trimmedCount
     transcriptsTrimmed += 1
   }
 
   return {
+    entriesRedacted,
     entriesTrimmed,
+    nextEligibleAt,
     transcriptsTrimmed,
   }
+}
+
+/**
+ * Clear the text of inbound entries past the content-retention window.
+ *
+ * Only `user` entries are redacted: they are the member's own words, which is
+ * what the retention policy covers. The entry itself stays so the transcript
+ * still shows a message occurred at that point in the conversation, and
+ * `textRetiredAt` records that the text expired rather than was empty.
+ */
+export function redactExpiredAssistantTranscriptEntries(
+  entries: readonly AssistantTranscriptEntry[],
+  now: Date,
+): {
+  entries: AssistantTranscriptEntry[]
+  nextEligibleAt: string | null
+  redactedCount: number
+} {
+  const cutoffMs = now.getTime() - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+  let redactedCount = 0
+  let nextEligibleAt: string | null = null
+
+  const next = entries.map((entry) => {
+    if (entry.kind !== 'user' || entry.textRetiredAt !== undefined) {
+      return entry
+    }
+    if (entry.text.length === 0) {
+      return entry
+    }
+    // Phase one cannot safely infer a receipt for legacy entries after normal
+    // accepted-turn residue pruning has discarded the input-to-transcript
+    // journal. Preserve those entries until the separately deployed phase-two
+    // cutover, after one full retention interval of stamped writes.
+    if (entry.contentReceivedAt === undefined) {
+      return entry
+    }
+    const contentReceivedAtMs = Date.parse(entry.contentReceivedAt)
+    if (!Number.isFinite(contentReceivedAtMs)) {
+      return entry
+    }
+    if (contentReceivedAtMs > cutoffMs) {
+      nextEligibleAt = selectEarlierAssistantRetentionWake(
+        nextEligibleAt,
+        new Date(
+          contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+        ).toISOString(),
+      )
+      return entry
+    }
+
+    redactedCount += 1
+    return {
+      ...entry,
+      text: '',
+      textRetiredAt: now.toISOString(),
+    }
+  })
+
+  return { entries: next, nextEligibleAt, redactedCount }
+}
+
+function selectEarlierAssistantRetentionWake(
+  current: string | null,
+  candidate: string | null,
+): string | null {
+  if (candidate === null) {
+    return current
+  }
+  if (current === null) {
+    return candidate
+  }
+  return Date.parse(candidate) < Date.parse(current) ? candidate : current
 }
 
 export function trimAssistantTranscriptEntriesForAudit(

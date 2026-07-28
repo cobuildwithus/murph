@@ -263,6 +263,8 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           && (update.sources?.length ?? 0) > 0;
         const connectionVersionMismatch = (stateMutationRequested || junctionSourceMutationRequested)
           && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
+        const connectionEpochMismatch = connectionWriteRequested
+          && baseline.connection.connectedAt !== update.observedConnectedAt;
         const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
         const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
           && baselineTokenVersion !== update.observedTokenVersion;
@@ -270,6 +272,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
         const versionMismatch =
           disconnectInProgress
+          || connectionEpochMismatch
           || connectionVersionMismatch
           || tokenVersionMismatch
           || tokenRefreshLeaseConflict

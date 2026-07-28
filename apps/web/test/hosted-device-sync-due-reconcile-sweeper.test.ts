@@ -7,8 +7,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/wake-service", () => ({
   appendHostedDeviceSyncScheduledReconcileWake: mocks.appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId: (input: {
-    connectionId: string; nextReconcileAt: string;
-  }) => ["device-sync", "scheduled-reconcile", "v1", input.connectionId, input.nextReconcileAt].join(":"),
+    connectionId: string; expectedConnectedAt: string; nextReconcileAt: string;
+  }) => [
+    "device-sync",
+    "scheduled-reconcile",
+    "v1",
+    input.connectionId,
+    input.expectedConnectedAt,
+    input.nextReconcileAt,
+  ].join(":"),
 }));
 
 import {
@@ -31,6 +38,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
@@ -52,7 +60,8 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith({
       connectionId: "dsc_due_1",
       createdAt: "2026-05-05T00:01:00.000Z",
-      eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-05T00:00:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
+      expectedConnectedAt: "2026-05-04T12:00:00.000Z",
       nextReconcileAt: "2026-05-05T00:00:00.000Z",
       provider: "whoop",
       traceId: null,
@@ -77,6 +86,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
@@ -110,12 +120,14 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
       },
       {
         connectionId: "dsc_due_2",
+        connectedAt: "2026-05-04T12:05:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_2",
@@ -132,7 +144,8 @@ describe("hosted device-sync due reconcile sweeper", () => {
       [{
         connectionId: "dsc_due_1",
         createdAt: "2026-05-05T00:01:00.000Z",
-        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-05T00:00:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
+        expectedConnectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         traceId: null,
@@ -141,7 +154,8 @@ describe("hosted device-sync due reconcile sweeper", () => {
       [{
         connectionId: "dsc_due_2",
         createdAt: "2026-05-05T00:01:00.000Z",
-        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_2:2026-05-05T00:00:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_2:2026-05-04T12:05:00.000Z:2026-05-05T00:00:00.000Z",
+        expectedConnectedAt: "2026-05-04T12:05:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         traceId: null,
@@ -155,12 +169,14 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
       },
       {
         connectionId: "dsc_due_2",
+        connectedAt: "2026-05-04T12:05:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:01.000Z",
         provider: "whoop",
         userId: "member_due_2",
@@ -209,12 +225,14 @@ describe("hosted device-sync due reconcile sweeper", () => {
     const store = buildStore([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
       },
       {
         connectionId: "dsc_due_2",
+        connectedAt: "2026-05-04T12:05:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:01.000Z",
         provider: "whoop",
         userId: "member_due_2",
@@ -254,6 +272,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
 
 function buildStore(rows: Array<{
   connectionId: string;
+  connectedAt: string;
   nextReconcileAt: string;
   provider: string;
   userId: string;

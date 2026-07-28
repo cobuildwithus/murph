@@ -363,12 +363,14 @@ credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
 Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary `Continue to checkout` action and a plain
-cancel action. The title and one short support sentence carry the explanation;
-do not repeat plan mechanics or payment detail across multiple paragraphs.
-Stack amount cards and actions on narrow screens, preserve visible focus and
-selection states, and render the production components on both the Components
-and Sections tabs of `/design` for review.
+large choice cards, then one primary **Add messages · $10** action and a plain
+cancel action. Explain once that Murph uses a saved card when available and
+that Stripe handles card entry or verification when needed. Do not imply that
+selecting an amount charges the card; only the explicit primary action
+authorizes that one-time contribution. Stack amount cards and actions on
+narrow screens, preserve visible focus and selection states, and render the
+production components on both the Components and Sections tabs of `/design`
+for review.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
