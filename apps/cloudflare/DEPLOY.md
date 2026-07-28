@@ -618,6 +618,12 @@ This rollout has an irreversible transcript cutover and must use two phases:
    receipt-backed captures, parser output, projections, inputs, and stamped
    transcripts while preserving every unstamped legacy transcript entry.
    Phase one is incomplete until the queue reaches zero.
+   If the Web migration was applied before runner convergence, first prove the
+   stamping-capable runner fingerprint across the fleet, then ship the additive
+   `20260728050000_rearm_hosted_mailbox_content_retention` recovery migration.
+   It repeats only the wake, attempt-marker reset, and CAS advance; it does not
+   alter content or checkpoint time. Start the drain window from that recovery
+   migration and keep monitoring the same due queue to zero.
 4. Keep legacy unstamped transcript entries intact for 14 complete days after
    the convergence instant and until phase one has drained, whichever is later.
    Newly stamped entries and the other receipt-owned message carriers use their

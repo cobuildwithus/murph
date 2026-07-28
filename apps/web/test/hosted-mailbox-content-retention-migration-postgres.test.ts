@@ -11,6 +11,10 @@ const migrationUrl = new URL(
   "../prisma/migrations/20260725190000_hosted_mailbox_content_retention/migration.sql",
   import.meta.url,
 );
+const recoveryMigrationUrl = new URL(
+  "../prisma/migrations/20260728050000_rearm_hosted_mailbox_content_retention/migration.sql",
+  import.meta.url,
+);
 
 if (
   runPostgresMigrationProof
@@ -24,8 +28,9 @@ if (
 describe.skipIf(!runPostgresMigrationProof)(
   "hosted mailbox content-retention migration",
   () => {
-    it("adds mailbox columns and re-arms only persisted snapshots in phase one", async () => {
+    it("re-arms persisted snapshots after the runner fleet converges", async () => {
       const migrationSql = await readFile(migrationUrl, "utf8");
+      const recoveryMigrationSql = await readFile(recoveryMigrationUrl, "utf8");
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
 
@@ -35,7 +40,7 @@ describe.skipIf(!runPostgresMigrationProof)(
           transactionTimestamp: string;
         }>(`
           SELECT to_char(
-            CURRENT_TIMESTAMP::TIMESTAMP(3),
+            (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3),
             'YYYY-MM-DD"T"HH24:MI:SS.MS'
           ) AS "transactionTimestamp"
         `);
@@ -93,6 +98,19 @@ describe.skipIf(!runPostgresMigrationProof)(
 
         await client.query(migrationSql);
 
+        await client.query(`
+          UPDATE "hosted_workspace"
+          SET
+            "inbox_media_retention_wake_at" = NULL,
+            "inbox_media_retention_signal_attempted_at" =
+              '2026-07-28T04:00:00.000Z',
+            "checkpointed_at" = '2026-07-28T04:00:00.000Z',
+            "version" = "version" + 1
+          WHERE "snapshot_ref" IS DISTINCT FROM NULL
+        `);
+
+        await client.query(recoveryMigrationSql);
+
         const staleCheckpoint = await client.query(`
           UPDATE "hosted_workspace"
           SET
@@ -100,7 +118,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             "checkpointed_at" = '2026-07-26T15:00:00.000Z',
             "version" = "version" + 1
           WHERE "user_id" = 'snapshot-missing-wake'
-            AND "version" = 9
+            AND "version" = 10
         `);
         expect(staleCheckpoint.rowCount).toBe(0);
 
@@ -139,17 +157,17 @@ describe.skipIf(!runPostgresMigrationProof)(
             wakeAt: "2099-01-01T00:00:00.000",
           },
           {
-            checkpointedAt: "2026-07-25T17:00:00.000",
+            checkpointedAt: "2026-07-28T04:00:00.000",
             userId: "snapshot-existing-wake",
             signalAttemptedAt: null,
-            version: "5",
+            version: "7",
             wakeAt: transactionTimestamp,
           },
           {
-            checkpointedAt: "2026-07-25T17:00:00.000",
+            checkpointedAt: "2026-07-28T04:00:00.000",
             userId: "snapshot-missing-wake",
             signalAttemptedAt: null,
-            version: "10",
+            version: "12",
             wakeAt: transactionTimestamp,
           },
         ]);
@@ -157,7 +175,8 @@ describe.skipIf(!runPostgresMigrationProof)(
         const due = await client.query<{ userId: string }>(`
           SELECT "user_id" AS "userId"
           FROM "hosted_workspace"
-          WHERE "inbox_media_retention_wake_at" <= CURRENT_TIMESTAMP
+          WHERE "inbox_media_retention_wake_at"
+            <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
           ORDER BY "user_id"
         `);
         expect(due.rows).toEqual([
