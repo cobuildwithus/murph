@@ -1,9 +1,11 @@
-# iOS Companion App (Health Sync)
+# Native Companion Apps (Health Sync)
 
-Last verified: 2026-07-14
+Last verified: 2026-07-25
 
-Current distribution status: approved for the App Store. The canonical public
-listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
+Current iOS distribution status: approved for the App Store. The canonical
+public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
+The separate native Android companion is executable-verified on an API 36
+emulator but has not passed the required physical-device or Play review gates.
 
 ## Why This Exists
 
@@ -125,15 +127,62 @@ Murph app.
    `whoop_v2` BYOO integration stays; if approval lands it upgrades fidelity
    (HRV, recovery, webhooks, richer sleep stages) for members who connect it.
    The 10-member cap covers current beta scale meanwhile.
-3. **Android is deferred deliberately.** Non-iOS wearable members are mostly
-   covered by existing server-side OAuth integrations (Oura, Garmin, Strava).
-   The only uncovered slice is WHOOP-on-Android, small in an iPhone-skewed
-   WHOOP base, and coverable later by the API path or a Kotlin app.
+3. **Android is a narrow Health Connect bridge.** The separate native Kotlin
+   app carries OTP login, explicit health setup, source-scoped backend status,
+   settings/legal controls, and optional background sync. It does not expand
+   into chat, vault browsing, automatic meal-photo capture, or a general Murph
+   client.
 
-## Architecture Decision: Native Swift
+## Android Health Connect Companion
+
+The Android app lives in its own native Kotlin + Jetpack Compose repository.
+It uses one manual composition root, Privy phone/email OTP, Junction/Vital with
+`ConnectionPolicy.Explicit`, and no local health-value store. A visible
+**Connect Health Connect** action requests `connectionIntent: "connect"`;
+known same-member passive restoration requests `"resume"`. Sign-in alone never
+creates a hosted health connection, and sign-out or member switching tears down
+the local Junction session before Privy logout. Before health setup is shown, a
+read-only source-scoped status request confirms that the verified Privy identity
+maps to an active Murph member with the required legal consent; missing account
+and missing-consent states render distinct recovery guidance.
+
+The Android home screen treats
+`GET /api/device-sync/companion/status?sourceProviderSlug=health_connect` as
+sync truth. Webhook receipt rows retain a normalized source slug only when the
+provider-owned webhook parser identifies the source of an actual data-bearing
+event. Data-less historical completions, lifecycle events, and legacy rows keep
+that field null. Source-scoped status filters both connected-source availability
+and receipt timestamps, so those null-source rows intentionally do not satisfy
+Android status.
+
+The client keeps its Junction resource request centralized and starts with four
+minimum-necessary groups: sleep, workouts, steps, and active calories. The
+manifest makes only their corresponding Health Connect read permissions
+explicit. Any added category must pass Google's minimum-necessary review and
+physical-device evidence for the product benefit.
+WHOOP's Health Connect export does not provide proprietary Recovery, Strain,
+WHOOP Age, or Pace of Aging scores, so Android must not claim iOS metadata
+parity or call the iOS-only supplemental metadata endpoints.
+
+The SDK is configured for Junction's documented fixed 30-day Android Health
+Connect history window. The additional history permission is permission, not
+availability evidence. Background-read access remains separate and is requested
+only when the member opts into optional background sync.
+
+Rollout order is additive backend migration and web support first, Android
+distribution second. Immediately after migration, Android may show
+waiting-for-first-data until a new Health Connect webhook creates source-scoped
+receipt evidence. Apple Health receipts must never substitute.
+
+## Architecture Decisions: Native Swift and Kotlin
 
 SwiftUI + Junction `vital-ios` (SPM) + Privy `privy-ios` for auth (same Privy
 app and user identities as the web vault).
+
+Android uses Kotlin + Jetpack Compose with Privy's native Android SDK and
+Junction's Health Connect SDK. Both apps remain separate native repositories;
+behavioral contracts are shared through the web API rather than a cross-platform
+runtime.
 
 Why native over React Native/Expo (both paths were researched and are
 viable — Junction maintains first-class bindings for all four frameworks):

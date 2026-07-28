@@ -182,6 +182,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 
 - Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows
 - Oura, Strava, and WHOOP webhook intake
+- native iOS/Android companion sign-in plus backend-confirmed, source-scoped
+  Apple Health and Health Connect status
 - hosted Linq and Telegram webhook ingress plus sparse routing state
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, email-authorization, and legal-consent slices
