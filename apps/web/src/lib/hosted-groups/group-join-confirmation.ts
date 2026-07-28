@@ -9,8 +9,9 @@ import {
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hasActiveHostedCryptoDomainRootsForUserTx } from "../hosted-crypto/domain-root-store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  readHostedMemberAssistantNotificationState,
+} from "../hosted-onboarding/hosted-member-store";
 import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -336,14 +337,12 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionAssistantNotificationRoute | null> {
-  const identity = await readHostedMemberIdentity({
+  const member = await readHostedMemberAssistantNotificationState({
     memberId: input.memberId,
     prisma: input.tx,
   });
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.tx,
-  });
+  const identity = member?.identity ?? null;
+  const routing = member?.routing ?? null;
   const linqAuthority = readHostedLinqHomeLineAuthority(routing);
   const linqContactLookupKey = (
     linqAuthority.kind === "home" || linqAuthority.kind === "pending"
