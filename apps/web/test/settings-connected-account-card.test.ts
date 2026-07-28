@@ -11,11 +11,11 @@ import { formatMaskedPhoneNumber } from "@/src/components/settings/hosted-settin
 
 describe("formatMaskedPhoneNumber", () => {
   test("masks E.164 phone numbers to last four digits", () => {
-    expect(formatMaskedPhoneNumber("+14046257706")).toBe("•••• 7706");
+    expect(formatMaskedPhoneNumber("+15550100002")).toBe("•••• 0002");
   });
 
   test("strips non-digits before extracting last four", () => {
-    expect(formatMaskedPhoneNumber("(404) 625-7706")).toBe("•••• 7706");
+    expect(formatMaskedPhoneNumber("(555) 010-0002")).toBe("•••• 0002");
   });
 
   test("pads with bullets when fewer than four digits are available", () => {
@@ -32,14 +32,14 @@ describe("ConnectedAccountCard", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ConnectedAccountCard, {
         label: "Phone",
-        value: "•••• 7706",
+        value: "•••• 0002",
         meta: "Verified",
         action: React.createElement("button", { type: "button" }, "Change"),
       }),
     );
 
     expect(markup).toContain("Phone");
-    expect(markup).toContain("•••• 7706");
+    expect(markup).toContain("•••• 0002");
     expect(markup).toContain("Verified");
     expect(markup).toContain("Change");
     expect(markup).toContain("bg-[rgba(255,252,246,0.9)]");
@@ -51,12 +51,12 @@ describe("ConnectedAccountCard", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ConnectedAccountCard, {
         label: "Telegram",
-        value: "@willhay",
+        value: "@member_example",
       }),
     );
 
     expect(markup).toContain("Telegram");
-    expect(markup).toContain("@willhay");
+    expect(markup).toContain("@member_example");
     expect(markup).not.toContain("undefined");
   });
 

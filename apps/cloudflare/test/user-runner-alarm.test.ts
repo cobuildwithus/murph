@@ -682,6 +682,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    workspace.checkpointedAt = "2026-06-11T00:00:01.000Z";
     workspace.version = "6";
     invocationResult.reject(new Error("Hosted container first request failed."));
     await vi.waitFor(() =>
