@@ -30,7 +30,67 @@ export interface HostedContactPrivacyKeyring {
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
 const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-terra";
-const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = ["+1"] as const;
+const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = [
+  // North America. This is intentionally the full NANP, not US/Canada-only.
+  "+1",
+  // Europe.
+  "+30",
+  "+31",
+  "+32",
+  "+33",
+  "+34",
+  "+351",
+  "+352",
+  "+353",
+  "+354",
+  "+356",
+  "+357",
+  "+358",
+  "+359",
+  "+36",
+  "+370",
+  "+371",
+  "+372",
+  "+376",
+  "+377",
+  "+378",
+  "+385",
+  "+386",
+  "+39",
+  "+40",
+  "+41",
+  "+420",
+  "+421",
+  "+423",
+  "+43",
+  "+44",
+  "+45",
+  "+46",
+  "+47",
+  "+48",
+  "+49",
+  // Asia-Pacific.
+  "+61",
+  "+64",
+  "+65",
+  "+673",
+  "+81",
+  "+82",
+  "+852",
+  "+853",
+  "+886",
+  // Middle East.
+  "+965",
+  "+966",
+  "+968",
+  "+971",
+  "+972",
+  "+973",
+  "+974",
+  // Latin America.
+  "+56",
+  "+598",
+] as const;
 const HOSTED_LINQ_INSTANT_START_PHONE_PREFIX_PATTERN = /^\+[1-9]\d{0,5}$/u;
 
 export interface HostedOnboardingEnvironment {

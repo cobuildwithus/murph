@@ -183,13 +183,43 @@ describe('assistant execution prompt contract', () => {
       'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Floor follows authority, not punctuation.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Apply this gate before any live-volley watch',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      "private relationships, personal conduct, shared social history, recognition, or recollection",
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'finish without text or reaction immediately. Do not sleep or watch on that terminal human-private branch.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Only participation cases that remain genuinely ambiguous after this gate may use the bounded live-volley watch.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'say plainly that you do not know; do not speculate or turn the limit into a bit.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
       'finish without a reply or reaction immediately',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Do not sleep or watch for a follow-up',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'This does not suppress open factual or task requests',
+      'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'no apology, acknowledgment, or backing-away bit',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'do not default to agreement, paraphrase, or neutral etiquette',
@@ -219,10 +249,16 @@ describe('assistant execution prompt contract', () => {
       'Human ownership can be collective.',
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Floor follows authority, not punctuation.',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'finish without a reply or reaction immediately',
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'a new decision unit even inside the same accepted provider turn',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'A complaint that Murph inserted itself into a human-owned beat',
     )
   })
 
