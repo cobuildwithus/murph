@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/pr936-retention-safety-fix-20260727
+      - agent/pr936-merge-audit-20260727
 
 concurrency:
   group: pr936-retention-safety-fix
