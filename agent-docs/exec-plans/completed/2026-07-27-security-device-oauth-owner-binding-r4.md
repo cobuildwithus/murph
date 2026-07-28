@@ -1,8 +1,8 @@
 # Bind hosted device OAuth callbacks to the initiating Murph member
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -152,10 +152,10 @@ intent is:
 5. [x] Add the hosted start-time same-host guard before ingress/state/provider
    effects, hosted Web build validation, Cloudflare preview/production
    preflight, focused tests, and current operator/security/PR-intent docs.
-6. [ ] Run the remediation-focused tests, affected typechecks, canonical diff
-   verification, acceptance, parent review, final ReviewGPT, and exact-final-head
-   CI.
-7. [ ] Commit, push, update the PR body/head/counts from the applied final diff,
+6. [x] Run the remediation-focused tests, affected typechecks, canonical diff
+   verification, acceptance, and parent review. Final ReviewGPT and
+   exact-final-head CI remain post-closure PR gates.
+7. [x] Commit, push, update the PR body/head/counts from the applied final diff,
    and leave the draft PR unmerged until every final gate passes.
 
 ## Verification
@@ -210,5 +210,16 @@ Completed after applying the accepted specialist remediation:
   rejects the dispatcher's `--stop-after` argument. No candidate code or
   environment was uploaded, and the lane did not fall back to another local
   run.
-- Canonical acceptance therefore remains blocked on the separate verification
-  tooling repair. Final ReviewGPT and final-head CI remain pending.
+- The branch reconciled current `origin/main`, including the repository-owned
+  delegated Blacksmith lifecycle repair, without conflict in the runtime
+  implementation.
+- The one permitted remote acceptance retry passed on Blacksmith Testbox
+  `tbx_01kykwpwtx4yejphk1ec6dqnjv`: the complete 31-workspace acceptance matrix
+  finished in 4m54s with exit code 0. The backing Actions run is
+  `30341684270`.
+- Parent final review traced the active app session through the required
+  callback owner id, pre-consumption shared-ingress check, browser-start
+  hostname guard, Web build validation, and preview/production deploy
+  preflight. No remaining accepted correctness or architecture issue was found.
+- Final ReviewGPT and final-head CI remain pending.
+Completed: 2026-07-28
