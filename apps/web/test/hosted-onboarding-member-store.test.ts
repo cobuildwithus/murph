@@ -3196,6 +3196,7 @@ describe("hosted-member-store", () => {
       currentBillingPhase: "pulse_trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial",
+      scheduledBillingPlanCode: "launch_group_monthly",
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:def456",
     });
@@ -3216,6 +3217,7 @@ describe("hosted-member-store", () => {
       currentCheckoutOffer: "pulse_trial",
       hasStripeCustomerId: true,
       hasStripeSubscriptionId: true,
+      scheduledBillingPlanCode: "launch_group_monthly",
     });
     expect(findUnique).toHaveBeenCalledWith({
       where: {
@@ -3225,6 +3227,7 @@ describe("hosted-member-store", () => {
         currentBillingPhase: true,
         currentBillingPlanCode: true,
         currentCheckoutOffer: true,
+        scheduledBillingPlanCode: true,
         stripeCustomerLookupKey: true,
         stripeSubscriptionLookupKey: true,
       },

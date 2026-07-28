@@ -1,10 +1,12 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 ## Goal
 
-Maintain a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
+Maintain clean direct-plan changes that rely on Stripe for billing state,
+timing, invoices, and future subscription changes. The original Edge-to-Pulse
+surface remains a compatibility path over the generic plan-change policy.
 
 The product behavior is:
 
@@ -16,25 +18,37 @@ The product behavior is:
 
 ## Current State
 
-The app supports both the Pulse-to-Edge upgrade and the explicit Edge-to-Pulse
-scheduled switch:
+The app supports one ordered direct-plan ladder:
 
-- `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
-- `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
+```txt
+Group < Pulse < Edge
+```
+
+Moving upward uses the existing immediate prorated upgrade mechanism. Moving
+downward uses the existing period-end Stripe Schedule mechanism. The current
+transitions are Group to Pulse or Edge, Pulse to Group or Edge, and Edge to
+Pulse or Group.
+
+- `POST /api/settings/billing/upgrade-plan` accepts a server-validated higher
+  direct plan.
+- `upgradeHostedBillingPlan` remains upgrade-shaped and requires a strictly
+  higher ranked target.
 - The upgrade result preserves Stripe collection truth: `processing` carries no
   payment URL and remains a deadline-bounded status recheck, while
   `payment_required` carries only an exact Stripe Billing Portal or hosted
   invoice URL. Settings redirects only for `payment_required`, offers a
   `Check status` action for `processing`, and sends terminal collection
   outcomes to `Open billing` instead of offering an ineffective retry.
-- `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
+- `POST /api/settings/billing/switch-plan` schedules a lower direct plan at
+  renewal. `switch-to-pulse` and `scheduleHostedBillingPlanSwitchToPulse`
+  remain legacy-facing compatibility paths.
 - `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
 - `Manage subscription` opens Stripe Customer Portal with the explicit member
   configuration for payment methods, invoices, and supported cancellation.
   Portal-side plan and quantity changes remain disabled.
 
-The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
-transitions still stay out of scope.
+Only the ordered direct-plan transitions above are supported. Family billing,
+top-ups, and arbitrary Stripe price changes stay out of scope.
 
 ## Hosted Assistant Configuration
 

@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, Group, paid plan, Family-sponsored Murph, or hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -72,8 +72,10 @@ say that Murph only checked status or that no billing change happened.
 - On an eligible private direct heads-up after the output gate above, call
   `murph.plan_usage` once when available. This is the allowed manual private
   check, not a watcher. Use its access kind, plan, period end, and
-  `recommendedAction` to choose the scenario; reserve percentages and forecast
-  for an explicit numerical usage follow-up. Do not infer missing facts.
+  `recommendedAction` to choose the scenario; reserve percentages, forecast,
+  available-plan comparisons, and quote details for an explicit follow-up.
+  Mention only plans present in `availablePlans`. Never infer Group eligibility
+  from the conversation, group history, or observed activity.
 - In a group, do not call `murph.plan_usage`. On the first trusted low-usage
   turn, call `murph.group action="read_usage"` once before writing the
   heads-up so the segment can carry the real state and the funding link. Read
@@ -97,10 +99,16 @@ change happened.
 
 Use the current scenario:
 
-- **Pulse Trial:** When `recommendedAction` is `start_pulse`, say that starting
-  Pulse now can keep the conversation going and ask whether the member wants
-  help. Do not act on the answer until the subscription quote and explicit
-  confirmation rules are satisfied.
+- **Pulse Trial:** When `recommendedAction` is `change_plan`, name only its
+  server-issued target and ask whether the member wants to review that option.
+  Do not describe when it starts until you have read the current quote, and do
+  not act on the answer until the current quote and explicit confirmation
+  rules are satisfied.
+- **Direct Group plan:** When the trusted plan is `Group`, explain that the
+  personal AI allowance may pause at zero while wearable syncing and authorized
+  group activity continue. When `recommendedAction` targets `launch_monthly`,
+  offer Pulse as the fit for more regular one-on-one Murph use. Do not offer a
+  Group top-up or imply that health syncing stops.
 - **Direct paid Pulse or Edge:** When `recommendedAction` is `add_usage`, say
   that the member can add usage and ask whether they want the quick path. Do
   not include the Settings link until they say yes or ask for it.
@@ -108,12 +116,12 @@ Use the current scenario:
   Family plan owner can add one-time usage for a specific active member from
   Settings > Family, and ask whether the member wants that explained. Never
   imply the sponsored member can choose the amount or start Checkout.
-- **Hosted group:** If `read_usage` returned `healthy`, usage was already
-  added or reset: skip the heads-up entirely. Otherwise say plainly that the
-  group's Murph time is running low and will pause for everyone when it runs
-  out, and that anyone in the chat can add usage for the whole group. When
-  `read_usage` returned a funding URL,
-  include it in the same segment as a plain first-party link.
+- **Hosted group conversation:** If `read_usage` returned `healthy`, usage was
+  already added or reset: skip the heads-up entirely. Otherwise say plainly
+  that the group's Murph time is running low and will pause for everyone when
+  it runs out, and that anyone in the chat can add usage for the whole group.
+  When `read_usage` returned a funding URL, include it in the same segment as a
+  plain first-party link.
   Do not promise a link the read did not return. Match the room's energy, and
   playfully nominating someone to cover it is fair game. End with one easy
   question that makes acting now the obvious move.
@@ -121,13 +129,7 @@ Use the current scenario:
   useful, then offer to help make the remaining usage last. Do not manufacture
   a commercial option.
 
-Natural examples of the final segment:
-
-```text
-You walked 4.2 miles at an easy, steady pace.
----
-Quick heads-up: our time may pause until August 3 if usage runs out. If you want to keep going, I can help you start Pulse now—want me to?
-```
+Natural example for a hosted group conversation:
 
 ```text
 Maya won yesterday's step challenge with 14,320 steps. 🏆
@@ -135,7 +137,7 @@ Maya won yesterday's step challenge with 14,320 steps. 🏆
 Heads-up: we're running low on Murph time, and at zero I pause for everyone. Who's keeping us alive at https://www.withmurph.ai/groups/fund/example_join_code, you or Maya?
 ```
 
-Adapt the wording to the conversation. Do not reuse either example as a fixed
+Adapt the wording to the conversation. Do not reuse this example as a fixed
 template.
 
 ## Follow-up options
@@ -153,13 +155,24 @@ gate fails, do not provide the handoff: explain that the active Family owner
 must manage an active member. The handoff is navigation to Settings > Family,
 not permission to choose an amount, start Checkout, or claim usage was added.
 
-- **Trial:** Starting Pulse now can preserve continuity. State the exact current
-  `subscriptionActionQuote` label before asking for confirmation. Waiting for
-  the trial end or usage reset remains a valid choice.
+- **Trial:** Use only `availablePlans` from the latest read. Explain Group as a
+  fit for staying connected to Murph groups with lighter private usage, and
+  Pulse as a fit for regular one-on-one Murph use. To quote a non-recommended
+  available choice, call `murph.plan_usage` again with that exact
+  `targetPlanCode`. State the resulting `subscriptionActionQuote.label` before
+  asking for confirmation. Waiting for the trial end or usage reset remains a
+  valid choice. When quote timing is `at_trial_end`, say the current trial
+  continues and there is no immediate charge. When timing is `now`, say the
+  trial ends and paid billing begins immediately. Never present `now` as the
+  ordinary continuation choice while trial usage remains.
+- **Direct Group plan:** Pulse is the lasting option for more private Murph
+  usage. State the exact current `change_plan` quote label and require explicit
+  confirmation. Waiting for the monthly reset is valid. Wearable syncing and
+  authorized group data continue while the personal AI allowance is exhausted.
 - **Paid Pulse:** A one-time usage-credit addition fits a temporary spike. If
   the member explicitly asks about a lasting alternative and a current
-  `upgrade_edge` quote exists, explain that Edge fits a consistently higher
-  pace. Never present the quote itself as a recommendation.
+  `change_plan` quote targets Edge, explain that Edge fits a consistently
+  higher pace. Never present the quote itself as a recommendation.
 - **Paid Edge:** Offer the authorized one-time add-usage handoff or waiting for
   the reset. There is no higher current direct tier to invent.
 - **Family Pulse:** Personal top-ups are unavailable. The Family plan owner may
@@ -171,10 +184,10 @@ not permission to choose an amount, start Checkout, or claim usage was added.
   The Family plan owner may add one-time usage for this active member after the
   shared Family management gate above. Otherwise offer to use less included
   usage or wait for the reset.
-- **Group:** Call `read_usage` again when the state may have changed. Share
-  its returned state, the
-  remaining percentage when the result includes remainingPercent,
-  the period end when relevant, and the first-party funding URL.
+- **Hosted group conversation:** Call `read_usage` again when the state may
+  have changed. Share its returned state, the remaining percentage when the
+  result includes remainingPercent, the period end when relevant, and the
+  first-party funding URL.
   Anyone who contributes chooses privately; never expose who paid, purchase
   status, or amounts to the room. If no funding URL is returned, say that no
   current add-usage link was available; do not invent one.
@@ -185,12 +198,17 @@ less of your included usage." Never switch it automatically.
 ## Action boundaries
 
 - A recommendation or low-usage warning is not consent.
-- Before `start_pulse_now` or `upgrade_edge`, require a matching current quote,
-  state its label, and get explicit confirmation of that exact choice.
+- Before `change_plan`, require a matching current quote, state its exact label,
+  and get explicit confirmation of that target, price, and timing. Pass the
+  quote's exact `targetPlanCode` and `quoteId`; never reconstruct either.
+- If the trusted offer or quote changes, discard the old recommendation and ask
+  again using the new exact quote. A stale quote never authorizes a mutation.
 - A bare yes after multiple options is ambiguous. Ask which option they mean.
 - For personal `add_usage`, send only the authorized first-party Settings
   handoff. Never choose an amount, start Checkout, or claim usage was added.
 - Send a group funding URL only when `read_usage` returned it.
+- Billing and trial details belong only in the member's private Murph thread.
+  Never disclose them in a group or fall back to a group route.
 - Sell continuity with confidence and charm. Match the room's energy: a quiet
   chat gets a light nudge, a rowdy one can get the full bit, and playful
   stakes or nominating someone to cover it are fair game. Do not guilt-trip,

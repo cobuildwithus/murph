@@ -55,6 +55,7 @@ function createHostedOnboardingEnvironment(
     stripePortalConfigurationIds: PORTAL_CONFIGURATION_IDS,
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
+      launch_group_monthly: "price_group_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeUsageCreditPriceIdsByOffer: {

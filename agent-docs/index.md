@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Purpose
 
@@ -45,6 +45,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history, including explicit admission, alias, and disclosure-layout contracts. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
+| `agent-docs/product-specs/group-member-plan.md` | Confirmed-group-member $3.50 direct plan mapped to Pulse capabilities, with personalized eligibility, generic billing transitions, private trial continuation, signed plan actions, and sync-safe usage exhaustion. | Hosted billing/current-state spec | High | 2026-07-27 |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the enforced hosted billing and AI usage allowance primitives. | Hosted billing/product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse by ending the Stripe trial and billing the existing Pulse subscription. | Hosted billing/product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers, including the fully deployed input-bound-only model/reasoning update contract, personal Luna/Terra choices, billing-gated Sol, relation-derived group-chat Sol, reasoning and conversation style controls, the enforced composed included-plus-credit usage boundary, and the one-time durable-workflow recheck rollout. | Hosted billing/current-state spec | High | 2026-07-16 |

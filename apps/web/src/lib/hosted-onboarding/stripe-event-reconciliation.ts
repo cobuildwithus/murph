@@ -113,13 +113,20 @@ import {
   HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
+import {
+  appendHostedTrialEndingNotificationTx,
+  type HostedTrialEndingNotificationSignal,
+} from "./billing-trial-ending-notification";
 import { isHostedOnboardingError } from "./errors";
 import {
   HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
   isHostedUsageCreditStripeRetryableError,
   reconcileHostedUsageCreditStripeEvent,
 } from "./usage-credit-stripe-reconciliation";
-import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
+import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeRecheckRuntime,
+} from "../hosted-orchestration/signal-runtime";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
 // read-only preparation deadline, and a request-count ceiling. Keep the receipt
@@ -166,6 +173,17 @@ const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
 ]);
 const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY =
   "hosted_family_legacy_invoice_id";
+
+interface HostedStripeEventProcessingResult {
+  activatedMemberId: string | null;
+  activatedMembers: HostedStripeActivatedMemberOutcome[];
+  cleanupCheckoutSubscription: HostedCheckoutSubscriptionCleanupCandidate | null;
+  cleanupPulseTrialStripeSubscriptionId: string | null;
+  hostedExecutionEventId: string | null;
+  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
+  trialEndingNotification: HostedTrialEndingNotificationSignal | null;
+  welcomeEmailMemberId: string | null;
+}
 
 class HostedLegacyFamilyCleanupPendingError extends Error {
   readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
@@ -343,15 +361,7 @@ async function processHostedStripeEventRecord(
   processingContext: HostedStripeEventProcessingContext,
   prisma: Prisma.TransactionClient,
   observedAt: Date,
-): Promise<{
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupCheckoutSubscription: HostedCheckoutSubscriptionCleanupCandidate | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
-  hostedExecutionEventId: string | null;
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-}> {
+): Promise<HostedStripeEventProcessingResult> {
   const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
   if (
@@ -422,7 +432,22 @@ async function processHostedStripeEventRecord(
         ),
       );
     case "customer.subscription.trial_will_end":
-      return buildEmptyHostedStripeEventProcessingResult();
+      return {
+        ...buildEmptyHostedStripeEventProcessingResult(),
+        trialEndingNotification:
+          await appendHostedTrialEndingNotificationTx({
+            memberId: requireHostedStripeDirectBillingMemberId(
+              processingContext,
+              event.type,
+            ),
+            occurredAt: observedAt,
+            subscription: requireHostedStripeCanonicalSubscription(
+              processingContext,
+              event.type,
+            ),
+            tx: prisma,
+          }),
+      };
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
         schedule: payload as Stripe.SubscriptionSchedule,
@@ -832,17 +857,14 @@ function isHostedStripeSubscriptionBillingEvent(type: string): boolean {
     || type === "customer.subscription.paused"
     || type === "customer.subscription.resumed"
     || type === "customer.subscription.pending_update_applied"
-    || type === "customer.subscription.pending_update_expired";
+    || type === "customer.subscription.pending_update_expired"
+    || type === "customer.subscription.trial_will_end";
 }
 
 async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
   financialSubscriptionId: string | null = null,
 ): Promise<Stripe.Subscription | null> {
-  if (event.type === "customer.subscription.trial_will_end") {
-    return null;
-  }
-
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     return withHostedStripeFailureLog(
@@ -889,6 +911,19 @@ function requireHostedStripeCanonicalSubscription(
   }
 
   throw new Error(`Canonical Stripe subscription is required for ${eventType}.`);
+}
+
+function requireHostedStripeDirectBillingMemberId(
+  processingContext: HostedStripeEventProcessingContext,
+  eventType: string,
+): string {
+  if (processingContext.billingOwner?.kind === "member") {
+    return processingContext.billingOwner.memberId;
+  }
+
+  throw new Error(
+    `Canonical direct member billing owner is required for ${eventType}.`,
+  );
 }
 
 function readHostedStripeEventObject(value: unknown): Record<string, unknown> {
@@ -973,6 +1008,7 @@ function isHostedStripePositiveBillingProjectionEvent(
   return type === "invoice.paid" ||
     (
       isHostedStripeSubscriptionBillingEvent(type) &&
+      type !== "customer.subscription.trial_will_end" &&
       canonicalBillingStatus === HostedBillingStatus.active
     );
 }
@@ -1130,6 +1166,20 @@ async function processClaimedHostedStripeEvent(
           });
         }
       }
+    }
+    const trialEndingNotification = result.trialEndingNotification;
+    if (trialEndingNotification) {
+      await waitForHostedPostCommitOperation({
+        deadlineMs: createHostedPostCommitDeadline(
+          HOSTED_STRIPE_EVENT_LEASE_BUDGET.postCommitMs,
+        ),
+        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+          abortSignal,
+          expectedUserId: trialEndingNotification.memberId,
+          mailboxItemId: trialEndingNotification.mailboxItemId,
+          prisma,
+        }),
+      });
     }
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
@@ -1762,15 +1812,7 @@ function mapHostedStripeActivationOutcome(
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
-): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupCheckoutSubscription: HostedCheckoutSubscriptionCleanupCandidate | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
-  hostedExecutionEventId: string | null;
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
+): HostedStripeEventProcessingResult {
   return {
     activatedMemberId: outcome.activatedMemberId,
     activatedMembers: outcome.activatedMembers ?? [],
@@ -1779,6 +1821,7 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
+    trialEndingNotification: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
   };
 }
@@ -1793,15 +1836,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
   } | null | undefined,
-): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupCheckoutSubscription: HostedCheckoutSubscriptionCleanupCandidate | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
-  hostedExecutionEventId: string | null;
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
+): HostedStripeEventProcessingResult {
   return {
     activatedMemberId: outcome?.activatedMemberId ?? null,
     activatedMembers: outcome?.activatedMembers ?? [],
@@ -1811,19 +1846,12 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
+    trialEndingNotification: null,
     welcomeEmailMemberId: outcome?.welcomeEmailMemberId ?? null,
   };
 }
 
-function buildEmptyHostedStripeEventProcessingResult(): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupCheckoutSubscription: HostedCheckoutSubscriptionCleanupCandidate | null;
-  cleanupPulseTrialStripeSubscriptionId: string | null;
-  hostedExecutionEventId: string | null;
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
+function buildEmptyHostedStripeEventProcessingResult(): HostedStripeEventProcessingResult {
   return {
     activatedMemberId: null,
     activatedMembers: [],
@@ -1831,6 +1859,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     cleanupPulseTrialStripeSubscriptionId: null,
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
+    trialEndingNotification: null,
     welcomeEmailMemberId: null,
   };
 }

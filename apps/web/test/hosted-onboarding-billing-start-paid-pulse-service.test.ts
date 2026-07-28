@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
+    hostedGroupMember: {
+      findFirst: vi.fn(),
+    },
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
@@ -90,6 +93,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
 import {
   continueHostedPulseTrialPaidPlan,
   startHostedPulseTrialPaidPlan,
+  startHostedTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 
 describe("startHostedPulseTrialPaidPlan", () => {
@@ -98,6 +102,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     invoiceFixtures.clear();
     invoicePaymentFixtures.clear();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValue({
+      id: "group_membership_123",
+    });
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
       mocks.preparedCryptoDomainRoots,
     );
@@ -122,11 +129,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
       blockActiveProjection: false,
       state: "healthy",
     });
-    mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-      billingPlanCode: "launch_monthly",
-      priceId: "price_pulse_recurring",
-      stripe: mocks.stripe,
-    });
+    mocks.requireHostedStripeBillingPlanConfig.mockImplementation(
+      ({ billingPlanCode }: { billingPlanCode: string }) => ({
+        billingPlanCode,
+        priceId: billingPlanCode === "launch_group_monthly"
+          ? "price_group_recurring"
+          : "price_pulse_recurring",
+        stripe: mocks.stripe,
+      }),
+    );
     mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
       url: "https://billing.stripe.test/session_123",
     });
@@ -228,6 +239,69 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("ends an active Pulse trial into eligible Group on the same subscription", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_group_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+      ],
+      latestInvoice: makeInvoice({ status: "draft" }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_group_recurring",
+          quantity: 1,
+        }],
+        payment_behavior: "allow_incomplete",
+        trial_end: "now",
+      }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(
+          /^hosted-billing-start-paid-pulse:[a-f0-9]{64}$/u,
+        ),
+      }),
+    );
+    expect(mocks.prismaClient.hostedGroupMember.findFirst)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          memberId: "member_123",
+        }),
+      }));
+  });
+
+  test("rechecks Group eligibility inside the billing mutation lock", async () => {
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce(null);
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+    });
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("does not project paid access when canonical financial reconciliation blocks it", async () => {

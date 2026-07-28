@@ -59,7 +59,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('**Pulse Trial:**')
     expect(skill).toContain('**Direct paid Pulse or Edge:**')
     expect(skill).toContain('**Family sponsored:**')
-    expect(skill).toContain('**Hosted group:**')
+    expect(skill).toContain('**Direct Group plan:**')
+    expect(skill).toContain('**Hosted group conversation:**')
     expect(skill).toContain('Do not promise a link')
     expect(skill).toContain('Personal top-ups are unavailable')
     expect(skill).toContain('Family plan owner may')
@@ -69,7 +70,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('matches exactly one `members` row')
     expect(skill).toContain('navigation to Settings > Family')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
-    expect(skill).toContain('include it in the same segment as a plain first-party link')
+    expect(skill).toContain('include it in the same segment as a')
+    expect(skill).toContain('plain first-party link')
     expect(skill).toContain("Match the room's energy")
     expect(skill).toContain('nominating someone to cover it')
     expect(skill).toContain('skip the heads-up entirely')
@@ -77,8 +79,42 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never switch it automatically')
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
-    expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(skill).toContain('remaining percentage when the')
+    expect(skill).toContain('result includes remainingPercent')
     expect(skill).not.toContain('Share only its')
+  })
+
+  it('keeps private trial timing and hosted group funding on separate routes', async () => {
+    const skill = await readLowUsageSkill()
+    const trialRoute = skill.slice(
+      skill.indexOf('- **Pulse Trial:**'),
+      skill.indexOf('- **Direct Group plan:**'),
+    )
+    const directGroupFollowUp = skill.slice(
+      skill.lastIndexOf('- **Direct Group plan:**'),
+      skill.indexOf('- **Paid Pulse:**'),
+    )
+    const hostedGroupFollowUp = skill.slice(
+      skill.lastIndexOf('- **Hosted group conversation:**'),
+      skill.indexOf('When offering a usage-saving model'),
+    )
+
+    expect(trialRoute).toContain('name only its')
+    expect(trialRoute).toContain('Do not describe when it starts')
+    expect(trialRoute).not.toMatch(/\$|start(?:s|ing)? it now/i)
+    expect(skill).not.toContain('start Pulse now')
+    expect(skill).toContain(
+      'When quote timing is `at_trial_end`, say the current trial',
+    )
+    expect(skill).toContain('continues and there is no immediate charge')
+    expect(skill).toContain(
+      'When timing is `now`, say the',
+    )
+    expect(skill).toContain('trial ends and paid billing begins immediately')
+    expect(directGroupFollowUp).toContain('current `change_plan` quote label')
+    expect(directGroupFollowUp).not.toContain('murph.group')
+    expect(hostedGroupFollowUp).toContain('Call `read_usage` again')
+    expect(hostedGroupFollowUp).not.toMatch(/murph\.plan_usage|change_plan/)
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {

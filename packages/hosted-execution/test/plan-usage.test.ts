@@ -20,13 +20,19 @@ describe("hosted plan usage contract", () => {
       planCode: "launch_monthly",
       planName: "Pulse",
       recommendedAction: {
-        kind: "upgrade_edge",
-        label: "Upgrade to Edge",
+        kind: "change_plan",
+        label: "Upgrade to Edge ($20/month)",
+        targetPlanCode: "launch_edge_monthly",
         url: "https://example.test/settings#subscription",
       },
       subscriptionActionQuote: {
-        action: "upgrade_edge",
+        action: "change_plan",
+        expiresAt: "2026-07-03T12:10:00.000Z",
         label: "Upgrade to Edge ($20/month)",
+        monthlyPriceUsdCents: 2_000,
+        quoteId: "signed-quote",
+        targetPlanCode: "launch_edge_monthly",
+        timing: "immediate",
       },
       remainingPercent: 25,
       status: "active",
@@ -41,6 +47,20 @@ describe("hosted plan usage contract", () => {
   it("parses the trial display name", () => {
     expect(parseHostedPlanUsageStatus({
       accessKind: "trial",
+      availablePlans: [
+        {
+          code: "launch_group_monthly",
+          displayName: "Group",
+          monthlyPriceUsdCents: 350,
+          selectable: true,
+        },
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       forecast: null,
       generatedAt: "2026-07-03T12:00:00.000Z",
       periodEnd: "2026-07-10T12:00:00.000Z",
@@ -48,10 +68,16 @@ describe("hosted plan usage contract", () => {
       periodStart: "2026-07-01T12:00:00.000Z",
       planCode: "launch_monthly",
       planName: "Pulse Trial",
+      recommendedPlanCode: "launch_group_monthly",
       recommendedAction: null,
       subscriptionActionQuote: {
-        action: "start_pulse_now",
-        label: "Start Pulse now ($8/month)",
+        action: "change_plan",
+        expiresAt: "2026-07-03T12:10:00.000Z",
+        label: "Start Group now ($3.50/month)",
+        monthlyPriceUsdCents: 350,
+        quoteId: "signed-quote",
+        targetPlanCode: "launch_group_monthly",
+        timing: "now",
       },
       remainingPercent: 75,
       status: "active",
@@ -59,8 +85,10 @@ describe("hosted plan usage contract", () => {
     })).toMatchObject({
       accessKind: "trial",
       planName: "Pulse Trial",
+      recommendedPlanCode: "launch_group_monthly",
       subscriptionActionQuote: {
-        action: "start_pulse_now",
+        action: "change_plan",
+        targetPlanCode: "launch_group_monthly",
       },
     });
   });
@@ -121,6 +149,13 @@ describe("hosted plan usage contract", () => {
     expect(parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: true,
     })).toEqual({ includeSubscriptionActionQuote: true });
+    expect(parseHostedPlanUsageToolRequest({
+      includeSubscriptionActionQuote: true,
+      subscriptionActionTargetPlanCode: "launch_monthly",
+    })).toEqual({
+      includeSubscriptionActionQuote: true,
+      subscriptionActionTargetPlanCode: "launch_monthly",
+    });
     expect(() => parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: false,
     })).toThrow();

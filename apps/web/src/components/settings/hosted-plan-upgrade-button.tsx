@@ -17,7 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  formatHostedBillingPrice,
+  getHostedBillingPlanDefinition,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 import { cn } from "@/src/lib/utils";
 
@@ -28,42 +31,86 @@ import {
   type HostedBillingErrorAction,
 } from "./hosted-settings-sync-helpers";
 
-const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
-const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
+type HostedImmediateUpgradeTarget =
+  | "launch_monthly"
+  | "launch_edge_monthly";
 
-const EDGE_FEATURES = [
-  "Everything in Pulse",
-  "More usage on latest AI models",
-  "Murph remembers more of your history",
-  "Deeper research and analysis",
-];
+const UPGRADE_PRESENTATION = {
+  launch_monthly: {
+    description: "For more regular one-on-one Murph use.",
+    features: [
+      "Everything in Group",
+      "More private Murph usage",
+      "Run more experiments and deeper analysis",
+      "Wearable syncing and group activity stay on",
+    ],
+  },
+  launch_edge_monthly: {
+    description: "For when you want the full picture.",
+    features: [
+      "Everything in Pulse",
+      "More usage on latest AI models",
+      "Murph remembers more of your history",
+      "Deeper research and analysis",
+    ],
+  },
+} as const satisfies Record<
+  HostedImmediateUpgradeTarget,
+  { description: string; features: readonly string[] }
+>;
 
-type EdgeUpgradeRecovery = HostedBillingErrorAction | null;
+type PlanUpgradeRecovery = HostedBillingErrorAction | null;
 
-const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
+const PLAN_UPGRADE_BILLING_RECOVERY_CODES = new Set([
   "HOSTED_BILLING_PLAN_UPGRADE_APPLIED_INVOICE_VOIDED",
   "HOSTED_BILLING_PLAN_UPGRADE_COLLECTION_TIMED_OUT",
   "HOSTED_BILLING_PLAN_UPGRADE_FINANCIAL_STATE_BLOCKED",
   "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_FAILED",
   "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_UNCOLLECTIBLE",
 ]);
-const EDGE_UPGRADE_SUPPORT_RECOVERY_CODES = new Set([
+const PLAN_UPGRADE_SUPPORT_RECOVERY_CODES = new Set([
   "HOSTED_BILLING_STRIPE_PLAN_CHANGE_PROVIDER_REJECTED",
 ]);
 
-export function UpgradeToEdgeButton(props: {
+export function UpgradeToPulseButton(
+  props: Omit<HostedPlanUpgradeButtonProps, "targetPlanCode">,
+) {
+  return (
+    <HostedPlanUpgradeButton
+      {...props}
+      targetPlanCode="launch_monthly"
+    />
+  );
+}
+
+export function UpgradeToEdgeButton(
+  props: Omit<HostedPlanUpgradeButtonProps, "targetPlanCode">,
+) {
+  return (
+    <HostedPlanUpgradeButton
+      {...props}
+      targetPlanCode="launch_edge_monthly"
+    />
+  );
+}
+
+interface HostedPlanUpgradeButtonProps {
   block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
   onPendingChange?: (pending: boolean) => void;
   presentation?: "banner" | "settings";
-}) {
+  targetPlanCode: HostedImmediateUpgradeTarget;
+}
+
+function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
   const presentation = props.presentation ?? "settings";
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUpgrading, setIsUpgrading] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [recovery, setRecovery] = useState<EdgeUpgradeRecovery>(null);
+  const [recovery, setRecovery] = useState<PlanUpgradeRecovery>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   async function handleUpgrade() {
@@ -78,7 +125,7 @@ export function UpgradeToEdgeButton(props: {
       const response = await requestHostedOnboardingJson<HostedBillingPlanUpgradeResult>({
         method: "POST",
         payload: {
-          targetPlanCode: "launch_edge_monthly",
+          targetPlanCode: props.targetPlanCode,
         },
         url: "/api/settings/billing/upgrade-plan",
       });
@@ -104,8 +151,13 @@ export function UpgradeToEdgeButton(props: {
       setConfirmationOpen(false);
       router.refresh();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not upgrade your plan right now."));
-      setRecovery(resolveEdgeUpgradeRecovery(error));
+      setErrorMessage(
+        toErrorMessage(
+          error,
+          `Could not upgrade to ${targetPlan.displayName} right now.`,
+        ),
+      );
+      setRecovery(resolvePlanUpgradeRecovery(error));
     } finally {
       if (!redirecting) {
         setIsUpgrading(false);
@@ -123,7 +175,9 @@ export function UpgradeToEdgeButton(props: {
     }
   }
 
-  const label = isUpgrading ? "Upgrading..." : props.children ?? "Upgrade to Edge";
+  const label = isUpgrading
+    ? "Upgrading..."
+    : props.children ?? `Upgrade to ${targetPlan.displayName}`;
   const disabled = props.disabled === true || isUpgrading;
 
   if (presentation === "banner") {
@@ -140,7 +194,7 @@ export function UpgradeToEdgeButton(props: {
           {label}
           <ArrowRight className="size-4" aria-hidden="true" />
         </Button>
-        <EdgeUpgradeConfirmationDialog
+        <PlanUpgradeConfirmationDialog
           errorMessage={errorMessage}
           isUpgrading={isUpgrading}
           processing={processing}
@@ -148,6 +202,7 @@ export function UpgradeToEdgeButton(props: {
           onConfirm={() => void handleUpgrade()}
           onOpenChange={setConfirmationOpenState}
           open={confirmationOpen}
+          targetPlanCode={props.targetPlanCode}
         />
       </div>
     );
@@ -164,7 +219,7 @@ export function UpgradeToEdgeButton(props: {
       >
         {label}
       </Button>
-      <EdgeUpgradeConfirmationDialog
+      <PlanUpgradeConfirmationDialog
         errorMessage={errorMessage}
         isUpgrading={isUpgrading}
         processing={processing}
@@ -172,30 +227,33 @@ export function UpgradeToEdgeButton(props: {
         onConfirm={() => void handleUpgrade()}
         onOpenChange={setConfirmationOpenState}
         open={confirmationOpen}
+        targetPlanCode={props.targetPlanCode}
       />
     </div>
   );
 }
 
-function EdgeUpgradeConfirmationDialog(props: {
+function PlanUpgradeConfirmationDialog(props: {
   errorMessage: string | null;
   isUpgrading: boolean;
   processing: boolean;
-  recovery: EdgeUpgradeRecovery;
+  recovery: PlanUpgradeRecovery;
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  targetPlanCode: HostedImmediateUpgradeTarget;
 }) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <EdgeUpgradeConfirmationContent
+        <PlanUpgradeConfirmationContent
           errorMessage={props.errorMessage}
           isUpgrading={props.isUpgrading}
           processing={props.processing}
           recovery={props.recovery}
           onCancel={() => props.onOpenChange(false)}
           onConfirm={props.onConfirm}
+          targetPlanCode={props.targetPlanCode}
         />
       </DialogContent>
     </Dialog>
@@ -206,22 +264,45 @@ export function EdgeUpgradeConfirmationContent(props: {
   errorMessage: string | null;
   isUpgrading: boolean;
   processing: boolean;
-  recovery: EdgeUpgradeRecovery;
+  recovery: PlanUpgradeRecovery;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   return (
+    <PlanUpgradeConfirmationContent
+      {...props}
+      targetPlanCode="launch_edge_monthly"
+    />
+  );
+}
+
+function PlanUpgradeConfirmationContent(props: {
+  errorMessage: string | null;
+  isUpgrading: boolean;
+  processing: boolean;
+  recovery: PlanUpgradeRecovery;
+  onCancel: () => void;
+  onConfirm: () => void;
+  targetPlanCode: HostedImmediateUpgradeTarget;
+}) {
+  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
+  const presentation = UPGRADE_PRESENTATION[props.targetPlanCode];
+  const priceLabel = formatHostedBillingPrice(
+    targetPlan.recurringAmountUsdCents,
+  );
+
+  return (
     <>
       <DialogHeader className="pr-10">
         <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-          Upgrade to Edge
+          Upgrade to {targetPlan.displayName}
         </DialogTitle>
         <DialogDescription className="text-sm leading-6 text-[#736a58]">
-          For when you want the full picture.
+          {presentation.description}
         </DialogDescription>
       </DialogHeader>
 
-      <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
+      <PlanFeatureCard price={priceLabel} features={presentation.features} />
 
       {props.errorMessage ? (
         <p
@@ -251,9 +332,9 @@ export function EdgeUpgradeConfirmationContent(props: {
           />
         ) : props.errorMessage && props.recovery === "support" ? (
           <ContactSupportAction
-            body={"Hi Murph support,\n\nI need help finishing an Edge billing change."}
+            body={`Hi Murph support,\n\nI need help finishing a ${targetPlan.displayName} billing change.`}
             className="w-full"
-            subject="Murph Edge billing support"
+            subject={`Murph ${targetPlan.displayName} billing support`}
           />
         ) : !props.errorMessage || props.recovery === "retry" ? (
           <Button
@@ -269,7 +350,7 @@ export function EdgeUpgradeConfirmationContent(props: {
                 ? "Check status"
                 : props.recovery === "retry"
                   ? "Try again"
-                  : "Upgrade to Edge"}
+                  : `Upgrade to ${targetPlan.displayName}`}
           </Button>
         ) : null}
         <Button
@@ -287,15 +368,11 @@ export function EdgeUpgradeConfirmationContent(props: {
   );
 }
 
-function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
-  return `$${amountUsdCents / 100}`;
-}
-
-function resolveEdgeUpgradeRecovery(error: unknown): EdgeUpgradeRecovery {
+function resolvePlanUpgradeRecovery(error: unknown): PlanUpgradeRecovery {
   return resolveHostedBillingErrorAction({
-    billingRecoveryCodes: EDGE_UPGRADE_BILLING_RECOVERY_CODES,
+    billingRecoveryCodes: PLAN_UPGRADE_BILLING_RECOVERY_CODES,
     error,
-    supportRecoveryCodes: EDGE_UPGRADE_SUPPORT_RECOVERY_CODES,
+    supportRecoveryCodes: PLAN_UPGRADE_SUPPORT_RECOVERY_CODES,
   });
 }
 

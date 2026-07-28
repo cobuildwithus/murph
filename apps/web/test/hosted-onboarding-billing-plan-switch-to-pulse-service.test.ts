@@ -1154,6 +1154,7 @@ describe("hosted Pulse switch schedule pending-field helpers", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId.mockResolvedValue({
       billingRef: {
+        currentBillingPlanCode: "launch_edge_monthly",
         memberId: "member_123",
         scheduledBillingEffectiveAt: new Date("2026-05-06T12:00:00.000Z"),
         scheduledBillingPlanCode: "launch_monthly",

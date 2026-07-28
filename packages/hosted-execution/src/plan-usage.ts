@@ -8,9 +8,16 @@ export const HOSTED_PLAN_USAGE_ACCESS_KINDS = [
 
 export const HOSTED_PLAN_USAGE_PLAN_NAMES = [
   "Edge",
+  "Group",
   "Family",
   "Pulse",
   "Pulse Trial",
+] as const;
+
+export const HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES = [
+  "launch_group_monthly",
+  "launch_monthly",
+  "launch_edge_monthly",
 ] as const;
 
 export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
@@ -29,7 +36,17 @@ const hostedPlanUsageActionLabelSchema = z.string().trim().min(1).max(80);
 const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
   z
     .object({
-      kind: z.enum(["start_pulse", "upgrade_edge"]),
+      kind: z.literal("change_plan"),
+      label: hostedPlanUsageActionLabelSchema,
+      targetPlanCode: z.enum([
+        ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+      ]),
+      url: z.string().url(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.enum(["start_pulse", "upgrade_pulse", "upgrade_edge"]),
       label: hostedPlanUsageActionLabelSchema,
       url: z.string().url(),
     })
@@ -45,8 +62,26 @@ const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
 
 const hostedPlanUsageSubscriptionActionQuoteSchema = z
   .object({
-    action: z.enum(["start_pulse_now", "upgrade_edge"]),
+    action: z.literal("change_plan"),
+    expiresAt: z.string().datetime({ offset: true }),
     label: z.string().trim().min(1).max(80),
+    monthlyPriceUsdCents: z.number().int().positive(),
+    quoteId: z.string().trim().min(1).max(1_024),
+    targetPlanCode: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]),
+    timing: z.enum(["at_trial_end", "immediate", "now", "period_end"]),
+  })
+  .strict();
+
+const hostedPlanUsageAvailablePlanSchema = z
+  .object({
+    code: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]),
+    displayName: z.enum(["Group", "Pulse", "Edge"]),
+    monthlyPriceUsdCents: z.number().int().positive(),
+    selectable: z.literal(true),
   })
   .strict();
 
@@ -60,13 +95,19 @@ const hostedPlanUsageForecastSchema = z
 const hostedPlanUsageAvailableSchema = z
   .object({
     accessKind: z.enum(HOSTED_PLAN_USAGE_ACCESS_KINDS),
+    availablePlans: z.array(hostedPlanUsageAvailablePlanSchema).optional(),
     forecast: hostedPlanUsageForecastSchema.nullable(),
     generatedAt: hostedPlanUsageGeneratedAtSchema,
     periodEnd: z.string().datetime({ offset: true }),
     periodKind: z.enum(["monthly", "trial"]),
     periodStart: z.string().datetime({ offset: true }),
-    planCode: z.enum(["launch_edge_monthly", "launch_monthly"]),
+    planCode: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]),
     planName: z.enum(HOSTED_PLAN_USAGE_PLAN_NAMES),
+    recommendedPlanCode: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]).optional(),
     recommendedAction: hostedPlanUsageRecommendedActionSchema.nullable(),
     subscriptionActionQuote:
       hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
@@ -78,8 +119,12 @@ const hostedPlanUsageAvailableSchema = z
 
 const hostedPlanUsageUnavailableSchema = z
   .object({
+    availablePlans: z.array(hostedPlanUsageAvailablePlanSchema).optional(),
     generatedAt: hostedPlanUsageGeneratedAtSchema,
     reason: z.enum(HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS),
+    recommendedPlanCode: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]).optional(),
     recommendedAction: hostedPlanUsageRecommendedActionSchema.nullable(),
     subscriptionActionQuote:
       hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
@@ -95,8 +140,20 @@ export const hostedPlanUsageStatusSchema = z.union([
 export const hostedPlanUsageToolRequestSchema = z
   .object({
     includeSubscriptionActionQuote: z.literal(true).optional(),
+    subscriptionActionTargetPlanCode: z.enum([
+      ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+    ]).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.subscriptionActionTargetPlanCode === undefined
+      || value.includeSubscriptionActionQuote === true,
+    {
+      message:
+        "subscriptionActionTargetPlanCode requires includeSubscriptionActionQuote.",
+    },
+  );
 
 export type HostedPlanUsageStatus = z.infer<typeof hostedPlanUsageStatusSchema>;
 export type HostedPlanUsageAvailableStatus = z.infer<

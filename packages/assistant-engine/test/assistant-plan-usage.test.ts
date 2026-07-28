@@ -33,7 +33,7 @@ describe("assistant plan usage tool", () => {
       .not.toContain(MURPH_PLAN_USAGE_TOOL);
   });
 
-  it("accepts only empty arguments and reads the bound member status", async () => {
+  it("reads the bound member status with a server-owned quote request", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -42,7 +42,12 @@ describe("assistant plan usage tool", () => {
         tool: "plan_usage",
       },
     });
-    expect(request).toEqual({ kind: "plan-usage" });
+    expect(request).toEqual({
+      kind: "plan-usage",
+      request: {
+        includeSubscriptionActionQuote: true,
+      },
+    });
     if (!request) {
       throw new Error("Expected a plan usage dynamic tool request.");
     }
@@ -58,13 +63,19 @@ describe("assistant plan usage tool", () => {
         planCode: "launch_monthly" as const,
         planName: "Pulse" as const,
         recommendedAction: {
-          kind: "upgrade_edge" as const,
-          label: "Upgrade to Edge",
+          kind: "change_plan" as const,
+          label: "Upgrade to Edge ($20/month)",
+          targetPlanCode: "launch_edge_monthly" as const,
           url: "https://example.test/settings#subscription",
         },
         subscriptionActionQuote: {
-          action: "upgrade_edge" as const,
+          action: "change_plan" as const,
+          expiresAt: "2026-07-03T12:10:00.000Z",
           label: "Upgrade to Edge ($20/month)",
+          monthlyPriceUsdCents: 2_000,
+          quoteId: "signed-quote",
+          targetPlanCode: "launch_edge_monthly" as const,
+          timing: "immediate" as const,
         },
         remainingPercent: 20,
         status: "active" as const,
@@ -80,10 +91,12 @@ describe("assistant plan usage tool", () => {
       request,
     });
 
-    expect(planUsageTool.read).toHaveBeenCalledOnce();
+    expect(planUsageTool.read).toHaveBeenCalledWith({
+      includeSubscriptionActionQuote: true,
+    });
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain('"usedPercent":80');
-    expect(result.rpcResult.contentItems[0]?.text).toContain("upgrade_edge");
+    expect(result.rpcResult.contentItems[0]?.text).toContain("change_plan");
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       '"label":"Upgrade to Edge ($20/month)"',
     );
@@ -98,6 +111,23 @@ describe("assistant plan usage tool", () => {
         tool: "plan_usage",
       },
     })?.kind).toBe("invalid-plan-usage-arguments");
+  });
+
+  it("passes through a listed target plan for a refreshed quote", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { targetPlanCode: "launch_monthly" },
+        namespace: "murph",
+        tool: "plan_usage",
+      },
+    })).toEqual({
+      kind: "plan-usage",
+      request: {
+        includeSubscriptionActionQuote: true,
+        subscriptionActionTargetPlanCode: "launch_monthly",
+      },
+    });
   });
 
   it("does not expose hosted read failures", async () => {

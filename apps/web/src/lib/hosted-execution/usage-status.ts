@@ -11,9 +11,18 @@ import { getPrisma } from "../prisma";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   canStartHostedPulseTrialPaidPlan,
-  canUpgradeHostedBillingPlanToEdge,
+  canScheduleHostedBillingPlanChange,
+  canUpgradeHostedBillingPlan,
   getHostedBillingPlanDefinition,
 } from "../hosted-onboarding/billing-plans";
+import {
+  hasConfirmedHostedGroupMembership,
+  resolveHostedTrialContinuationOffer,
+} from "../hosted-onboarding/billing-plan-eligibility";
+import {
+  buildHostedBillingPlanQuoteState,
+  createHostedBillingPlanQuote,
+} from "../hosted-onboarding/billing-plan-quote";
 import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
 import {
   readHostedMemberBillingEligibilityState,
@@ -21,6 +30,7 @@ import {
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
+import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -37,6 +47,10 @@ export async function readHostedPersonalAiUsageStatus(input: {
   now?: Date | string;
   prisma?: HostedPlanUsageClient;
   publicBaseUrl?: string | null;
+  subscriptionActionTargetPlanCode?:
+    | "launch_group_monthly"
+    | "launch_monthly"
+    | "launch_edge_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -54,6 +68,8 @@ export async function readHostedPersonalAiUsageStatus(input: {
     now,
     prisma,
     publicBaseUrl: input.publicBaseUrl,
+    subscriptionActionTargetPlanCode:
+      input.subscriptionActionTargetPlanCode,
   });
 }
 
@@ -64,6 +80,10 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   now?: Date | string;
   prisma?: HostedPlanUsageClient;
   publicBaseUrl?: string | null;
+  subscriptionActionTargetPlanCode?:
+    | "launch_group_monthly"
+    | "launch_monthly"
+    | "launch_edge_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -98,25 +118,33 @@ export async function projectHostedPersonalAiUsageStatus(input: {
       decision.reason === "trial_expired_pending_billing";
     const shouldResolveAvailableAction = trialConversionPending
       && (includeSubscriptionActionQuote || actionUrl !== null);
-    const availableAction = shouldResolveAvailableAction
-      ? await resolveAvailableSubscriptionAction({
+    const availableOffer = shouldResolveAvailableAction
+      ? await resolveAvailableSubscriptionOffer({
           accessKind: "trial",
           memberId: input.memberId,
+          now,
           planCode: decision.billingPlanCode,
           prisma,
+          requestedTargetPlanCode:
+            input.subscriptionActionTargetPlanCode,
+          trialTiming: "now",
         })
-      : null;
+      : EMPTY_SUBSCRIPTION_OFFER;
     return {
+      ...projectSubscriptionOffer(availableOffer),
       generatedAt,
       reason: trialConversionPending
         ? "trial_conversion_pending"
         : "hosted_access_inactive",
       recommendedAction: trialConversionPending
-        ? buildRecommendedAction({ action: availableAction, actionUrl })
+        ? buildRecommendedAction({
+            action: availableOffer.quote,
+            actionUrl,
+          })
         : null,
       ...projectSubscriptionActionQuoteExpansion({
         include: includeSubscriptionActionQuote,
-        quote: availableAction,
+        quote: availableOffer.quote,
       }),
       status: "unavailable",
     };
@@ -163,9 +191,11 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     ? "Family"
     : accessKind === "trial"
       ? "Pulse Trial"
-    : decision.billingPlanCode === "launch_edge_monthly"
-      ? "Edge"
-      : "Pulse";
+      : decision.billingPlanCode === "launch_edge_monthly"
+        ? "Edge"
+        : decision.billingPlanCode === "launch_group_monthly"
+          ? "Group"
+          : "Pulse";
   const shouldRecommendAction = exhausted
     || forecast !== null
     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
@@ -173,21 +203,33 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     includeSubscriptionActionQuote
     || (
       shouldRecommendAction
-      && accessKind === "trial"
+      && (
+        accessKind === "trial"
+        || (
+          accessKind === "paid"
+          && decision.billingPlanCode === "launch_group_monthly"
+        )
+      )
       && actionUrl !== null
     );
   const shouldResolvePersonalUsageCreditOffers =
-    shouldRecommendAction && accessKind === "paid";
-  const [availableSubscriptionAction, personalUsageCreditOfferCodes] =
+    shouldRecommendAction
+    && accessKind === "paid"
+    && decision.billingPlanCode !== "launch_group_monthly";
+  const [availableSubscriptionOffer, personalUsageCreditOfferCodes] =
     await Promise.all([
       shouldResolveSubscriptionAction
-        ? resolveAvailableSubscriptionAction({
+        ? resolveAvailableSubscriptionOffer({
             accessKind,
             memberId: input.memberId,
+            now,
             planCode: decision.billingPlanCode,
             prisma,
+            requestedTargetPlanCode:
+              input.subscriptionActionTargetPlanCode,
+            trialTiming: exhausted ? "now" : "at_trial_end",
           })
-        : Promise.resolve(null),
+        : Promise.resolve(EMPTY_SUBSCRIPTION_OFFER),
       shouldResolvePersonalUsageCreditOffers
         ? readHostedPersonalUsageCreditOfferCodes({
             memberId: input.memberId,
@@ -207,6 +249,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
 
   return {
     accessKind,
+    ...projectSubscriptionOffer(availableSubscriptionOffer),
     forecast,
     generatedAt,
     periodEnd: decision.periodEnd.toISOString(),
@@ -215,18 +258,23 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     planCode: decision.billingPlanCode,
     planName,
     recommendedAction: shouldRecommendAction
-      ? accessKind === "paid"
-        ? personalUsageCreditOfferCodes.length > 0
-          ? buildAddUsageRecommendedAction()
-          : null
-        : buildRecommendedAction({
-            action: availableSubscriptionAction,
+      ? accessKind === "trial"
+        ? buildRecommendedAction({
+            action: availableSubscriptionOffer.quote,
             actionUrl,
           })
+        : decision.billingPlanCode === "launch_group_monthly"
+          ? buildRecommendedAction({
+              action: availableSubscriptionOffer.quote,
+              actionUrl,
+            })
+          : personalUsageCreditOfferCodes.length > 0
+            ? buildAddUsageRecommendedAction()
+            : null
       : null,
     ...projectSubscriptionActionQuoteExpansion({
       include: includeSubscriptionActionQuote,
-      quote: availableSubscriptionAction,
+      quote: availableSubscriptionOffer.quote,
     }),
     remainingPercent: 100 - usedPercent,
     status: exhausted ? "exhausted" : "active",
@@ -314,14 +362,33 @@ async function buildUsageForecast(input: {
   };
 }
 
-async function resolveAvailableSubscriptionAction(input: {
+interface HostedResolvedSubscriptionOffer {
+  availablePlans?: HostedPlanUsageAvailableStatus["availablePlans"];
+  quote: HostedPlanUsageSubscriptionActionQuote | null;
+  recommendedPlanCode?:
+    | "launch_group_monthly"
+    | "launch_monthly"
+    | "launch_edge_monthly";
+}
+
+const EMPTY_SUBSCRIPTION_OFFER: HostedResolvedSubscriptionOffer = {
+  quote: null,
+};
+
+async function resolveAvailableSubscriptionOffer(input: {
   accessKind: HostedPlanUsageAvailableStatus["accessKind"];
   memberId: string;
+  now: Date;
   planCode: HostedPlanUsageAvailableStatus["planCode"];
   prisma: HostedPlanUsageClient;
-}): Promise<HostedPlanUsageSubscriptionActionQuote | null> {
+  requestedTargetPlanCode?:
+    | "launch_group_monthly"
+    | "launch_monthly"
+    | "launch_edge_monthly";
+  trialTiming?: "at_trial_end" | "now";
+}): Promise<HostedResolvedSubscriptionOffer> {
   if (input.accessKind === "family_sponsored") {
-    return null;
+    return EMPTY_SUBSCRIPTION_OFFER;
   }
 
   const actionState = await Promise.all([
@@ -345,16 +412,16 @@ async function resolveAvailableSubscriptionAction(input: {
     return null;
   });
   if (!actionState) {
-    return null;
+    return EMPTY_SUBSCRIPTION_OFFER;
   }
 
   const [member, billingState] = actionState;
   if (!member || !billingState) {
-    return null;
+    return EMPTY_SUBSCRIPTION_OFFER;
   }
 
   if (input.accessKind === "trial") {
-    return canStartHostedPulseTrialPaidPlan({
+    if (!canStartHostedPulseTrialPaidPlan({
         billingStatus: member.billingStatus,
         currentBillingPhase: billingState.currentBillingPhase,
         currentBillingPlanCode: billingState.currentBillingPlanCode,
@@ -362,40 +429,136 @@ async function resolveAvailableSubscriptionAction(input: {
         hasStripeCustomerId: billingState.hasStripeCustomerId,
         hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
         suspendedAt: member.suspendedAt,
-      })
-      ? buildSubscriptionActionQuote("start_pulse_now")
-      : null;
+    })) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+    const hasConfirmedGroupMembership =
+      await hasConfirmedHostedGroupMembership({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      });
+    const trialOffer = resolveHostedTrialContinuationOffer({
+      groupPlanConfigured:
+        getHostedOnboardingEnvironment()
+          .stripePriceIdsByPlan.launch_group_monthly !== null,
+      hasConfirmedGroupMembership,
+    });
+    const targetPlanCode =
+      input.requestedTargetPlanCode
+      ?? trialOffer.recommendedPlanCode;
+    if (
+      targetPlanCode !== "launch_group_monthly"
+      && targetPlanCode !== "launch_monthly"
+    ) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+    if (!trialOffer.availablePlanCodes.includes(targetPlanCode)) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+    return {
+      availablePlans: trialOffer.availablePlanCodes.map((planCode) => {
+        const definition = getHostedBillingPlanDefinition(planCode);
+        return {
+          code: planCode,
+          displayName:
+            planCode === "launch_group_monthly" ? "Group" : "Pulse",
+          monthlyPriceUsdCents: definition.recurringAmountUsdCents,
+          selectable: true as const,
+        };
+      }),
+      quote: buildSubscriptionActionQuote({
+        memberId: input.memberId,
+        now: input.now,
+        state: buildHostedBillingPlanQuoteState({
+          billingState,
+          billingStatus: member.billingStatus,
+        }),
+        targetPlanCode,
+        timing: input.trialTiming ?? "now",
+      }),
+      recommendedPlanCode: trialOffer.recommendedPlanCode,
+    };
   }
 
   const hasOwnActiveBilling = hasHostedMemberOwnActiveBilling(member);
-  const canUpgradeToEdge = input.planCode === "launch_monthly"
-    && hasOwnActiveBilling
+  const targetPlanCode = input.requestedTargetPlanCode
+    ?? (
+      input.planCode === "launch_group_monthly"
+        ? "launch_monthly"
+        : input.planCode === "launch_monthly"
+          ? "launch_edge_monthly"
+          : null
+    );
+  if (!targetPlanCode || targetPlanCode === input.planCode) {
+    return EMPTY_SUBSCRIPTION_OFFER;
+  }
+  if (
+    targetPlanCode === "launch_group_monthly"
+    && !(await hasConfirmedHostedGroupMembership({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }))
+  ) {
+    return EMPTY_SUBSCRIPTION_OFFER;
+  }
+  const canUpgrade = hasOwnActiveBilling
     && billingState.hasStripeCustomerId
     && billingState.hasStripeSubscriptionId
-    && canUpgradeHostedBillingPlanToEdge({
+    && canUpgradeHostedBillingPlan({
       currentBillingPhase: billingState.currentBillingPhase,
       currentBillingPlanCode: billingState.currentBillingPlanCode,
       currentCheckoutOffer: billingState.currentCheckoutOffer,
+      targetPlanCode,
     });
-
-  return canUpgradeToEdge
-    ? buildSubscriptionActionQuote("upgrade_edge")
-    : null;
+  const canSchedule = hasOwnActiveBilling
+    && billingState.hasStripeCustomerId
+    && billingState.hasStripeSubscriptionId
+    && canScheduleHostedBillingPlanChange({
+      billingStatus: member.billingStatus,
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentBillingPlanCode: billingState.currentBillingPlanCode,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
+      stripeCustomerId: billingState.hasStripeCustomerId
+        ? "configured"
+        : null,
+      stripeSubscriptionId: billingState.hasStripeSubscriptionId
+        ? "configured"
+        : null,
+      suspendedAt: member.suspendedAt,
+      targetPlanCode,
+    });
+  const timing = canUpgrade
+    ? "immediate" as const
+    : canSchedule
+      ? "period_end" as const
+      : null;
+  return {
+    quote: timing
+      ? buildSubscriptionActionQuote({
+        memberId: input.memberId,
+        now: input.now,
+        state: buildHostedBillingPlanQuoteState({
+          billingState,
+          billingStatus: member.billingStatus,
+        }),
+        targetPlanCode,
+        timing,
+      })
+      : null,
+  };
 }
 
-function buildSubscriptionActionQuote(
-  action: HostedPlanUsageSubscriptionActionQuote["action"],
-): HostedPlanUsageSubscriptionActionQuote {
-  const billingPlan = getHostedBillingPlanDefinition(
-    action === "start_pulse_now" ? "launch_monthly" : "launch_edge_monthly",
-  );
-  const recurringAmount = `$${billingPlan.recurringAmountUsdCents / 100}`;
-  return {
-    action,
-    label: action === "start_pulse_now"
-      ? `Start Pulse now (${recurringAmount}/month)`
-      : `Upgrade to Edge (${recurringAmount}/month)`,
-  };
+function buildSubscriptionActionQuote(input: {
+  memberId: string;
+  now: Date;
+  state: ReturnType<typeof buildHostedBillingPlanQuoteState>;
+  targetPlanCode:
+    | "launch_group_monthly"
+    | "launch_monthly"
+    | "launch_edge_monthly";
+  timing: "at_trial_end" | "immediate" | "now" | "period_end";
+}): HostedPlanUsageSubscriptionActionQuote {
+  return createHostedBillingPlanQuote(input);
 }
 
 function buildRecommendedAction(input: {
@@ -406,10 +569,9 @@ function buildRecommendedAction(input: {
     return null;
   }
   return {
-    kind: input.action.action === "start_pulse_now"
-      ? "start_pulse"
-      : "upgrade_edge",
+    kind: "change_plan",
     label: input.action.label,
+    targetPlanCode: input.action.targetPlanCode,
     url: input.actionUrl,
   };
 }
@@ -431,6 +593,22 @@ function projectSubscriptionActionQuoteExpansion(input: {
   return input.include
     ? { subscriptionActionQuote: input.quote }
     : {};
+}
+
+function projectSubscriptionOffer(
+  offer: HostedResolvedSubscriptionOffer,
+): Pick<
+  HostedPlanUsageAvailableStatus,
+  "availablePlans" | "recommendedPlanCode"
+> {
+  return {
+    ...(offer.availablePlans
+      ? { availablePlans: offer.availablePlans }
+      : {}),
+    ...(offer.recommendedPlanCode
+      ? { recommendedPlanCode: offer.recommendedPlanCode }
+      : {}),
+  };
 }
 
 function buildUsageActionUrl(

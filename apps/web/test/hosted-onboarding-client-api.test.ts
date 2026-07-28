@@ -6,6 +6,7 @@ import {
   requestHostedOnboardingJson,
   requestHostedPulseTrialContinuation,
   requestHostedPulseTrialStartPaid,
+  requestHostedTrialPlanStartPaid,
 } from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted onboarding client api", () => {
@@ -198,6 +199,35 @@ describe("hosted onboarding client api", () => {
       keepalive: false,
       method: "POST",
     });
+  });
+
+  it("posts the selected immediate trial plan for Group", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        billingPlanCode: "launch_group_monthly",
+        status: "started",
+      }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedTrialPlanStartPaid({
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toEqual({
+      status: "started",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/billing/start-paid-pulse",
+      expect.objectContaining({
+        body: JSON.stringify({
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
+        }),
+        method: "POST",
+      }),
+    );
   });
 
   it("keeps Start Pulse pending without redirecting", async () => {

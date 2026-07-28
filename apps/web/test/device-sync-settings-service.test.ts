@@ -125,6 +125,50 @@ test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member wit
   }));
 });
 
+test("keeps an active Group member's device sync available without consulting AI usage", async () => {
+  const prisma = {
+    hostedAiUsagePeriod: {
+      findUnique: vi.fn(async () => {
+        throw new Error("Device sync must not consult personal AI usage.");
+      }),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingRef: {
+          currentBillingPhase: "paid",
+          currentBillingPlanCode: "launch_group_monthly",
+        },
+        billingStatus: "active",
+        suspendedAt: null,
+        threadContainer: null,
+      })),
+    },
+  };
+
+  const { buildHostedDeviceSyncSettingsResponse } = await import(
+    "@/src/lib/device-sync/settings-service"
+  );
+  const response = await buildHostedDeviceSyncSettingsResponse({
+    member: {
+      billingStatus: "active",
+      id: "member_group",
+      suspendedAt: null,
+    },
+    prisma: prisma as never,
+  });
+
+  expect(response.ok).toBe(true);
+  expect(prisma.hostedAiUsagePeriod.findUnique).not.toHaveBeenCalled();
+  expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: {
+        userId: "member_group",
+      },
+    }),
+  );
+});
+
 test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
   const prisma = createAccessPrisma({

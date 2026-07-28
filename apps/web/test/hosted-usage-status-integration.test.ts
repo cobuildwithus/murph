@@ -29,6 +29,7 @@ describe("hosted plan usage production gate integration", () => {
       currentCheckoutOffer: "pulse_trial_7d",
       hasStripeCustomerId: true,
       hasStripeSubscriptionId: true,
+      scheduledBillingPlanCode: null,
     });
   });
 
@@ -46,12 +47,22 @@ describe("hosted plan usage production gate integration", () => {
         suspendedAt: null,
       }) as never,
       publicBaseUrl: "https://example.test",
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
+      availablePlans: [
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       generatedAt: NOW.toISOString(),
       reason: "trial_conversion_pending",
+      recommendedPlanCode: "launch_monthly",
       recommendedAction: {
-        kind: "start_pulse",
+        kind: "change_plan",
         label: "Start Pulse now ($8/month)",
+        targetPlanCode: "launch_monthly",
         url: "https://example.test/settings#subscription",
       },
       status: "unavailable",
@@ -118,6 +129,9 @@ function buildPrisma(input: {
         suspendedAt: input.suspendedAt,
         threadContainer: null,
       })),
+    },
+    hostedGroupMember: {
+      findFirst: vi.fn(async () => null),
     },
   };
 }

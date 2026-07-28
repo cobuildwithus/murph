@@ -35,7 +35,9 @@ import {
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 
+const DIRECT_GROUP_ALLOWANCE_USD_MICROS = 2_800_000n;
 const DIRECT_PULSE_ALLOWANCE_USD_MICROS = 6_400_000n;
 const DIRECT_EDGE_ALLOWANCE_USD_MICROS = 16_000_000n;
 const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
@@ -3118,6 +3120,36 @@ describe("resolveHostedAiUsageGate", () => {
 });
 
 describe("readHostedAiUsageGate", () => {
+  it("denies exhausted Group AI work while preserving active device-sync access", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingPlanCode: "launch_group_monthly",
+      limitUsdMicros: DIRECT_GROUP_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: DIRECT_GROUP_ALLOWANCE_USD_MICROS,
+    });
+
+    const [aiUsageGate, activeAccess] = await Promise.all([
+      readHostedAiUsageGate({
+        memberId: "member_123",
+        now: "2026-03-29T12:00:00.000Z",
+        prisma: prisma as never,
+      }),
+      readActiveHostedMemberAccess({
+        memberId: "member_123",
+        now: new Date("2026-03-29T12:00:00.000Z"),
+        prisma: prisma as never,
+      }),
+    ]);
+
+    expect(aiUsageGate).toMatchObject({
+      allowed: false,
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_group_monthly",
+      reason: "ai_usage_limit_exceeded",
+    });
+    expect(activeAccess).toBe(true);
+  });
+
   it("honors manual usage-period counter resets on the read-first gate", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -3980,6 +4012,7 @@ function createAllowanceTx(input: {
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
         billingRef: {
           currentBillingPhase: input.billingPhase ?? null,
           currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
