@@ -4171,6 +4171,131 @@ test("experiment follow-up due skips missed-log when generic activity target has
   assert.equal(decision.reason, "session_already_logged");
 });
 
+test("experiment missed-log follow-up matches canonical multi-activity adherence", () => {
+  const cases = [
+    {
+      activityType: "Walking",
+      durationMinutes: 40,
+      qualifies: true,
+      suffix: "walk",
+    },
+    {
+      activityType: "Rowing",
+      durationMinutes: 35,
+      qualifies: true,
+      suffix: "row",
+    },
+    {
+      activityType: "Cycling",
+      durationMinutes: 20,
+      qualifies: false,
+      suffix: "short-cycle",
+    },
+    {
+      activityType: "Running",
+      durationMinutes: 50,
+      qualifies: false,
+      suffix: "run",
+    },
+    {
+      activityType: "Elliptical",
+      qualifies: true,
+      suffix: "unknown-duration",
+    },
+    {
+      activityType: "Strength",
+      durationMinutes: 50,
+      qualifies: false,
+      suffix: "strength",
+    },
+  ] as const;
+
+  for (const [index, scenario] of cases.entries()) {
+    const slug = `daily-zone-2-${scenario.suffix}`;
+    const experiment = makeExperiment("active", {
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJZ2",
+      slug,
+      commonsProtocolRef: {
+        key: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+        pageRevisionId: "sha256:page-revision",
+        runSpecRevisionId: "sha256:run-spec-revision",
+        testPlanId: "zone2-aerobic-base-readout",
+      },
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+        doseSignature: "Daily easy cardio, at least 35 min",
+        modality: "sustainable easy aerobic volume",
+        activitySessionEvidence: {
+          activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+          minimumDurationMinutes: 35,
+        },
+        targetSessions: 14,
+        minimumUsefulSessions: 10,
+      },
+      runPlan: {
+        baselineStart: "2026-05-25",
+        baselineEnd: "2026-05-31",
+        interventionStart: "2026-06-01",
+        interventionEnd: "2026-06-14",
+        modality: "Cycling",
+        sessionsPerWeek: 7,
+        targetSessions: 14,
+        minimumUsefulSessions: 10,
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "08:00",
+          timeZone: "America/New_York",
+        },
+      },
+      assistantSupport: {
+        remindersEnabled: true,
+        missedLogFollowup: "default_on",
+        weeklyDigestEnabled: false,
+      },
+    });
+    const activity = makeActivitySession({
+      entityId: `evt_daily_zone_2_${index}`,
+      dayKey: "2026-06-03",
+      occurredAt: "2026-06-03T22:00:00.000Z",
+      activityType: scenario.activityType,
+      ...("durationMinutes" in scenario
+        ? { durationMinutes: scenario.durationMinutes }
+        : {}),
+    });
+    const vault = createVaultReadModel({
+      vaultRoot: `/virtual/experiment-followup-${scenario.suffix}`,
+      metadata: { timezone: "America/New_York" },
+      entities: [experiment, activity],
+    });
+
+    const progress = summarizeExperimentProgress(vault, slug, {
+      asOf: "2026-06-03",
+    });
+    const decision = decideExperimentFollowupDue(vault, slug, {
+      kind: "missed-log",
+      date: "2026-06-03",
+    });
+
+    assert.equal(
+      progress.adherence.completedSessions,
+      scenario.qualifies ? 1 : 0,
+      `${scenario.suffix} progress qualification`,
+    );
+    assert.equal(
+      decision.action,
+      scenario.qualifies ? "skip" : "notify",
+      `${scenario.suffix} follow-up action`,
+    );
+    assert.equal(
+      decision.reason,
+      scenario.qualifies
+        ? "session_already_logged"
+        : "planned_session_log_missing",
+      `${scenario.suffix} follow-up reason`,
+    );
+  }
+});
+
 test("experiment follow-up due skips missed-log for opt-out and unsupported non-daily schedules", () => {
   const optedOut = createVaultReadModel({
     vaultRoot: "/virtual/experiment-followup-opt-out",

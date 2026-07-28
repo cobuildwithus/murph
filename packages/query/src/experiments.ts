@@ -7,7 +7,6 @@ import {
   experimentProgressSnapshotSchema,
   safeParseContract,
   toLocalDayKey,
-  activityTextMatchesKind,
   type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
@@ -23,6 +22,7 @@ import {
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   experimentAdherenceTargetPlansDate,
+  linkedEventObservationMatchesEvidence,
   resolveActivityEvidenceLocalDate,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceRollupTarget,
@@ -1678,12 +1678,16 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     const activityKind = resolveAdherenceObservationActivityKind({
       attributes: event.attributes as Record<string, unknown>,
     });
-    return activityEvidenceTargets.some((evidence) => {
-      if (!evidence.activityKind) {
-        return true;
-      }
-      return activityTextMatchesKind(activityKind, evidence.activityKind);
-    });
+    const observation: ExperimentAdherenceObservation = {
+      activityKind,
+      durationMinutes: readActivityDurationMinutes(event),
+      evidenceId: event.entityId,
+      eventKind: event.kind,
+      localDate: eventDate,
+    };
+    return activityEvidenceTargets.some((evidence) =>
+      linkedEventObservationMatchesEvidence(observation, evidence)
+    );
   });
 }
 

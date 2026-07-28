@@ -900,7 +900,7 @@ function metricValueSatisfiesRule(
   }
 }
 
-function linkedEventObservationMatchesEvidence(
+export function linkedEventObservationMatchesEvidence(
   observation: ExperimentAdherenceObservation,
   evidence: LinkedEventCountEvidence,
 ): boolean {
