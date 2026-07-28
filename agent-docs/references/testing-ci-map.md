@@ -207,6 +207,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   invariant visible without replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
+  excludes explicit committed terminal non-replies during bounded checkpoint
+  grace, reopens them when durable consumption does not arrive, keeps normal
+  checkpointed suppression healthy and impossible marker chronology alertable,
   excludes consumed traces with best-effort missing delivery links, and proves
   cron auth, incident claim coalescing, operator-time quiet hours, stable
   wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
@@ -217,6 +220,27 @@ not enter evidence; and attachment-only input fails closed before provider work.
   coalescing until the admitted effect settles. Row-version race cases prove
   stale healthy candidates cannot report recovery or bypass pacing after a
   concurrent incident cycles the singleton back to healthy.
+  `packages/assistant-engine/test/assistant-{automation,outbox}-runtime.test.ts`
+  proves suppression is projected only after terminal evidence succeeds, is
+  re-derived from completed evidence on replay, and a rebatched still-active
+  grouped reply retains every answered mailbox item for the existing
+  accepted-delivery linkage. It also proves provider dispatch freezes the
+  answered-item set, sending or sent replay returns a retryable uncovered result
+  for a later item, and automation writes no terminal evidence or cursor progress
+  for that item. The latency-store test keeps ordinary milestones attempt-scoped
+  while allowing only that terminal evidence projection to converge by assistant
+  input.
+  `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
+  that projection uses the existing nonblocking assistant-milestone port.
+  The latency-store proof also shows that terminal evidence carries an initial
+  publication expectation and later dirty-window resets advance that expectation
+  monotonically across the fenced runtime attempt. A strictly newer authenticated
+  lease generation takes over an unresolved trace's refresh ownership whether
+  its deadline or terminal callback arrives first. Equal-generation callbacks
+  merge only for that owner, while delayed prior-generation evidence and
+  milestone replay cannot reclaim the trace or roll either timestamp back. The
+  current attempt may also persist a reset deadline before its first terminal
+  projection; a different attempt cannot adopt that nonterminal trace.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one

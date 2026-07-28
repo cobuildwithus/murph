@@ -1723,6 +1723,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runtime_phase_started",
   "workspace_restore_done",
   "mailbox_import_done",
+  "checkpoint_publication_expected_by",
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
@@ -1730,6 +1731,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
+  "terminal_non_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -1845,6 +1847,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqTypingAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
+    terminalNonReplyCommittedAtEpochMs?: number;
+    checkpointPublicationExpectedByEpochMs?: number;
+    runtimeLeaseGeneration?: string;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1972,6 +1977,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "linqTypingAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
+    "terminalNonReplyCommittedAtEpochMs",
+    "checkpointPublicationExpectedByEpochMs",
+    "runtimeLeaseGeneration",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -2002,7 +2010,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
-export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
@@ -2230,6 +2238,11 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return typeof value === "string"
+      && value.length <= 20
+      && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";
   }
@@ -2273,6 +2286,7 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
 export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
   assistantInputIds: string[];
   at: string;
+  checkpointPublicationExpectedBy?: string | null;
   milestone: HostedRuntimeAssistantMilestone;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;

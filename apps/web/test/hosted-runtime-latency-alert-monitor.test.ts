@@ -68,6 +68,102 @@ describe("hosted runtime latency health", () => {
     expect(health.unresolvedReplyCount).toBe(0);
   });
 
+  it("treats an explicit terminal non-reply as resolved before mailbox checkpointing", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:58:12.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      invalidChronologyCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("reopens an unconsumed terminal non-reply after the runtime expectation expires", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:54:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T15:59:59.999Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 0,
+      oldestUnresolvedAgeMs: 6 * 60_000,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("keeps checkpointed terminal non-replies resolved after the expectation expires", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:54:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T15:59:00.000Z",
+          consumedAt: "2026-07-26T15:57:30.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      invalidChronologyCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("does not hide an unconsumed terminal non-reply without a runtime expectation", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:58:12.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 0,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("ignores impossible terminal non-reply chronology and keeps stuck work alertable", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:57:59.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 1,
+      unresolvedReplyCount: 1,
+    });
+  });
+
   it("fails the health scan safe when its bounded trace read is truncated", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
@@ -97,6 +193,31 @@ describe("hosted runtime latency health", () => {
 });
 
 describe("hosted runtime latency alert monitor", () => {
+  it("derives terminal non-replies from the stored latency phase breakdown", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        checkpointPublicationExpectedBy: "2026-07-26T16:10:00.000Z",
+        terminalNonReplyCommittedAt: "2026-07-26T15:58:05.000Z",
+      }),
+    ]);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result).toMatchObject({
+      configured: false,
+      health: {
+        anomalous: false,
+        unresolvedReplyCount: 0,
+      },
+      outcome: "disabled",
+    });
+  });
+
   it("opens one PII-free Linq incident and coalesces the next anomalous scan", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -946,14 +1067,22 @@ describe("hosted runtime latency alert monitor", () => {
 
 function latencyRow(input: {
   acceptedAt: string;
+  checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
+  terminalNonReplyCommittedAt?: string | null;
 }): HostedRuntimeLatencyHealthRow {
   return {
     acceptedAt: instant(input.acceptedAt),
+    checkpointPublicationExpectedBy: input.checkpointPublicationExpectedBy
+      ? instant(input.checkpointPublicationExpectedBy)
+      : null,
     consumedAt: input.consumedAt ? instant(input.consumedAt) : null,
     deliveryAcceptedAt: input.deliveryAcceptedAt
       ? instant(input.deliveryAcceptedAt)
+      : null,
+    terminalNonReplyCommittedAt: input.terminalNonReplyCommittedAt
+      ? instant(input.terminalNonReplyCommittedAt)
       : null,
   };
 }
@@ -979,6 +1108,26 @@ function createMonitorPrismaFixture(
       mailboxItem: {
         consumedAt: row.consumedAt,
       },
+      phaseBreakdownJson:
+        row.terminalNonReplyCommittedAt || row.checkpointPublicationExpectedBy
+        ? {
+            assistant: {
+              ...(row.terminalNonReplyCommittedAt
+                ? {
+                    terminalNonReplyCommittedAtEpochMs:
+                      row.terminalNonReplyCommittedAt.getTime(),
+                  }
+                : {}),
+              ...(row.checkpointPublicationExpectedBy
+                ? {
+                    checkpointPublicationExpectedByEpochMs:
+                      row.checkpointPublicationExpectedBy.getTime(),
+                  }
+                : {}),
+            },
+            schemaVersion: 1,
+          }
+        : null,
     }));
   });
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
