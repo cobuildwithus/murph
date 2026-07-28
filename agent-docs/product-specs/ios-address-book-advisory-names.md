@@ -1,6 +1,6 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Product boundary
 
@@ -24,11 +24,12 @@ policy that this member-scoped design intentionally avoids.
   limited and full system access.
 - It inspects at most 5,000 person contacts, 20,000 phone values, and eight
   phone values per contact, then deterministically emits at most 1,000 rows.
-- Each row contains an explicit international phone number and one safe
-  first-name token plus an optional last initial. National-only numbers,
-  sentence-shaped labels, ambiguous duplicate
-  names, role/relationship labels, URLs, email-like labels, and non-person
-  contacts are omitted.
+- Each row contains a canonical international phone number and one safe
+  first-name token plus an optional last initial. iOS may canonicalize a
+  structurally valid North American national number only when the device region
+  is the United States or Canada; other national-only numbers, sentence-shaped
+  labels, ambiguous duplicate names, role/relationship labels, URLs, email-like
+  labels, and non-person contacts are omitted.
 - An empty projection cannot enable sharing. The server accepts an empty
   contact list only with the exact mutation id of an already-committed
   replacement so iOS can confirm a lost response without persisting contacts.
