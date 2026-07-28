@@ -1,6 +1,6 @@
 # TypeScript Verification Performance
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Purpose
 
@@ -12,8 +12,8 @@ The design stays deliberately small:
 
 - Normal verification keeps TypeScript's worker defaults.
 - Local Codex `test:diff` and acceptance commands use the conservative
-  shared-host profile by default; explicit escalation can run them through
-  Crabbox on Blacksmith Testboxes.
+  shared-host profile by default; explicit offload can run them through
+  Crabbox on a dedicated static Mac or a Blacksmith Testbox.
 - One root runner selects the canonical TypeScript 7 compiler and adds only the
   lane's configured worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
@@ -41,8 +41,9 @@ check. Next's TypeScript 5 contract check is never skipped by this reuse.
 
 The canonical `pnpm test:diff` and `pnpm verify:acceptance` entrypoints first
 select their executor. Automatic dispatch stays local. An explicitly forced
-Crabbox run uses an isolated Blacksmith Testbox and disables shared-host
-throttling there. Local canonical verification and build entrypoints
+remote run uses either a per-worktree static Mac workspace or an isolated
+Blacksmith Testbox and disables shared-host throttling there. Local canonical
+verification and build entrypoints
 automatically use the profile when `CODEX_THREAD_ID` is present outside CI.
 Other local callers can opt in:
 

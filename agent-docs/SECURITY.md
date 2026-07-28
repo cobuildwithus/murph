@@ -416,7 +416,62 @@ Last verified: 2026-07-28
 - Hosted generated voice memos are Worker-mediated ElevenLabs plus channel-native delivery effects. Store only bounded transcript/config metadata plus Linq attachment references or Telegram delivery-time generation references in assistant runtime/outbox records; never write generated audio bytes, ElevenLabs request text beyond the intended transcript field, provider secrets, presigned upload headers, or Telegram multipart audio bodies into logs, docs, fixtures, or user-facing output.
 - Hosted snapshot path diagnostics may use a Worker-derived HMAC key from `HOSTED_LOG_FINGERPRINT_SECRET`, passed only through the runner job diagnostics object for metadata-only path hashes. The container CPU watchdog may log Linux `comm` process names after the shared structured-log text redactor. It must not log command lines, argv, file paths, prompts, request bodies, transcripts, vault contents, or a Worker fingerprint secret. Do not put the raw Worker fingerprint secret or raw `HOSTED_LOG_FINGERPRINT_SECRET` env key in forwarded env, platform env, user env, hosted runtime env, logs, container env, or persisted artifacts.
 - The container fatal-report sink (`runner-control.worker/v1/container-fatal`, handled in `apps/cloudflare/src/runner-egress-intercept.ts`) is deliberately reachable without a bound user or write fence: the unattributable container deaths it exists to record happen outside any invocation, when neither exists. Its only effect is a sanitized, size-capped, per-isolate rate-limited worker log line; it must never forward to the Durable Object, never inject credentials, and never persist beyond worker logs. Any code running in a hosted container can post to it, so treat its log lines as container-asserted diagnostics (correlate with DO lifecycle stop events), not authenticated facts.
-- Crabbox verification on Blacksmith is a secret-free trust boundary, not a deployment lane. Its workflow must retain read-only repository contents permission, no GitHub Environment, no OIDC permission, no Actions-secret references, and pinned actions. The local dispatcher must rebuild the Crabbox CLI environment from non-secret host/config paths instead of passing through the parent environment, use that exact scrubbed environment for every Git sync-guard subprocess, and pin the Blacksmith organization, default-branch ref, workflow, and job before each fresh canonical Testbox is created instead of trusting mutable local profile/config values or an arbitrary reusable lease. Before candidate sync can execute repository code, the default-branch workflow must install the trusted verification shell as a root-owned file outside the workspace; canonical delegation invokes that absolute path, which validates the two allowed commands and directly `exec`s the candidate verifier through `env -i` with an isolated temporary home and a one-bit trusted-entry marker. The candidate verifier must fail closed without that marker and then rebuild its own deterministic test-only environment. A change to the workflow or trusted entrypoint cannot use the not-yet-landed trust root for proof: verify it locally, land it through the protected workflow-change path, then run a post-landing remote proof. Never treat these controls as a sandbox for a compromised local account; any process that can already read a production secret and make arbitrary network calls can exfiltrate it without Crabbox.
+- Crabbox verification is a secret-free trust boundary, not a deployment lane.
+  The local dispatcher must rebuild the Crabbox CLI environment from non-secret
+  host/config paths instead of passing through the parent environment and use
+  that exact scrubbed environment for every Git sync-guard subprocess.
+  Both remote providers must reject untracked, partially staged, conflicting,
+  sensitive, or private sync candidates before transport, forward no
+  environment allowlist or SSH agent, and enter the same deterministic
+  synthetic test environment.
+  Static SSH must use only validated operator-local host, user, and port routing,
+  a dedicated standard macOS account with no personal, product, cloud, Keychain,
+  `.env*`, or Full Disk Access authority, an isolated opaque workspace per
+  invocation, and full resync. The host must resolve independently of an
+  SSH-config-only alias so Crabbox's raw readiness probe and SSH transport select
+  the same machine. Routing values may enter only as Crabbox CLI arguments, not
+  the rebuilt CLI environment or the remote test environment. A mutable-checkout
+  preflight may fail fast, but remote
+  admission, sensitive-path checks, logged tree proof, and executed bytes must
+  derive from one frozen Git candidate. Materialization must preserve the
+  captured base as detached `HEAD` with that candidate staged so implicit diff
+  selection remains intact without depending on a local branch. Crabbox excludes
+  `.git`, so the dispatcher may add only generated base-tree/object metadata
+  after candidate admission. Before inspecting that metadata or starting any
+  candidate-controlled install or verification, the remote entrypoint must use
+  only its rebuilt non-secret environment to prove `tar` and a bounded `zstd`
+  stdin round trip with the production snapshot arguments; missing,
+  incompatible, or corrupt behavior fails closed without copying stderr or
+  ambient environment data into diagnostics. Only then may it move the metadata
+  out of the worktree, reconstruct detached `HEAD`, and verify both admitted tree
+  ids. The same entrypoint must stamp the `static-ssh` verification profile
+  internally after discarding caller profile and worker-tuning values. The local
+  artifact lock protects cooperating local producers and candidate capture only.
+  A native macOS `lockf` descriptor inherited by the remote verifier is the sole
+  static-worker capacity authority; its path must resolve above Crabbox's nested
+  lease/repository directories so every run contends on the same kernel lock.
+  The verifier must retain it through exact child-group cleanup and delete only
+  its exact outer run directory.
+  Candidate code has arbitrary execution authority within that account, so a
+  personal or credential-bearing account is never an acceptable worker.
+  The Blacksmith workflow must retain read-only repository contents permission,
+  no GitHub Environment, no OIDC permission, no Actions-secret references, and
+  pinned actions. The dispatcher must pin the Blacksmith organization,
+  default-branch ref, workflow, and job before each fresh canonical Testbox is
+  created instead of trusting mutable local profile/config values or an
+  arbitrary reusable lease. Before candidate sync can execute repository code,
+  the default-branch workflow must install the trusted verification shell as a
+  root-owned file outside the workspace; canonical delegation invokes that
+  absolute path, which validates the two allowed commands and directly `exec`s
+  the candidate verifier through `env -i` with an isolated temporary home and a
+  one-bit trusted-entry marker. The candidate verifier must fail closed without
+  that marker and then call the shared sanitized core. A change to the workflow
+  or trusted entrypoint cannot use the not-yet-landed trust root for proof:
+  verify it locally, land it through the protected workflow-change path, then
+  run a post-landing remote proof. Never treat either boundary as a sandbox for
+  a compromised initiating account; any process that can already read a
+  production secret and make arbitrary network calls can exfiltrate it without
+  Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
