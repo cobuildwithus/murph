@@ -263,6 +263,44 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the referral ledger constraint predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260728030000_hosted_usage_referral_credit_entry_constraints";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_entry"',
+          '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
+          '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+          '    CHECK ("amount_usd_micros" <> 0) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("keeps known post-baseline destructive migration history exempt", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -609,15 +647,24 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("omits the contract migration superseded by predeploy proof constraints", async () => {
+  test("omits contract migrations superseded by predeploy proof constraints", async () => {
     const migrations = await listHostedWebContractMigrations();
 
+    for (const migrationId of [
+      "20260720233000_hosted_group_usage_funding_invariants",
+      "20260726123000_allow_hosted_usage_referral_credit_entries",
+    ]) {
+      assert.equal(
+        migrations.some(({ id }) => id === migrationId),
+        false,
+      );
+    }
     assert.equal(
       migrations.some(
         ({ id }) =>
-          id === "20260720233000_hosted_group_usage_funding_invariants",
+          id === "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
       ),
-      false,
+      true,
     );
   });
 

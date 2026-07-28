@@ -108,6 +108,10 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
+  [
+    "20260728030000_hosted_usage_referral_credit_entry_constraints",
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

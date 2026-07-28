@@ -492,9 +492,12 @@ Rollout gates:
 
 - `HOSTED_USAGE_REFERRALS_ENABLED=1` enables referral arming, fresh-group
   binding, and qualification observation. Every other value fails closed. Do
-  not enable it until the additive migration is live, the previous Vercel
-  function window has drained, and contract migration
-  `20260726123000_allow_hosted_usage_referral_credit_entries` has applied.
+  not enable it until normal migration
+  `20260728030000_hosted_usage_referral_credit_entry_constraints` is live, the
+  previous Vercel function window has drained, and projection-only contract
+  migration
+  `20260728031000_resynchronize_hosted_usage_credit_purchase_grants` has
+  applied.
 
 Required when hosted computer-use is enabled:
 
@@ -650,19 +653,19 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
-- `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` and
-  `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` together enable the five-minute
-  production reply-latency monitor. Configure one opaque existing Linq chat ID
-  for a dedicated operator thread and one valid IANA time zone; do not put a
-  phone number in either value. The participant should reply once before
-  relying on the thread for alerts. The monitor uses the fixed 30-second
-  product boundary, sends one alert per continuous incident, suppresses sends
-  from 11 PM through 7 AM operator-local time, and adds up to ten minutes of
-  stable wake/retry jitter. Provider attempts therefore stay at least ten
-  minutes apart and spread across more than one five-minute cron tick. A
-  fresh health and operator-time recheck before provider admission makes no
-  attempt-state change when latency recovered or quiet hours began. Only the
-  exact row-version compare-and-swap immediately before Linq advances the
+- `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` enables the five-minute production
+  reply-latency monitor when the shared Resend operational-alert transport is
+  fully configured through `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
+  and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
+  shared operational configuration; the latency path never sends through or
+  falls back to Linq/iMessage. The monitor uses the fixed 30-second product
+  boundary, sends one email per continuous incident, suppresses sends from 11
+  PM through 7 AM operator-local time, and adds up to ten minutes of stable
+  wake/retry jitter. Provider attempts therefore stay at least ten minutes
+  apart and spread across more than one five-minute cron tick. A fresh health
+  and operator-time recheck before provider admission makes no attempt-state
+  change when latency recovered or quiet hours began. Only the exact
+  row-version compare-and-swap immediately before Resend advances the
   provider-attempt boundary; a stale evaluation cannot win after another
   incident cycles the singleton back to the same visible status. A known-unsent
   first deferral therefore builds fresh evidence in the morning, while a blocked
@@ -671,7 +674,8 @@ Hosted onboarding extras:
   four-minute send lease instead of claiming recovery while the outcome is
   unknown; the first healthy scan after the call settles, fails, or the lease
   expires clears the incident. Persisted evidence remains aggregate
-  counts/timings in the existing operational-alert row.
+  counts/timings plus sanitized provider failure status in the existing
+  operational-alert row.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -943,13 +947,12 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- To receive reply-latency texts, set
-  `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` to a pre-established dedicated
-  operator chat, set `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's
-  IANA time zone, and verify that line can exchange a normal reply before
-  treating the alert path as live. With both values absent the channel stays
-  disabled; exactly one value or an invalid non-empty time zone fails the cron
-  visibly.
+- To receive reply-latency emails, configure `RESEND_API_KEY`,
+  `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`, then set
+  `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's IANA time zone.
+  The time zone is the monitor opt-in: without it the monitor stays disabled;
+  with it, incomplete Resend email config or an invalid time zone fails the
+  cron visibly. The latency path has no Linq/iMessage fallback.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
@@ -1047,6 +1050,21 @@ before the application serves is necessary because the new application can
 create that sessionless fulfilled shape. The migration guard permits only its
 proved constraint drop/add operations and still rejects any additional
 incompatible DDL.
+
+The exact
+`20260728030000_hosted_usage_referral_credit_entry_constraints` migration is a
+second narrow predeploy exception. It atomically replaces only the two existing
+credit-entry checks with the referral-aware amount and source branches. Its
+first explicit transaction uses the repository's five-second lock bound and
+adds both replacements `NOT VALID`, so the unavoidable `ACCESS EXCLUSIVE`
+metadata lock performs no retained-row scan and rejects new invalid writes as
+soon as it commits. A second transaction validates retained rows under the less
+disruptive PostgreSQL validation lock, which permits ordinary ledger reads and
+writes. The migration guard permits only those proved constraint drop/add
+operations. The former combined contract migration is superseded; post-drain
+contract migration
+`20260728031000_resynchronize_hosted_usage_credit_purchase_grants` now performs
+only the idempotent purchase-projection resynchronization.
 
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
