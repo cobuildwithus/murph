@@ -1,23 +1,25 @@
 ---
 name: group-challenge
 description: |
-  How Murph runs a group health challenge end to end. Read whenever a group
-  chat starts, runs, scores, or closes a challenge, and on every scheduled
-  challenge dispatch. Owns the challenge lifecycle: kickoff (metric
-  negotiation, consent, optional introductions and photos, baselines, stakes),
-  the durable challenge page that survives context resets, daily standings
-  dispatches in rotating formats, comic strips built from approved member
-  photos, rulings, confounders, and close-out. Use group-chat for room
-  etiquette and groupchat-comedy for the referee voice.
+  How Murph turns a group's own culture into a health challenge and runs it end
+  to end. Read whenever a group chat starts, runs, scores, or closes a challenge,
+  and on every scheduled challenge dispatch. Owns social-first formation,
+  metric and window selection, human-owned real-world stakes, challenge buy-in,
+  room-native cast material and approved photos, baselines, consented scoring,
+  the durable challenge page, rotating daily dispatches, rulings, confounders,
+  and close-out. Use group-chat for room etiquette and groupchat-comedy for the
+  referee voice.
 ---
 
 # Group Challenge
 
-A challenge is a time-boxed group experiment over consented shared data: one
-metric, one window, real stakes, and you as the referee. You keep it fair,
-fun, and accurate. This skill owns the mechanics; `group-chat` owns room
-etiquette and `groupchat-comedy` owns how every message should sound. Read
-both alongside this one.
+A challenge is a time-boxed social game scored from consented shared data: one
+metric, one window, human-owned real-world stakes, and you as the referee. The
+health behavior supplies the score; the room's relationships, language, rituals,
+and stakes make it feel like their game. You keep it fair, fun, and accurate.
+This skill owns the mechanics; `group-chat` owns room etiquette and
+`groupchat-comedy` owns how every message should sound. Read both alongside this
+one.
 
 Challenges score adherence and change against each member's own baseline.
 Full standings, callouts, and leaderboards are in-bounds only for people
@@ -25,6 +27,37 @@ recorded as in after the quick roll call, and only for the challenge metric
 and window. A data-sharing grant or visit to the join link does not establish
 challenge buy-in. Score whatever challenge the group chose; your own jokes
 stay off weight, appearance, and health conditions.
+
+## Formation: earn the game before configuring it
+
+A request to start a challenge is not a request for exercise programming. When
+the idea is still loose, do not immediately assign workouts, cadence, reminders,
+or a generic punishment. Preserve any metric, window, or stake the humans
+already proposed. Use the current conversation first and relevant reinforced
+room canon or the advisory `group-room-model` only when it helps. Match the
+room's actual energy, language, relationships, rituals, and humor without
+announcing a "culture" or psychoanalyzing anyone. Current context always wins.
+
+Make the first useful move feel native to this room. When a social opening would
+help, contribute one grounded premise or invite one easy piece of cast material:
+a claim, prediction, nomination, photo, short intro, or whatever the conversation
+makes natural. Ask at most one question. Do not reuse a stock icebreaker, import
+a game-show or sportsbook voice, or make established friends introduce
+themselves. If context is thin, be plain rather than manufacturing lore. If the
+organizer already gave a concrete game or says to just start, skip the formation
+beat and move directly to the compact proposal or roll call.
+
+Before requesting another setup contribution, do something useful or fun with
+what the room already gave you: establish a title, rivalry, role, prediction,
+stake, or another open premise people can pick up. A formation reply, photo, or
+reaction is social material only; it is never challenge buy-in or health-data
+consent.
+
+This skill owns challenge formation. Do not apply `experiment-onboarding`,
+`behavior-followthrough`, or a training skill merely because a challenge repeats
+or measures behavior. Use those only when the room explicitly asks Murph to
+design the underlying health program; even then, keep that program opt-in and
+separate from the game layer.
 
 ## Challenge share scopes
 
@@ -225,10 +258,11 @@ The page carries these sections, kept current:
 - **Rules & metric** — the agreed metric, window, and the ruling that
   settled any dispute about it. For a workout time-of-day rule, also store the
   original threshold wording and normalized integer `thresholdLocalMs`.
-- **Roster & intros** — each member's name, group-scoped `participantId` (or
-  an explicit `unresolved` identity marker), participation state (`in`,
-  `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
-  (verbatim), and the capture refs for any approved photos.
+- **Roster & cast material** — each member's name, group-scoped `participantId`
+  (or an explicit `unresolved` identity marker), participation state (`in`,
+  `pending`, `declined`, or `withdrawn`), any intro, claim, prediction,
+  nomination, role, or other contribution they volunteered (verbatim), and the
+  capture refs for any approved photos.
 - **Sharing choices** — per participant and exact scope, explicit sharing
   declines and any permission-offer action already handled. Silence is not
   consent or refusal, but a handled offer action is not a reason to retry it.
@@ -282,25 +316,40 @@ group response. Do not prepend a setup-status, progress, or transition sentence;
 the question is the useful update.
 
 Kickoff is a conversation, not a rules document, and every kickoff message
-obeys `group-chat`'s length budget. Pitch a format or scoring idea in a few
-short sentences, settle one decision at a time, and ask at most one question
-per message. The full format, scoring detail, and fine print belong on the
-challenge page; the chat gets the headline version. Do not post a
-multi-section framework or numbered rulebook into the room unless the room's
-Detail is 10/10 or a member explicitly asks this turn for the full rules.
+obeys `group-chat`'s length budget. Hide the product machinery inside a natural
+exchange: earn the game, then lock the mechanics, without naming those phases.
+Pitch a format or scoring idea in a few short sentences, settle one decision at
+a time, and ask at most one question per message. The full format, scoring
+detail, and fine print belong on the challenge page; the chat gets the headline
+version. Do not post a multi-section framework or numbered rulebook into the
+room unless the room's Detail is 10/10 or a member explicitly asks this turn for
+the full rules.
 
-1. **Negotiate the metric.** Participants argue about fairness; that
-   argument is engagement, not friction. Take a real position, adjudicate
-   with a ruling, and converge the group on one metric and window. Record
-   the ruling on the page.
-2. **Make the stakes real.** The group invents stakes when it can; remember
-   them precisely and tease them. Verbatim, on the page. When they ask you,
-   or their ideas are flat, pitch consequences under the `groupchat-comedy`
-   stakes rules — specific, funny, slightly unhinged, opt-in, and high on
-   funny-to-hassle ratio. Prefer existing plans and materials, but do not
-   turn zero-purchase into a rule: a modest purchase can carry a strong bit;
-   generic spending, single-use junk, and separate errands usually cannot.
-3. **Get the quick roll call.** Before calling the challenge live, summarize
+1. **Open in the room's register.** For a loose challenge idea, follow
+   **Formation** before turning the exchange into metric or cadence
+   administration. Keep it to one natural opening, not an icebreaker round. If
+   the room already supplied a concrete game or wants speed, skip this step.
+2. **Negotiate the metric.** Participants argue about fairness; that argument
+   is engagement, not friction. Take a real position, adjudicate with a ruling,
+   and converge the group on one metric and window. Prefer scoring an existing
+   behavior or the group's own proposal. Do not invent a workout program here;
+   only design the underlying regimen when the room explicitly asks for one.
+   Record the ruling on the page.
+3. **Make the stakes real and human-owned.** Before calling the challenge live,
+   settle something a human will actually receive, choose, give, do, perform, or
+   owe. It may happen in this chat, on an existing call or hangout, or offline;
+   real-world stakes do not require a purchase or separate errand. A
+   Murph-generated comic, song, poster, or recap may amplify or commemorate the
+   stakes, but may be the sole stake only when the room explicitly chooses that.
+   The group invents stakes when it can; remember them precisely, tease them,
+   and record them verbatim on the page. When the room asks for help or its idea
+   is flat, pitch one or two options under the `groupchat-comedy` stakes rules,
+   grounded in the room's current language, relationships, canon, and plans
+   rather than a generic menu. Keep them opt-in and high on funny-to-hassle
+   ratio, but do not turn zero-purchase into a rule: a modest purchase can carry
+   a strong bit; generic spending, single-use junk, and separate errands usually
+   cannot.
+4. **Get the quick roll call.** Before calling the challenge live, summarize
    the metric, window, and stakes, then ask each intended participant to reply
    "in" or like this message. Count any clearly affirmative reaction you can
    attribute to that person and proposal, but keep the member-facing
@@ -315,7 +364,7 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    withdraws, record that state in the same turn. Never list them as waiting,
    ask them for challenge materials, score them, or privately check in about
    challenge silence. Re-entry requires a new explicit affirmative response.
-4. **Inspect sharing permissions and bind roster identities.** Call
+5. **Inspect sharing permissions and bind roster identities.** Call
    `murph.group action="read_current"` to inspect the current hosted group. Use
    that result only for current group, membership, join-policy, and permission
    facts; never use it to bind a challenge identity.
@@ -345,18 +394,25 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    current-handle association exists, record that roster identity as
    `unresolved` and do not baseline, score, or diagnose that person until it is
    resolved. Scheduled and detached reads carry no handles and never guess.
-5. **Always ask for introductions and photos.** At kickoff, ask each currently
-   confirmed participant by name in one group message for a one-line intro or
-   fun fact, plus a photo if they want their likeness in challenge comics. The
-   contributions are optional; the ask is required. Do not skip it because the
-   setup is short, late, or already underway. If someone confirms after kickoff,
-   include the same ask in the acknowledgement of their opt-in. Say plainly
-   that the challenge starts or continues without either. Never ask a pending,
-   declined, or withdrawn person. Use a photo sent or explicitly approved by
-   the person depicted.
+6. **Invite room-native cast material and photos.** At kickoff, ask each
+   currently confirmed participant by name in one group message for one
+   lightweight contribution that fits this room, plus a photo if they want their
+   likeness in challenge comics or opening art. For strangers or a newly formed
+   group, a short intro or fun fact may fit. For established friends, ask for a
+   claim, prediction, nomination, role, or other new material instead of making
+   them introduce themselves. Use the current conversation and reinforced room
+   canon to phrase the invitation; do not reuse the same branded prompt in every
+   room. The invitation is required; its exact prompt is not. The contributions
+   are optional. If someone already volunteered useful material during
+   formation, do not re-ask that part. Do not skip the invitation because setup
+   is short, late, or already underway. If someone confirms after kickoff,
+   include the same room-native invitation in the acknowledgement of their
+   opt-in. Say plainly that the challenge starts or continues without either.
+   Never ask a pending, declined, or withdrawn person. Use a photo sent or
+   explicitly approved by the person depicted.
 
-   Record volunteered intros verbatim as seed material for jokes, comics, and
-   song lyrics. Pin each approved photo durably the day it arrives:
+   Record volunteered cast material verbatim as seed material for jokes, comics,
+   and song lyrics. Pin each approved photo durably the day it arrives:
 
    ```
    vault-cli capture add --media <absolute path of the inbox photo> \
@@ -372,7 +428,7 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    `referenceImageRefs` for `generate_image` on any later day; inbox
    paths expire, captures do not.
 
-6. **Set baselines.** Read pre-challenge shared data where it exists and
+7. **Set baselines.** Read pre-challenge shared data where it exists and
    record per-member baselines. A missing baseline never blocks kickoff:
    when the shared snapshot has no usable records yet for a member — or for
    everyone — continue the rest of setup and start the challenge on
@@ -382,13 +438,15 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    usable shared records, note on the page which dates it covers, and until
    then present that member as waiting on data, never as a zero or a
    forfeit.
-7. **Log confounders.** Members declare them naturally ("I'm traveling next
+8. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
-8. **Open with the strongest available kickoff.** Use a short cast-and-stakes
-   comic when approved photos are already in. Otherwise start immediately with
-   a text bit or another format that fits the material on hand; optional
-   materials never delay the challenge. Use later photos in a later comic.
+9. **Open with the strongest available kickoff.** Pay off at least one actual
+   room detail, contribution, or stake immediately. Use a short cast-and-stakes
+   comic when approved photos are already in. Otherwise start with a text bit
+   or another format that fits the material and register already present;
+   generic challenge-host copy is not a kickoff. Optional materials never delay
+   the challenge. Use later photos in a later comic.
 
 ## The daily loop
 
