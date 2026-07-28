@@ -75,10 +75,15 @@ import {
   type ObservedLinqRequest,
   type ObservedLinqRequestMatcher,
 } from "./helpers/hosted-local-linq-support.js";
+import {
+  startHostedLocalResendStub,
+  type HostedLocalResendStub,
+  type ObservedResendRequest,
+} from "./helpers/hosted-local-resend-support.js";
 
 const runId = randomUUID().replaceAll("-", "").slice(0, 12);
 const linqWebhookSecret = "linq-local-foreground-reply-priority-secret";
-const latencyAlertChatId = `chat_local_priority_operator_${runId}`;
+const latencyAlertEmail = "operator@example.test";
 const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
 const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
@@ -110,15 +115,18 @@ const allProbeIdentities = [
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
+let resendStub: HostedLocalResendStub | null = null;
 
 describe.sequential("hosted local foreground reply priority e2e", () => {
   beforeAll(async () => {
     linqStub = await startHostedLocalLinqStub();
+    resendStub = await startHostedLocalResendStub();
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: latencyAlertChatId,
+        HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
+        HOSTED_LINQ_ALERT_EMAILS: latencyAlertEmail,
         HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: latencyAlertTimeZone,
         CRON_SECRET: latencyAlertCronSecret,
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
@@ -130,7 +138,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         LINQ_API_TOKEN: "linq-local-test-token",
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+        MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL: requireResendStub().baseUrl,
         OPENAI_API_KEY: "stub-local-openai-key",
+        RESEND_API_KEY: "re_local_latency_alert",
       },
       assistantProviderStubModelId: productionLikeAssistantModel,
       faultInjection: true,
@@ -147,6 +157,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   afterAll(async () => {
     await scenario?.stop();
     scenario = null;
+    await resendStub?.stop();
+    resendStub = null;
     await linqStub?.stop();
     linqStub = null;
   }, 120_000);
@@ -381,19 +393,17 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     writeLatencyProof("active_default", latencyMs);
   }, 180_000);
 
-  it("pages one operator incident through the real cron, database, and Linq boundary", async () => {
+  it("pages one operator incident through the real cron, database, and Resend boundary", async () => {
     const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
       latencyMs: 31_000,
       userId: retentionProbe.userId,
     });
 
-    const alertPath = `/chats/${encodeURIComponent(latencyAlertChatId)}/messages`;
-    const alertMatcher = matchLinqMessagePrefix("Murph reply latency alert.");
-    requireLinqStub().armNextPostAcceptLostAcknowledgment({
-      expectedPath: alertPath,
-      matchRequest: alertMatcher,
-      responseCount: 1,
+    requireResendStub().armNextPostAcceptLostAcknowledgment({
+      matchRequest: (request) =>
+        readObservedResendEmail(request).subject
+          === "Hosted runtime reply latency",
     });
 
     const failed = await requestLatencyAlertCron();
@@ -403,20 +413,24 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
       },
     });
-    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+    expect(acceptedResendLatencyAlertRequests()).toHaveLength(1);
+    expect(observedLinqLatencyAlertRequests()).toHaveLength(0);
 
-    const failedAttempts = observedLinqRequests(alertPath, alertMatcher);
+    const failedAttempts = observedResendLatencyAlertRequests();
     expect(failedAttempts).toHaveLength(1);
     const incidentBody = failedAttempts[0]?.body;
-    const incidentIdempotencyKey =
-      readObservedLinqIdempotencyKey(failedAttempts[0]);
+    const incidentEmail = readObservedResendEmail(failedAttempts[0]);
+    const incidentIdempotencyKey = failedAttempts[0]?.idempotencyKey ?? null;
     expect(incidentBody).toBeTruthy();
+    expect(incidentEmail.subject).toBe("Hosted runtime reply latency");
+    expect(incidentEmail.text).toContain("Murph reply latency alert.");
+    expect(incidentEmail.to).toEqual([latencyAlertEmail]);
     expect(incidentIdempotencyKey).toMatch(
       /^murph\/runtime-latency\/[0-9a-f-]+\/alert$/u,
     );
     const privateAlertFragments = [
       anomalousTrace.traceId,
-      latencyAlertChatId,
+      latencyAlertEmail,
       runId,
       ...allProbeIdentities.flatMap((identity) => [
         identity.chatId,
@@ -430,7 +444,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       "Foreground reply won over retention-only work.",
     ];
     for (const privateFragment of privateAlertFragments) {
-      expect(incidentBody).not.toContain(privateFragment);
+      expect(incidentEmail.text).not.toContain(privateFragment);
     }
     expect(failedAttempts.every((request) => request.body === incidentBody)).toBe(true);
 
@@ -441,7 +455,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         outcome: "deferred_rate_limit",
       },
     });
-    expect(observedLinqRequests(alertPath, alertMatcher)).toHaveLength(1);
+    expect(observedResendLatencyAlertRequests()).toHaveLength(1);
 
     await expect(ageHostedRuntimeLatencyAlertForTest({
       ageMs: 21 * 60_000,
@@ -454,13 +468,12 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         outcome: "alert_sent",
       },
     });
-    const retriedAttempts = observedLinqRequests(alertPath, alertMatcher);
+    const retriedAttempts = observedResendLatencyAlertRequests();
     expect(retriedAttempts).toHaveLength(2);
     expect(retriedAttempts[1]?.body).toBe(incidentBody);
-    expect(readObservedLinqIdempotencyKey(retriedAttempts[1])).toBe(
-      incidentIdempotencyKey,
-    );
-    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+    expect(retriedAttempts[1]?.idempotencyKey).toBe(incidentIdempotencyKey);
+    expect(acceptedResendLatencyAlertRequests()).toHaveLength(1);
+    expect(observedLinqLatencyAlertRequests()).toHaveLength(0);
 
     const coalesced = await requestLatencyAlertCron();
     expect(coalesced.status).toBe(200);
@@ -469,7 +482,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         outcome: "incident_active",
       },
     });
-    expect(observedLinqRequests(alertPath, alertMatcher)).toHaveLength(2);
+    expect(observedResendLatencyAlertRequests()).toHaveLength(2);
 
     const normalized = await normalizeHostedLinqLatencyTracesForTest({
       environment: requireScenario().runtimeEnv,
@@ -485,7 +498,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         outcome: "healthy",
       },
     });
-    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+    expect(acceptedResendLatencyAlertRequests()).toHaveLength(1);
 
     await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
@@ -503,11 +516,10 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         outcome: "alert_sent",
       },
     });
-    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(2);
-    const recurrence = observedLinqRequests(alertPath, alertMatcher).at(-1);
-    expect(readObservedLinqIdempotencyKey(recurrence)).not.toBe(
-      incidentIdempotencyKey,
-    );
+    expect(acceptedResendLatencyAlertRequests()).toHaveLength(2);
+    const recurrence = observedResendLatencyAlertRequests().at(-1);
+    expect(recurrence?.idempotencyKey).not.toBe(incidentIdempotencyKey);
+    expect(observedLinqLatencyAlertRequests()).toHaveLength(0);
   }, 120_000);
 });
 
@@ -1258,35 +1270,56 @@ function matchLinqMessageText(expectedText: string): ObservedLinqRequestMatcher 
   return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
 }
 
-function matchLinqMessagePrefix(expectedPrefix: string): ObservedLinqRequestMatcher {
-  return (request) =>
-    requireLinqStub().readObservedMessageText(request)?.startsWith(expectedPrefix) === true;
-}
-
-function observedLinqRequests(
-  expectedPath: string,
-  matcher: ObservedLinqRequestMatcher,
-): ObservedLinqRequest[] {
+function observedLinqLatencyAlertRequests(): ObservedLinqRequest[] {
   return requireLinqStub().observedRequests.filter((request) =>
-    request.method === "POST"
-    && request.url === expectedPath
-    && matcher(request)
+    requireLinqStub().readObservedMessageText(request)
+      ?.startsWith("Murph reply latency alert.") === true
   );
 }
 
-function readObservedLinqIdempotencyKey(
-  request: ObservedLinqRequest | undefined,
-): string | null {
+function observedResendLatencyAlertRequests(): ObservedResendRequest[] {
+  return requireResendStub().observedRequests.filter((request) =>
+    request.method === "POST"
+    && request.url === "/emails"
+    && readObservedResendEmail(request).subject
+      === "Hosted runtime reply latency"
+  );
+}
+
+function acceptedResendLatencyAlertRequests(): ObservedResendRequest[] {
+  return requireResendStub().acceptedRequests.filter((request) =>
+    readObservedResendEmail(request).subject
+      === "Hosted runtime reply latency"
+  );
+}
+
+function readObservedResendEmail(request: ObservedResendRequest | undefined): {
+  subject: string | null;
+  text: string | null;
+  to: string[];
+} {
   if (!request) {
-    return null;
+    return { subject: null, text: null, to: [] };
   }
-  const body = JSON.parse(request.body) as Record<string, unknown>;
-  const message = body.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) {
-    return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(request.body);
+  } catch {
+    return { subject: null, text: null, to: [] };
   }
-  const value = (message as Record<string, unknown>).idempotency_key;
-  return typeof value === "string" ? value : null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { subject: null, text: null, to: [] };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    subject: typeof record.subject === "string" ? record.subject : null,
+    text: typeof record.text === "string" ? record.text : null,
+    to: Array.isArray(record.to)
+      ? record.to.filter((recipient): recipient is string =>
+          typeof recipient === "string"
+        )
+      : [],
+  };
 }
 
 async function requestLatencyAlertCron(): Promise<Response> {
@@ -1341,4 +1374,13 @@ function requireLinqStub(): HostedLocalLinqStub {
     throw new Error("Hosted foreground reply priority Linq stub was not initialized.");
   }
   return linqStub;
+}
+
+function requireResendStub(): HostedLocalResendStub {
+  if (!resendStub) {
+    throw new Error(
+      "Hosted foreground reply priority Resend stub was not initialized.",
+    );
+  }
+  return resendStub;
 }
