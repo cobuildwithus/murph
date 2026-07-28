@@ -1,11 +1,27 @@
 export const HOSTED_USAGE_CREDIT_OFFER_CODES = [
   "usage_5_usd",
   "usage_10_usd",
+  "usage_20_usd",
   "usage_25_usd",
 ] as const;
 
 export type HostedUsageCreditOfferCode =
   (typeof HOSTED_USAGE_CREDIT_OFFER_CODES)[number];
+
+export const HOSTED_GROUP_SPONSORSHIP_OFFER_CODES = [
+  "usage_5_usd",
+  "usage_10_usd",
+  "usage_20_usd",
+] as const satisfies readonly HostedUsageCreditOfferCode[];
+
+export type HostedGroupSponsorshipOfferCode =
+  (typeof HOSTED_GROUP_SPONSORSHIP_OFFER_CODES)[number];
+
+export const HOSTED_NONGROUP_USAGE_CREDIT_OFFER_CODES = [
+  "usage_5_usd",
+  "usage_10_usd",
+  "usage_25_usd",
+] as const satisfies readonly HostedUsageCreditOfferCode[];
 
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 =
   "hosted-usage-credit-checkout-v1" as const;
@@ -77,6 +93,12 @@ const HOSTED_USAGE_CREDIT_OFFER_DEFINITIONS = {
     grantUsdMicros: 10_000_000n,
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
   },
+  usage_20_usd: {
+    cashAmountMinor: 2_000,
+    cashCurrency: "usd",
+    grantUsdMicros: 20_000_000n,
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD",
+  },
   usage_25_usd: {
     cashAmountMinor: 2_500,
     cashCurrency: "usd",
@@ -108,6 +130,28 @@ export function parseHostedUsageCreditOfferCode(
       HOSTED_USAGE_CREDIT_OFFER_CODES.includes(value as HostedUsageCreditOfferCode)
     ? value as HostedUsageCreditOfferCode
     : null;
+}
+
+export function parseHostedGroupSponsorshipOfferCode(
+  value: unknown,
+): HostedGroupSponsorshipOfferCode | null {
+  const parsed = parseHostedUsageCreditOfferCode(value);
+  return parsed &&
+      HOSTED_GROUP_SPONSORSHIP_OFFER_CODES.includes(
+        parsed as HostedGroupSponsorshipOfferCode,
+      )
+    ? parsed as HostedGroupSponsorshipOfferCode
+    : null;
+}
+
+export function filterHostedNonGroupUsageCreditOfferCodes(
+  offerCodes: readonly HostedUsageCreditOfferCode[],
+): HostedUsageCreditOfferCode[] {
+  return offerCodes.filter((offerCode) =>
+    HOSTED_NONGROUP_USAGE_CREDIT_OFFER_CODES.includes(
+      offerCode as (typeof HOSTED_NONGROUP_USAGE_CREDIT_OFFER_CODES)[number],
+    )
+  );
 }
 
 export function getHostedUsageCreditOfferDefinition(

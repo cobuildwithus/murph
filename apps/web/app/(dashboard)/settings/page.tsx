@@ -57,6 +57,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
   estimateHostedUsageCreditMessages,
+  filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
@@ -563,7 +564,9 @@ function resolveFamilyOwnerUsageTopUpMember(input: {
 
 function readHostedConfiguredUsageCreditOfferCodesSafely(): readonly HostedUsageCreditOfferCode[] {
   try {
-    return readHostedConfiguredUsageCreditOfferCodes();
+    return filterHostedNonGroupUsageCreditOfferCodes(
+      readHostedConfiguredUsageCreditOfferCodes(),
+    );
   } catch {
     return [];
   }

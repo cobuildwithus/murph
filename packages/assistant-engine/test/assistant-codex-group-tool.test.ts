@@ -1961,6 +1961,7 @@ describe("murph.group dynamic tool", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok" as const,
         truncated: false,

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { HostedPlanUsageAvailableStatus } from "@murphai/hosted-execution/plan-usage";
 
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
@@ -19,6 +20,27 @@ const DESIGN_USAGE_OFFERS = [
   { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
 ] as const;
 const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
+
+const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
+  {
+    amountLabel: "$5",
+    estimatedMessages: 100,
+    offerCode: "usage_5_usd",
+    runningBitDurationLabel: null,
+  },
+  {
+    amountLabel: "$10",
+    estimatedMessages: 200,
+    offerCode: "usage_10_usd",
+    runningBitDurationLabel: "1 day",
+  },
+  {
+    amountLabel: "$20",
+    estimatedMessages: 400,
+    offerCode: "usage_20_usd",
+    runningBitDurationLabel: "3 days",
+  },
+] as const;
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
   {
@@ -95,11 +117,11 @@ function GroupUsageFundingStudy() {
       <div className="w-full max-w-xl">
         <GroupUsageFundingCard
           action={
-            <HostedUsageTopUpDialog
+            <GroupSponsorshipDialog
               checkoutUrl="/api/design/usage-credit-preview"
-              offers={DESIGN_USAGE_OFFERS}
+              customizationAllowed
+              offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
               payerMemberId={DESIGN_PAYER_MEMBER_ID}
-              scope="group"
             />
           }
           groupName="Sunday sleep crew"
@@ -148,7 +170,7 @@ function GroupUsageFundingStudy() {
           </Button>
         </div>
         {groupFulfilledPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
+          <GroupSponsorshipDialog
             key={groupFulfilledPreviewKey}
             activePurchase={{
               offerCode: "usage_5_usd",
@@ -157,27 +179,27 @@ function GroupUsageFundingStudy() {
               status: "fulfilled",
             }}
             deferTerminalRefreshUntilClose
+            customizationAllowed
             initialOpen
             offers={[]}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            scope="group"
           />
         ) : null}
         {groupPaymentRecoveryPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
+          <GroupSponsorshipDialog
             key={groupPaymentRecoveryPreviewKey}
             activePurchase={{
               cancelAllowed: true,
-              offerCode: "usage_25_usd",
+              offerCode: "usage_20_usd",
               purchaseId: "hucp_design_pending_0",
               retryAllowed: true,
               status: "payment_pending",
             }}
             checkoutUrl="/api/design/usage-credit-preview"
+            customizationAllowed
             initialOpen
             offers={[]}
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            scope="group"
           />
         ) : null}
         {fulfilledPreviewKey > 0 ? (
@@ -314,6 +336,7 @@ function PersonalUsageCreditState(props: {
 }
 
 export {
+  DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,

@@ -1,4 +1,5 @@
 import type { VariantProps } from "class-variance-authority";
+import type { ReactNode } from "react";
 
 import type { buttonVariants } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -38,6 +39,10 @@ interface HostedUsageTopUpReturn {
 
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
+  buildCheckoutPayload?: (input: {
+    clientRequestKey: string;
+    offerCode: string;
+  }) => Record<string, unknown>;
   checkoutUrl?: string;
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
@@ -45,6 +50,11 @@ interface HostedUsageTopUpDialogProps {
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  renderPurchaseDetails?: ReactNode;
+  renderSelectionDetails?: (input: {
+    disabled: boolean;
+    selectedOffer: HostedUsageTopUpOffer | null;
+  }) => ReactNode;
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
   triggerClassName?: string;

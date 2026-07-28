@@ -50,6 +50,7 @@ interface HostedUsageTopUpRequestIdentitySnapshot {
 
 function useHostedUsageTopUpDialog({
   activePurchase = null,
+  buildCheckoutPayload,
   checkoutUrl = CHECKOUT_URL,
   deferTerminalRefreshUntilClose = false,
   initialOpen = false,
@@ -502,11 +503,14 @@ function useHostedUsageTopUpDialog({
     }
 
     const outcome = await runOwnedCheckoutRequest(async (signal) => {
+      const payload = buildCheckoutPayload?.({
+        clientRequestKey: requestKey,
+        offerCode,
+      }) ?? { offerCode, clientRequestKey: requestKey };
       const value = await requestHostedOnboardingJson<unknown>({
         method: "POST",
         payload: {
-          offerCode,
-          clientRequestKey: requestKey,
+          ...payload,
           ...(recoveryOnly ? { recoveryOnly: true } : {}),
         },
         signal,
