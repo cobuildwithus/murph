@@ -1,0 +1,110 @@
+        await client.query("BEGIN");
+        await client.query(`
+          CREATE TEMP TABLE "hosted_mailbox_item" (
+            "id" TEXT PRIMARY KEY
+          );
+          CREATE TEMP TABLE "hosted_workspace" (
+            "user_id" TEXT PRIMARY KEY,
+            "version" BIGINT NOT NULL,
+            "snapshot_ref" TEXT,
+            "inbox_media_retention_wake_at" TIMESTAMP(3),
+            "inbox_media_retention_signal_attempted_at" TIMESTAMP(3),
+            "checkpointed_at" TIMESTAMP(3)
+          );
+
+          INSERT INTO "hosted_workspace" (
+            "user_id",
+            "version",
+            "snapshot_ref",
+            "inbox_media_retention_wake_at",
+            "inbox_media_retention_signal_attempted_at",
+            "checkpointed_at"
+          )
+          VALUES (
+            'persisted',
+            4,
+            'snapshot://existing',
+            '2099-01-01T00:00:00.000Z',
+            '2026-07-25T18:00:00.000Z',
+            '2026-07-25T17:00:00.000Z'
+          );
+        `);
+
+        await client.query(migrationSql);
+
+        const columns = await client.query<{
+          columnName: string;
+          isNullable: string;
+        }>(`
+          SELECT
+            column_name AS "columnName",
+            is_nullable AS "isNullable"
+          FROM information_schema.columns
+          WHERE table_schema LIKE 'pg_temp_%'
+            AND table_name = 'hosted_mailbox_item'
+            AND column_name IN ('content_retired_at', 'retention_disposition')
+          ORDER BY column_name
+        `);
+        expect(columns.rows).toEqual([
+          { columnName: "content_retired_at", isNullable: "YES" },
+          { columnName: "retention_disposition", isNullable: "YES" },
+        ]);
+
+        const workspace = await client.query<{
+          checkpointedAt: string;
+          signalAttemptedAt: string;
+          userId: string;
+          version: string;
+          wakeAt: string;
+        }>(`
+          SELECT
+            to_char("checkpointed_at", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS "checkpointedAt",
+            to_char(
+              "inbox_media_retention_signal_attempted_at",
+              'YYYY-MM-DD"T"HH24:MI:SS.MS'
+            ) AS "signalAttemptedAt",
+            "user_id" AS "userId",
+            "version"::TEXT AS "version",
+            to_char(
+              "inbox_media_retention_wake_at",
+              'YYYY-MM-DD"T"HH24:MI:SS.MS'
+            ) AS "wakeAt"
+          FROM "hosted_workspace"
+        `);
+        expect(workspace.rows).toEqual([
+          {
+            checkpointedAt: "2026-07-25T17:00:00.000",
+            signalAttemptedAt: "2026-07-25T18:00:00.000",
+            userId: "persisted",
+            version: "4",
+            wakeAt: "2099-01-01T00:00:00.000",
+          },
+        ]);
+      } finally {
+        await client.query("ROLLBACK");
+        await client.end();
+      }
+    });
+  },
+);
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol.startsWith("postgres")
+      && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+''',
+)
+
+write(
+    "apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts",
+    '''import pg from "pg";
+import { describe, expect, it } from "vitest";
+
+import {
+  applyHostedInboundMessageContentRetentionRearm,
+  readHostedInboundMessageContentRetentionRearmMaxSnapshots,
