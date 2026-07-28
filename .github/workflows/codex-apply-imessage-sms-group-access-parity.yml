@@ -36,6 +36,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee /tmp/patch-run.log) 2>&1
+          set -x
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main
@@ -46,7 +48,10 @@ jobs:
           git add -A
           git commit -m 'refactor(groups): unify access offers across messaging channels'
           git rebase --onto origin/main 1e69f621b244c660da124d47d66717e0d54de6b5 HEAD
-          git diff --check origin/main...HEAD
+          git status --short
+          git log --oneline --decorate -5
+          git diff --stat origin/main..HEAD
+          git diff --check origin/main..HEAD
           test -f agent-docs/exec-plans/completed/2026-07-28-imessage-sms-group-access-parity.md
 
       - name: Capture patch diagnostics
@@ -55,7 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/patch-diagnostics/worktree
+          cp /tmp/patch-run.log /tmp/patch-diagnostics/apply.log || true
           git status --short > /tmp/patch-diagnostics/status.txt || true
+          git log --oneline --decorate -10 > /tmp/patch-diagnostics/log.txt || true
           git diff --name-only --diff-filter=U > /tmp/patch-diagnostics/conflicts.txt || true
           git diff > /tmp/patch-diagnostics/conflict.diff || true
           while IFS= read -r file; do
@@ -63,7 +70,6 @@ jobs:
             mkdir -p "/tmp/patch-diagnostics/worktree/$(dirname "$file")"
             cp "$file" "/tmp/patch-diagnostics/worktree/$file"
           done < /tmp/patch-diagnostics/conflicts.txt
-          cp /tmp/change.patch /tmp/patch-diagnostics/change.patch
 
       - name: Upload patch diagnostics
         if: steps.apply.outcome == 'failure'
