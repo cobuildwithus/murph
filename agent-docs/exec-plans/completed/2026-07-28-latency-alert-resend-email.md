@@ -1,6 +1,6 @@
 # Latency alert Resend email
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -19,8 +19,9 @@ Updated: 2026-07-28
   while later incidents receive a distinct key and mutable configuration cannot
   create a second identity for the earlier effect.
 - Provider failures persist only sanitized error codes and HTTP status.
-- Focused tests, direct lost-acknowledgement proof, canonical verification,
-  preliminary specialist review, final ReviewGPT, CI, and mergeability pass.
+- Focused tests, direct lost-acknowledgement proof, preliminary specialist
+  review, final ReviewGPT, CI, and mergeability pass; any unrelated canonical
+  verification admission blocker is documented with next-best proof.
 
 ## Scope
 
@@ -49,7 +50,8 @@ Updated: 2026-07-28
    idempotency key.
    Mitigation: keep the incident key independent of configuration so Resend
    rejects a changed-payload replay instead of accepting a duplicate under a
-   new key.
+   new key within its provider retention window; do not claim provider-side
+   exactly-once behavior beyond that external window.
 3. Risk: delivery migration accidentally retains a phone fallback.
    Mitigation: remove the production chat configuration and assert that setting
    it cannot trigger a Linq send.
@@ -80,14 +82,25 @@ Updated: 2026-07-28
   configured sender and recipient preserves the incident key and message, and
   that the provider's changed-payload conflict remains sanitized. This closes a
   proof gap without adding production state or changing the delivery design.
+- Parent final review kept the durable contract honest about Resend's external
+  idempotency retention window and removed the test suite's duplicated send
+  input shape in favor of the transport's owned type.
 
 ## Verification
 
-- Focused Vitest coverage for latency alert configuration, delivery, provider
-  failure metadata, pacing, and exact ambiguous retry identity.
-- Focused Resend transport coverage for caller abort propagation and sanitized
-  provider failures.
-- Hosted-local direct proof for accepted-but-lost acknowledgement replay and no
-  Linq/iMessage fallback.
-- `pnpm test:diff` for every touched owner when it truthfully covers the change.
-- `pnpm verify:acceptance`.
+- Passed focused Web Vitest coverage for latency alert configuration, delivery,
+  provider failure metadata, pacing, mutable-configuration retry identity,
+  caller abort propagation, and sanitized provider failures (35 tests).
+- Passed the focused hosted-local Resend stub suite (2 tests), Web prepared
+  typecheck, and the full foreground-priority hosted-local scenario (5 tests)
+  with real PostgreSQL, authenticated cron HTTP, accepted-but-lost
+  acknowledgement replay, and no Linq/iMessage fallback.
+- `pnpm test:diff` passed global guards and selected both touched app owners, but
+  its bounded local attempt could not enter the exclusive shared-host slot.
+  `pnpm verify:acceptance` was also run and kept waiting across multiple
+  unrelated acceptance owners before the owned waiter was stopped. The
+  documented Crabbox fallback failed before provisioning because the installed
+  delegate rejects the dispatcher's required `--stop-after` contract. GitHub CI
+  and the focused direct proofs are the independent final validation for this
+  host-capacity exception.
+Completed: 2026-07-28

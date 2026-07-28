@@ -59,17 +59,19 @@ Last verified: 2026-07-27
   ten minutes after the prior attempt or accepted-send boundary. A retry that
   may already have succeeded preserves the exact body and incident-scoped
   idempotency key. The key does not vary with mutable email configuration:
-  identical Resend retries deduplicate, while a changed payload under the same
-  key fails closed instead of acquiring a second send identity. Distinct
-  incidents vary through current aggregate evidence and checked-at time, never
-  random padding or synonym churn. Fresh health and operator-time rechecks
-  precede the one exact row-version compare-and-swap that admits provider entry,
-  increments attempt count, and advances the provider-attempt timestamp. The
-  same version fence makes a stale recovery coalesce rather than report healthy
-  after a concurrent incident cycles back to the same status. Recovery or quiet
-  hours before admission leave attempt state untouched: a known-unsent first
-  alert later builds current evidence, while an ambiguous prior attempt retains
-  its exact body, key, and pacing boundary. After provider entry, healthy scans
+  within Resend's idempotency retention window, identical retries deduplicate
+  and a changed payload under the same key fails closed instead of acquiring a
+  second send identity. The monitor does not claim provider-side exactly-once
+  behavior beyond that external retention window. Distinct incidents vary
+  through current aggregate evidence and checked-at time, never random padding
+  or synonym churn. Fresh health and operator-time rechecks precede the one
+  exact row-version compare-and-swap that admits provider entry, increments
+  attempt count, and advances the provider-attempt timestamp. The same version
+  fence makes a stale recovery coalesce rather than report healthy after a
+  concurrent incident cycles back to the same status. Recovery or quiet hours
+  before admission leave attempt state untouched: a known-unsent first alert
+  later builds current evidence, while an ambiguous prior attempt retains its
+  exact body, key, and pacing boundary. After provider entry, healthy scans
   coalesce against the bounded four-minute send lease until the attempt settles
   or expires; only then may the persisted incident become healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.

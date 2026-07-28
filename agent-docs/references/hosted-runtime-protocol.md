@@ -2027,14 +2027,16 @@ recovery message from aged observability data. Every provider attempt,
 including an uncertain retry, is separated from the prior attempt or success
 by at least ten minutes plus stable bounded jitter. Uncertain retries reuse the
 exact incident body and incident-scoped provider idempotency key. That key
-remains independent of mutable email configuration: Resend deduplicates an
-identical replay and rejects a changed payload under the same key instead of
-granting it a second send identity. Separate incidents carry fresh aggregate
-evidence and a fresh checked-at timestamp rather than artificial text
-variation. The configured destination is the shared Resend operational-alert
-mailbox; the historical `HOSTED_LINQ_ALERT_EMAIL_*` environment names remain
-its deployment configuration, but the latency path never sends through or
-falls back to Linq/iMessage. Its separately configured IANA operator timezone
+remains independent of mutable email configuration. Within Resend's idempotency
+retention window, an identical replay deduplicates and a changed payload under
+the same key fails closed instead of receiving a second send identity. The
+monitor does not claim provider-side exactly-once behavior beyond that external
+retention window. Separate incidents carry fresh aggregate evidence and a fresh
+checked-at timestamp rather than artificial text variation. The configured
+destination is the shared Resend operational-alert mailbox; the historical
+`HOSTED_LINQ_ALERT_EMAIL_*` environment names remain its deployment
+configuration, but the latency path never sends through or falls back to
+Linq/iMessage. Its separately configured IANA operator timezone
 suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
 delay of up to ten minutes spreads deferred alerts across more than one
 five-minute cron tick instead of resuming every alert at the same quiet-hours

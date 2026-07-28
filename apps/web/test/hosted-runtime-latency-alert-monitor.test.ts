@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HostedResendPlainTextEmailError,
+  type sendHostedResendPlainTextEmail,
 } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
 import {
   HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS,
@@ -1145,20 +1146,7 @@ interface AlertUpsertArgs {
   };
 }
 
-interface AlertSendInput {
-  config: {
-    apiBaseUrl?: string;
-    apiKey: string;
-    from: string;
-    timeoutMs: number;
-  };
-  fetchImpl?: typeof fetch;
-  idempotencyKey: string;
-  signal?: AbortSignal;
-  subject: string;
-  text: string;
-  to: string[];
-}
+type AlertSendInput = Parameters<typeof sendHostedResendPlainTextEmail>[0];
 
 interface AlertUpdateManyArgs {
   data: {
