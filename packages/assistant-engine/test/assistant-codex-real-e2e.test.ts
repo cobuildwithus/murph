@@ -133,7 +133,7 @@ interface ResumeCacheProbeSummary {
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
-    'prefers grounded group-chat point-of-view candidates without forcing play',
+    'prefers grounded group-chat actions while respecting collective human ownership',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -172,7 +172,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
-        expect(result.finalMessage.trim()).toBe('14:B 15:A 18:B 19:A')
+        expect(result.finalMessage.trim()).toBe(
+          '14:B 15:A 18:B 19:A 20:B 21:A',
+        )
         expect(
           actions.some((action) =>
             action.kind === 'command'
@@ -923,8 +925,9 @@ function buildGroupPointOfViewDeveloperInstructions(): string {
 function buildGroupPointOfViewCandidateProbe(): string {
   return [
     'This is a playful group-chat candidate-choice evaluation.',
-    'For each numbered transcript, choose the reply Murph should send.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B>` with no explanation.',
+    'For each numbered transcript, choose the action Murph should take.',
+    'A candidate may be a reply or SILENT.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -934,13 +937,24 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'A: "Priya is now festival director. The seventh rejection comes with a counterproposal."',
     'B: "Everyone should take turns choosing movies."',
     '',
-    '18. Elena: "I packed three backup batteries for the day hike."',
+    '18. Murph: "Any heroic overpacking to report?"',
+    'Elena: "I packed three backup batteries for the day hike."',
     'A: "The moon has appointed a new sandwich mayor."',
     'B: "Elena is no longer attending the hike; she is the regional power grid."',
     '',
     '19. Lee: "What is the boiling point of water at sea level?"',
     'A: "100°C (212°F). It changes with altitude."',
     'B: "The kettle has entered its villain era."',
+    '',
+    '20. Reed posts a photo of an old apartment building.',
+    'Reed: "y\'all remember this place"',
+    'Reed: "we somehow fit nine people in there for a whole summer."',
+    'A: "Nine people and one bathroom is not a lease, it is a field study."',
+    'B: SILENT',
+    '',
+    '21. Reed: "Does anyone know the occupancy limit for a two-bedroom?"',
+    'A: "Usually two people per bedroom plus one, though it varies by city."',
+    'B: SILENT',
   ].join('\n')
 }
 

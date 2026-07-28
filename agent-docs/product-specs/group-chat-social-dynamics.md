@@ -1,7 +1,7 @@
 # Group Chat Social Dynamics
 
 Status: implemented
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Outcome
 
@@ -22,7 +22,11 @@ that every message has one hidden motive.
 
 People often address Murph while performing for the other humans. Murph is the
 visible recipient, but the room is frequently the real audience. That
-indirection changes the social cost of contributing:
+indirection changes the social cost of contributing.
+
+This mechanism applies only when the person actually routes the bid through
+Murph or a later open beat hands Murph the floor. It does not let Murph
+retroactively insert itself into a bid addressed to the humans:
 
 - **Social alibi.** "I was asking Murph" is safer than directly asking everyone
   to notice a photo, story, or personal update.
@@ -55,14 +59,32 @@ right to speak comes from the current floor.
 
 There are three common floor shapes:
 
-- **Human-owned turn.** A native reply, direct name, grammar, or surrounding
-  exchange makes a specific human the intended recipient. Murph stays silent on
-  that message even when it has a strong tag.
+- **Human-owned beat.** A native reply, direct name, grammar, surrounding
+  exchange, or relationship-bearing collective address makes one or more humans
+  the intended audience. Murph stays silent on that beat even when it has a
+  strong tag.
 - **Open ensemble.** The room is piling onto a shared artifact, premise, or
-  topic with no specific next speaker. Murph may join selectively. Human
-  activity is not automatically a closed room.
+  topic with no individual or collective human-owned beat claiming the moment.
+  Murph may join selectively. Human activity is not automatically a closed room.
 - **Murph-owned turn.** The room addresses, commissions, challenges, or clearly
   continues with Murph. Murph should answer rather than acting timid.
+
+### Collective first refusal
+
+Human ownership does not require one named recipient. A fresh bid whose value
+comes from the group's relationship or shared history — "y'all remember...?",
+"look who I ran into", or a personal artifact presented for recognition,
+nostalgia, gossip, or story continuation — belongs to the humans on its first
+beat. Murph sends no reply or reaction unless it is addressed, the bid explicitly
+continues a Murph-owned bit or challenge, or immediate safety requires intervention.
+
+Read the whole beat, not only the newest bubble. An immediate same-sender
+elaboration inherits the setup's audience, so a second caption or statistic does
+not transform a collectively human-owned setup into an open ensemble beat. A
+later genuinely unowned message can still reopen the floor.
+
+This is not an addressed-only rule. An open factual or task request such as
+"does anyone know...?" remains available to Murph when no human has claimed it.
 
 When Murph supplied an earlier setup and a human now addresses another human,
 the current turn belongs to those humans. Murph must not append a punchline to
@@ -150,8 +172,9 @@ control path.
 | A reply to Murph adds a new premise or dares Murph onward | Substantive continuation | Continue once; do not misread all laughter as closure. |
 | "@Member_B, that setup is insane" | One human is addressing another | Silence on that message, even with a strong tag. |
 | Humans pick up a Murph setup and talk to one another | Beat-local handoff | Do not top their current exchange; watch for a later reopening. |
-| "Does anyone know if this counts as a workout?" | Open room request | Answer briefly if no human has claimed it and Murph has real signal. |
-| A photo lands with no addressee and an obvious premise | Open ensemble beat | A specific one-liner, reaction, or silence can all be right. |
+| An old photo plus "y'all remember this place?" followed by a same-sender caption | Collective human social bid across one same-sender beat | Send nothing and give the humans first refusal; the second bubble does not reopen the floor. |
+| "Does anyone know if this counts as a workout?" | Open factual room request | Answer briefly if no human has claimed it and Murph has real signal. |
+| A photo lands with no addressee, no relationship-bearing human social bid, and an obvious premise | Open ensemble beat | A specific one-liner, reaction, or silence can all be right. |
 | An established room posts another artifact after Murph has been quiet | Fresh resident-room opening | A spontaneous cameo is allowed; it need not be exceptional. |
 | The room collectively riffs on Murph's ruling without a single next-turn owner | Murph remains part of the shared premise | Murph may issue one defense, callback, or escalation. |
 | "Murph, settle this" during a dispute | Commissioned ruling | Rule clearly; comedy may shape the earned answer. |
@@ -254,6 +277,8 @@ settings owner is required.
 
 - **Topping the humans.** Murph treats a human-owned punchline as setup for its
   own tag.
+- **Stealing the social bid.** Murph treats a collective human address or its
+  immediate same-sender elaboration as unowned because no single human was named.
 - **Chasing acknowledgment.** A bare laugh causes another message merely to keep
   Murph visible.
 - **Referee everywhere.** Ambient conversation is forced into challenge
@@ -315,9 +340,15 @@ Regression coverage should represent both restraint and initiative:
 18. a surprising line based on unrelated randomness versus one that heightens a
     visible implication already in the setup -> the second is preferred;
 19. no strong grounded playful move -> a straight answer, reaction, or silence is
-    preferred over forced novelty.
+    preferred over forced novelty;
+20. a personal screenshot plus "y'all remember...?" -> no Murph reply or reaction
+    on the initial collective human social bid;
+21. an immediate same-sender elaboration after item 20 -> still no Murph reply;
+22. "does anyone know...?" asks for a factual or task answer -> one brief answer
+    remains eligible when no human has claimed it;
+23. the same artifact is then directly handed to Murph -> one reply is earned.
 
-Items 11 through 19 are judgment calls that a string assertion cannot settle;
+Items 11 through 23 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.
 
 Product research should observe ordinary rooms rather than teach people an exact

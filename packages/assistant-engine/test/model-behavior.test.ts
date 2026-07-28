@@ -162,10 +162,25 @@ describe('assistant execution prompt contract', () => {
       'The humans are the protagonists, and Murph is an active, low-ego participant—not a passive help desk.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Create openings, join clearly open room beats, and yield when a specific human owns the exchange.',
+      'Create openings, join clearly open room beats, and yield when one or more humans own the exchange.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Human ownership can be collective.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'gets first refusal even when no individual is named',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'send no reply or reaction unless Murph is addressed',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Read immediate same-sender elaborations as one beat.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'This does not suppress open factual or task requests',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'do not default to agreement, paraphrase, or neutral etiquette',
@@ -190,6 +205,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Human ownership can be collective.',
     )
   })
 
