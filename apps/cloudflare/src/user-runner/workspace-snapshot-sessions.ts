@@ -39,6 +39,8 @@ import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported } from "./r2-delete.js";
 
 export const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
+const WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA =
+  "murph.hosted-workspace-snapshot-r2-put-drain.v1";
 
 type WorkspaceSnapshotSessionStateStore = Pick<
   RunnerStateStore,
@@ -63,6 +65,11 @@ export interface WorkspaceSnapshotSessionService {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
   }): Promise<boolean>;
+  rememberPresignedPut(input: {
+    drainUntil: string;
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    expiresAt: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
   recordOrphanCandidate(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
@@ -78,6 +85,66 @@ export function createWorkspaceSnapshotSessionService(input: {
   assertWorkspaceBelongsToRunnerUser(workspace: HostedWorkspaceState | null, userId: string): void;
 }): WorkspaceSnapshotSessionService {
   const service: WorkspaceSnapshotSessionService = {
+    async rememberPresignedPut(rememberInput) {
+      const expectedSession = parseHostedWorkspaceSnapshotUploadSession(
+        rememberInput.expectedSession,
+        "Expected hosted workspace snapshot upload session",
+      );
+      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
+        ...expectedSession,
+        r2PutDrainUntil: rememberInput.drainUntil,
+        r2PutExpiresAt: rememberInput.expiresAt,
+      });
+      await input.stateStore.bindUser(expectedSession.userId);
+      const currentValue = await input.state.storage.get<unknown>(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+      );
+      if (currentValue === undefined) {
+        return null;
+      }
+      const currentSession = parseHostedWorkspaceSnapshotUploadSession(currentValue);
+      if (!workspaceSnapshotUploadSessionsMatchExactly(currentSession, expectedSession)) {
+        return null;
+      }
+      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
+        return null;
+      }
+
+      const previousDrainState = await input.state.storage.get<unknown>(
+        workspaceSnapshotR2PutDrainStorageKey(),
+      );
+      const previousDrainUntil = previousDrainState === undefined
+        ? null
+        : parseWorkspaceSnapshotR2PutDrainState(previousDrainState).drainUntil;
+      const drainUntil = selectLaterIsoTimestamp(
+        previousDrainUntil,
+        updatedSession.r2PutDrainUntil ?? null,
+      );
+      if (!drainUntil) {
+        throw new Error("Hosted workspace snapshot PUT drain deadline is unavailable.");
+      }
+      await input.state.storage.put(workspaceSnapshotR2PutDrainStorageKey(), {
+        drainUntil,
+        schema: WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA,
+        userId: updatedSession.userId,
+      });
+      await input.state.storage.put(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+        updatedSession,
+      );
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          r2BucketRole: updatedSession.r2BucketRole ?? "source",
+          r2PutDrainRecorded: true,
+        },
+        message: "Hosted runner recorded a bucket-affine snapshot PUT drain deadline.",
+        phase: "wake.running",
+        userId: updatedSession.userId,
+      });
+      return updatedSession;
+    },
+
     async rememberReplacedSnapshotRef(rememberInput) {
       const expectedSession = parseHostedWorkspaceSnapshotUploadSession(
         rememberInput.expectedSession,
@@ -349,6 +416,51 @@ function workspaceSnapshotUploadSessionsMatchExactly(
 ): boolean {
   // Both values have been parsed into the same canonical JSON-only shape.
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export async function readHostedWorkspaceSnapshotR2PutDrainUntil(input: {
+  state: DurableObjectStateLike;
+  userId: string;
+}): Promise<string | null> {
+  const drainStateValue = await input.state.storage.get<unknown>(
+    workspaceSnapshotR2PutDrainStorageKey(),
+  );
+  const drainState = drainStateValue === undefined
+    ? null
+    : parseWorkspaceSnapshotR2PutDrainState(drainStateValue);
+  if (drainState && drainState.userId !== input.userId) {
+    throw new Error("Hosted workspace snapshot PUT drain state belongs to another user.");
+  }
+  const sessionValue = await input.state.storage.get<unknown>(
+    workspaceSnapshotUploadSessionCurrentStorageKey(),
+  );
+  const session = sessionValue === undefined
+    ? null
+    : parseHostedWorkspaceSnapshotUploadSession(sessionValue);
+  if (session && session.userId !== input.userId) {
+    throw new Error("Hosted workspace snapshot upload session belongs to another user.");
+  }
+  return selectLaterIsoTimestamp(
+    drainState?.drainUntil ?? null,
+    session?.r2PutDrainUntil ?? null,
+  );
+}
+
+function parseWorkspaceSnapshotR2PutDrainState(value: unknown): {
+  drainUntil: string;
+  userId: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot PUT drain state is invalid.");
+  }
+  const record = value as Record<string, unknown>;
+  if (record.schema !== WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA) {
+    throw new TypeError("Hosted workspace snapshot PUT drain state schema is invalid.");
+  }
+  return {
+    drainUntil: requireCanonicalIsoTimestamp(record.drainUntil, "PUT drain deadline"),
+    userId: requireNonEmptyString(record.userId, "PUT drain user id"),
+  };
 }
 
 export async function readWorkspaceSnapshotOrphanCandidateNextAlarmAt(input: {
@@ -724,4 +836,30 @@ function readObjectRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function workspaceSnapshotR2PutDrainStorageKey(): string {
+  return "workspace-snapshot:r2-put-drain:v1";
+}
+
+function selectLaterIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function requireCanonicalIsoTimestamp(value: unknown, label: string): string {
+  const text = requireNonEmptyString(value, label);
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== text) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a canonical ISO timestamp.`);
+  }
+  return text;
+}
+
+function requireNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a non-empty string.`);
+  }
+  return value;
 }

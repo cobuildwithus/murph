@@ -6,6 +6,10 @@ import type {
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import {
+  resolveHostedR2CutoverContext,
+  withHostedR2CutoverBucket,
+} from "../r2-cutover.ts";
+import {
   mapWorkerRouteError,
 } from "./errors.ts";
 import {
@@ -30,7 +34,12 @@ export default {
     ctx?: WorkerExecutionContext,
   ): Promise<Response> {
     try {
-      return await handleWorkerFetch(request, env, ctx);
+      const cutoverContext = resolveHostedR2CutoverContext(env);
+      return await handleWorkerFetch(
+        request,
+        withHostedR2CutoverBucket(env, cutoverContext),
+        ctx,
+      );
     } catch (error) {
       return mapWorkerRouteError(request, error);
     }
@@ -40,6 +49,11 @@ export default {
     env: WorkerEnvironmentSource,
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
-    await handleHostedEmailIngress(message, env, ctx);
+    const cutoverContext = resolveHostedR2CutoverContext(env);
+    await handleHostedEmailIngress(
+      message,
+      withHostedR2CutoverBucket(env, cutoverContext),
+      ctx,
+    );
   },
 };

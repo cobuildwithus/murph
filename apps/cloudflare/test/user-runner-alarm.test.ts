@@ -4205,7 +4205,9 @@ describe("HostedUserRunner execution coordination", () => {
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
+    const bucket = new ListableMemoryEncryptedR2Bucket();
     const { alarms, runner, sql } = createRunnerHarness({
+      bucket,
       destroyInstance,
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4219,8 +4221,8 @@ describe("HostedUserRunner execution coordination", () => {
       ok: true,
       r2: {
         deletedObjectCount: 0,
-        skippedUserScopedPrefixes: true,
-        supported: false,
+        skippedUserScopedPrefixes: false,
+        supported: true,
       },
       userId: TEST_USER_ID,
     });

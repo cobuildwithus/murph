@@ -22,7 +22,9 @@ const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
     CF_BUNDLES_BUCKET: "bundles",
+    CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+    CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
     CF_PUBLIC_BASE_URL: HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
     CF_WORKER_NAME: "hosted-runner",
     CLOUDFLARE_ACCOUNT_ID: "r2-account",
@@ -41,6 +43,8 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
     HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
+    HOSTED_R2_CUTOVER_PHASE: "source_active",
+    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam",
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -62,13 +66,16 @@ function createRequiredPreviewWorkerDeployEnv(
 ): EnvSource {
   return createRequiredWorkerDeployEnv({
     CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-staging-enam",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-staging-enam",
     CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
     CF_WORKER_NAME: "hosted-runner-staging",
     HOSTED_CRYPTO_ENV: "preview",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
+    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-staging-enam",
     HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
     HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
     ...overrides,
@@ -80,7 +87,9 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment({}, { deployWorker: false })).toEqual([
       "CF_WORKER_NAME",
       "CF_BUNDLES_BUCKET",
+      "CF_BUNDLES_ENAM_BUCKET",
       "CF_BUNDLES_PREVIEW_BUCKET",
+      "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
     ]);
   });
 
@@ -90,6 +99,8 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: true })).toEqual([
+      "CF_BUNDLES_ENAM_BUCKET",
+      "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
       "CF_PUBLIC_BASE_URL",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT",
       "HOSTED_WEB_BASE_URL",
@@ -99,8 +110,10 @@ describe("deploy preflight helpers", () => {
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
       "HOSTED_CRYPTO_ENV",
+      "HOSTED_R2_CUTOVER_PHASE",
       "HOSTED_R2_PRESIGN_ACCOUNT_ID",
       "HOSTED_R2_PRESIGN_BUCKET_NAME",
+      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_LOG_FINGERPRINT_SECRET",
       "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
@@ -116,7 +129,9 @@ describe("deploy preflight helpers", () => {
   it("does not require worker-only secrets for config-only runs", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).toEqual([]);
   });
@@ -124,7 +139,9 @@ describe("deploy preflight helpers", () => {
   it("allows config-only runs without CF_PUBLIC_BASE_URL", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).not.toThrow();
   });
@@ -132,7 +149,9 @@ describe("deploy preflight helpers", () => {
   it("treats whitespace-only values as missing", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_ENAM_BUCKET: "   ",
       CF_BUNDLES_PREVIEW_BUCKET: "   ",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_PUBLIC_BASE_URL: "   ",
       CF_WORKER_NAME: "hosted-runner",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "   ",
@@ -140,7 +159,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_ENAM_BUCKET CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_CUTOVER_PHASE HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
     );
   });
 
@@ -239,15 +258,20 @@ describe("deploy preflight helpers", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(
       createRequiredPreviewWorkerDeployEnv({
         CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles",
+        CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam",
         CF_WORKER_NAME: "hosted-runner",
         HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+        HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
       }),
       { deployWorker: true },
     )).toEqual(expect.arrayContaining([
       "CF_WORKER_NAME must contain a preview or staging name segment for preview deploys.",
       "CF_BUNDLES_BUCKET must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_ENAM_BUCKET must contain a preview or staging name segment for preview deploys.",
       "CF_BUNDLES_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_ENAM_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
     ]));
   });
 
@@ -327,6 +351,37 @@ describe("deploy preflight helpers", () => {
       HOSTED_R2_PRESIGN_BUCKET_NAME: "other-bundles",
     }), { deployWorker: true })).toContain(
       "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.",
+    );
+  });
+
+  it("requires the direct-R2 ENAM presign bucket to match the ENAM binding bucket", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "other-bundles-enam",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET.",
+    );
+  });
+
+  it("requires fixed-role R2 bucket names to stay distinct", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      CF_BUNDLES_ENAM_BUCKET: "bundles",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles",
+    }), { deployWorker: true })).toContain(
+      "CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.",
+    );
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview",
+    }), { deployWorker: true })).toContain(
+      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
+    );
+  });
+
+  it("requires a supported fixed-role R2 cutover phase", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_CUTOVER_PHASE: "dual_write",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.",
     );
   });
 

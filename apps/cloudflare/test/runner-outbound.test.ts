@@ -5108,6 +5108,7 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
+    await env.BUNDLES.put(objectKey, new Uint8Array([1, 2, 3, 4]));
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotPresignGetRequest({
@@ -10301,6 +10302,35 @@ function createWorkspaceVersionAwareUserRunner(input: {
     });
     return true;
   });
+  const rememberHostedWorkspaceSnapshotPresignedPut = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      drainUntil: string;
+      expectedSession: HostedWorkspaceSnapshotUploadSession;
+      expiresAt: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    const current = workspaceSnapshotUploadSessions.get(request.expectedSession.snapshotId);
+    if (
+      !current
+      || current.attemptId !== attemptId
+      || current.leaseGeneration !== leaseGeneration
+      || current.attemptId !== request.expectedSession.attemptId
+      || current.leaseGeneration !== request.expectedSession.leaseGeneration
+      || current.objectKey !== request.expectedSession.objectKey
+      || current.workspaceVersion !== request.expectedSession.workspaceVersion
+    ) {
+      return null;
+    }
+    const updatedSession = {
+      ...current,
+      r2PutDrainUntil: request.drainUntil,
+      r2PutExpiresAt: request.expiresAt,
+    };
+    workspaceSnapshotUploadSessions.set(current.snapshotId, updatedSession);
+    return updatedSession;
+  });
   const readHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
     this: WorkerUserRunnerStubLike,
     request: {
@@ -10368,6 +10398,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
     bindUser,
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
+    rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
@@ -10386,6 +10417,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     setActiveWriteFence(input: {
       attemptId: string;
@@ -10576,6 +10608,16 @@ function createRunnerOutboundEnv(
               key,
               size: value.byteLength,
             };
+      },
+      async list(input: { prefix?: string } = {}) {
+        const objects = [...values.keys()]
+          .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
+          .sort()
+          .map((key) => ({ key }));
+        return {
+          objects,
+          truncated: false,
+        };
       },
       async put(key: string, value: R2PutValueLike) {
         values.set(key, await readTestR2PutValue(value));

@@ -45,7 +45,9 @@ const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 const REQUIRED_DEPLOY_ENV_NAMES = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
+  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
+  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
@@ -96,7 +98,9 @@ const PREVIEW_DEPLOY_URL_INVARIANT_LABELS = [
 const PREVIEW_DEPLOY_RESOURCE_LABELS = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
+  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
+  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
@@ -240,9 +244,38 @@ export function listHostedDeployEnvironmentInvariantErrors(
   }
 
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
+  const bundlesEnamBucket = normalizeOptionalString(source.CF_BUNDLES_ENAM_BUCKET);
+  const bundlesPreviewBucket = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
+  const bundlesEnamPreviewBucket =
+    normalizeOptionalString(source.CF_BUNDLES_ENAM_PREVIEW_BUCKET);
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
     errors.push("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.");
+  }
+  const presignEnamBucket =
+    normalizeOptionalString(source.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME);
+  if (bundlesEnamBucket && presignEnamBucket && presignEnamBucket !== bundlesEnamBucket) {
+    errors.push("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET.");
+  }
+  if (bundlesBucket && bundlesEnamBucket && bundlesBucket === bundlesEnamBucket) {
+    errors.push("CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.");
+  }
+  if (
+    bundlesPreviewBucket
+    && bundlesEnamPreviewBucket
+    && bundlesPreviewBucket === bundlesEnamPreviewBucket
+  ) {
+    errors.push(
+      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
+    );
+  }
+  const r2CutoverPhase = normalizeOptionalString(source.HOSTED_R2_CUTOVER_PHASE);
+  if (
+    r2CutoverPhase
+    && r2CutoverPhase !== "source_active"
+    && r2CutoverPhase !== "destination_active"
+  ) {
+    errors.push("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);

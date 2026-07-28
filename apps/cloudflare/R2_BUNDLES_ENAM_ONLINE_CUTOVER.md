@@ -1,0 +1,376 @@
+# Hosted R2 bundles: live OC to ENAM cutover bridge
+
+This temporary runbook replaces the whole-copy maintenance window with a
+single-writer, two-bucket bridge. It is intentionally optimized for the current
+hosted population (roughly twenty members), not for a permanent general-purpose
+replication system.
+
+Delete this runbook, the online-copy command, the second binding, and all phase
+handling after OC is retired.
+
+## Safety contract
+
+The fixed bucket roles never change while the bridge exists:
+
+- `BUNDLES` is the existing OC source binding.
+- `BUNDLES_ENAM` is the new ENAM destination binding.
+- `HOSTED_R2_PRESIGN_BUCKET_NAME` is the OC source bucket.
+- `HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME` is the ENAM destination bucket.
+- `HOSTED_R2_CUTOVER_PHASE` is exactly `source_active` or
+  `destination_active`.
+
+The phase changes behavior, not binding identity:
+
+| Phase | Reads | Ordinary writes | General lists | Deletes |
+| --- | --- | --- | --- | --- |
+| `source_active` | OC only | OC only | OC only | OC, then ENAM |
+| `destination_active` | ENAM, then OC only after a definitive miss | ENAM only | ENAM only | OC, then ENAM |
+
+Do not add dual writes, a merged-list abstraction, a migration Durable Object,
+a queue, a copy journal, a tombstone, or a hot-path migration lock.
+
+Account deletion is deliberately unavailable through the existing maintenance
+response from before the first ENAM application object is created until all of
+these conditions hold:
+
+1. destination writes are active;
+2. every source-active Worker and Durable Object is drained;
+3. every OC-targeting direct PUT URL and bounded upload is expired;
+4. final create-only delta passes are complete;
+5. the copier is permanently stopped; and
+6. two final directional convergence reads pass.
+
+After deletion is re-enabled, the runtime deletes the member's data from OC
+first and ENAM second, obtains stable-empty observations in both buckets, and
+deletes Durable Object state last. A partial cleanup or an outstanding direct
+PUT returns failure or a retryable response and never reports deletion success.
+
+## What the online copier may copy
+
+`pnpm --dir apps/cloudflare r2:bundles:online-copy` accepts only these
+user-scoped immutable classes:
+
+- content-addressed hosted bundles;
+- content-addressed artifacts;
+- browser-vault replicas after the operator has proved that a `dataVersion`
+  cannot identify two different payloads; and
+- workspace snapshots with unique snapshot IDs.
+
+Every copy uses:
+
+- the ETag from the OC inventory as a source precondition;
+- R2's destination create-only CopyObject condition;
+- metadata `COPY`; and
+- Standard storage.
+
+The command never issues a delete and never overwrites an ENAM object. An
+existing identical ENAM object is convergence. A same-key identity mismatch is
+an invariant failure.
+
+The command blocks rather than copies:
+
+- `runner-secrets.json` or any other fixed/mutable key;
+- legacy global `bundles/` keys;
+- unknown placement;
+- an object outside the current hosted-member namespace set;
+- a canonical workspace still using a pre-v2 snapshot reference;
+- a canonical v2 checkpoint absent from OC;
+- non-Standard, multipart/non-MD5, or single-copy-oversized eligible objects;
+  and
+- any source or destination migration marker other than the exact pair marker.
+
+Raw email and meal-photo objects are recognized but excluded:
+
+- `hosted-email/messages/`
+- `hosted-meal-photos/images/`
+
+Copying these objects would restart their lifecycle age. Their consumers must
+continue using exact keys, which automatically receive destination-active
+ENAM-to-OC read fallback. Do not introduce a generic merged list to discover
+them. Keep OC until both source prefixes have drained through processing and
+their original lifecycle policy.
+
+## Direct snapshot upload tickets
+
+A new upload session records the phase's bucket role. A session written by
+pre-bridge code has no role and is interpreted as `source`, preserving OC
+affinity during mixed-version drain.
+
+Before returning a direct PUT URL, the Durable Object records:
+
+- the selected fixed bucket role;
+- the URL expiry; and
+- a conservative deletion-drain deadline.
+
+The production PUT lifetime is fixed at the existing ten-minute direct-upload
+window. The runner upload request is independently bounded by that expiry; the
+deletion watermark adds another ten-minute conservative completion bound.
+Account deletion retries until the watermark has passed, then performs its
+final bucket scans.
+
+Completion HEADs the bucket recorded in the session, not the phase's current
+primary bucket. Presigned GET first HEADs the current primary; it checks OC only
+after an actual ENAM absence and signs the bucket where the object was found.
+Permission failures, timeouts, and other operational errors do not trigger
+fallback.
+
+Do not issue direct presigned DELETE URLs while the two buckets coexist. Before
+the first copy, prove every pre-bridge mutating URL has expired.
+
+## Automated preflight
+
+The online-copy command performs these gates before inventory comparison or
+copying:
+
+1. AWS CLI v2 is available.
+2. The named source is OC and the named destination is ENAM.
+3. Both buckets use Standard as their default storage class.
+4. Both buckets exactly match `r2-bundles-lifecycle.json`.
+5. A complete read-only `hosted_member`/workspace query succeeds through
+   `murph-prod-psql-ro`.
+6. Every current canonical snapshot is v2, owned by the matching member, and
+   present in OC.
+7. Every observed user or lifecycle namespace belongs to a current member.
+8. No mutable, unknown, or legacy-global object exists in either bucket.
+9. The operator explicitly supplies `--immutable-keys-audited` for copying and
+   final convergence.
+
+The command reports counts and short key fingerprints only. It does not print
+member IDs, namespace IDs, snapshot references, object keys, or credentials.
+
+## Deployment preparation
+
+Create an empty ENAM production bucket and a separate ENAM preview bucket with
+the canonical lifecycle rules. Create one temporary runtime credential scoped
+only to the fixed OC/ENAM pair and one temporary online-copy credential scoped
+only to that pair.
+
+Configure the GitHub environment variables:
+
+```text
+CF_BUNDLES_BUCKET=<existing-oc-production>
+CF_BUNDLES_PREVIEW_BUCKET=<existing-oc-preview>
+CF_BUNDLES_ENAM_BUCKET=<new-enam-production>
+CF_BUNDLES_ENAM_PREVIEW_BUCKET=<new-enam-preview>
+HOSTED_R2_PRESIGN_BUCKET_NAME=<existing-oc-production>
+HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME=<new-enam-production>
+HOSTED_R2_CUTOVER_PHASE=source_active
+```
+
+The deploy renderer rejects transposed buckets, equal source/destination roles,
+an unknown phase, or a presign name that does not match its fixed binding.
+
+## Minimum production sequence
+
+### 1. Merge and deploy V1 in `source_active`
+
+Deploy the complete bridge before placing any application object in ENAM.
+Require:
+
+- `BUNDLES` still names OC;
+- `BUNDLES_ENAM` names the new ENAM bucket;
+- ordinary reads, writes, direct PUTs, and lists remain OC-only;
+- every ordinary delete attempts OC and then ENAM; and
+- runner status reports protocol `r2-oc-enam-v1` and phase
+  `source_active`.
+
+### 2. Drain pre-bridge code and mutating URLs
+
+Enumerate the roughly twenty current hosted members. Wake or query each runner
+and require the V1 status protocol. Require no in-flight invocation. Wait the
+maximum lifetime of every PUT or DELETE URL that pre-bridge code could have
+issued, plus its bounded request duration.
+
+Do not start copying merely because Worker traffic is at 100 percent. An old
+Durable Object can outlive the Worker rollout and must be observed directly.
+
+### 3. Enable account-deletion maintenance
+
+Set and prove the existing account-deletion maintenance control at both the
+sensitive-action challenge and effect boundaries. Keep unrelated privacy
+operations, including export, available.
+
+Wait the existing Web predecessor/skew drain. Only then may the destination
+receive the pair marker or copied application data.
+
+### 4. Run source-active create-only passes
+
+Load the pair-scoped migration credential without printing it, then run:
+
+```bash
+pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
+  --source "$SOURCE_BUCKET" \
+  --destination "$DESTINATION_BUCKET" \
+  --phase source_active \
+  --immutable-keys-audited \
+  --confirm-destination "$DESTINATION_BUCKET" \
+  --apply
+```
+
+Rerun while OC remains live. A concurrent new OC object simply appears in the
+next pass. An ETag change for an approved immutable key blocks the operation
+and must be investigated.
+
+### 5. Stop and prove the copier quiescent
+
+Stop admitting copy work and allow the command to exit normally. It awaits all
+bounded in-flight requests before returning. If the process crashes, wait out
+the request bound and rerun the source-active read-only check.
+
+Run without `--apply`:
+
+```bash
+pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
+  --source "$SOURCE_BUCKET" \
+  --destination "$DESTINATION_BUCKET" \
+  --phase source_active
+```
+
+In `source_active`, an eligible ENAM object absent from OC blocks promotion.
+The online command cannot prune it. Because ENAM is still writer-exclusive,
+abandon the destination using separately reviewed destination-only credentials
+or investigate the specific ordinary-delete race before rebooking.
+
+### 6. Fence writes and promote
+
+Briefly pause new workspace writes and direct-PUT ticket issuance. Reads remain
+available. Drain current write invocations, then deploy the same bridge with:
+
+```text
+HOSTED_R2_CUTOVER_PHASE=destination_active
+```
+
+Require one Worker version at 100 percent and query every relevant Durable
+Object until it reports protocol `r2-oc-enam-v1` and phase
+`destination_active`.
+
+While write admission remains fenced, prove:
+
+1. a copied pre-switch snapshot cold-restores;
+2. an operator canary writes directly to ENAM;
+3. that ENAM checkpoint cold-restores through a fresh current-version runner;
+4. ENAM binding PUT/HEAD/GET/delete smokes pass; and
+5. source fallback occurs only for an actual ENAM miss.
+
+Before releasing writes, rollback is the source-active phase plus immediate
+redeploy. Releasing normal write admission is the forward-only commit point.
+After release, repair forward; never return to OC-only reads.
+
+### 7. Drain OC direct PUT capability
+
+Record the last instant at which any source-active version could issue an OC
+PUT ticket. Wait the enforced ten-minute URL lifetime and the conservative
+ten-minute upload bound. Require no source-active protocol observation and no
+new OC direct-PUT issuance or completion during the final quiet interval.
+
+Bucket-affine completion continues to accept an OC upload issued before the
+phase switch. Destination-active reads find it through OC fallback until the
+next create-only delta pass copies it.
+
+### 8. Run destination-active deltas
+
+Run the same acknowledged apply command with:
+
+```text
+--phase destination_active
+```
+
+ENAM-native objects are expected and are never pruned. Continue until no
+eligible OC object is source-only.
+
+Stop the copier permanently, wait out any uncertain process request bound, and
+revoke its credential.
+
+### 9. Prove final eligible convergence
+
+Run twice from a clean operator shell:
+
+```bash
+pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
+  --source "$SOURCE_BUCKET" \
+  --destination "$DESTINATION_BUCKET" \
+  --phase destination_active \
+  --immutable-keys-audited \
+  --final-convergence \
+  --copier-stopped \
+  --source-put-drained
+```
+
+The proof is directional: every currently eligible OC object must exist
+identically in ENAM. ENAM-only production writes are valid and are not drift.
+
+### 10. Re-enable account deletion
+
+Before clearing maintenance, require the deployed deletion path to:
+
+- stop the runner and establish its existing write fence;
+- honor the recorded direct-PUT drain watermark;
+- require list/delete support on both concrete bindings;
+- delete every per-user prefix and fixed key in OC and ENAM;
+- observe every prefix and fixed key absent in both buckets;
+- delete logical state, alarms, and Durable Object storage last; and
+- return success only when all steps complete.
+
+Exercise a deletion race canary that produces a pending `503`, then completes
+after the watermark. Exercise an ENAM deletion failure and prove Durable Object
+state remains for retry.
+
+### 11. Drain OC lifecycle prefixes and fallback
+
+Continue normal processing of exact raw-email and meal-photo keys. Require both
+OC prefixes to become empty under their original lifecycle. Keep ENAM-to-OC
+fallback while any legitimate source read remains.
+
+Before removing fallback, require a bounded zero-fallback interval longer than
+all supported GET URLs and relevant retry/alarm cycles, plus successful cold
+restores of both pre-switch and post-switch snapshots.
+
+### 12. Retire OC and remove the bridge
+
+Use a separate reviewed destructive operation. Before deleting OC, prove:
+
+- all live configuration and presign variables name ENAM as authority;
+- the runtime is ENAM-only;
+- no source-only eligible object remains;
+- both OC lifecycle prefixes are empty;
+- no valid OC URL or credential remains;
+- account deletion is green against the ENAM-only path; and
+- fallback has remained unused for the approved soak.
+
+Then merge one cleanup PR that removes:
+
+- `BUNDLES_ENAM` and phase handling;
+- the source fallback;
+- pair-scoped runtime credentials;
+- the online-copy command and tests;
+- the temporary maintenance control;
+- this runbook; and
+- the old OC bucket only after its final destructive gate.
+
+## Observability and privacy
+
+Runtime structured logs include only:
+
+- current cutover phase and protocol;
+- selected direct-PUT bucket role;
+- source-fallback operation counts;
+- dual-delete partial-failure flags; and
+- whether a PUT drain deadline was recorded.
+
+The runner status response exposes the versioned bridge protocol and phase so
+operators can enumerate the small member set during both drains. Do not add raw
+object keys or member identifiers to migration logs.
+
+## Emergency frozen-window fallback
+
+The existing command remains unchanged:
+
+```text
+pnpm --dir apps/cloudflare r2:bundles:migrate
+```
+
+It requires `--source-frozen`, exact source/destination parity, and may prune a
+writer-exclusive destination. It is not safe against a live source and must
+never be used for destination-active convergence. Follow
+`R2_BUNDLES_ENAM_MIGRATION.md` only when deliberately abandoning the online
+plan and entering its full maintenance fence.
