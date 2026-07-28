@@ -265,6 +265,7 @@ export async function persistAssistantTurnAndSession(input: {
   session: AssistantSession
   turnCreatedAt: string
   turnId: string
+  userContentReceivedAt?: string | null
 }): Promise<AssistantSession> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
@@ -278,6 +279,9 @@ export async function persistAssistantTurnAndSession(input: {
       input.session.sessionId,
       [
         {
+          ...(input.userContentReceivedAt
+            ? { contentReceivedAt: input.userContentReceivedAt }
+            : {}),
           kind: 'user',
           text: input.input.prompt,
           createdAt: input.turnCreatedAt,

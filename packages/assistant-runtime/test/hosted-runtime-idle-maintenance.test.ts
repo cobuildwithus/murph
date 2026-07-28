@@ -7,12 +7,26 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 
 const compactWarmCodexThread = vi.fn();
+const runAssistantTranscriptContentRetention = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
+vi.mock("@murphai/assistant-engine/assistant-store", () => ({
+  runAssistantTranscriptContentRetention: (input: unknown) =>
+    runAssistantTranscriptContentRetention(input),
+}));
 const runInboxMediaRetention = vi.fn();
+const runInboxTextRetention = vi.fn();
+const runInboxEnvelopeMigration = vi.fn();
 vi.mock("@murphai/inboxd/retention", () => ({
+  runInboxEnvelopeMigration: (input: unknown) => runInboxEnvelopeMigration(input),
   runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
+  runInboxTextRetention: (input: unknown) => runInboxTextRetention(input),
+}));
+const runHostedPendingAssistantInputContentRetention = vi.fn();
+vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
+  runHostedPendingAssistantInputContentRetention: (input: unknown) =>
+    runHostedPendingAssistantInputContentRetention(input),
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
@@ -33,6 +47,13 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 
 beforeEach(() => {
   compactWarmCodexThread.mockReset();
+  runAssistantTranscriptContentRetention.mockReset();
+  runAssistantTranscriptContentRetention.mockResolvedValue({
+    entriesRedacted: 0,
+    entriesTrimmed: 0,
+    nextEligibleAt: null,
+    transcriptsTrimmed: 0,
+  });
   runInboxMediaRetention.mockReset();
   runInboxMediaRetention.mockResolvedValue({
     expiredAttachments: 0,
@@ -40,6 +61,37 @@ beforeEach(() => {
     hasMoreEligibleAttachments: false,
     nextEligibleAt: null,
     records: [],
+  });
+  runInboxTextRetention.mockReset();
+  // Idle maintenance runs both retention passes; a quiet text pass keeps these
+  // cases asserting the media wake they were written for.
+  runInboxTextRetention.mockResolvedValue({
+    expiredCaptures: 0,
+    hasMoreEligibleCaptures: false,
+    legacyCapturesSkipped: 0,
+    nextEligibleAt: null,
+  });
+  runInboxEnvelopeMigration.mockReset();
+  runInboxEnvelopeMigration.mockResolvedValue({
+    activeOperationCount: 0,
+    blockerCount: 0,
+    candidateBytes: 0,
+    candidateCount: 0,
+    deletedBytes: 0,
+    deletedCount: 0,
+    hasMore: false,
+    hasWork: false,
+    mismatchCount: 0,
+    missingLedgerCount: 0,
+    mode: "apply",
+    mutated: false,
+    scannedEnvelopeCount: 0,
+  });
+  runHostedPendingAssistantInputContentRetention.mockReset();
+  runHostedPendingAssistantInputContentRetention.mockResolvedValue({
+    inputsRetired: 0,
+    inputsSuppressed: 0,
+    nextEligibleAt: null,
   });
   archiveClosedIntegrationIngestShards.mockReset();
   archiveClosedIntegrationIngestShards.mockResolvedValue({
@@ -368,6 +420,149 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
   });
 
+  it("runs inbox text retention and wakes at the earlier of the two retention passes", async () => {
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: "2026-07-20T00:00:00.000Z",
+      records: [],
+    });
+    runInboxTextRetention.mockResolvedValue({
+      expiredCaptures: 3,
+      hasMoreEligibleCaptures: false,
+      legacyCapturesSkipped: 0,
+      nextEligibleAt: "2026-07-12T00:00:00.000Z",
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxTextRetention).toHaveBeenCalledWith(expect.objectContaining({
+      vaultRoot: "/vault",
+    }));
+    // The text pass expires sooner, so its wake has to win; taking the media
+    // wake would let message content sit past its window.
+    expect(outcome).toEqual({
+      kind: "skipped",
+      nextWakeAt: "2026-07-12T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+  });
+
+  it("schedules pending assistant input content on the shared retention wake", async () => {
+    runHostedPendingAssistantInputContentRetention.mockResolvedValue({
+      inputsRetired: 0,
+      inputsSuppressed: 0,
+      nextEligibleAt: "2026-07-08T00:00:00.000Z",
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runHostedPendingAssistantInputContentRetention).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/vault",
+    });
+    expect(outcome).toMatchObject({
+      nextWakeAt: "2026-07-08T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+    });
+  });
+
+  it("schedules captureless transcript content on the shared retention wake", async () => {
+    runAssistantTranscriptContentRetention.mockResolvedValue({
+      entriesRedacted: 0,
+      entriesTrimmed: 0,
+      nextEligibleAt: "2026-07-10T00:00:00.000Z",
+      transcriptsTrimmed: 0,
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runAssistantTranscriptContentRetention).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      vault: "/vault",
+    });
+    expect(outcome).toMatchObject({
+      nextWakeAt: "2026-07-10T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+    });
+  });
+
+  it("bounds the inbox text retention slice when a checkpoint has pending work", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: true,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxTextRetention).toHaveBeenCalledWith(expect.objectContaining({
+      maxCaptures: 1,
+    }));
+  });
+
   it("returns an immediate retention wake when the retention batch has more eligible work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
@@ -487,6 +682,83 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(compactWarmCodexThread).not.toHaveBeenCalled();
       expect(wakeSignal.consumePending()).toEqual({
         notifiedAtEpochMs: wakeAt.getTime(),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts envelope migration on a pending wake, re-notifies, and completes a later pass", async () => {
+    vi.useFakeTimers();
+    const wakeAt = new Date("2026-04-26T00:00:01.000Z");
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const migrationCall: { signal: AbortSignal | null } = { signal: null };
+    runInboxEnvelopeMigration.mockImplementationOnce(
+      async (input: { signal: AbortSignal }) => {
+        migrationCall.signal = input.signal;
+        vi.setSystemTime(wakeAt);
+        wakeSignal.notify();
+        await new Promise<void>((resolve) => {
+          if (input.signal.aborted) {
+            resolve();
+            return;
+          }
+          input.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        input.signal.throwIfAborted();
+      },
+    );
+
+    try {
+      const interrupted = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.6-terra",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal,
+      });
+
+      expect(interrupted).toEqual({
+        kind: "skipped",
+        reason: "pending_work",
+        threadContextTokensBefore: null,
+      });
+      expect(migrationCall.signal?.aborted).toBe(true);
+      expect(wakeSignal.consumePending()).toEqual({
+        notifiedAtEpochMs: wakeAt.getTime(),
+      });
+
+      compactWarmCodexThread.mockResolvedValue({
+        kind: "skipped",
+        reason: "below_threshold",
+        threadContextTokensBefore: 20_000,
+      });
+      const resumed = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.6-terra",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        vaultRoot: "/vault",
+        wakeSignal: null,
+      });
+
+      expect(resumed).toMatchObject({
+        kind: "skipped",
+        reason: "below_threshold",
+      });
+      expect(runInboxEnvelopeMigration).toHaveBeenLastCalledWith({
+        apply: true,
+        signal: expect.any(AbortSignal),
+        vaultRoot: "/vault",
       });
     } finally {
       vi.useRealTimers();
