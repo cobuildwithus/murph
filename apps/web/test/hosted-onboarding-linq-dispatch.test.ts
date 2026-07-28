@@ -4634,7 +4634,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("lets a concurrent follow-up finish the admitted pending instant start without a signup link", async () => {
+  it("retries a different inbound before counting it while the admitted instant start owns the inactive member", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_follow_up";
     const admissionEventId = "evt_instant_start_original";
@@ -4684,12 +4684,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       sentAt: null,
       status: "pending",
     };
-    let trialActive = false;
     const hostedMemberFindUnique = vi.fn(async () => ({
       accountGroupMemberships: [],
-      billingStatus: trialActive
-        ? HostedBillingStatus.active
-        : HostedBillingStatus.not_started,
+      billingStatus: HostedBillingStatus.not_started,
       createdAt: new Date("2026-03-26T12:00:00.000Z"),
       id: memberId,
       invites: [invite],
@@ -4735,20 +4732,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMemberRouting,
     });
-    mocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
-      id: `mailbox_${followUpEventId}`,
-      userId: memberId,
-    });
-    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
-      async () => {
-        trialActive = true;
-        return {
-          redirectPath: "/home?initialVisit=true",
-          status: "enrolled",
-        };
-      },
-    );
-
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
@@ -4770,22 +4753,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    })).resolves.toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-active-member",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_IN_PROGRESS",
+      retryable: true,
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
-      .toHaveBeenCalledOnce();
-    expect(hostedInviteUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        instantStartAdmissionEventId: admissionEventId,
-      }),
-    }));
-    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledOnce();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      .not.toHaveBeenCalled();
+    expect(hostedInviteUpdate).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
   });

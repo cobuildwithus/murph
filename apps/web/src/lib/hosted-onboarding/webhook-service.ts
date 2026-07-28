@@ -451,6 +451,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         let enrollmentFailed = false;
         try {
           await ensureHostedLinqInstantStartPulseTrialEnrollment({
+            admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,
             prisma,

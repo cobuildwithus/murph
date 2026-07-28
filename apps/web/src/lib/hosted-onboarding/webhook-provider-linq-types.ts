@@ -18,6 +18,7 @@ export type HostedOnboardingLinqGroupRosterReconcile = {
 };
 
 export type HostedLinqInstantStartEnrollment = {
+  admissionEventId: string;
   inviteCode: string;
   memberId: string;
 };

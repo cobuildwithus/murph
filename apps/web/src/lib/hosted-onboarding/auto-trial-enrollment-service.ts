@@ -97,6 +97,7 @@ export interface HostedAutoPulseTrialEnrollmentInput {
 }
 
 export interface HostedLinqInstantStartPulseTrialEnrollmentInput {
+  admissionEventId: string;
   inviteCode: string;
   memberId: string;
   now?: Date;
@@ -114,6 +115,10 @@ export interface HostedAutoPulseTrialEnrollmentResult {
 }
 
 type HostedAutoPulseTrialEnrollmentPolicy = {
+  instantStartAdmission?: {
+    eventId: string;
+    inviteCode: string;
+  };
   provisionUnderMemberLock: boolean;
   requireLaunchConsent: boolean;
   requireUnboundStripeCustomer: boolean;
@@ -248,6 +253,10 @@ export async function ensureHostedLinqInstantStartPulseTrialEnrollment(
     ...(input.now ? { now: input.now } : {}),
     ...(input.prisma ? { prisma: input.prisma } : {}),
   }, {
+    instantStartAdmission: {
+      eventId: input.admissionEventId,
+      inviteCode: input.inviteCode,
+    },
     // The pending Linq route and the active member are one admission state
     // transition. Keep provider provisioning inside the existing member owner
     // so another inbound cannot observe a customer-bound inactive midpoint.
@@ -508,6 +517,13 @@ async function runHostedAutoPulseTrialProvisioningWithMemberLockRetry(input: {
         const currentStatus =
           resolveHostedAutoPulseTrialExistingStatus(currentMember);
         if (currentStatus) {
+          if (input.policy.instantStartAdmission) {
+            await clearHostedLinqInstantStartAdmissionTx({
+              eventId: input.policy.instantStartAdmission.eventId,
+              required: false,
+              tx,
+            });
+          }
           return {
             kind: "completed",
             cleanupStripeSubscriptionId: null,
@@ -518,6 +534,15 @@ async function runHostedAutoPulseTrialProvisioningWithMemberLockRetry(input: {
 
         assertHostedAutoPulseTrialEligible(currentMember);
         assertHostedAutoPulseTrialCustomerPolicy(currentMember, input.policy);
+        const instantStartInviteId = input.policy.instantStartAdmission
+          ? await requireHostedLinqInstantStartAdmissionTx({
+              eventId: input.policy.instantStartAdmission.eventId,
+              inviteCode: input.policy.instantStartAdmission.inviteCode,
+              memberId: input.memberId,
+              now: input.now,
+              tx,
+            })
+          : null;
         const candidateStripeCustomerId =
           currentMember.billingRef?.stripeCustomerId
           ?? await createHostedPulseTrialStripeCustomer({
@@ -589,11 +614,75 @@ async function runHostedAutoPulseTrialProvisioningWithMemberLockRetry(input: {
         if (outcome.kind === "failed") {
           throw outcome.error;
         }
+        if (instantStartInviteId && input.policy.instantStartAdmission) {
+          await clearHostedLinqInstantStartAdmissionTx({
+            eventId: input.policy.instantStartAdmission.eventId,
+            inviteId: instantStartInviteId,
+            required: true,
+            tx,
+          });
+        }
         return outcome;
       }),
     transactionTimeoutMs:
       HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
   });
+}
+
+async function requireHostedLinqInstantStartAdmissionTx(input: {
+  eventId: string;
+  inviteCode: string;
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<string> {
+  const invite = await input.tx.hostedInvite.findUnique({
+    select: { id: true },
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      instantStartAdmissionEventId: input.eventId,
+      inviteCode: input.inviteCode,
+      memberId: input.memberId,
+      sentAt: null,
+    },
+  });
+  if (invite) {
+    return invite.id;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_INSTANT_START_ADMISSION_REVOKED",
+    httpStatus: 409,
+    message: "This instant-start admission is no longer active.",
+    retryable: false,
+  });
+}
+
+async function clearHostedLinqInstantStartAdmissionTx(input: {
+  eventId: string;
+  inviteId?: string;
+  required: boolean;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const cleared = await input.tx.hostedInvite.updateMany({
+    data: {
+      instantStartAdmissionEventId: null,
+    },
+    where: {
+      ...(input.inviteId ? { id: input.inviteId } : {}),
+      instantStartAdmissionEventId: input.eventId,
+    },
+  });
+  if (input.required && cleared.count !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_INSTANT_START_ADMISSION_CHANGED",
+      httpStatus: 503,
+      message: "Murph is still resolving this instant-start admission. Try again.",
+      retryable: true,
+    });
+  }
 }
 
 export async function inspectHostedAutoPulseTrialCampaignDisposition(input: {

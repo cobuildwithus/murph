@@ -1253,19 +1253,20 @@ home line must be the same line the person contacted, and the existing no-card
 Pulse-trial owner must start from an unbound Stripe customer so an old saved card
 cannot silently auto-convert a text-initiated trial. The first planner transaction
 creates the canonical member, verified phone identity, pending route, and invite.
-That invite carries only the event id of the persisted model-source allow, so an
-exact same-chat, same-participant, same-line follow-up can finish the already
-admitted start without being reclassified or receiving a stale signup link.
-The existing Stripe/activation owner then provisions the customer, subscription,
-billing ref, and activation under the member row lock with bounded no-retry
-provider calls. A second ordinary planner pass counts and appends each inbound
-exactly once after active access is visible. Signup delivery revalidates that the
-invite is no longer pending instant start and the member is still inactive. Any block,
+That invite carries only the event id of the persisted model-source allow and is
+the single-owner token for that exact original inbound. While the token remains
+pending, a different inbound for the inactive member exits retryably before
+counting or creating an effect; it cannot continue or cancel the admitted start.
+The existing Stripe/activation owner locks the member, revalidates the exact
+invite and event before any Stripe mutation, then clears the token atomically
+with activation. A second ordinary planner pass counts and appends the original
+inbound exactly once after active access is visible. Ordinary signup delivery
+retains its existing exact-invite and inactive-member checks. Any block,
 deterministic fail-open, unsupported prefix/channel, cross-line route, existing
-member or billing customer, or enrollment ambiguity keeps the existing signup-link
-or ignored behavior. Active members, explicit thread routes, own messages, group
-chats, local guard rejects, deterministic URL/STOP-style spam, and other
-non-invite paths bypass the classifier.
+member or billing customer, or definitive enrollment failure keeps the existing
+signup-link or ignored behavior. Active members, explicit thread routes, own
+messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
+and other non-invite paths bypass the classifier.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

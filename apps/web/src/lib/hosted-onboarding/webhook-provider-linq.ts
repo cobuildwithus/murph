@@ -589,6 +589,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         prisma: input.prisma,
       })
     : false;
+  let instantStartOwner: HostedLinqInstantStartOwner | null = null;
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -842,6 +843,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       prisma: input.prisma,
     });
+    if (!existingMemberEffectiveActive) {
+      instantStartOwner = await readHostedLinqInstantStartOwner({
+        memberId: existingMember.id,
+        now: new Date(),
+        prisma: input.prisma,
+      });
+      if (
+        instantStartOwner
+        && instantStartOwner.eventId !== input.event.event_id
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_INSTANT_START_IN_PROGRESS",
+          httpStatus: 503,
+          message: "Murph is still finishing this instant start. Try again.",
+          retryable: true,
+        });
+      }
+    }
   }
 
   // A member who already owns billing can never be onboarded as a first contact
@@ -1088,15 +1107,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
       phonePrefixes: instantStartPhonePrefixes,
     });
   const pendingInstantStartAdmissionEventId =
-    existingMember && instantStartCandidate
-      ? await readHostedLinqPendingInstantStartAdmissionEventId({
-          chatId: summary.chatId,
-          memberId: existingMember.id,
-          now: new Date(),
-          participantContact,
-          prisma: input.prisma,
-          recipientPhoneNumber,
-        })
+    existingMember
+    && instantStartCandidate
+    && instantStartOwner?.eventId === input.event.event_id
+    && instantStartOwner.chatId === summary.chatId
+    && instantStartOwner.participantKind === participantContact.kind
+    && instantStartOwner.participantLookupKey === participantContact.lookupKey
+    && instantStartOwner.recipientPhoneNumber
+      === normalizePhoneNumber(recipientPhoneNumber)
+      ? instantStartOwner.eventId
       : null;
 
   if (
@@ -1356,6 +1375,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           },
         }),
         instantStartEnrollment: {
+          admissionEventId: instantStartAdmissionEventId,
           inviteCode: invite.inviteCode,
           memberId: member.id,
         },
@@ -1423,25 +1443,31 @@ export async function planHostedOnboardingLinqWebhook(input: {
   );
 }
 
-async function readHostedLinqPendingInstantStartAdmissionEventId(input: {
+type HostedLinqInstantStartOwner = {
   chatId: string;
+  eventId: string;
+  participantKind: HostedLinqParticipantContact["kind"];
+  participantLookupKey: string;
+  recipientPhoneNumber: string;
+};
+
+async function readHostedLinqInstantStartOwner(input: {
   memberId: string;
   now: Date;
-  participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
-  recipientPhoneNumber: string | null;
-}): Promise<string | null> {
+}): Promise<HostedLinqInstantStartOwner | null> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.memberId,
     prisma: input.prisma,
   });
   const pendingParticipant = routing?.pendingLinqParticipantContact;
+  const recipientPhoneNumber = normalizePhoneNumber(
+    routing?.pendingLinqRecipientPhone ?? null,
+  );
   if (
-    routing?.pendingLinqChatId !== input.chatId
-    || normalizePhoneNumber(routing.pendingLinqRecipientPhone)
-      !== normalizePhoneNumber(input.recipientPhoneNumber)
-    || pendingParticipant?.kind !== input.participantContact.kind
-    || pendingParticipant.lookupKey !== input.participantContact.lookupKey
+    !routing?.pendingLinqChatId
+    || !pendingParticipant
+    || !recipientPhoneNumber
   ) {
     return null;
   }
@@ -1481,7 +1507,13 @@ async function readHostedLinqPendingInstantStartAdmissionEventId(input: {
     });
   return admissionDecision?.decision === "allow"
     && admissionDecision.source === "model"
-      ? admissionEventId
+      ? {
+          chatId: routing.pendingLinqChatId,
+          eventId: admissionEventId,
+          participantKind: pendingParticipant.kind,
+          participantLookupKey: pendingParticipant.lookupKey,
+          recipientPhoneNumber,
+        }
       : null;
 }
 

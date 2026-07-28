@@ -2804,6 +2804,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   it("reuses the ordinary Pulse trial for trusted Linq instant start without a canned welcome", async () => {
     await expect(
       ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
         inviteCode: "invite-code",
         memberId: "member_123",
         now: new Date("2026-06-14T12:00:05.000Z"),
@@ -2840,6 +2841,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
     await expect(
       ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
         inviteCode: "invite-code",
         memberId: "member_123",
         now: new Date("2026-06-14T12:00:05.000Z"),
@@ -2869,6 +2871,53 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     );
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+    const transactionClient = prisma.transactionClients[0];
+    expect(transactionClient?.hostedInvite.findUnique).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        expiresAt: {
+          gt: new Date("2026-06-14T12:00:05.000Z"),
+        },
+        instantStartAdmissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        sentAt: null,
+      },
+    });
+    expect(transactionClient?.hostedInvite.updateMany).toHaveBeenCalledWith({
+      data: {
+        instantStartAdmissionEventId: null,
+      },
+      where: {
+        id: "invite_instant_start_123",
+        instantStartAdmissionEventId: "evt_instant_start_123",
+      },
+    });
+  });
+
+  it("stops before Stripe when the admitted invite marker was revoked under the member lock", async () => {
+    const prisma = makePrisma({ instantStartInvite: null });
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_revoked",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_ADMISSION_REVOKED",
+      retryable: false,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("falls back before Stripe when instant start finds an existing billing customer", async () => {
@@ -2892,6 +2941,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
     await expect(
       ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
         inviteCode: "invite-code",
         memberId: "member_123",
         now: new Date("2026-06-14T12:00:05.000Z"),
@@ -2931,6 +2981,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
     await expect(
       ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
         inviteCode: "invite-code",
         memberId: "member_123",
         now: new Date("2026-06-14T12:00:05.000Z"),
@@ -3110,14 +3161,37 @@ function makeTrialSubscriptionMetadata(
   };
 }
 
-function makePrisma() {
+type AutoTrialPrismaTransactionClient = {
+  hostedInvite: {
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
+  tx: boolean;
+};
+
+function makePrisma(input: {
+  instantStartInvite?: { id: string } | null;
+} = {}) {
   let transactionActive = false;
-  let activeTransactionClient: { tx: boolean } | null = null;
-  const transactionClients: Array<{ tx: boolean }> = [];
+  let activeTransactionClient: AutoTrialPrismaTransactionClient | null = null;
+  const transactionClients: AutoTrialPrismaTransactionClient[] = [];
 
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
-      const tx = { tx: true };
+      const tx = {
+        tx: true,
+      } as AutoTrialPrismaTransactionClient;
+      Object.defineProperty(tx, "hostedInvite", {
+        enumerable: false,
+        value: {
+          findUnique: vi.fn().mockResolvedValue(
+            input.instantStartInvite === undefined
+              ? { id: "invite_instant_start_123" }
+              : input.instantStartInvite,
+          ),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      });
       Object.defineProperty(tx, "$queryRaw", {
         enumerable: false,
         value: vi.fn().mockResolvedValue([]),
