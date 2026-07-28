@@ -38,7 +38,6 @@ import {
   applyAssistantSessionCodexResumeStateAction,
   persistAssistantTurnAndSession,
   resolveAssistantProviderResumeStateAction,
-  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -508,9 +507,9 @@ export async function sendAssistantNotificationLocal(
           })
         const selectedRoute = providerResult.route
         const providerResumeStateAction =
-          resolveAssistantNotificationProviderResumeStateAction({
-            input,
-            providerResult,
+          resolveAssistantProviderResumeStateAction({
+            codexThreadId: providerResult.codexThreadId,
+            threadScope: notificationThreadScope,
           })
         await recordAssistantUsageEvent({
           executionContext,
@@ -1415,22 +1414,6 @@ async function deliverAssistantNotificationMessage(input: {
         session: input.session,
       }
   }
-}
-
-function resolveAssistantNotificationProviderResumeStateAction(input: {
-  input: AssistantNotificationInput
-  providerResult: { codexThreadId?: string | null }
-}): AssistantProviderResumeStateAction {
-  if (
-    isAssistantNotificationMaintenanceExactSkip(input.input) ||
-    !isAssistantNotificationScheduledOccurrence(input.input)
-  ) {
-    return 'preserve-existing'
-  }
-
-  return normalizeNullableString(input.providerResult.codexThreadId)
-    ? 'persist-from-provider-turn'
-    : 'preserve-existing'
 }
 
 function createAssistantMaintenanceNotificationResolvedSession(input: {

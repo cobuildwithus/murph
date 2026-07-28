@@ -56,6 +56,9 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
+  ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+} from '../store/persistence.js'
+import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../turn-finalizer.js'
@@ -483,6 +486,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           currentUserPrompt: input.input.prompt,
+          ...(onboardingGoalCheckinTurn
+            ? {
+                historyNotBeforeMs:
+                  resolveOnboardingGoalCheckinTranscriptHistoryNotBeforeMs(
+                    input.input.scheduledOccurrenceAt,
+                  ),
+              }
+            : {}),
           sessionId: input.session.sessionId,
           vault: input.input.vault,
         })
@@ -969,9 +980,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
+  historyNotBeforeMs?: number | null
   sessionId: string
   vault: string
 }): Promise<readonly AssistantProviderConversationMessage[]> {
+  const historyNotBeforeMs = input.historyNotBeforeMs
+  if (historyNotBeforeMs === null) {
+    return []
+  }
   let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
@@ -985,6 +1001,13 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
+    if (
+      historyNotBeforeMs !== undefined &&
+      resolveAssistantTranscriptEntryEvidenceTimeMs(entry) <
+        historyNotBeforeMs
+    ) {
+      return []
+    }
     if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
@@ -1045,6 +1068,26 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   return limitAssistantConversationHistoryMessages(
     messages.map(({ message }) => message),
   )
+}
+
+function resolveOnboardingGoalCheckinTranscriptHistoryNotBeforeMs(
+  scheduledOccurrenceAt: string | null | undefined,
+): number | null {
+  const occurrenceAtMs = Date.parse(scheduledOccurrenceAt ?? '')
+  return Number.isFinite(occurrenceAtMs)
+    ? occurrenceAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+    : null
+}
+
+function resolveAssistantTranscriptEntryEvidenceTimeMs(
+  entry: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>[number],
+): number {
+  const timestamp =
+    entry.kind === 'user'
+      ? entry.contentReceivedAt ?? entry.createdAt
+      : entry.createdAt
+  const timestampMs = Date.parse(timestamp)
+  return Number.isFinite(timestampMs) ? timestampMs : Number.NEGATIVE_INFINITY
 }
 
 function normalizeAssistantConversationHistoryText(value: string): string | null {

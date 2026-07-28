@@ -583,17 +583,24 @@ boundary with a fresh output-only turn: bounded committed conversation history
 and an engine-projected list of bounded active-goal titles remain available,
 while the memory document, generic CLI contract, shell, hosted dynamic tools,
 broad health-context injection, network fetches, and writable filesystem access
-do not. The dedicated system prompt owns the evidence and no-mutation contract
-above untrusted conversation, goal, and task text.
+do not. Conversation evidence is limited to entries inside the existing
+14-day inbound-content retention horizon measured from the scheduled
+occurrence, so a retained assistant question cannot outlive its retired answer
+and look unanswered. An invalid or missing occurrence supplies no transcript
+evidence. The isolated turn preserves the member's live conversation resume
+state whether it sends or skips. The dedicated system prompt owns the evidence
+and no-mutation contract above untrusted conversation, goal, and task text.
 
 Canonical onboarding remains the execution authority. Cron rechecks that the
 state is still completed with `user_answered` and old enough for the claimed
 occurrence before model work and again before tools, delivery, and commit. A
-reopen, replacement completion, malformed state, or lost authority consumes the
-one-shot as a quiet skip rather than starting a retry loop. The 20-elapsed-day
-execution floor is the conservative lower bound for a 21-local-calendar-day
-schedule: it admits late-day completions and timezone transitions without
-allowing a newly replaced completion to inherit an older occurrence.
+queued delivery repeats that check at final outbox provider entry, after any
+restart or delay. A reopen, replacement completion, malformed state, or lost
+authority consumes the one-shot as a quiet skip rather than starting a retry
+loop. The 20-elapsed-day execution floor is the conservative lower bound for a
+21-local-calendar-day schedule: it admits late-day completions and timezone
+transitions without allowing a newly replaced completion to inherit an older
+occurrence.
 
 ## Success Criteria
 

@@ -316,10 +316,45 @@ describe('assistant Codex turn planning', () => {
     })
 
     try {
-      await appendAssistantTranscriptEntries(vault, session.sessionId, [
-        { kind: 'user', text: 'I may want to leave this open for now.' },
-        { kind: 'assistant', text: 'That is completely fine.' },
-      ])
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        [
+          {
+            createdAt: '2026-06-20T15:00:00.000Z',
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'Would you like to pick a health direction?',
+          },
+          {
+            contentReceivedAt: '2026-06-20T15:01:00.000Z',
+            createdAt: '2026-06-20T15:01:00.000Z',
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: '',
+            textRetiredAt: '2026-07-04T15:01:00.000Z',
+          },
+          {
+            contentReceivedAt: '2026-07-15T15:00:00.000Z',
+            createdAt: '2026-07-15T15:00:00.000Z',
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'I may want to leave this open for now.',
+          },
+          {
+            createdAt: '2026-07-15T15:01:00.000Z',
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'That is completely fine.',
+          },
+          {
+            createdAt: '2026-07-18T15:00:00.000Z',
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'Should I keep learning for now?',
+          },
+        ],
+      )
       const plan = await resolveAssistantRouteTurnPlan({
         executionContext: {
           hosted: {
@@ -365,6 +400,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.conversationHistoryMessages).toEqual([
         { content: 'I may want to leave this open for now.', role: 'user' },
         { content: 'That is completely fine.', role: 'assistant' },
+        { content: 'Should I keep learning for now?', role: 'assistant' },
       ])
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).toContain('No active canonical goal is available.')

@@ -262,6 +262,8 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -710,6 +712,8 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -960,6 +964,8 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1203,6 +1209,8 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1359,6 +1367,8 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1568,6 +1578,8 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1751,6 +1763,8 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1930,6 +1944,8 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -2103,6 +2119,8 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -2513,7 +2531,10 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     NotificationTurnProviderInput['hostedToolContext']
   > = []
   const observedProfiles: Array<NotificationTurnProviderInput['profile']> = []
-  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+  const {
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
       observedHostedToolContexts.push(providerInput.hostedToolContext)
       observedProfiles.push(providerInput.profile)
@@ -2586,6 +2607,15 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     threadScope: 'isolated-thread',
     toolProfile: 'output-only-turn',
   })
+  expect(mocks.resolveAssistantProviderResumeStateAction).toHaveBeenLastCalledWith({
+    codexThreadId: providerResult.codexThreadId,
+    threadScope: 'isolated-thread',
+  })
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'preserve-existing',
+    }),
+  )
 })
 
 test('sendAssistantNotificationLocal keeps onboarding goal check-in skips silent', async () => {
@@ -2618,6 +2648,11 @@ test('sendAssistantNotificationLocal keeps onboarding goal check-in skips silent
   expect(result.response).toBeNull()
   expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'preserve-existing',
+    }),
+  )
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
@@ -3530,6 +3565,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -3701,6 +3738,8 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -4090,6 +4129,8 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -4502,6 +4543,16 @@ async function loadNotificationTurnHarness(input: {
     mocks,
     sendAssistantNotificationLocal,
   }
+}
+
+function resolveTestAssistantProviderResumeStateAction(input: {
+  codexThreadId: string | null
+  threadScope: 'isolated-thread' | 'session-thread'
+}): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
+  if (input.threadScope === 'isolated-thread') {
+    return 'preserve-existing'
+  }
+  return input.codexThreadId ? 'persist-from-provider-turn' : 'clear'
 }
 
 function createProviderResult(input?: {

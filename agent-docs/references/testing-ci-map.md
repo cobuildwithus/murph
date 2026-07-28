@@ -71,7 +71,11 @@ prove that the profile retains bounded committed history plus bounded
 engine-projected active-goal titles while removing the whole memory document,
 generic CLI contract, shell, hosted dynamic tools, broad context, network
 fetches, writable filesystem access, generated artifacts, progress hooks, and
-mutation-capable configuration overrides.
+mutation-capable configuration overrides. Notification tests prove send and
+skip preserve the live direct-session resume owner; planning tests prove
+retention-retired answers cannot leave older assistant questions in evidence;
+outbox tests prove a deferred send revalidates answered onboarding at final
+provider entry.
 
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
@@ -166,9 +170,11 @@ same-weekday catch-up, installed-occurrence stability, terminal non-reactivation
 member ownership, and malformed-state failure isolation. Cron tests prove that
 recompletion or reopening invalidates a claimed occurrence before model work or
 delivery and that canonical onboarding is rechecked alongside existing owner
-and lifecycle authority. Hosted-runtime tests prove optional preparation
-failures enter the bounded managed-maintenance retry path without blocking the
-other managed automations.
+and lifecycle authority. Outbox tests repeat that proof at final provider entry
+for a durably queued intent after onboarding changed without an automation
+revision. Hosted-runtime tests prove optional preparation failures enter the
+bounded managed-maintenance retry path without blocking the other managed
+automations.
 
 ## Current CI Workflows
 
