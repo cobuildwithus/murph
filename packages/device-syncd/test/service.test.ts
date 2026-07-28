@@ -1190,6 +1190,8 @@ test("device sync service keeps pending external-link setup out of manual, sched
     nextReconcileAt: "2026-03-17T11:00:00.000Z",
   });
 
+  assert.equal(service.getNextWakeAt("2026-03-17T10:00:00.000Z"), null);
+
   assert.throws(
     () => service.queueManualReconcile(pending.id),
     (error: unknown) =>
@@ -1207,8 +1209,12 @@ test("device sync service keeps pending external-link setup out of manual, sched
     provider: "demo",
     kind: "reconcile",
     payload: {},
-    availableAt: "2026-03-17T11:00:00.000Z",
+    availableAt: "2026-03-17T11:30:00.000Z",
   });
+  assert.equal(
+    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
+    "2026-03-17T11:30:00.000Z",
+  );
   const processed = await service.runWorkerOnce();
   const terminal = store.getJobById(queued.id);
 

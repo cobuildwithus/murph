@@ -33,6 +33,7 @@ export default async function HostedDeviceSyncCallbackPage(input: {
   ]);
   let callbackRequest: Request | null = null;
   let publicIngress: ReturnType<typeof createHostedDeviceSyncPublicIngressService> | null = null;
+  let completionAction: string | null = null;
 
   try {
     callbackRequest = buildHostedDeviceSyncCallbackRequest({
@@ -54,19 +55,23 @@ export default async function HostedDeviceSyncCallbackPage(input: {
       })
     ) {
       await publicIngress.discardConnectionCallback(provider);
-      return <HostedDeviceSyncCallbackConfirmation state="failure" />;
+    } else {
+      completionAction = buildHostedDeviceSyncCallbackCompletionAction(provider, searchParams);
     }
-
-    return (
-      <HostedDeviceSyncCallbackConfirmation
-        action={buildHostedDeviceSyncCallbackCompletionAction(provider, searchParams)}
-        state="confirmation"
-      />
-    );
   } catch {
     await publicIngress?.discardConnectionCallback(provider).catch(() => undefined);
+  }
+
+  if (!completionAction) {
     return <HostedDeviceSyncCallbackConfirmation state="failure" />;
   }
+
+  return (
+    <HostedDeviceSyncCallbackConfirmation
+      action={completionAction}
+      state="confirmation"
+    />
+  );
 }
 
 function buildHostedDeviceSyncCallbackRequest(input: {

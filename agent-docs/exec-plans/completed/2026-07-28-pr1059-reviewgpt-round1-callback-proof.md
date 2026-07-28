@@ -1,6 +1,6 @@
 # Close stolen device-authorization callback relay
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -57,9 +57,10 @@ Updated: 2026-07-28
    documentation.
 5. [x] Add the production callback component to the design catalog and capture
    desktop and mobile browser proof.
-6. [ ] Run focused tests, package/Web/Cloudflare typechecks, canonical diff and
-   acceptance verification, preliminary specialists, parent review, final
-   ReviewGPT correction, and exact-head CI.
+6. [x] Run focused tests, package/Web/Cloudflare typechecks, canonical diff and
+   acceptance verification, preliminary specialists, and parent review. The
+   final exact-head ReviewGPT correction and PR CI follow the scoped commit in
+   the PR completion loop.
 
 ## Verification
 
@@ -74,3 +75,22 @@ Updated: 2026-07-28
   (`audit-packages/pr-1059-design-proof/{desktop,mobile}-{confirmation,failure}.png`)
 - preliminary `completion-specialists` ReviewGPT
 - final exact-head ReviewGPT correction and PR CI
+
+## Outcomes
+
+- Focused callback/start/build validation passed (98 tests); device-sync owner
+  coverage passed (215 tests); hosted wake coverage passed (94 tests);
+  Cloudflare preflight coverage passed (65 tests).
+- Device-sync, Web, and Cloudflare typechecks passed. The Web production build
+  passed with both callback routes rendered dynamically.
+- Preliminary `completion-specialists` ReviewGPT found two medium issues. The
+  callback action layout now keeps DOM, focus, and mobile visual order aligned,
+  with desktop and mobile browser proof. Pending Junction setup is also
+  excluded from active reconcile wake selection, with a queued-job precedence
+  regression test.
+- Parent review found no further actionable issue.
+- `pnpm test:diff packages/device-syncd apps/web apps/cloudflare` passed.
+- `pnpm verify:acceptance` passed, including workspace typechecks, package
+  coverage, package-boundary checks, Web verification/build, and Cloudflare
+  Node and Workers tests.
+Completed: 2026-07-28

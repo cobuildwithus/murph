@@ -58,7 +58,7 @@ export function HostedDeviceSyncCallbackConfirmation(
           {confirming ? (
             <form
               action={props.action}
-              className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end"
+              className="flex w-full flex-col gap-3 sm:flex-row sm:justify-end"
               method="post"
             >
               <a
