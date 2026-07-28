@@ -7,6 +7,12 @@ Last verified: 2026-07-28
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Static SSH worker archive readiness and executor-owned verification scheduling
+are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`,
+`agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
