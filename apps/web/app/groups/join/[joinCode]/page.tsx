@@ -187,6 +187,7 @@ function renderGroupJoin(input: {
                 alreadyActiveMember={alreadyActiveMember}
                 expectedMembershipId={view.viewerMembershipId}
                 groupName={groupName}
+                inviteCode={input.inviteCode}
                 joinCode={input.joinCode}
                 permissions={view.requestedVaultShareProjections}
                 postJoinContactOption={input.postJoinContactOption}

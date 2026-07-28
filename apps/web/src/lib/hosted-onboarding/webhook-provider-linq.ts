@@ -124,6 +124,7 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import {
+  acquireHostedLinqParticipantPhoneLockTx,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
@@ -503,6 +504,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (participantContact.kind === "phone") {
+    // The outreach opener holds this same lock through provider acceptance.
+    // Waiting here before identity and outreach reads makes an immediate reply
+    // observe either the committed opener or none of its state, never a generic
+    // onboarding plan from a half-visible dispatch.
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: participantContact.value,
+      tx: input.prisma,
+    });
+  }
+
   const existingMemberLookup = participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
@@ -872,37 +884,50 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
   }
 
-  if (existingMember && existingMemberEffectiveActive) {
-    const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-      dedupeKey: input.event.event_id,
-      prisma: input.prisma,
-      userId: existingMember.id,
-    });
+  const groupJoinContext = participantPhoneNumber
+    ? await readHostedGroupJoinOutreachReplyContextTx({
+        linqChatId: summary.chatId,
+        participantMemberId: existingMember?.id ?? null,
+        participantPhoneNumber,
+        recipientPhoneNumber,
+        sourceEventId: input.event.event_id,
+        tx: input.prisma,
+      })
+    : null;
 
-    if (existingMailboxItem) {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildActiveMemberDirectPlan({
-          desiredSideEffects: [],
-          postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-          response: {
+  if (existingMember && existingMemberEffectiveActive) {
+    if (!groupJoinContext) {
+      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+        dedupeKey: input.event.event_id,
+        prisma: input.prisma,
+        userId: existingMember.id,
+      });
+
+      if (existingMailboxItem) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildActiveMemberDirectPlan({
+            desiredSideEffects: [],
+            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+            response: {
+              duplicate: true,
+              ignored: true,
+              ok: true,
+              reason: "duplicate-webhook-event",
+            },
+            // No checkpoint on the duplicate read: this transaction did not run
+            // the append-path workspace upsert, so the retry keeps the legacy
+            // signal path that repairs a missing workspace row.
+            wakeHandoffs: [{ eventId: input.event.event_id, mailboxItemId: existingMailboxItem.id, source: "linq", userId: existingMember.id }],
+          }),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
             duplicate: true,
-            ignored: true,
-            ok: true,
+            existingMemberActive: existingMemberEffectiveActive,
+            existingMemberMatch,
             reason: "duplicate-webhook-event",
-          },
-          // No checkpoint on the duplicate read: this transaction did not run
-          // the append-path workspace upsert, so the retry keeps the legacy
-          // signal path that repairs a missing workspace row.
-          wakeHandoffs: [{ eventId: input.event.event_id, mailboxItemId: existingMailboxItem.id, source: "linq", userId: existingMember.id }],
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          duplicate: true,
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          reason: "duplicate-webhook-event",
-          routeStage: "active-member-duplicate",
-        }),
-      );
+            routeStage: "active-member-duplicate",
+          }),
+        );
+      }
     }
 
     const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
@@ -935,22 +960,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     // Daily quota suppression intentionally remains ahead of both route
     // binding and mailbox append, so a suppressed message changes neither.
-    const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
-      context,
-      dailyState,
-      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
-      event: input.event,
-      logDetails: {
-        existingMemberActive: true,
-        existingMemberMatch,
-        routeDecision: bindingResult.kind,
-      },
-      memberId: existingMember.id,
-      routeStages: {
-        dailyQuotaReached: "active-member-daily-quota-reached",
-        dailyQuotaReply: "active-member-daily-quota-reply",
-      },
-    });
+    const admissionPlan = groupJoinContext
+      ? null
+      : await planHostedLinqDailyQuotaAdmissionDenied({
+          context,
+          dailyState,
+          dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
+          event: input.event,
+          logDetails: {
+            existingMemberActive: true,
+            existingMemberMatch,
+            routeDecision: bindingResult.kind,
+          },
+          memberId: existingMember.id,
+          routeStages: {
+            dailyQuotaReached: "active-member-daily-quota-reached",
+            dailyQuotaReply: "active-member-daily-quota-reply",
+          },
+        });
     if (admissionPlan) {
       return {
         ...admissionPlan,
@@ -966,6 +993,37 @@ export async function planHostedOnboardingLinqWebhook(input: {
       prisma: input.prisma,
       recipientPhone: bindingResult.recipientPhone,
     }) ?? participantContact;
+
+    if (groupJoinContext) {
+      const invite = await issueHostedInviteTx({
+        channel: "linq",
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildSignupLinkResponse({
+          chatId: summary.chatId,
+          groupJoinCode: groupJoinContext.joinCode,
+          groupJoinOutreachId: groupJoinContext.outreachId,
+          inviteCode: invite.inviteCode,
+          inviteId: invite.id,
+          memberId: existingMember.id,
+          messageId: summary.messageId,
+          occurredAt,
+          service: messageEvent.data.service ?? null,
+          sourceEventId: input.event.event_id,
+          threadIsDirect: resolveHostedLinqThreadIsDirect(messageEvent),
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          dailyInboundCount: dailyState.inboundCount,
+          existingMemberActive: true,
+          existingMemberMatch,
+          reason: "sent-signup-link",
+          routeDecision: bindingResult.kind,
+          routeStage: "active-member-group-join-link",
+        }),
+      );
+    }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
       eventId: input.event.event_id,
@@ -1079,15 +1137,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
     );
   }
-
-  const groupJoinContext = participantPhoneNumber
-    ? await readHostedGroupJoinOutreachReplyContextTx({
-        linqChatId: summary.chatId,
-        participantPhoneNumber,
-        recipientPhoneNumber,
-        tx: input.prisma,
-      })
-    : null;
 
   const existingDailyState = existingMember
     ? await readHostedLinqDailyState({

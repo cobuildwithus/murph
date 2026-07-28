@@ -462,6 +462,7 @@ type HostedLinqLineFixture = {
 type HostedLinqProviderEventFixture = {
   createMany?: MockedFunction;
   findMany?: MockedFunction;
+  findUnique?: MockedFunction;
 };
 
 type HostedLinqFirstContactAdmissionDecisionFixture = {
@@ -667,6 +668,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       status: 204,
     });
+    // clearAllMocks preserves queued one-shot implementations from an aborted test.
+    mocks.shareMurphHostedLinqNativeContactCardToChat.mockReset();
     mocks.shareMurphHostedLinqNativeContactCardToChat.mockResolvedValue({
       status: "sent",
     });
@@ -10323,6 +10326,9 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
     }),
     hostedLinqProviderEvent: {
       createMany: hostedLinqProviderEventCreateMany,
+      findUnique: vi.fn().mockResolvedValue({
+        groupJoinOfferHandledAt: null,
+      }),
     },
   });
   prisma.$transaction = vi.fn(async (

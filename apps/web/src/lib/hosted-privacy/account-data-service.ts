@@ -33,9 +33,7 @@ import {
   releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "../hosted-onboarding/linq-daily-state";
 import {
-  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
-  parseHostedLinqInviteSignupDeliverySourceRef,
   parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
@@ -322,13 +320,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_group_join_outreach",
     label: "Pre-member group-join outreach intent",
     deletion: "live-delete",
-    note: "Deletes outreach rows this account can reach: those matching the member's phone blind index, and those belonging to groups the account owns or runs. Rows are resolved by phone because the participant may never have become a member. Covers the encrypted participant phone, group and offer association, selected sending line, and replying chat identity. The Prisma group cascade remains a safety net only; deletion runs first so the provider correlation, which is reachable solely through the outreach id, is never orphaned. Export omits these rows: they are pre-member delivery state, not member-authored content.",
+    note: "Deletes outreach rows this account can reach: those matching the member's phone blind index, and those whose canonical offer belongs to a group the account owns or runs. Rows are resolved by phone because the participant may never have become a member. The outreach row covers encrypted participant contact, scheduling, dedupe, and reaction convergence only; selected line, chat, provider lifecycle, and exact reply occurrence live on related delivery rows. Export omits this pre-member operational intent.",
   },
   {
     slug: "prisma.hosted_group_join_outreach_delivery",
     label: "Group-join outreach provider correlation",
     deletion: "live-delete",
-    note: "Deletes both the cold outreach delivery and the group-aware signup-link delivery correlations tied to those outreach ids, so provider attempt and receipt history does not outlive the account. The cold delivery carries no participant or group key of its own, so both correlation kinds are deleted while the outreach row still supplies the source reference.",
+    note: "Deletes opener and group-aware signup-link deliveries through their direct outreach relation, so selected-line, chat, provider attempt, receipt, and exact reply-occurrence history does not outlive the account. The canonical offer supplies group ownership; no hashed source-reference reconstruction is required.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -1163,19 +1161,12 @@ function buildHostedLinqInviteSignupDeliveryWhere(
   memberIds: readonly string[],
 ): Prisma.HostedLinqDeliveryWhereInput {
   return {
-    OR: uniqueStrings(memberIds).flatMap((memberId) => [
-      {
-        sourceRef: {
-          startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
-        },
+    groupJoinOutreachId: null,
+    OR: uniqueStrings(memberIds).map((memberId) => ({
+      sourceRef: {
+        startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
       },
-      {
-        sourceRef: {
-          startsWith:
-            buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(memberId),
-        },
-      },
-    ]),
+    })),
     template: {
       in: ["invite_signup", "invite_signup_fallback"],
     },
@@ -1258,13 +1249,7 @@ function readHostedLinqSignupProjectionIdentities(
 ): HostedLinqSignupProjectionIdentity[] {
   const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
   for (const delivery of deliveries) {
-    const source = parseHostedLinqInviteSignupDeliverySourceRef(
-      delivery.sourceRef,
-    );
-    if (!source?.groupJoinReplyContext) {
-      continue;
-    }
-    const attempt = parseHostedLinqInviteSignupEffectId(source.effectId);
+    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
     if (!attempt) {
       continue;
     }

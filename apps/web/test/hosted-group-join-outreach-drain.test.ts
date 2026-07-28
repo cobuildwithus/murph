@@ -344,6 +344,21 @@ describe("hosted group join outreach drain", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it("never rewrites provider success as failure when acceptance persistence fails", async () => {
+    mocks.markDeliveryAccepted.mockRejectedValueOnce(
+      new Error("acceptance persistence failed"),
+    );
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).rejects.toThrow("acceptance persistence failed");
+
+    expect(mocks.createChat).toHaveBeenCalledTimes(1);
+    expect(mocks.markDeliveryFailed).not.toHaveBeenCalled();
+  });
+
   it("reports idle without touching the provider when nothing is due", async () => {
     const { prisma } = createPrismaStub({ due: null });
 
@@ -583,7 +598,7 @@ describe("hosted group join outreach drain", () => {
     }
   });
 
-  it("keeps every variant link-free, group-specific, and reply-earning", () => {
+  it("keeps every variant reaction-neutral and clear that reply starts the next step", () => {
     // The bank exists so many recipients do not get byte-identical copy, but each
     // variant is held to the same first-contact rules.
     const messages = new Set<string>();
@@ -594,13 +609,16 @@ describe("hosted group join outreach drain", () => {
       });
       messages.add(message);
       expect(message).toContain("Sunday Sleep Crew");
-      expect(message).toMatch(
-        /repl(y|ies)|say hi|message me|send me a message|drop me a line|tell me here/iu,
-      );
+      expect(message.endsWith("Reply here to start the next step.")).toBe(true);
+      expect(message).not.toMatch(/\b(?:liked|hearted)\b|tapped like|your like/iu);
       expect(message).not.toMatch(/https?:|www\./iu);
       expect(message).not.toContain("\u2014");
       // Acquisition framing is forbidden in outbound copy.
       expect(message).not.toMatch(/sign ?up|get started|welcome|verify|account/iu);
+      // The reply begins the handoff; it does not itself complete the web join.
+      expect(message).not.toMatch(
+        /one (message|reply)|all I need|and you're into|get you (?:added|in|joined|set up)|(?:do|finish|handle|sort) the rest|make it happen|take (?:care of it|it from there)|walk you in/iu,
+      );
     }
 
     // Real spread, not one template with a rotating word.
@@ -689,6 +707,7 @@ function createPrismaStub(options?: {
           displayName: "Training circle",
           id: "hgrp_opaque",
           joinCode: "join_opaque",
+          runtimeMember: { suspendedAt: null },
           runtimeMemberId: "hbm_runtime",
         },
         groupId: "hgrp_opaque",

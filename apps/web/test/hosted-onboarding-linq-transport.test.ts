@@ -83,6 +83,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
     claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
+    readHostedLinqDailyState: vi.fn().mockResolvedValue(null),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
     releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
   };
@@ -149,6 +150,7 @@ import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
   HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
   markHostedLinqOnboardingLinkNoticeSent,
+  readHostedLinqDailyState,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
@@ -166,10 +168,6 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import {
-  buildHostedLinqInviteSignupDeliverySourceRef,
-  parseHostedLinqInviteSignupDeliverySourceRef,
-} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
@@ -287,7 +285,7 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("commits accepted group reply context before the provider fence returns", async () => {
+  it("commits accepted group delivery with the exact reply time before the provider fence returns", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       groupJoinCode: "join-group",
@@ -329,16 +327,11 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
     const claimInput = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
       .mock.calls[0]?.[0];
-    expect(parseHostedLinqInviteSignupDeliverySourceRef(
-      claimInput?.sourceRef,
-    )).toEqual({
-      effectId: effect.effectId,
-      groupJoinReplyContext: {
-        outreachId: "hgrpjoa-1",
-        repliedAt: "2026-03-26T12:00:00.000Z",
-      },
-    });
-    expect(claimInput?.groupJoinOutreachId).toBe("hgrpjoa-1");
+    expect(claimInput).toEqual(expect.objectContaining({
+      groupJoinOutreachId: "hgrpjoa-1",
+      groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+      sourceRef: effect.effectId,
+    }));
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
@@ -572,13 +565,11 @@ describe("hosted Linq webhook transport", () => {
       template: "invite_signup",
     });
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValueOnce({
-      groupJoinOutreachId: null,
+      id: "hld_persisted_group_reply",
+      groupJoinOutreachId: "hgrpjoa-a",
+      groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
       providerCorrelated: false,
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: effect.effectId,
-        groupJoinOutreachId: "hgrpjoa-a",
-        groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-      }),
+      sourceRef: effect.effectId,
     });
     const prisma = createInviteSignupPrismaFixture({
       groupJoinCode: "join-group-a",
@@ -594,12 +585,9 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         groupJoinOutreachId: "hgrpjoa-a",
+        groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
         idempotencyKey: effect.effectId,
-        sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-          effectId: effect.effectId,
-          groupJoinOutreachId: "hgrpjoa-a",
-          groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        }),
+        sourceRef: effect.effectId,
       }),
     );
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -637,15 +625,12 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-a",
       template: "invite_signup",
     });
-    const persistedSourceRef =
-      buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: originalEffect.effectId,
-        groupJoinOutreachId: "hgrpjoa-a",
-        groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-      });
+    const persistedSourceRef = originalEffect.effectId;
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx)
       .mockResolvedValue({
-        groupJoinOutreachId: null,
+        id: "hld_persisted_group_reply",
+        groupJoinOutreachId: "hgrpjoa-a",
+        groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
       });
@@ -662,6 +647,7 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         groupJoinOutreachId: "hgrpjoa-a",
+        groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
         idempotencyKey: originalEffect.effectId,
         sourceRef: persistedSourceRef,
       }),
@@ -712,6 +698,82 @@ describe("hosted Linq webhook transport", () => {
           id: "hgrpjoa-deleted",
         }),
       }),
+    );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries planning when web membership appears before group-link dispatch", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-web-joined",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-web-joined",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture({
+      existingGroupMembership: true,
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_MEMBERSHIP_CHANGED",
+      retryable: true,
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch a newly planned generic link after a group link wins the member lock", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-generic-planned-before-group-accepted",
+      template: "invite_signup",
+    });
+    vi.mocked(readHostedLinqDailyState).mockResolvedValueOnce({
+      onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
+    } as never);
+    const prisma = createInviteSignupPrismaFixture();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_already_claimed",
+        template: "invite_signup",
+      }],
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.any(Array), "member-1");
+    expect(readHostedLinqDailyState).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: expect.any(Object),
+    });
+    expect(
+      prisma.$queryRaw.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(readHostedLinqDailyState).mock.invocationCallOrder[0] ?? 0,
     );
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -2004,9 +2066,7 @@ describe("hosted Linq webhook transport", () => {
       prisma,
       reclaimStalePreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: effect.effectId,
-      }),
+      sourceRef: effect.effectId,
       status: "attempted",
       targetKind: "participant",
       template: "invite_signup_fallback",
@@ -2485,9 +2545,7 @@ describe("hosted Linq webhook transport", () => {
       prisma,
       reclaimStalePreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: effect.effectId,
-      }),
+      sourceRef: effect.effectId,
       status: "attempted",
       targetKind: "thread",
       template: "invite_signup",
@@ -2681,6 +2739,7 @@ function buildAuthorizedLinqRouteFixture(input: {
 
 function createInviteSignupPrismaFixture(
   input: {
+    existingGroupMembership?: boolean;
     groupJoinCode?: string;
     groupReplyAuthorized?: boolean;
     inviteAuthorized?: boolean;
@@ -2704,6 +2763,7 @@ function createInviteSignupPrismaFixture(
           : {
               offer: {
                 group: {
+                  id: "hgrp-runtime",
                   joinCode: input.groupJoinCode ?? "join-group",
                   runtimeMember: { suspendedAt: null },
                   runtimeMemberId: "member-runtime",
@@ -2713,6 +2773,11 @@ function createInviteSignupPrismaFixture(
             },
       ),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedGroupMember: {
+      findUnique: vi.fn().mockResolvedValue(
+        input.existingGroupMembership ? { id: "hgrpm-existing" } : null,
+      ),
     },
     hostedLinqDelivery: {
       findFirst: vi.fn().mockResolvedValue(null),

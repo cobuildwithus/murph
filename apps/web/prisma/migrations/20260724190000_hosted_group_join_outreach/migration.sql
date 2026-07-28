@@ -39,7 +39,8 @@ ALTER TABLE "hosted_group_join_outreach"
   ON UPDATE CASCADE;
 
 ALTER TABLE "hosted_linq_delivery"
-  ADD COLUMN "group_join_outreach_id" TEXT;
+  ADD COLUMN "group_join_outreach_id" TEXT,
+  ADD COLUMN "group_join_reply_occurred_at" TIMESTAMP(3);
 
 CREATE INDEX "hosted_linq_delivery_group_join_outreach_status_idx"
   ON "hosted_linq_delivery"(
@@ -52,5 +53,8 @@ ALTER TABLE "hosted_linq_delivery"
   ADD CONSTRAINT "hosted_linq_delivery_group_join_outreach_id_fkey"
   FOREIGN KEY ("group_join_outreach_id")
   REFERENCES "hosted_group_join_outreach"("id")
-  ON DELETE SET NULL
+  ON DELETE CASCADE
   ON UPDATE CASCADE;
+
+ALTER TABLE "hosted_linq_provider_event"
+  ADD COLUMN "group_join_offer_handled_at" TIMESTAMP(3);

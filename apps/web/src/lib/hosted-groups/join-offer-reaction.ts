@@ -8,6 +8,9 @@ import {
   isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
+import {
+  markHostedLinqGroupJoinOfferHandledTx,
+} from "../hosted-onboarding/linq-provider-event-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
@@ -121,13 +124,19 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
-        return revokeHostedGroupJoinOutreachForRemovedReactionTx({
+        const revoked = await revokeHostedGroupJoinOutreachForRemovedReactionTx({
           allowMissingRowTombstone: regionSupportedForRemoval,
           now: input.event.providerCreatedAt,
           offerId: offer.offerId,
           participantPhoneNumber,
           tx,
         });
+        await markHostedLinqGroupJoinOfferHandledTx({
+          eventId: input.event.eventId,
+          handledAt: input.event.providerCreatedAt,
+          prisma: tx,
+        });
+        return revoked;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
       if (revoked.kind === "revoked") {
         return { status: "accepted", reason: "outreach_revoked" };
@@ -177,6 +186,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           participantPhoneNumber,
         );
         if (!regionSupported) {
+          await markHostedLinqGroupJoinOfferHandledTx({
+            eventId: input.event.eventId,
+            handledAt: input.event.providerCreatedAt,
+            prisma: tx,
+          });
           return;
         }
         await enqueueHostedGroupJoinOutreachTx({
@@ -184,6 +198,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           participantPhoneNumber,
           requestedAt: input.event.providerCreatedAt,
           tx,
+        });
+        await markHostedLinqGroupJoinOfferHandledTx({
+          eventId: input.event.eventId,
+          handledAt: input.event.providerCreatedAt,
+          prisma: tx,
         });
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     } catch (error) {
@@ -215,6 +234,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     memberId: member.id,
     messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
+    onAcceptedTx: (tx) => markHostedLinqGroupJoinOfferHandledTx({
+      eventId: input.event.eventId,
+      handledAt: input.event.providerCreatedAt,
+      prisma: tx,
+    }),
     prisma: input.prisma,
     ...(input.signal ? { signal: input.signal } : {}),
     threadIdentityLookupKeyReadCandidates,

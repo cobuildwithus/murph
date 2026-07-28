@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  markHostedLinqGroupJoinOfferHandledTx: vi.fn(),
   readHostedGroupJoinOfferTargetTx: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -66,6 +67,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-provider-event-store", () => ({
+  markHostedLinqGroupJoinOfferHandledTx:
+    mocks.markHostedLinqGroupJoinOfferHandledTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -138,6 +144,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
+    mocks.markHostedLinqGroupJoinOfferHandledTx.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -171,6 +178,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
+    });
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).toHaveBeenCalledWith(
       expect.objectContaining({
         memberId: "member_reactor",
@@ -327,6 +339,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       // existing join path's `now`.
       requestedAt: new Date("2026-03-26T12:01:00.000Z"),
       tx: expect.anything(),
+    });
+    expect(mocks.markHostedLinqGroupJoinOfferHandledTx).toHaveBeenCalledWith({
+      eventId: "evt_reaction_123",
+      handledAt: new Date("2026-03-26T12:01:00.000Z"),
+      prisma: expect.anything(),
     });
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();

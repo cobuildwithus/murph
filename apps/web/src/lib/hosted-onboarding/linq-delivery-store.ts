@@ -17,10 +17,8 @@ import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
 import {
-  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectId,
   type HostedLinqInviteSignupGroupJoinReplyContext,
-  parseHostedLinqInviteSignupDeliverySourceRef,
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
@@ -49,6 +47,7 @@ type HostedLinqDeliveryProviderDispatchData = {
   failureCode: null;
   failureReason: null;
   groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
   linqChatLookupKey: string | null;
   phoneNumberHint: string | null;
   phoneNumberLookupKey: string | null;
@@ -284,6 +283,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 type HostedLinqDeliveryProviderDispatchClaimInput = {
   attemptedAt?: Date;
   groupJoinOutreachId?: string | null;
+  groupJoinReplyOccurredAt?: Date | null;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -316,7 +316,9 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
+  id: string;
   groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
 } | null> {
@@ -332,6 +334,8 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
       acceptedAt: true,
       deliveredAt: true,
       groupJoinOutreachId: true,
+      groupJoinReplyOccurredAt: true,
+      id: true,
       lastReceiptAt: true,
       messageLookupKey: true,
       sourceRef: true,
@@ -340,7 +344,9 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   });
   return delivery
     ? {
+        id: delivery.id,
         groupJoinOutreachId: delivery.groupJoinOutreachId,
+        groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
         providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
         sourceRef: delivery.sourceRef,
       }
@@ -352,6 +358,17 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   buildDeliveryId: (idempotencyKey: string) => string,
 ): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   const attemptedAt = input.attemptedAt ?? new Date();
+  const template = normalizeNullable(input.template);
+  const groupJoinOutreachId = normalizeNullable(input.groupJoinOutreachId);
+  const groupJoinReplyOccurredAt = normalizeNullableDate(
+    input.groupJoinReplyOccurredAt,
+    "Hosted Linq group-join reply occurrence time",
+  );
+  assertHostedLinqDeliveryGroupJoinContext({
+    groupJoinOutreachId,
+    groupJoinReplyOccurredAt,
+    template,
+  });
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
   );
@@ -373,7 +390,8 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     failedAt: null,
     failureCode: null,
     failureReason: null,
-    groupJoinOutreachId: normalizeNullable(input.groupJoinOutreachId),
+    groupJoinOutreachId,
+    groupJoinReplyOccurredAt,
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
@@ -387,7 +405,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     }),
     status: input.status ?? "attempted",
     targetKind: normalizeNullable(input.targetKind),
-    template: normalizeNullable(input.template),
+    template,
   } satisfies HostedLinqDeliveryProviderDispatchData;
   const createData = {
     ...data,
@@ -633,6 +651,8 @@ async function updateHostedLinqDeliveryAttemptIfPreProvider(input: {
     acceptedAt: Date | null;
     deliveredAt: Date | null;
     failedAt: Date | null;
+    groupJoinOutreachId: string | null;
+    groupJoinReplyOccurredAt: Date | null;
     id: string;
     lastReceiptAt: Date | null;
     messageLookupKey: string | null;
@@ -747,11 +767,15 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
     const delivery = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: {
+        groupJoinOutreachId: true,
+        groupJoinReplyOccurredAt: true,
         sourceRef: true,
         template: true,
       },
     });
     const deliveryIdentity = {
+      groupJoinOutreachId: delivery?.groupJoinOutreachId ?? null,
+      groupJoinReplyOccurredAt: delivery?.groupJoinReplyOccurredAt ?? null,
       idempotencyKey: input.idempotencyKey,
       sourceRef: delivery?.sourceRef ?? null,
       template: delivery?.template ?? null,
@@ -1337,6 +1361,8 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       },
     },
     select: {
+      groupJoinOutreachId: true,
+      groupJoinReplyOccurredAt: true,
       id: true,
       idempotencyKey: true,
       phoneNumberLookupKey: true,
@@ -1377,6 +1403,8 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     ? null
     : input.event.deliveryStatus === "failed"
       ? await resolveHostedLinqFailedDeliveryReopenTx({
+          groupJoinOutreachId: delivery.groupJoinOutreachId,
+          groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
           idempotencyKey: delivery.idempotencyKey,
           prisma: input.prisma,
           sourceRef: delivery.sourceRef,
@@ -1702,6 +1730,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   failureCode: true,
   failedAt: true,
   groupJoinOutreachId: true,
+  groupJoinReplyOccurredAt: true,
   id: true,
   lastReceiptAt: true,
   linqChatLookupKey: true,
@@ -1811,6 +1840,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     deliveredAt: Date | null;
     failedAt: Date | null;
     groupJoinOutreachId: string | null;
+    groupJoinReplyOccurredAt: Date | null;
     id: string;
     lastReceiptAt: Date | null;
     linqChatLookupKey: string | null;
@@ -1828,6 +1858,33 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
 }): Promise<HostedLinqDeliveryProviderDispatchClaim> {
+  if (
+    (
+      (input.delivery.groupJoinOutreachId ?? null)
+        !== input.data.groupJoinOutreachId
+      || !datesEqual(
+        input.delivery.groupJoinReplyOccurredAt ?? null,
+        input.data.groupJoinReplyOccurredAt,
+      )
+    )
+    || (
+      isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+      && (
+        input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
+        || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
+        || input.delivery.sourceRef !== input.data.sourceRef
+        || input.delivery.targetKind !== input.data.targetKind
+        || input.delivery.template !== input.data.template
+      )
+    )
+  ) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+      outcome: "incompatible",
+    };
+  }
+
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
@@ -1835,24 +1892,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       ...(isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
-    };
-  }
-
-  if (
-    isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
-    && (
-      input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
-      || input.delivery.groupJoinOutreachId !== input.data.groupJoinOutreachId
-      || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
-      || input.delivery.sourceRef !== input.data.sourceRef
-      || input.delivery.targetKind !== input.data.targetKind
-      || input.delivery.template !== input.data.template
-    )
-  ) {
-    return {
-      claimed: false,
-      id: input.delivery.id,
-      outcome: "incompatible",
     };
   }
 
@@ -2012,6 +2051,8 @@ async function runHostedLinqDeliveryStoreTransaction<T>(
 }
 
 function resolveHostedLinqReopenOnboardingLink(input: {
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
   idempotencyKey: string | null;
   sourceRef: string | null;
   template: string | null;
@@ -2020,24 +2061,28 @@ function resolveHostedLinqReopenOnboardingLink(input: {
     return null;
   }
 
-  const source =
-    parseHostedLinqInviteSignupDeliverySourceRef(input.sourceRef)
-    ?? parseHostedLinqInviteSignupDeliverySourceRef(input.idempotencyKey);
-  const parsed = source
-    ? parseHostedLinqInviteSignupEffectId(source.effectId)
-    : null;
-  return parsed && source
-    ? {
-        ...(source.groupJoinReplyContext
-          ? { groupJoinReplyContext: source.groupJoinReplyContext }
-          : {}),
-        memberId: parsed.memberId,
-        occurredAt: parsed.dayUtc,
-      }
-    : null;
+  const parsed = parseHostedLinqInviteSignupEffectId(input.sourceRef)
+    ?? parseHostedLinqInviteSignupEffectId(input.idempotencyKey);
+  if (!parsed) {
+    return null;
+  }
+  const groupJoinReplyContext =
+    input.groupJoinOutreachId && input.groupJoinReplyOccurredAt
+      ? {
+          outreachId: input.groupJoinOutreachId,
+          repliedAt: input.groupJoinReplyOccurredAt.toISOString(),
+        }
+      : null;
+  return {
+    ...(groupJoinReplyContext ? { groupJoinReplyContext } : {}),
+    memberId: parsed.memberId,
+    occurredAt: parsed.dayUtc,
+  };
 }
 
 async function resolveHostedLinqFailedDeliveryReopenTx(input: {
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
   idempotencyKey: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef: string | null;
@@ -2047,12 +2092,8 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   if (!link) {
     return null;
   }
-  const source =
-    parseHostedLinqInviteSignupDeliverySourceRef(input.sourceRef)
-    ?? parseHostedLinqInviteSignupDeliverySourceRef(input.idempotencyKey);
-  const failedAttempt = source
-    ? parseHostedLinqInviteSignupEffectId(source.effectId)
-    : null;
+  const failedAttempt = parseHostedLinqInviteSignupEffectId(input.sourceRef)
+    ?? parseHostedLinqInviteSignupEffectId(input.idempotencyKey);
   if (!failedAttempt) {
     return link;
   }
@@ -2088,20 +2129,13 @@ async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
 }): Promise<Array<NonNullable<
   ReturnType<typeof parseHostedLinqInviteSignupEffectId>
 >>> {
-  const genericSourceRefPrefix = buildHostedLinqInviteSignupEffectId({
+  const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: input.memberId,
     occurredAt: input.dayUtc,
   });
-  const groupSourceRefPrefix =
-    `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-      input.memberId,
-    )}${input.dayUtc}`;
   const liveDeliveries = await input.prisma.hostedLinqDelivery.findMany({
     where: {
-      OR: [
-        { sourceRef: { startsWith: genericSourceRefPrefix } },
-        { sourceRef: { startsWith: groupSourceRefPrefix } },
-      ],
+      sourceRef: { startsWith: sourceRefPrefix },
       status: {
         in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
       },
@@ -2112,12 +2146,7 @@ async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
     select: { sourceRef: true },
   });
   return liveDeliveries.flatMap((delivery) => {
-    const source = parseHostedLinqInviteSignupDeliverySourceRef(
-      delivery.sourceRef,
-    );
-    const attempt = source
-      ? parseHostedLinqInviteSignupEffectId(source.effectId)
-      : null;
+    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
     return attempt
       && attempt.memberId === input.memberId
       && attempt.dayUtc === input.dayUtc
@@ -2150,7 +2179,7 @@ function normalizeHostedLinqDeliverySourceRef(input: {
   const sourceRef = normalizeNullable(input.sourceRef);
   if (
     isHostedLinqInviteSignupDeliveryTemplate(input.template)
-    && parseHostedLinqInviteSignupDeliverySourceRef(sourceRef)
+    && parseHostedLinqInviteSignupEffectId(sourceRef)
   ) {
     return sourceRef;
   }
@@ -2162,6 +2191,44 @@ function isHostedLinqInviteSignupDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return template === "invite_signup" || template === "invite_signup_fallback";
+}
+
+function assertHostedLinqDeliveryGroupJoinContext(input: {
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
+  template: string | null;
+}): void {
+  const isSignup = isHostedLinqInviteSignupDeliveryTemplate(input.template);
+  if (
+    input.groupJoinReplyOccurredAt
+    && (!input.groupJoinOutreachId || !isSignup)
+  ) {
+    throw new TypeError(
+      "Hosted Linq group-join reply occurrence requires a related signup delivery.",
+    );
+  }
+  if (isSignup && input.groupJoinOutreachId && !input.groupJoinReplyOccurredAt) {
+    throw new TypeError(
+      "Hosted Linq group-aware signup delivery requires the exact reply occurrence time.",
+    );
+  }
+}
+
+function datesEqual(left: Date | null, right: Date | null): boolean {
+  return left?.getTime() === right?.getTime();
+}
+
+function normalizeNullableDate(
+  value: Date | null | undefined,
+  label: string,
+): Date | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Number.isNaN(value.getTime())) {
+    throw new TypeError(`${label} must be valid.`);
+  }
+  return value;
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

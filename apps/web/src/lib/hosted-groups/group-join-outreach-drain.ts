@@ -16,7 +16,6 @@ import {
 import { createHostedLinqChat } from "../hosted-onboarding/linq-client";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import {
-  hostedOnboardingError,
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
@@ -31,7 +30,6 @@ import { countHostedMemberHomeLinqBindingsByRecipientPhone } from "../hosted-onb
 import {
   acquireHostedLinqParticipantPhoneLockTx,
 } from "../hosted-onboarding/linq-participant-contact";
-import { LINQ_API_DEFAULT_TIMEOUT_MS } from "../linq/api";
 import {
   decideHostedGroupJoinOutreachSendWindow,
 } from "./group-join-outreach-window";
@@ -43,6 +41,13 @@ import {
   markHostedGroupJoinOutreachSkippedDeliveryTx,
   readHostedGroupJoinOutreachParticipantPhone,
 } from "./group-join-outreach-store";
+import {
+  beginHostedGroupJoinProviderRequest,
+  createHostedGroupJoinProviderFenceState,
+  HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS,
+  HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
+  type HostedGroupJoinProviderFenceState,
+} from "./group-join-provider-fence";
 
 const HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS = 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS = 30_000;
@@ -52,13 +57,6 @@ const HOSTED_GROUP_JOIN_OUTREACH_RESERVED_WELCOME_SLOTS = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
-const HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS = 1_500;
-const HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS = 2_000;
-const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS = 15_000;
-const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS = {
-  maxWait: 5_000,
-  timeout: HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS,
-} as const;
 const MINUTES_PER_DAY = 24 * 60;
 
 export type HostedGroupJoinOutreachDrainResult =
@@ -72,44 +70,48 @@ export type HostedGroupJoinOutreachDrainResult =
  *
  * Deliverability requires that many recipients not receive byte-identical copy,
  * and equally forbids faking variation with padding or synonym churn. So these
- * are a small set of genuinely different openers that each keep the same
- * properties: they name the actual group, contain no link, ask for a reply, and
- * read as one person writing to another.
+ * are a small set of genuinely different leads that each name the actual
+ * group, contain no link, and never claim a specific gesture that the durable
+ * outreach row does not retain. One shared handoff sentence owns the product
+ * invariant that replying starts, but does not complete, the next step.
  *
  * Selection is by digest of the outreach id, so a retried or replayed dispatch
  * always composes the identical message and the provider idempotency key stays
  * meaningful.
  */
-const HOSTED_GROUP_JOIN_OUTREACH_MESSAGES: readonly ((groupName: string) => string)[] = [
-  (g) => `You liked the invite to ${g}. Reply here and I'll help you join.`,
-  (g) => `Your like on the invite to ${g} came through. Reply here and I'll get you set up.`,
-  (g) => `You're in for ${g}? Reply here and I'll take it from there.`,
-  (g) => `Thanks for the like on the invite to ${g}. Send me a message here and I'll sort your spot.`,
-  (g) => `Got your like on the invite to ${g}. Reply here whenever and I'll set you up.`,
-  (g) => `That was you liking the invite to ${g}, right? Reply here and I'll finish it off.`,
-  (g) => `I saw your like on the invite to ${g}. Say hi here and I'll walk you in.`,
-  (g) => `You hearted the invite to ${g}. Reply here and I'll handle the rest.`,
-  (g) => `Noticed your like on the invite to ${g}. Message me here and I'll get you in.`,
-  (g) => `You liked the invite to ${g}. Say hi here and I'll sort the rest.`,
-  (g) => `Your like came through on the invite to ${g}. Reply here and I'll set it up.`,
-  (g) => `Looks like you want in on ${g}. Reply here and I'll make it happen.`,
-  (g) => `You're keen on ${g} by the look of it. Reply here and I'll get you added.`,
-  (g) => `You liked the invite to ${g}. Message me here and I'll do the rest.`,
-  (g) => `Saw the like on your end for ${g}. Reply here and I'll take care of it.`,
-  (g) => `You tapped like on the invite to ${g}. Reply here and I'll get you joined.`,
-  (g) => `Your like on ${g} landed with me. Say hi here and I'll set you up.`,
-  (g) => `You liked the invite to ${g}. Drop me a line here and I'll get you in.`,
-  (g) => `Getting you into ${g} takes one message. Reply here and I'll start it.`,
-  (g) => `You liked the invite to ${g}. Tell me here and I'll get it moving.`,
-  (g) => `Happy to get you into ${g}. Reply here and I'll set it up.`,
-  (g) => `You liked the invite to ${g}. Reply here and I'll get you in.`,
-  (g) => `Your like on the invite to ${g} reached me. Message me here and I'll finish it.`,
-  (g) => `You liked the invite to ${g}. A quick reply here is all I need.`,
-  (g) => `One reply and you're into ${g}. Send me a message here whenever.`,
+const HOSTED_GROUP_JOIN_OUTREACH_LEADS: readonly ((groupName: string) => string)[] = [
+  (g) => `You reacted to the invite to ${g}.`,
+  (g) => `Your reaction to the invite to ${g} came through.`,
+  (g) => `Interested in ${g}?`,
+  (g) => `Thanks for responding to the invite to ${g}.`,
+  (g) => `Got your reaction to the invite to ${g}.`,
+  (g) => `That was you responding to the invite to ${g}, right?`,
+  (g) => `I saw your reaction to the invite to ${g}.`,
+  (g) => `You responded to the invite to ${g}.`,
+  (g) => `Noticed your reaction to the invite to ${g}.`,
+  (g) => `You showed interest in the invite to ${g}.`,
+  (g) => `Your response came through on the invite to ${g}.`,
+  (g) => `Looks like ${g} caught your eye.`,
+  (g) => `Looks like you're interested in ${g}.`,
+  (g) => `I noticed your interest in ${g}.`,
+  (g) => `Saw your response to the invite to ${g}.`,
+  (g) => `You reacted to ${g}'s invite.`,
+  (g) => `Your reaction to ${g} reached me.`,
+  (g) => `Thanks for showing interest in ${g}.`,
+  (g) => `The invite to ${g} got your reaction.`,
+  (g) => `I caught your response to the invite to ${g}.`,
+  (g) => `Want help with ${g}?`,
+  (g) => `It looks like the invite to ${g} interested you.`,
+  (g) => `Your response to the invite to ${g} reached me.`,
+  (g) => `I noticed you responded to the invite to ${g}.`,
+  (g) => `Want help joining ${g}?`,
 ];
 
+const HOSTED_GROUP_JOIN_OUTREACH_REPLY_HANDOFF =
+  "Reply here to start the next step.";
+
 export const HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT =
-  HOSTED_GROUP_JOIN_OUTREACH_MESSAGES.length;
+  HOSTED_GROUP_JOIN_OUTREACH_LEADS.length;
 
 export function buildHostedGroupJoinOutreachMessage(input: {
   groupDisplayName: string | null | undefined;
@@ -118,7 +120,9 @@ export function buildHostedGroupJoinOutreachMessage(input: {
   const groupName = normalizeHostedGroupJoinOutreachGroupName(input.groupDisplayName);
   const variantIndex = readHostedGroupJoinOutreachVariantIndex(input.outreachId);
 
-  return HOSTED_GROUP_JOIN_OUTREACH_MESSAGES[variantIndex]!(groupName);
+  const lead = HOSTED_GROUP_JOIN_OUTREACH_LEADS[variantIndex]!(groupName);
+
+  return `${lead} ${HOSTED_GROUP_JOIN_OUTREACH_REPLY_HANDOFF}`;
 }
 
 export function resolveHostedGroupJoinOutreachDailyLimit(
@@ -143,7 +147,7 @@ export function readHostedGroupJoinOutreachVariantIndex(outreachId: string): num
   const digest = sha256Hex(`group-join-outreach-message:${outreachId}`);
 
   return Number.parseInt(digest.slice(0, 8), 16)
-    % HOSTED_GROUP_JOIN_OUTREACH_MESSAGES.length;
+    % HOSTED_GROUP_JOIN_OUTREACH_LEADS.length;
 }
 
 export type HostedGroupJoinOutreachSweepResult = {
@@ -213,7 +217,7 @@ export async function drainOneHostedGroupJoinOutreach(input: {
     async (tx) => drainOneHostedGroupJoinOutreachTx({
       now,
       ...(input.signal ? { signal: input.signal } : {}),
-      transactionStartedAtMs: Date.now(),
+      providerFenceState: createHostedGroupJoinProviderFenceState(),
       tx,
     }),
     HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
@@ -224,8 +228,8 @@ export async function drainOneHostedGroupJoinOutreach(input: {
 
 async function drainOneHostedGroupJoinOutreachTx(input: {
   now: Date;
+  providerFenceState: HostedGroupJoinProviderFenceState;
   signal?: AbortSignal;
-  transactionStartedAtMs: number;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOutreachDrainResult> {
   await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
@@ -299,6 +303,9 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
           displayName: true,
           id: true,
           joinCode: true,
+          runtimeMember: {
+            select: { suspendedAt: true },
+          },
           runtimeMemberId: true,
         },
       },
@@ -320,7 +327,12 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
       tx: input.tx,
     });
   }
-  if (!offer.group?.runtimeMemberId || !offer.group.joinCode) {
+  if (
+    !offer.group?.runtimeMemberId
+    || !offer.group.joinCode
+    || !offer.group.runtimeMember
+    || offer.group.runtimeMember.suspendedAt
+  ) {
     return skipHostedGroupJoinOutreachTx({
       now: input.now,
       outreachId: outreach.id,
@@ -496,17 +508,6 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
   }
 
   const idempotencyKey = buildHostedGroupJoinOutreachIdempotencyKey(outreach.id);
-  if (!hasHostedGroupJoinOutreachProviderFenceBudget(input.transactionStartedAtMs)) {
-    return deferHostedGroupJoinOutreachTx({
-      nextAttemptAt: new Date(
-        input.now.getTime() + HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS,
-      ),
-      now: input.now,
-      outreachId: outreach.id,
-      reason: "provider_fence_budget",
-      tx: input.tx,
-    });
-  }
   const deliveryClaim = await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt: input.now,
     groupJoinOutreachId: outreach.id,
@@ -550,23 +551,8 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
     },
   });
 
-  if (!hasHostedGroupJoinOutreachProviderFenceBudget(input.transactionStartedAtMs)) {
-    return recordHostedGroupJoinOutreachProviderFailureTx({
-      error: hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_FENCE_EXHAUSTED",
-        httpStatus: 503,
-        message: "Hosted group join outreach provider fence ran out of time.",
-        retryable: true,
-      }),
-      idempotencyKey,
-      nextAttemptCount: outreach.attemptCount + 1,
-      now: input.now,
-      outreachId: outreach.id,
-      tx: input.tx,
-    });
-  }
-
   try {
+    beginHostedGroupJoinProviderRequest(input.providerFenceState);
     const sent = await createHostedLinqChat({
       from: line.phoneNumber,
       idempotencyKey,
@@ -577,6 +563,7 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
       ...(input.signal ? { signal: input.signal } : {}),
       to: [participantPhoneNumber],
     });
+    input.providerFenceState.providerRequestCompleted = true;
     await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: new Date(),
       idempotencyKey,
@@ -589,6 +576,12 @@ async function drainOneHostedGroupJoinOutreachTx(input: {
       outreachId: outreach.id,
     };
   } catch (error) {
+    if (
+      !input.providerFenceState.providerRequestStarted
+      || input.providerFenceState.providerRequestCompleted
+    ) {
+      throw error;
+    }
     return recordHostedGroupJoinOutreachProviderFailureTx({
       error,
       idempotencyKey,
@@ -661,15 +654,6 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   }
 
   return null;
-}
-
-function hasHostedGroupJoinOutreachProviderFenceBudget(
-  transactionStartedAtMs: number,
-): boolean {
-  const elapsedMs = Date.now() - transactionStartedAtMs;
-  return HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS - elapsedMs
-    >= LINQ_API_DEFAULT_TIMEOUT_MS
-      + HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS;
 }
 
 async function recordHostedGroupJoinOutreachProviderFailureTx(input: {

@@ -210,6 +210,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
       alreadyActiveMember: false,
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
+      inviteCode: "invite_phone_bound",
       joinCode: "JOIN123",
       permissions: [
         macroPermission("protein-days.v0", "protein"),
@@ -247,6 +248,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
     method: "POST",
     payload: {
       expectedMembershipId: null,
+      inviteCode: "invite_phone_bound",
       selectedVaultShareProjectionScopes: [
         { projectionKind: "protein-days.v0" },
         { projectionKind: "carbs-days.v0" },

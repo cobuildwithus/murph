@@ -124,8 +124,10 @@ describe("hosted-onboarding member-identity-service", () => {
     const createdMember = makeMember({
       id: "member_created",
     });
+    const participantContactLock = vi.fn().mockResolvedValue(0);
     const identityCreateMany = vi.fn(async () => ({ count: 1 }));
     const prisma = asRootPrisma({
+      $executeRaw: participantContactLock,
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
         delete: vi.fn(),
@@ -151,6 +153,9 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
+    expect(participantContactLock).toHaveBeenCalledTimes(1);
+    expect(participantContactLock.mock.invocationCallOrder[0])
+      .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("blocks a suspended member before reconciling any identity fields", async () => {
@@ -544,10 +549,14 @@ function requireHostedEmailLookupKey(value: string): string {
 }
 
 function asRootPrisma<T extends object>(tx: T): T & {
+  $executeRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
 } {
+  const executeRaw = (
+    tx as T & { $executeRaw?: ReturnType<typeof vi.fn> }
+  ).$executeRaw ?? vi.fn().mockResolvedValue(0);
   const innerTx = {
-    $executeRaw: vi.fn().mockResolvedValue(0),
+    $executeRaw: executeRaw,
     hostedAccountDeletionCleanup: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -555,6 +564,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
   };
   return {
     ...innerTx,
+    $executeRaw: executeRaw,
     $transaction: vi.fn(
       async (callback: (transaction: T) => Promise<unknown>) =>
         callback(innerTx as T),

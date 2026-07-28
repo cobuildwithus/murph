@@ -192,6 +192,22 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
+      if (providerResult.groupJoinOfferHandled) {
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-linq-group-join-offer-reaction",
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: true,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,

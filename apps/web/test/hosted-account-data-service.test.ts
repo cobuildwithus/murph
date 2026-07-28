@@ -89,9 +89,8 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
-  buildHostedLinqInviteSignupDeliverySourceRef,
-  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectId,
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
@@ -624,14 +623,10 @@ describe("deleteHostedAccountData", () => {
     const participantMemberId = "member_group_participant";
     const occurredAt = new Date("2026-07-27T14:00:00.000Z");
     const outreachId = "hgrpjoa_owned_projection";
-    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: buildHostedLinqInviteSignupEffectId({
-        memberId: participantMemberId,
-        occurredAt,
-        sourceEventDigest: "a".repeat(32),
-      }),
-      groupJoinOutreachId: outreachId,
-      groupJoinRepliedAt: occurredAt.toISOString(),
+    const sourceRef = buildHostedLinqInviteSignupEffectId({
+      memberId: participantMemberId,
+      occurredAt,
+      sourceEventDigest: "a".repeat(32),
     });
     const dailyStateUpdates: unknown[] = [];
     const operationOrder: string[] = [];
@@ -924,31 +919,20 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
+          groupJoinOutreachId: null,
           OR: [
             {
               sourceRef: {
-                startsWith: "linq-invite-signup:member_123:",
+                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
+                  "member_123",
+                ),
               },
             },
             {
               sourceRef: {
-                startsWith:
-                  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-                    "member_123",
-                  ),
-              },
-            },
-            {
-              sourceRef: {
-                startsWith: "linq-invite-signup:member_thread_container_123:",
-              },
-            },
-            {
-              sourceRef: {
-                startsWith:
-                  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-                    "member_thread_container_123",
-                  ),
+                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
+                  "member_thread_container_123",
+                ),
               },
             },
           ],

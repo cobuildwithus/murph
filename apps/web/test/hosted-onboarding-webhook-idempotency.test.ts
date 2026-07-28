@@ -193,9 +193,6 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import {
-  buildHostedLinqInviteSignupDeliverySourceRef,
-} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
@@ -866,12 +863,15 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(membershipCreates).toBe(1);
   });
 
-  it("reruns clean duplicate Linq reaction.added events without sending the join-offer confirmation twice", async () => {
+  it("skips a duplicate Linq join reaction after its terminal handling committed", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     prisma.hostedLinqProviderEvent.createMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 0 });
+    prisma.hostedLinqProviderEvent.findUnique.mockResolvedValueOnce({
+      groupJoinOfferHandledAt: new Date("2026-03-26T12:01:00.000Z"),
+    });
     let confirmationSends = 0;
     let confirmationSent = false;
     mocks.handleHostedGroupJoinOfferReaction.mockImplementation(async () => {
@@ -907,12 +907,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
       duplicate: true,
-      ignored: false,
+      ignored: true,
       ok: true,
-      reason: "accepted-linq-group-join-offer-reaction",
+      reason: "duplicate-linq-group-join-offer-reaction",
     });
 
-    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(2);
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(1);
     expect(confirmationSends).toBe(1);
   });
 
@@ -1159,6 +1159,150 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
+  it("honors an earlier group outreach after the phone becomes an active member", async () => {
+    const prisma = createPrismaStub();
+    const outreach = {
+      groupJoinOutreach: {
+        id: "hgrpjoa_active_member",
+        offer: {
+          group: {
+            id: "hgrp_active_member",
+            joinCode: "join_active_member",
+            runtimeMember: { suspendedAt: null },
+            runtimeMemberId: "hbm_runtime",
+          },
+          revokedAt: null,
+        },
+      },
+      groupJoinOutreachId: "hgrpjoa_active_member",
+      id: "hld_active_member_opener",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
+    };
+    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedGroupJoinOutreach.findFirst.mockResolvedValue({
+      offer: outreach.groupJoinOutreach.offer,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.issueHostedInviteTx.mockResolvedValue({
+      id: "invite_123",
+      inviteCode: "code_active_member",
+    });
+    prisma.hostedInvite.findUnique.mockResolvedValue({
+      inviteCode: "code_active_member",
+    });
+    const restorePublicBaseUrl = configureHostedPublicBaseUrlForTest();
+
+    try {
+      await expect(
+        handleHostedOnboardingLinqWebhook({
+          rawBody: buildLinqMessageWebhookBody({
+            eventId: "evt_active_member_group_reply",
+            service: "iMessage",
+          }),
+          signature: null,
+          timestamp: null,
+        }),
+      ).resolves.toMatchObject({
+        inviteCode: "code_active_member",
+        joinUrl:
+          "https://join.example.test/groups/join/join_active_member?invite=code_active_member",
+        ok: true,
+        reason: "sent-signup-link",
+      });
+
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: buildHostedInviteReply({
+            joinUrl:
+              "https://join.example.test/groups/join/join_active_member?invite=code_active_member",
+          }),
+        }),
+      );
+    } finally {
+      restorePublicBaseUrl();
+    }
+  });
+
+  it("uses ordinary onboarding after an inactive member already joined on the web", async () => {
+    const prisma = createPrismaStub();
+    const outreach = {
+      groupJoinOutreach: {
+        id: "hgrpjoa_web_joined",
+        offer: {
+          group: {
+            id: "hgrp_web_joined",
+            joinCode: "join_web_joined",
+            runtimeMember: { suspendedAt: null },
+            runtimeMemberId: "hbm_runtime",
+          },
+          revokedAt: null,
+        },
+      },
+      groupJoinOutreachId: "hgrpjoa_web_joined",
+      id: "hld_web_joined_opener",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
+    };
+    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedGroupMember.findUnique.mockResolvedValueOnce({
+      id: "hgrpm_web_joined",
+    });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.not_started,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.issueHostedInviteTx.mockResolvedValue({
+      id: "invite_123",
+      inviteCode: "code_web_joined",
+    });
+    prisma.hostedInvite.findUnique.mockResolvedValue({
+      inviteCode: "code_web_joined",
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody({
+          eventId: "evt_web_joined_group_reply",
+          service: "iMessage",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "code_web_joined",
+      joinUrl: "https://join.example.test/join/code_web_joined",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: buildHostedInviteReply({
+          joinUrl: "https://join.example.test/join/code_web_joined",
+        }),
+      }),
+    );
+  });
+
   it("uses member/day delivery admission for overlapping first-contact signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -1176,12 +1320,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     const expectedIdempotencyKey =
       "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
-    const firstSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: expectedIdempotencyKey,
-    });
+    const firstSourceRef = expectedIdempotencyKey;
     mocks.readHostedLinqDeliveryProviderDispatchIntentTx
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
+        id: "hld_first_contact",
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
         providerCorrelated: false,
         sourceRef: firstSourceRef,
       });
@@ -1810,8 +1955,12 @@ function createPrismaStub() {
     // Inbound planning consults pending pre-member group-join outreach to
     // recover the originating group. This fixture has no outreach rows.
     hostedGroupJoinOutreach: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    hostedGroupMember: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -1865,6 +2014,8 @@ function createPrismaStub() {
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({
@@ -1925,4 +2076,23 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function configureHostedPublicBaseUrlForTest(): () => void {
+  const previous = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+  process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL =
+    "https://join.example.test";
+  clearHostedOnboardingRuntimeCache();
+  return () => {
+    restoreEnvValue("HOSTED_ONBOARDING_PUBLIC_BASE_URL", previous);
+    clearHostedOnboardingRuntimeCache();
+  };
+}
+
+function clearHostedOnboardingRuntimeCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
 }

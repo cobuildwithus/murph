@@ -21,15 +21,14 @@ import {
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
-  buildHostedLinqInviteSignupDeliverySourceRef,
-  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectId,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
-  buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
-  parseHostedLinqInviteSignupDeliverySourceRef,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
-import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import {
+  ingestHostedLinqProviderEventTx,
+  markHostedLinqGroupJoinOfferHandledTx,
+} from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
@@ -388,11 +387,7 @@ describe("hosted Linq observability stores", () => {
       occurredAt: "2026-03-26T12:05:00.000Z",
       sourceEventDigest: "a".repeat(32),
     });
-    const groupSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: groupEffectId,
-      groupJoinOutreachId: "hgrpjoa_group_success",
-      groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
-    });
+    const groupSourceRef = groupEffectId;
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_generic_failed",
       idempotencyKey:
@@ -427,17 +422,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
       select: { sourceRef: true },
       where: {
-        OR: [
-          { sourceRef: { startsWith: genericEffectId } },
-          {
-            sourceRef: {
-              startsWith:
-                `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-                  "member_123",
-                )}2026-03-26T00:00:00.000Z`,
-            },
-          },
-        ],
+        sourceRef: { startsWith: genericEffectId },
         status: {
           in: [
             "attempted",
@@ -915,6 +900,51 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("recognizes and atomically marks a terminal group-join reaction", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const handledAt = new Date("2026-03-26T12:01:00.000Z");
+
+    await markHostedLinqGroupJoinOfferHandledTx({
+      eventId: "evt_group_join_handled",
+      handledAt,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqProviderEventUpdateMany).toHaveBeenCalledWith({
+      data: { groupJoinOfferHandledAt: handledAt },
+      where: {
+        eventId: createHostedLinqProviderEventLookupKey(
+          "evt_group_join_handled",
+        ),
+        groupJoinOfferHandledAt: null,
+      },
+    });
+
+    fixture.hostedLinqProviderEventCreateMany.mockResolvedValueOnce({ count: 0 });
+    fixture.hostedLinqProviderEventFindUnique.mockResolvedValueOnce({
+      groupJoinOfferHandledAt: handledAt,
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_group_123",
+        from_handle: { handle: "+15551234567", service: "iMessage" },
+        message_id: "msg_offer_123",
+        reaction_type: "like",
+      },
+      eventId: "evt_group_join_handled",
+      eventType: "reaction.added",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: true,
+      groupJoinOfferHandled: true,
+    });
   });
 
   it("advances delivery rows for same-timestamp delivered receipts only by provider event id", async () => {
@@ -1482,6 +1512,64 @@ describe("hosted Linq observability stores", () => {
       })],
       skipDuplicates: true,
     });
+  });
+
+  it("persists the exact group-reply occurrence and outreach relation on the delivery", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:01.000Z");
+    const replyOccurredAt = new Date("2026-03-26T11:59:58.321Z");
+    const effectId = buildHostedLinqInviteSignupEffectId({
+      groupJoinOutreachId: "hgrpjoa_exact_reply",
+      memberId: "member_123",
+      occurredAt: replyOccurredAt,
+      sourceEventId: "evt_exact_group_reply",
+    });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      groupJoinOutreachId: "hgrpjoa_exact_reply",
+      groupJoinReplyOccurredAt: replyOccurredAt,
+      idempotencyKey: effectId,
+      linqChatId: "chat_exact_reply",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: effectId,
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toMatchObject({ claimed: true });
+
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        groupJoinOutreachId: "hgrpjoa_exact_reply",
+        groupJoinReplyOccurredAt: replyOccurredAt,
+        sourceRef: effectId,
+      })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("rejects incomplete group-aware signup delivery context before persistence", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const effectId = buildHostedLinqInviteSignupEffectId({
+      groupJoinOutreachId: "hgrpjoa_incomplete_reply",
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "evt_incomplete_group_reply",
+    });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      groupJoinOutreachId: "hgrpjoa_incomplete_reply",
+      idempotencyKey: effectId,
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: effectId,
+      targetKind: "thread",
+      template: "invite_signup",
+    })).rejects.toThrow(
+      "Hosted Linq group-aware signup delivery requires the exact reply occurrence time.",
+    );
+    expect(fixture.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
   });
 
   it("re-reads a concurrent provider-dispatch row after duplicate-safe creation", async () => {
@@ -3581,33 +3669,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       memberId: "member_123",
       sourceEventDigest: null,
     });
-    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: second,
-      groupJoinOutreachId: "hgrpjoa_opaque",
-      groupJoinRepliedAt: "2026-03-26T12:34:56.000Z",
-    });
-    expect(sourceRef.startsWith(
-      buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix("member_123"),
-    )).toBe(true);
-    expect(sourceRef).toContain(
-      buildHostedLinqInviteSignupGroupJoinSourceRefFragment("hgrpjoa_opaque"),
-    );
-    expect(parseHostedLinqInviteSignupDeliverySourceRef(sourceRef)).toEqual({
-      effectId: second,
-      groupJoinReplyContext: {
-        outreachId: "hgrpjoa_opaque",
-        repliedAt: "2026-03-26T12:34:56.000Z",
-      },
-    });
-    const genericSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: BASE_EFFECT_ID,
-    });
-    expect(parseHostedLinqInviteSignupDeliverySourceRef(genericSourceRef))
-      .toEqual({
-        effectId: BASE_EFFECT_ID,
-        groupJoinReplyContext: null,
-      });
-
     const groupEffectId = buildHostedLinqInviteSignupEffectId({
       groupJoinOutreachId: "hgrpjoa_opaque",
       memberId: "member_123",
@@ -3732,11 +3793,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       service: "sms",
     }]);
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: BASE_EFFECT_ID,
-        groupJoinOutreachId: "hgrpjoa_buffered",
-        groupJoinRepliedAt: "2026-03-26T12:01:00.000Z",
-      }),
+      groupJoinOutreachId: "hgrpjoa_buffered",
+      groupJoinReplyOccurredAt: new Date("2026-03-26T12:01:00.000Z"),
+      sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
 
@@ -3781,11 +3840,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: groupEffectId,
-        groupJoinOutreachId: "hgrpjoa_group_success",
-        groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
-      }),
+      sourceRef: groupEffectId,
     }]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
@@ -3812,11 +3867,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       service: "sms",
     }]);
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: BASE_EFFECT_ID,
-        groupJoinOutreachId: "hgrpjoa_buffered",
-        groupJoinRepliedAt: "2026-03-26T12:01:00.000Z",
-      }),
+      groupJoinOutreachId: "hgrpjoa_buffered",
+      groupJoinReplyOccurredAt: new Date("2026-03-26T12:01:00.000Z"),
+      sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
 
@@ -3844,15 +3897,13 @@ describe("hosted Linq signup-link delivery attempts", () => {
   it("reopens failed group context, releases lone suppression, and restores both when delivery later wins", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
-    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: BASE_EFFECT_ID,
-      groupJoinOutreachId: "hgrpjoa_receipt",
-      groupJoinRepliedAt: repliedAt,
-    });
+    const sourceRef = BASE_EFFECT_ID;
     fixture.hostedLinqDeliveryFindFirst
       .mockResolvedValueOnce({
         id: "hld_group_failed",
         idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(BASE_EFFECT_ID),
+        groupJoinOutreachId: "hgrpjoa_receipt",
+        groupJoinReplyOccurredAt: new Date(repliedAt),
         phoneNumberLookupKey: null,
         sourceRef,
         template: "invite_signup",
@@ -3860,6 +3911,8 @@ describe("hosted Linq signup-link delivery attempts", () => {
       .mockResolvedValueOnce({
         id: "hld_group_delivered",
         idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(BASE_EFFECT_ID),
+        groupJoinOutreachId: "hgrpjoa_receipt",
+        groupJoinReplyOccurredAt: new Date(repliedAt),
         phoneNumberLookupKey: null,
         sourceRef,
         template: "invite_signup",
@@ -3928,20 +3981,14 @@ describe("hosted Linq signup-link delivery attempts", () => {
       idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
         BASE_EFFECT_ID,
       ),
+      groupJoinOutreachId: "hgrpjoa_stale",
+      groupJoinReplyOccurredAt: new Date(repliedAt),
       phoneNumberLookupKey: null,
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: BASE_EFFECT_ID,
-        groupJoinOutreachId: "hgrpjoa_stale",
-        groupJoinRepliedAt: repliedAt,
-      }),
+      sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: `${BASE_EFFECT_ID}:a2`,
-        groupJoinOutreachId: "hgrpjoa_stale",
-        groupJoinRepliedAt: repliedAt,
-      }),
+      sourceRef: `${BASE_EFFECT_ID}:a2`,
     }]);
 
     await ingestHostedLinqProviderEventTx({
@@ -3964,17 +4011,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
     expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
       select: { sourceRef: true },
       where: {
-        OR: [
-          { sourceRef: { startsWith: BASE_EFFECT_ID } },
-          {
-            sourceRef: {
-              startsWith:
-                `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-                  "member_123",
-                )}2026-03-26T00:00:00.000Z`,
-            },
-          },
-        ],
+        sourceRef: { startsWith: BASE_EFFECT_ID },
         status: {
           in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
         },
@@ -4087,6 +4124,9 @@ function createObservabilityPrismaFixture() {
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
+  const hostedLinqProviderEventFindUnique = vi.fn().mockResolvedValue(null);
+  const hostedLinqProviderEventUpdateMany =
+    vi.fn().mockResolvedValue({ count: 1 });
   const hostedMailboxItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
   const prisma = {
     $transaction: transaction,
@@ -4122,6 +4162,8 @@ function createObservabilityPrismaFixture() {
       createMany: hostedLinqProviderEventCreateMany,
       findFirst: hostedLinqProviderEventFindFirst,
       findMany: hostedLinqProviderEventFindMany,
+      findUnique: hostedLinqProviderEventFindUnique,
+      updateMany: hostedLinqProviderEventUpdateMany,
     },
     hostedMailboxItem: {
       updateMany: hostedMailboxItemUpdateMany,
@@ -4152,6 +4194,8 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
     hostedLinqProviderEventFindMany,
+    hostedLinqProviderEventFindUnique,
+    hostedLinqProviderEventUpdateMany,
     hostedMailboxItemUpdateMany,
     prisma,
     transaction,

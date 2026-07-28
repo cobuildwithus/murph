@@ -28,6 +28,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
 }): Promise<{
   alertIds: string[];
   duplicate: boolean;
+  groupJoinOfferHandled?: boolean;
   restoreOnboardingLink?: NonNullable<
     Awaited<ReturnType<typeof applyHostedLinqDeliveryReceiptTx>>["restoreOnboardingLink"]
   >;
@@ -70,9 +71,16 @@ export async function ingestHostedLinqProviderEventTx(input: {
   });
 
   if (created.count === 0) {
+    const existing = await input.prisma.hostedLinqProviderEvent.findUnique({
+      where: { eventId: eventLookupKey },
+      select: { groupJoinOfferHandledAt: true },
+    });
     return {
       alertIds: [],
       duplicate: true,
+      ...(existing?.groupJoinOfferHandledAt
+        ? { groupJoinOfferHandled: true }
+        : {}),
     };
   }
 
@@ -138,6 +146,38 @@ export async function ingestHostedLinqProviderEventTx(input: {
       ? { restoreOnboardingLink: deliveryReceipt.restoreOnboardingLink }
       : {}),
   };
+}
+
+export async function markHostedLinqGroupJoinOfferHandledTx(input: {
+  eventId: string;
+  handledAt?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const updated = await input.prisma.hostedLinqProviderEvent.updateMany({
+    data: {
+      groupJoinOfferHandledAt: input.handledAt ?? new Date(),
+    },
+    where: {
+      eventId: createHostedLinqProviderEventLookupKey(input.eventId),
+      groupJoinOfferHandledAt: null,
+    },
+  });
+  if (updated.count > 1) {
+    throw new Error("A Linq provider event marker updated more than one row.");
+  }
+  if (updated.count === 0) {
+    const existing = await input.prisma.hostedLinqProviderEvent.findUnique({
+      where: {
+        eventId: createHostedLinqProviderEventLookupKey(input.eventId),
+      },
+      select: { groupJoinOfferHandledAt: true },
+    });
+    if (!existing?.groupJoinOfferHandledAt) {
+      throw new Error(
+        "A terminal group-join reaction requires its Linq provider event.",
+      );
+    }
+  }
 }
 
 function isHostedRuntimeOwnedOutboundEcho(

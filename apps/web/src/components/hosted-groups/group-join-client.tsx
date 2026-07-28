@@ -112,6 +112,7 @@ export function GroupJoinAcceptForm(props: {
   alreadyActiveMember: boolean;
   expectedMembershipId: string | null;
   groupName: string;
+  inviteCode?: string | null;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
   postJoinContactOption: MurphContactOption | null;
@@ -167,6 +168,7 @@ export function GroupJoinAcceptForm(props: {
         method: "POST",
         payload: {
           expectedMembershipId: props.expectedMembershipId,
+          ...(props.inviteCode ? { inviteCode: props.inviteCode } : {}),
           selectedVaultShareProjectionScopes,
         },
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/accept`,

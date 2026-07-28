@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   enqueueHostedGroupJoinOutreachTx,
-  isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
   readHostedGroupJoinOutreachReplyContextTx,
+  readHostedGroupJoinOutreachReplyDeliveryContextTx,
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
@@ -209,6 +209,7 @@ describe("hosted group join outreach store", () => {
         id: input?.outreachId ?? "hgrpjoa_opaque",
         offer: {
           group: {
+            id: "hgrp_opaque",
             joinCode: input?.joinCode ?? "join_opaque",
             runtimeMember: {
               suspendedAt: input?.runtimeSuspendedAt ?? null,
@@ -231,15 +232,23 @@ describe("hosted group join outreach store", () => {
 
   function createReplyContextTx(input?: {
     deliveries?: ReturnType<typeof createReplyDelivery>[];
+    existingMembership?: { id: string } | null;
     liveSignupDelivery?: { id: string } | null;
   }) {
     const findMany = vi.fn(async () =>
       input?.deliveries ?? [createReplyDelivery()]);
     const findFirst = vi.fn(async () => input?.liveSignupDelivery ?? null);
+    const findMembership = vi.fn(
+      async () => input?.existingMembership ?? null,
+    );
     return {
       findFirst,
       findMany,
+      findMembership,
       tx: {
+        hostedGroupMember: {
+          findUnique: findMembership,
+        },
         hostedLinqDelivery: {
           findFirst,
           findMany,
@@ -270,6 +279,30 @@ describe("hosted group join outreach store", () => {
     }));
   });
 
+  it("drops the group context when the resolved member already joined on the web", async () => {
+    const { findMembership, tx } = createReplyContextTx({
+      existingMembership: { id: "hgrpm_opaque" },
+    });
+
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      participantMemberId: "hbm_participant",
+      participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(findMembership).toHaveBeenCalledWith({
+      where: {
+        groupId_memberId: {
+          groupId: "hgrp_opaque",
+          memberId: "hbm_participant",
+        },
+      },
+      select: { id: true },
+    });
+  });
+
   it("keeps reply context unavailable while a group-aware signup delivery is live", async () => {
     const { tx } = createReplyContextTx({
       liveSignupDelivery: { id: "hld_live_signup" },
@@ -281,6 +314,32 @@ describe("hosted group join outreach store", () => {
       recipientPhoneNumber: "+15550000000",
       tx,
     })).resolves.toBeNull();
+  });
+
+  it("keeps reply context available for the exact inbound retry", async () => {
+    const { findFirst, tx } = createReplyContextTx();
+    findFirst.mockResolvedValueOnce(null);
+
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
+      sourceEventId: "event-exact-retry",
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_opaque",
+      outreachId: "hgrpjoa_opaque",
+    });
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        NOT: {
+          sourceRef: {
+            contains: expect.stringMatching(/^:e[0-9a-f]{32}$/),
+          },
+        },
+      }),
+    }));
   });
 
   it("prefers an exact chat over a newer sending-line fallback", async () => {
@@ -318,6 +377,7 @@ describe("hosted group join outreach store", () => {
       outreach: {
         offer: {
           group: {
+            id: "hgrp_opaque",
             joinCode: "join_opaque",
             runtimeMember: { suspendedAt: null },
             runtimeMemberId: "hbm_runtime",
@@ -333,6 +393,7 @@ describe("hosted group join outreach store", () => {
       outreach: {
         offer: {
           group: {
+            id: "hgrp_opaque",
             joinCode: "join_opaque",
             runtimeMember: { suspendedAt: null },
             runtimeMemberId: "hbm_runtime",
@@ -348,6 +409,7 @@ describe("hosted group join outreach store", () => {
       outreach: {
         offer: {
           group: {
+            id: "hgrp_opaque",
             joinCode: "join_opaque",
             runtimeMember: { suspendedAt: null },
             runtimeMemberId: "hbm_runtime",
@@ -363,6 +425,7 @@ describe("hosted group join outreach store", () => {
       outreach: {
         offer: {
           group: {
+            id: "hgrp_opaque",
             joinCode: "join_opaque",
             runtimeMember: {
               suspendedAt: new Date("2026-07-24T16:01:00.000Z"),
@@ -373,7 +436,7 @@ describe("hosted group join outreach store", () => {
         },
       },
     },
-  ])("authorizes reply delivery only for $label", async ({
+  ])("returns reply delivery context only for $label", async ({
     expected,
     liveSignupDelivery,
     outreach,
@@ -383,17 +446,107 @@ describe("hosted group join outreach store", () => {
       hostedGroupJoinOutreach: {
         findFirst: vi.fn(async () => outreach),
       },
+      hostedGroupMember: {
+        findUnique: vi.fn(async () => null),
+      },
       hostedLinqDelivery: {
         findFirst: vi.fn(async () => liveSignupDelivery),
       },
     };
 
-    await expect(isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx({
-      groupJoinCode: "join_opaque",
+    await expect(readHostedGroupJoinOutreachReplyDeliveryContextTx({
       outreachId: "hgrpjoa_opaque",
       tx: tx as never,
-    })).resolves.toBe(expected);
+    })).resolves.toEqual(
+      expected
+        ? { joinCode: "join_opaque", kind: "available" }
+        : null,
+    );
     expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes the persisted signup delivery while reauthorizing its retry", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      hostedGroupJoinOutreach: {
+        findFirst: vi.fn(async () => ({
+          offer: {
+            group: {
+              id: "hgrp_opaque",
+              joinCode: "join_opaque",
+              runtimeMember: { suspendedAt: null },
+              runtimeMemberId: "hbm_runtime",
+            },
+            revokedAt: null,
+          },
+        })),
+      },
+      hostedGroupMember: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedLinqDelivery: { findFirst },
+    };
+
+    await expect(readHostedGroupJoinOutreachReplyDeliveryContextTx({
+      excludeSignupDeliveryId: "hld_retry",
+      outreachId: "hgrpjoa_opaque",
+      tx: tx as never,
+    })).resolves.toEqual({
+      joinCode: "join_opaque",
+      kind: "available",
+    });
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: { not: "hld_retry" },
+      }),
+    }));
+  });
+
+  it("reports a web join separately from lost outreach authority", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const findMembership = vi.fn().mockResolvedValue({ id: "hgrpm_opaque" });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      hostedGroupJoinOutreach: {
+        findFirst: vi.fn(async () => ({
+          offer: {
+            group: {
+              id: "hgrp_opaque",
+              joinCode: "join_opaque",
+              runtimeMember: { suspendedAt: null },
+              runtimeMemberId: "hbm_runtime",
+            },
+            revokedAt: null,
+          },
+        })),
+      },
+      hostedGroupMember: {
+        findUnique: findMembership,
+      },
+      hostedLinqDelivery: { findFirst },
+    };
+
+    await expect(readHostedGroupJoinOutreachReplyDeliveryContextTx({
+      memberId: "hbm_participant",
+      outreachId: "hgrpjoa_opaque",
+      tx: tx as never,
+    })).resolves.toEqual({
+      joinCode: "join_opaque",
+      kind: "already_member",
+    });
+
+    expect(findMembership).toHaveBeenCalledWith({
+      where: {
+        groupId_memberId: {
+          groupId: "hgrp_opaque",
+          memberId: "hbm_participant",
+        },
+      },
+      select: { id: true },
+    });
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });
 

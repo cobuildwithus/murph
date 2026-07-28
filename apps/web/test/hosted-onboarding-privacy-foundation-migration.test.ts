@@ -1258,10 +1258,16 @@ describe("hosted Prisma baseline migration", () => {
       'ADD COLUMN "group_join_outreach_id" TEXT',
     );
     expect(hostedGroupJoinOutreachMigrationSql).toContain(
-      'hosted_linq_delivery_group_join_outreach_status_idx',
+      'ADD COLUMN "group_join_reply_occurred_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_offer_handled_at" TIMESTAMP(3)',
     );
     expect(hostedGroupJoinOutreachMigrationSql).toContain(
       'REFERENCES "hosted_group_join_outreach"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_linq_delivery_group_join_outreach_status_idx',
     );
     expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
       '"participant_phone_number"',

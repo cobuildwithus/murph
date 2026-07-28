@@ -5,6 +5,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
+  createHostedLinqChat: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
     handles: [],
     isGroup: false,
@@ -102,6 +103,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
   >("@/src/lib/hosted-onboarding/linq-client");
   return {
     ...actual,
+    createHostedLinqChat: providerMocks.createHostedLinqChat,
     getHostedLinqChatSummary: providerMocks.getHostedLinqChatSummary,
   };
 });
@@ -171,6 +173,9 @@ vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
 });
 
 import {
+  drainOneHostedGroupJoinOutreach,
+} from "@/src/lib/hosted-groups/group-join-outreach-drain";
+import {
   HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
   HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   acquireHostedGroupJoinOutreachDrainLockTx,
@@ -189,7 +194,6 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
-  buildHostedLinqInviteSignupDeliverySourceRef,
   buildHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
@@ -204,6 +208,9 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  acquireHostedLinqParticipantPhoneLockTx,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqProviderEventLookupKey,
@@ -467,15 +474,12 @@ describe.skipIf(!runPostgresProof)(
         // preparation transaction commits and before provider entry. The
         // provider has seen no request and the attempt has no correlation.
         const crashClaimedAt = new Date();
-        const originalSourceRef =
-          buildHostedLinqInviteSignupDeliverySourceRef({
-            effectId: signupLinkEffect.effectId,
-            groupJoinOutreachId: outreachId,
-            groupJoinRepliedAt: signupLinkEffect.payload.occurredAt,
-          });
+        const originalSourceRef = signupLinkEffect.effectId;
+        const exactReplyOccurredAt = new Date(signupLinkEffect.payload.occurredAt);
         await expect(claimHostedLinqDeliveryProviderDispatchTx({
           attemptedAt: crashClaimedAt,
           groupJoinOutreachId: outreachId,
+          groupJoinReplyOccurredAt: exactReplyOccurredAt,
           idempotencyKey: signupLinkEffect.effectId,
           linqChatId: chatId,
           prisma,
@@ -883,7 +887,6 @@ describe.skipIf(!runPostgresProof)(
           occurredAt: acceptedAt,
           sourceEventDigest: randomUUID().replaceAll("-", "").slice(0, 32),
         });
-        const groupOutreachId = `hgrpjoa_deleted_${randomUUID()}`;
         const genericLookupKey =
           createHostedLinqDeliveryIdempotencyLookupKey(genericEffectId);
         const groupLookupKey =
@@ -940,11 +943,7 @@ describe.skipIf(!runPostgresProof)(
                 idempotencyKey: groupLookupKey,
                 messageLookupKey: groupMessageLookupKey,
                 source: "hosted_webhook_side_effect",
-                sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-                  effectId: groupEffectId,
-                  groupJoinOutreachId: groupOutreachId,
-                  groupJoinRepliedAt: acceptedAt.toISOString(),
-                }),
+                sourceRef: groupEffectId,
                 status: "accepted",
                 targetKind: "thread",
                 template: "invite_signup",
@@ -1022,6 +1021,563 @@ describe.skipIf(!runPostgresProof)(
         }
       },
     );
+
+    it("serializes opener dispatch with phone-bound member creation in both orders", async () => {
+      const memberFirst = await createOpenerRaceFixture();
+      providerMocks.createHostedLinqChat.mockReset();
+      let releaseMemberCommit = () => {};
+      const memberMayCommit = new Promise<void>((resolve) => {
+        releaseMemberCommit = resolve;
+      });
+      let reportMemberIdentityReady = () => {};
+      const memberIdentityReady = new Promise<void>((resolve) => {
+        reportMemberIdentityReady = resolve;
+      });
+      let memberFirstPromise: Promise<unknown> | null = null;
+      let memberFirstDrain: ReturnType<typeof drainOneHostedGroupJoinOutreach>
+        | null = null;
+      try {
+        memberFirstPromise = memberFirst.contenderPrisma.$transaction(
+          async (tx) => {
+            await createPhoneBoundMemberIdentityTx({
+              phoneNumber: memberFirst.participantPhone,
+              tx,
+            });
+            reportMemberIdentityReady();
+            await memberMayCommit;
+          },
+        );
+        await memberIdentityReady;
+
+        let drainSettled = false;
+        memberFirstDrain = drainOneHostedGroupJoinOutreach({
+          now: memberFirst.now,
+          prisma: memberFirst.drainPrisma,
+        }).finally(() => {
+          drainSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(drainSettled).toBe(false);
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        await expect(memberFirst.drainPrisma.hostedMemberIdentity.findFirst({
+          select: { memberId: true },
+          where: {
+            phoneLookupKey: memberFirst.participantPhoneLookupKey,
+          },
+        })).resolves.toBeNull();
+
+        releaseMemberCommit();
+        const [, memberFirstDrainResult] = await withTimeout(
+          Promise.all([memberFirstPromise, memberFirstDrain]),
+          10_000,
+        );
+        expect(memberFirstDrainResult).toEqual({
+          kind: "skipped",
+          outreachId: memberFirst.outreachId,
+          reason: "recipient_now_member",
+        });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+      } finally {
+        releaseMemberCommit();
+        await Promise.allSettled([
+          ...(memberFirstPromise ? [memberFirstPromise] : []),
+          ...(memberFirstDrain ? [memberFirstDrain] : []),
+        ]);
+        await cleanupOpenerRaceFixture(memberFirst);
+      }
+
+      const openerFirst = await createOpenerRaceFixture();
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId: `chat-opener-race-${randomUUID()}`,
+            messageId: `message-opener-race-${randomUUID()}`,
+          };
+        });
+      let drainPromise: ReturnType<typeof drainOneHostedGroupJoinOutreach> | null =
+        null;
+      let memberPromise: Promise<unknown> | null = null;
+
+      try {
+        drainPromise = drainOneHostedGroupJoinOutreach({
+          now: openerFirst.now,
+          prisma: openerFirst.drainPrisma,
+        });
+        await providerStarted;
+
+        let memberSettled = false;
+        memberPromise = openerFirst.contenderPrisma.$transaction((tx) =>
+          createPhoneBoundMemberIdentityTx({
+            phoneNumber: openerFirst.participantPhone,
+            tx,
+          })
+        ).finally(() => {
+          memberSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(memberSettled).toBe(false);
+        await expect(openerFirst.contenderPrisma.hostedMemberIdentity.findFirst({
+          select: { memberId: true },
+          where: {
+            phoneLookupKey: openerFirst.participantPhoneLookupKey,
+          },
+        })).resolves.toBeNull();
+
+        releaseProvider();
+        const [drainResult] = await withTimeout(
+          Promise.all([drainPromise, memberPromise]),
+          10_000,
+        );
+        expect(drainResult).toEqual({
+          kind: "sent",
+          outreachId: openerFirst.outreachId,
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+        await expect(openerFirst.drainPrisma.hostedLinqDelivery.findFirst({
+          select: {
+            groupJoinOutreachId: true,
+            status: true,
+          },
+          where: {
+            groupJoinOutreachId: openerFirst.outreachId,
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          },
+        })).resolves.toEqual({
+          groupJoinOutreachId: openerFirst.outreachId,
+          status: "accepted",
+        });
+      } finally {
+        releaseProvider();
+        await Promise.allSettled([
+          ...(drainPromise ? [drainPromise] : []),
+          ...(memberPromise ? [memberPromise] : []),
+        ]);
+        providerMocks.createHostedLinqChat.mockReset();
+        await cleanupOpenerRaceFixture(openerFirst);
+      }
+    });
+
+    it("holds an immediate reply until the opener correlation commits", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createOpenerRaceFixture();
+      const memberPrisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const chatId = `chat-immediate-reply-${randomUUID()}`;
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId,
+            messageId: `message-immediate-reply-${randomUUID()}`,
+          };
+        });
+      let drainPromise: ReturnType<typeof drainOneHostedGroupJoinOutreach> | null =
+        null;
+      let memberPromise: Promise<unknown> | null = null;
+      let planPromise: Promise<
+        Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>
+      > | null = null;
+
+      try {
+        drainPromise = drainOneHostedGroupJoinOutreach({
+          now: fixture.now,
+          prisma: fixture.drainPrisma,
+        });
+        await providerStarted;
+
+        // Queue canonical member creation ahead of the reply on the same phone
+        // lock. Once the opener commits, the reply must see both durable facts
+        // rather than trying to provision a second member.
+        memberPromise = memberPrisma.$transaction((tx) =>
+          createPhoneBoundMemberIdentityTx({
+            phoneNumber: fixture.participantPhone,
+            tx,
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        const replyEvent = buildDirectReplyEvent({
+          chatId,
+          eventId: `event-immediate-reply-${randomUUID()}`,
+          messageId: `message-immediate-reply-${randomUUID()}`,
+          occurredAt: "2026-07-27T16:00:01.000Z",
+          participantPhone: fixture.participantPhone,
+          recipientPhone: fixture.linePhone,
+        });
+        let planSettled = false;
+        planPromise = fixture.contenderPrisma.$transaction((tx) =>
+          planHostedOnboardingLinqWebhook({
+            event: replyEvent,
+            firstContactAdmitted: true,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          })
+        ).finally(() => {
+          planSettled = true;
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(planSettled).toBe(false);
+
+        releaseProvider();
+        const [drainResult, , plan] = await withTimeout(
+          Promise.all([drainPromise, memberPromise, planPromise]),
+          10_000,
+        );
+        expect(drainResult).toEqual({
+          kind: "sent",
+          outreachId: fixture.outreachId,
+        });
+        expect(plan.response).toMatchObject({
+          joinUrl: expect.stringContaining(
+            `/groups/join/${fixture.joinCode}?invite=`,
+          ),
+          reason: "sent-signup-link",
+        });
+      } finally {
+        releaseProvider();
+        await Promise.allSettled([
+          ...(drainPromise ? [drainPromise] : []),
+          ...(memberPromise ? [memberPromise] : []),
+          ...(planPromise ? [planPromise] : []),
+        ]);
+        providerMocks.createHostedLinqChat.mockReset();
+        vi.unstubAllEnvs();
+        await memberPrisma.$disconnect();
+        await cleanupOpenerRaceFixture(fixture);
+      }
+    });
+
+    it("retries when web membership commits before group-link dispatch", async () => {
+      const fixture = await createDeletionReplyRaceFixture();
+      providerMocks.sendHostedLinqChatMessage.mockReset();
+      try {
+        await fixture.deletionPrisma.hostedGroupMember.create({
+          data: {
+            groupId: fixture.groupId,
+            id: `hgrpm_web_join_${randomUUID()}`,
+            joinedAt: new Date("2026-07-27T16:00:01.000Z"),
+            memberId: fixture.participantMemberId,
+          },
+        });
+
+        await expect(drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        })).rejects.toMatchObject({
+          code: "HOSTED_GROUP_JOIN_MEMBERSHIP_CHANGED",
+          retryable: true,
+        });
+
+        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        await expect(fixture.deletionPrisma.hostedLinqDelivery.findUnique({
+          select: { id: true },
+          where: { idempotencyKey: fixture.deliveryLookupKey },
+        })).resolves.toBeNull();
+      } finally {
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("suppresses a fresh generic dispatch after a concurrent group link wins the member lock", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      const genericEffect = createHostedWebhookLinqMessageSideEffect({
+        chatId: fixture.chatId,
+        inviteId: fixture.inviteId,
+        memberId: fixture.participantMemberId,
+        occurredAt: "2026-07-27T16:00:00.000Z",
+        sourceEventId: `event-generic-race-${randomUUID()}`,
+        template: "invite_signup",
+      });
+      const genericDeliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(genericEffect.effectId);
+      if (!genericDeliveryLookupKey) {
+        throw new Error("Expected the generic-race delivery lookup key.");
+      }
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId: fixture.chatId,
+            messageId: `linq-group-race-${randomUUID()}`,
+          };
+        });
+      let groupPromise: ReturnType<typeof drainDeletionReplyEffect> | null = null;
+      let genericPromise: ReturnType<typeof drainDeletionReplyEffect> | null =
+        null;
+
+      try {
+        // Planning either signup effect first materializes the occurrence-day
+        // row that owns onboardingLinkSentAt. This direct-drain fixture must
+        // preserve that production prerequisite so both effects share the same
+        // member/day suppression marker.
+        await fixture.deletionPrisma.hostedLinqDailyState.create({
+          data: {
+            dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+            firstSeenAt: new Date("2026-07-27T16:00:00.000Z"),
+            lastSeenAt: new Date("2026-07-27T16:00:00.000Z"),
+            memberId: fixture.participantMemberId,
+          },
+        });
+
+        groupPromise = drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        });
+        await providerStarted;
+
+        let genericSettled = false;
+        genericPromise = drainDeletionReplyEffect({
+          effect: genericEffect,
+          prisma: fixture.deletionPrisma,
+        }).finally(() => {
+          genericSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(genericSettled).toBe(false);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+
+        releaseProvider();
+        const [groupResult, genericResult] = await withTimeout(
+          Promise.all([groupPromise, genericPromise]),
+          10_000,
+        );
+        expect(groupResult).toEqual({ sentCount: 1, skipped: [] });
+        expect(genericResult).toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: genericEffect.effectId,
+            reason: "notice_already_claimed",
+            template: "invite_signup",
+          }],
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        await expect(fixture.deletionPrisma.hostedLinqDailyState.findUnique({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            memberId_dayUtc: {
+              dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: expect.any(Date),
+        });
+        await expect(fixture.deletionPrisma.hostedLinqDelivery.findUnique({
+          select: { id: true },
+          where: { idempotencyKey: genericDeliveryLookupKey },
+        })).resolves.toBeNull();
+      } finally {
+        releaseProvider();
+        await Promise.allSettled([
+          ...(groupPromise ? [groupPromise] : []),
+          ...(genericPromise ? [genericPromise] : []),
+        ]);
+        await fixture.deletionPrisma.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: genericDeliveryLookupKey },
+        });
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("holds account deletion behind the opener provider fence", async () => {
+      const fixture = await createOpenerRaceFixture();
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      let reportDeletionCrossedFence = () => {};
+      const deletionCrossedFence = new Promise<void>((resolve) => {
+        reportDeletionCrossedFence = resolve;
+      });
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId: `chat-opener-delete-${randomUUID()}`,
+            messageId: `message-opener-delete-${randomUUID()}`,
+          };
+        });
+      accountDeletionMocks.prepareHostedAccountDeletionCleanup
+        .mockReset()
+        .mockImplementation(async (input) => {
+          reportDeletionCrossedFence();
+          return makePreparedDeletionCleanup(input);
+        });
+      accountDeletionMocks.runHostedAccountDeletionCleanup
+        .mockReset()
+        .mockResolvedValue(makeDeletionCleanupRunResult());
+      let drainPromise: ReturnType<typeof drainOneHostedGroupJoinOutreach> | null =
+        null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        drainPromise = drainOneHostedGroupJoinOutreach({
+          now: fixture.now,
+          prisma: fixture.drainPrisma,
+        });
+        await providerStarted;
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.contenderPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        const crossedFenceBeforeProviderCompleted = await Promise.race([
+          deletionCrossedFence.then(() => true),
+          new Promise<false>((resolve) => {
+            setTimeout(() => resolve(false), 1_000);
+          }),
+        ]);
+        expect(crossedFenceBeforeProviderCompleted).toBe(false);
+
+        releaseProvider();
+        const [drainResult] = await withTimeout(
+          Promise.all([drainPromise, deletionPromise]),
+          15_000,
+        );
+        expect(drainResult).toEqual({
+          kind: "sent",
+          outreachId: fixture.outreachId,
+        });
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+        await expect(fixture.drainPrisma.hostedGroupJoinOutreach.findUnique({
+          select: { id: true },
+          where: { id: fixture.outreachId },
+        })).resolves.toBeNull();
+        await expect(fixture.drainPrisma.hostedLinqDelivery.findFirst({
+          select: { id: true },
+          where: { groupJoinOutreachId: fixture.outreachId },
+        })).resolves.toBeNull();
+      } finally {
+        releaseProvider();
+        await Promise.allSettled([
+          ...(drainPromise ? [drainPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        providerMocks.createHostedLinqChat.mockReset();
+        accountDeletionMocks.prepareHostedAccountDeletionCleanup
+          .mockReset()
+          .mockImplementation(async (input) => makePreparedDeletionCleanup(input));
+        accountDeletionMocks.runHostedAccountDeletionCleanup
+          .mockReset()
+          .mockResolvedValue(makeDeletionCleanupRunResult());
+        await cleanupOpenerRaceFixture(fixture);
+      }
+    });
+
+    it("rejects an opener after the account-deletion suspension fence commits", async () => {
+      const fixture = await createOpenerRaceFixture();
+      let releaseDeletion = () => {};
+      const deletionMayContinue = new Promise<void>((resolve) => {
+        releaseDeletion = resolve;
+      });
+      let reportSuspensionFenceCommitted = () => {};
+      const suspensionFenceCommitted = new Promise<void>((resolve) => {
+        reportSuspensionFenceCommitted = resolve;
+      });
+      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+        .mockReset()
+        .mockImplementation(async () => {
+          reportSuspensionFenceCommitted();
+          await deletionMayContinue;
+        });
+      accountDeletionMocks.runHostedAccountDeletionCleanup
+        .mockReset()
+        .mockResolvedValue(makeDeletionCleanupRunResult());
+      providerMocks.createHostedLinqChat.mockReset();
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.contenderPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await suspensionFenceCommitted;
+        await expect(fixture.drainPrisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.runtimeMemberId },
+        })).resolves.toEqual({ suspendedAt: expect.any(Date) });
+
+        await expect(drainOneHostedGroupJoinOutreach({
+          now: fixture.now,
+          prisma: fixture.drainPrisma,
+        })).resolves.toEqual({
+          kind: "skipped",
+          outreachId: fixture.outreachId,
+          reason: "group_unavailable",
+        });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+
+        releaseDeletion();
+        await expect(withTimeout(deletionPromise, 10_000)).resolves.toBeDefined();
+        await expect(fixture.drainPrisma.hostedGroupJoinOutreach.findUnique({
+          select: { id: true },
+          where: { id: fixture.outreachId },
+        })).resolves.toBeNull();
+      } finally {
+        releaseDeletion();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+          .mockReset()
+          .mockResolvedValue(undefined);
+        accountDeletionMocks.runHostedAccountDeletionCleanup
+          .mockReset()
+          .mockResolvedValue(makeDeletionCleanupRunResult());
+        providerMocks.createHostedLinqChat.mockReset();
+        await cleanupOpenerRaceFixture(fixture);
+      }
+    });
 
     it("lets a reply already holding the drain finish before the same deletion request", async () => {
       vi.stubEnv(
@@ -1461,6 +2017,178 @@ describe.skipIf(!runPostgresProof)(
     });
   },
 );
+
+type OpenerRaceFixture = {
+  contenderPrisma: PrismaClient;
+  drainPrisma: PrismaClient;
+  groupId: string;
+  joinCode: string;
+  linePhone: string;
+  linePhoneLookupKey: string;
+  now: Date;
+  outreachId: string;
+  ownerMemberId: string;
+  participantPhone: string;
+  participantPhoneLookupKey: string;
+  runtimeMemberId: string;
+};
+
+async function createOpenerRaceFixture(): Promise<OpenerRaceFixture> {
+  const drainPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const contenderPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const now = new Date("2026-07-27T16:00:00.000Z");
+  const ownerMemberId = `hbm_opener_owner_${randomUUID()}`;
+  const runtimeMemberId = `hbm_opener_runtime_${randomUUID()}`;
+  const groupId = `hgrp_opener_race_${randomUUID()}`;
+  const joinCode = `join-opener-race-${randomUUID()}`;
+  const offerId = `hgrpjo_opener_race_${randomUUID()}`;
+  const participantPhone = createUniqueTestPhone("+1202");
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(participantPhone);
+  const linePhone = createUniqueTestPhone("+1303");
+  const linePhoneLookupKey = createHostedPhoneLookupKey(linePhone);
+  if (!participantPhoneLookupKey || !linePhoneLookupKey) {
+    throw new Error("Expected opener-race phone lookup keys.");
+  }
+
+  await drainPrisma.hostedMember.createMany({
+    data: [
+      { id: ownerMemberId },
+      { id: runtimeMemberId },
+    ],
+  });
+  await drainPrisma.hostedThreadContainer.create({
+    data: {
+      memberId: runtimeMemberId,
+      ownerMemberId,
+    },
+  });
+  await drainPrisma.hostedGroup.create({
+    data: {
+      displayName: "Opener Fence Group",
+      id: groupId,
+      joinCode,
+      joinCodeCreatedAt: now,
+      ownerMemberId,
+      runtimeMemberId,
+    },
+  });
+  await drainPrisma.hostedGroupJoinOffer.create({
+    data: {
+      groupId,
+      id: offerId,
+      messageLookupKey: `offer-opener-race-${randomUUID()}`,
+      postedAt: now,
+      projectionKindsJson: ["best_effort"],
+    },
+  });
+  await upsertHostedLinqLineForPhoneTx({
+    observedAt: now,
+    phoneNumber: linePhone,
+    prisma: drainPrisma,
+    providerStatus: "ACTIVE",
+    source: "configured",
+  });
+  await drainPrisma.hostedLinqLine.update({
+    data: {
+      assignmentWeight: 1_000_000,
+      healthStatus: "healthy",
+      maxNewConversationsPerDay: 100,
+    },
+    where: { phoneNumberLookupKey: linePhoneLookupKey },
+  });
+  const enqueued = await drainPrisma.$transaction((tx) =>
+    enqueueHostedGroupJoinOutreachTx({
+      offerId,
+      participantPhoneNumber: participantPhone,
+      requestedAt: now,
+      tx,
+    })
+  );
+
+  return {
+    contenderPrisma,
+    drainPrisma,
+    groupId,
+    joinCode,
+    linePhone,
+    linePhoneLookupKey,
+    now,
+    outreachId: enqueued.outreachId,
+    ownerMemberId,
+    participantPhone,
+    participantPhoneLookupKey,
+    runtimeMemberId,
+  };
+}
+
+async function createPhoneBoundMemberIdentityTx(input: {
+  phoneNumber: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await acquireHostedLinqParticipantPhoneLockTx({
+    phoneNumber: input.phoneNumber,
+    tx: input.tx,
+  });
+  const memberId = `hbm_opener_participant_${randomUUID()}`;
+  const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
+  if (!phoneLookupKey) {
+    throw new Error("Expected opener-race participant phone lookup key.");
+  }
+  await input.tx.hostedMember.create({
+    data: { id: memberId },
+  });
+  await input.tx.hostedMemberIdentity.create({
+    data: {
+      ...(await buildHostedMemberIdentityPrivateColumns({
+        memberId,
+        phoneNumber: input.phoneNumber,
+        prisma: input.tx,
+        privyUserId: null,
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+      })),
+      maskedPhoneNumberHint: `*** ${input.phoneNumber.slice(-4)}`,
+      memberId,
+      phoneLookupKey,
+    },
+  });
+}
+
+async function cleanupOpenerRaceFixture(
+  fixture: OpenerRaceFixture,
+): Promise<void> {
+  const participantIdentity =
+    await fixture.drainPrisma.hostedMemberIdentity.findFirst({
+      select: { memberId: true },
+      where: { phoneLookupKey: fixture.participantPhoneLookupKey },
+    });
+  await fixture.drainPrisma.hostedGroup.deleteMany({
+    where: { id: fixture.groupId },
+  });
+  await fixture.drainPrisma.hostedThreadContainer.deleteMany({
+    where: { memberId: fixture.runtimeMemberId },
+  });
+  await fixture.drainPrisma.hostedMember.deleteMany({
+    where: {
+      id: {
+        in: [
+          fixture.ownerMemberId,
+          fixture.runtimeMemberId,
+          ...(participantIdentity ? [participantIdentity.memberId] : []),
+        ],
+      },
+    },
+  });
+  await fixture.drainPrisma.hostedLinqLine.deleteMany({
+    where: { phoneNumberLookupKey: fixture.linePhoneLookupKey },
+  });
+  await Promise.all([
+    fixture.contenderPrisma.$disconnect(),
+    fixture.drainPrisma.$disconnect(),
+  ]);
+}
 
 type DeletionReplyRaceFixture = {
   chatId: string;

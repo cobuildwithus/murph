@@ -23,7 +23,10 @@ type HostedGroupJoinOutreachDrainLockClient =
 type HostedGroupJoinOutreachReplyAuthorityClient =
   Pick<
     Prisma.TransactionClient,
-    "$executeRaw" | "hostedGroupJoinOutreach" | "hostedLinqDelivery"
+    | "$executeRaw"
+    | "hostedGroupJoinOutreach"
+    | "hostedGroupMember"
+    | "hostedLinqDelivery"
   >;
 
 const HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON = "reaction_removed";
@@ -176,6 +179,7 @@ export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
     return { kind: "not_pending" };
   }
 
+  await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(
       hashtext('hosted_group_join_outreach'),
@@ -293,8 +297,10 @@ export function readHostedGroupJoinOutreachParticipantPhone(input: {
 
 export async function readHostedGroupJoinOutreachReplyContextTx(input: {
   linqChatId: string;
+  participantMemberId?: string | null;
   participantPhoneNumber: string;
   recipientPhoneNumber: string | null;
+  sourceEventId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<{ joinCode: string; outreachId: string } | null> {
   const participantPhoneNumber = normalizePhoneNumber(
@@ -364,6 +370,7 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
               revokedAt: true,
               group: {
                 select: {
+                  id: true,
                   joinCode: true,
                   runtimeMember: {
                     select: {
@@ -392,6 +399,8 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
       }
       const context = await readAvailableHostedGroupJoinOutreachDeliveryContextTx({
         delivery,
+        participantMemberId: input.participantMemberId,
+        sourceEventId: input.sourceEventId,
         tx: input.tx,
       });
       if (context) {
@@ -403,22 +412,16 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
   return null;
 }
 
-export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: {
-  groupJoinCode: string;
-  outreachId: string;
-  tx: HostedGroupJoinOutreachReplyAuthorityClient;
-}): Promise<boolean> {
-  const context = await readHostedGroupJoinOutreachReplyDeliveryContextTx({
-    outreachId: input.outreachId,
-    tx: input.tx,
-  });
-  return context?.joinCode === input.groupJoinCode.trim();
-}
-
 export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
+  excludeSignupDeliveryId?: string | null;
+  memberId?: string | null;
   outreachId: string;
   tx: HostedGroupJoinOutreachReplyAuthorityClient;
-}): Promise<{ joinCode: string } | null> {
+}): Promise<
+  | { joinCode: string; kind: "already_member" }
+  | { joinCode: string; kind: "available" }
+  | null
+> {
   await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
 
   const outreach = await input.tx.hostedGroupJoinOutreach.findFirst({
@@ -442,6 +445,7 @@ export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
           revokedAt: true,
           group: {
             select: {
+              id: true,
               joinCode: true,
               runtimeMember: {
                 select: {
@@ -458,14 +462,25 @@ export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
   if (!outreach) {
     return null;
   }
+  const joinCode = readHostedGroupJoinOutreachOfferJoinCode(outreach.offer);
+  if (!joinCode) {
+    return null;
+  }
+  if (await hasHostedGroupMembershipTx({
+    groupId: outreach.offer.group.id,
+    memberId: input.memberId,
+    tx: input.tx,
+  })) {
+    return { joinCode, kind: "already_member" };
+  }
   if (await hasHostedGroupJoinOutreachLiveSignupDeliveryTx({
+    excludeDeliveryId: input.excludeSignupDeliveryId,
     outreachId: input.outreachId,
     tx: input.tx,
   })) {
     return null;
   }
-  const joinCode = readHostedGroupJoinOutreachOfferJoinCode(outreach.offer);
-  return joinCode ? { joinCode } : null;
+  return { joinCode, kind: "available" };
 }
 
 async function readAvailableHostedGroupJoinOutreachDeliveryContextTx(input: {
@@ -474,6 +489,7 @@ async function readAvailableHostedGroupJoinOutreachDeliveryContextTx(input: {
       id: string;
       offer: {
         group: {
+          id: string;
           joinCode: string | null;
           runtimeMember: {
             suspendedAt: Date | null;
@@ -485,13 +501,23 @@ async function readAvailableHostedGroupJoinOutreachDeliveryContextTx(input: {
     } | null;
     groupJoinOutreachId: string | null;
   };
+  participantMemberId?: string | null;
+  sourceEventId?: string | null;
   tx: HostedGroupJoinOutreachReplyAuthorityClient;
 }): Promise<{ joinCode: string; outreachId: string } | null> {
   const outreach = input.delivery.groupJoinOutreach;
   if (!outreach || !input.delivery.groupJoinOutreachId) {
     return null;
   }
+  if (await hasHostedGroupMembershipTx({
+    groupId: outreach.offer.group.id,
+    memberId: input.participantMemberId,
+    tx: input.tx,
+  })) {
+    return null;
+  }
   if (await hasHostedGroupJoinOutreachLiveSignupDeliveryTx({
+    excludeSourceEventId: input.sourceEventId,
     outreachId: input.delivery.groupJoinOutreachId,
     tx: input.tx,
   })) {
@@ -504,12 +530,28 @@ async function readAvailableHostedGroupJoinOutreachDeliveryContextTx(input: {
 }
 
 async function hasHostedGroupJoinOutreachLiveSignupDeliveryTx(input: {
+  excludeDeliveryId?: string | null;
+  excludeSourceEventId?: string | null;
   outreachId: string;
   tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">;
 }): Promise<boolean> {
+  const excludeSourceEventId = input.excludeSourceEventId?.trim() ?? "";
+  const excludedSourceEventFragment = excludeSourceEventId
+    ? `:e${sha256Hex(excludeSourceEventId).slice(0, 32)}`
+    : null;
   const delivery = await input.tx.hostedLinqDelivery.findFirst({
     where: {
+      ...(input.excludeDeliveryId
+        ? { id: { not: input.excludeDeliveryId } }
+        : {}),
       groupJoinOutreachId: input.outreachId,
+      ...(excludedSourceEventFragment
+        ? {
+            NOT: {
+              sourceRef: { contains: excludedSourceEventFragment },
+            },
+          }
+        : {}),
       template: {
         in: ["invite_signup", "invite_signup_fallback"],
       },
@@ -522,6 +564,27 @@ async function hasHostedGroupJoinOutreachLiveSignupDeliveryTx(input: {
     select: { id: true },
   });
   return Boolean(delivery);
+}
+
+async function hasHostedGroupMembershipTx(input: {
+  groupId: string;
+  memberId?: string | null;
+  tx: Pick<Prisma.TransactionClient, "hostedGroupMember">;
+}): Promise<boolean> {
+  const memberId = input.memberId?.trim() ?? "";
+  if (!memberId) {
+    return false;
+  }
+  const membership = await input.tx.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: input.groupId,
+        memberId,
+      },
+    },
+    select: { id: true },
+  });
+  return Boolean(membership);
 }
 
 function readHostedGroupJoinOutreachOfferJoinCode(input: {
