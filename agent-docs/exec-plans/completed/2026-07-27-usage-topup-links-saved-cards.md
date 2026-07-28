@@ -1,6 +1,6 @@
 # Direct usage top-up handoffs and saved cards
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -83,5 +83,15 @@ Let an eligible member ask Murph for the exact first-party page that opens the c
 - Product experience review returned no findings after the accepted
   preselection finding was corrected. The separate Claude UI check stopped at
   explicit credit exhaustion.
-- Current-base reconciliation, the preliminary specialist pass, final
-  acceptance, final ReviewGPT, and CI remain.
+- The preliminary specialist pass found two medium issues: competing generic
+  billing-route guidance and missing real owner-self host composition coverage.
+  ReviewGPT/Pro supplied the exact remediation patch; focused prompt-stack and
+  dialog tests passed after it was applied unchanged.
+- Current-base reconciliation completed without conflicts. The canonical
+  affected-package verification passed all feature-owned suites and reproduced
+  only the pre-existing CLI interactive-test timeouts. Full
+  `pnpm verify:acceptance` then passed, including workspace typechecks, Web and
+  Cloudflare verification, coverage, production build, and package boundaries.
+- The implementation plan is complete. The post-closure final ReviewGPT PR gate
+  and exact-head CI remain as release validation.
+Completed: 2026-07-27
