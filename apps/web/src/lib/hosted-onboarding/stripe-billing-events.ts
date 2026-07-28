@@ -76,6 +76,7 @@ import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
   readHostedMemberFamilyBillingClaim,
   type PreparedHostedFamilyCryptoDomainRoots,
   type HostedFamilyStripeSubscriptionResult,
@@ -104,12 +105,17 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   stripeSubscriptionId: string;
 };
 
-async function hasHostedConflictingFamilyBillingClaimTx(input: {
+type HostedFamilyBillingClaimDisposition =
+  | "conflicting_family_subscription"
+  | "none"
+  | "same_family_subscription";
+
+async function classifyHostedFamilyBillingClaimTx(input: {
   memberId: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   tx: Prisma.TransactionClient;
-}): Promise<boolean> {
+}): Promise<HostedFamilyBillingClaimDisposition> {
   await lockHostedMemberRow(input.tx, input.memberId);
   const currentMember = await readHostedMemberBillingSnapshot({
     memberId: input.memberId,
@@ -127,13 +133,28 @@ async function hasHostedConflictingFamilyBillingClaimTx(input: {
       || currentCustomerId === input.stripeCustomerId
     )
   ) {
-    return false;
+    return "none";
   }
 
-  return Boolean(await readHostedMemberFamilyBillingClaim({
+  const familyClaim = await readHostedMemberFamilyBillingClaim({
     memberId: input.memberId,
     prisma: input.tx,
-  }));
+  });
+  if (!familyClaim) {
+    return "none";
+  }
+  if (input.stripeSubscriptionId) {
+    const familySubscription =
+      await lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId({
+        prisma: input.tx,
+        stripeSubscriptionId: input.stripeSubscriptionId,
+      });
+    if (familySubscription?.group.id === familyClaim.groupId) {
+      return "same_family_subscription";
+    }
+  }
+
+  return "conflicting_family_subscription";
 }
 
 export async function applyStripeCheckoutCompleted(
@@ -168,12 +189,13 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
-  if (await hasHostedConflictingFamilyBillingClaimTx({
+  const familyClaimDisposition = await classifyHostedFamilyBillingClaimTx({
     memberId: member.core.id,
     stripeCustomerId: coerceStripeObjectId(session.customer),
     stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription),
     tx: prisma,
-  })) {
+  });
+  if (familyClaimDisposition !== "none") {
     await clearHostedMemberStripeCheckoutAttemptForSessionTx({
       memberId: member.core.id,
       sessionId: session.id,
@@ -181,8 +203,12 @@ export async function applyStripeCheckoutCompleted(
     });
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupStandardCheckoutStripeSubscriptionId:
-        coerceStripeSubscriptionId(session.subscription),
+      ...(familyClaimDisposition === "conflicting_family_subscription"
+        ? {
+            cleanupStandardCheckoutStripeSubscriptionId:
+              coerceStripeSubscriptionId(session.subscription),
+          }
+        : {}),
     };
   }
 
@@ -615,18 +641,24 @@ export async function applyStripeSubscriptionUpdated(
       subscriptionCancellationEmail: null,
     };
   }
-  if (await hasHostedConflictingFamilyBillingClaimTx({
+  const familyClaimDisposition = await classifyHostedFamilyBillingClaimTx({
     memberId: member.core.id,
     stripeCustomerId: coerceStripeObjectId(subscription.customer),
     stripeSubscriptionId: subscription.id,
     tx: prisma,
-  })) {
+  });
+  if (familyClaimDisposition !== "none") {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupFamilySponsoredStripeSubscriptionId:
-        subscription.status === "canceled" || subscription.status === "incomplete_expired"
-          ? null
-          : subscription.id,
+      ...(familyClaimDisposition === "conflicting_family_subscription"
+        ? {
+            cleanupFamilySponsoredStripeSubscriptionId:
+              subscription.status === "canceled" ||
+                subscription.status === "incomplete_expired"
+                ? null
+                : subscription.id,
+          }
+        : {}),
       subscriptionCancellationEmail: null,
     };
   }
@@ -729,21 +761,26 @@ export async function applyStripeInvoicePaid(
     };
   }
 
-  if (await hasHostedConflictingFamilyBillingClaimTx({
+  const familyClaimDisposition = await classifyHostedFamilyBillingClaimTx({
     memberId: member.core.id,
     stripeCustomerId:
       coerceStripeObjectId(invoice.customer)
       ?? coerceStripeObjectId(canonicalSubscription?.customer),
     stripeSubscriptionId: subscriptionId,
     tx: prisma,
-  })) {
+  });
+  if (familyClaimDisposition !== "none") {
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
-      cleanupFamilySponsoredStripeSubscriptionId:
-        canonicalSubscription?.status === "canceled" ||
-          canonicalSubscription?.status === "incomplete_expired"
-          ? null
-          : subscriptionId,
+      ...(familyClaimDisposition === "conflicting_family_subscription"
+        ? {
+            cleanupFamilySponsoredStripeSubscriptionId:
+              canonicalSubscription?.status === "canceled" ||
+                canonicalSubscription?.status === "incomplete_expired"
+                ? null
+                : subscriptionId,
+          }
+        : {}),
     };
   }
 
@@ -879,14 +916,14 @@ export async function applyStripeInvoicePaymentFailed(
   if (!member) {
     return;
   }
-  if (await hasHostedConflictingFamilyBillingClaimTx({
+  if (await classifyHostedFamilyBillingClaimTx({
     memberId: member.core.id,
     stripeCustomerId:
       coerceStripeObjectId(invoice.customer)
       ?? coerceStripeObjectId(canonicalSubscription?.customer),
     stripeSubscriptionId: subscriptionId,
     tx: prisma,
-  })) {
+  }) !== "none") {
     return;
   }
 

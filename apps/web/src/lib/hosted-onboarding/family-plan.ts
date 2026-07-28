@@ -1731,13 +1731,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
-  const familyPlanState = readHostedFamilyStripePlanState({
-    priceIdsByPlan: readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
-    subscription: input.subscription,
-  });
-  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
-    input.subscription.status,
-  );
   const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
     eventCreatedAt,
     group,
@@ -1749,6 +1742,41 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       groupId: group.id,
     };
   }
+
+  if (
+    input.subscription.status === "canceled"
+    || input.subscription.status === "incomplete_expired"
+  ) {
+    await writeHostedAccountGroupStripeBillingTx({
+      billedSeatCount: null,
+      billingStatus: HostedBillingStatus.canceled,
+      currentBillingPhase: null,
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      groupId: group.id,
+      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+      stripeEventCreatedAt: eventCreatedAt,
+      stripeSubscriptionItemId: null,
+      stripeSubscriptionId: null,
+      tx: input.tx,
+    });
+    await input.tx.hostedAccountGroupPlanCapacity.deleteMany({
+      where: { groupId: group.id },
+    });
+    return {
+      activations: [],
+      groupId: group.id,
+    };
+  }
+
+  const familyPlanState = readHostedFamilyStripePlanState({
+    priceIdsByPlan: readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
+    subscription: input.subscription,
+  });
+  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
+    input.subscription.status,
+  );
 
   if (!familyPlanState) {
     const failClosedBillingStatus = stripeBillingStatus === HostedBillingStatus.active

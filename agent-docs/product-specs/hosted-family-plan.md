@@ -256,7 +256,11 @@ inside the same transaction also extends their lifetime.
 A live Family owner—an active sponsorship, a nonterminal bound subscription,
 or a checkout attempt created within the prior 24 hours—prevents a member from
 starting a separate direct checkout. An exact expired-Session event clears only
-the matching Family attempt; terminal subscriptions and older abandoned
+the matching Family attempt. Family reconciliation projects Stripe `canceled`
+and `incomplete_expired` subscriptions into the existing terminal canceled
+group status, clears the current Family subscription/item binding, and keeps the
+customer plus event freshness watermark so both direct and Family checkout can
+recover without allowing an older event to reclaim billing. Older abandoned
 attempts do not become permanent claims. A directly paid beneficiary is not
 claimed because active Family reconciliation deliberately skips that member.
 
@@ -264,7 +268,12 @@ If a direct checkout opened before Family billing claimed the member and
 completes afterward, reconciliation leaves it unbound and cancels that
 superseded subscription after the database transaction. An already accepted
 direct subscription remains the owner when its Checkout, subscription, or
-invoice event is replayed after a later Family attempt. Duplicate cleanup
+invoice event is replayed after a later Family attempt. When that exact
+subscription has since been handed to the Family group, its immutable direct
+Checkout replay is a no-op: the current Family group subscription binding
+proves that it is the same provider identity, so reconciliation neither
+recreates individual billing nor cancels/refunds the Family subscription. A
+different direct subscription remains a cleanup candidate. Duplicate cleanup
 automatically refunds only one provable paid invoice and completes only after
 Stripe reports the full refund `succeeded`; balance credits, credit notes,
 partial or pending refunds, multiple paid invoices, and multiple payment

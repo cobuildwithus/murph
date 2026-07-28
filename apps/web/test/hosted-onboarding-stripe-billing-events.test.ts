@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeReversal: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
+  lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
@@ -56,6 +57,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       mocks.applyHostedFamilyStripeCheckoutExpiredTx,
     applyHostedFamilyStripeSubscriptionUpdatedTx:
       mocks.applyHostedFamilyStripeSubscriptionUpdatedTx,
+    lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId:
+      mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
     readHostedMemberFamilyBillingClaim:
       mocks.readHostedMemberFamilyBillingClaim,
   };
@@ -160,6 +163,7 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.findMemberForStripeReversal.mockResolvedValue(member);
     mocks.findMemberForStripeSubscription.mockResolvedValue(member);
     mocks.applyHostedFamilyStripeCheckoutExpiredTx.mockResolvedValue(false);
+    mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId.mockResolvedValue(null);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
@@ -327,9 +331,12 @@ describe("hosted onboarding stripe billing events", () => {
   });
 
   it("marks standard checkout for cleanup when Family billing claimed the member first", async () => {
-    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce(
-      "pending_family_checkout",
-    );
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      checkoutAttemptId: "pending_family_checkout",
+      groupId: "hbag_family",
+      kind: "checkout_attempt",
+      ownerMemberId: "member_owner",
+    });
 
     await expect(
       applyStripeCheckoutCompleted({
