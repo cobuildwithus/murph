@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
-  ensureHostedMemberForPhoneTx: vi.fn(),
+  ensureHostedMemberForPhoneResolutionTx: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getPrisma: vi.fn(),
   handleHostedGroupJoinOfferReaction: vi.fn(),
@@ -95,7 +95,8 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  ensureHostedMemberForPhoneTx: mocks.ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx:
+    mocks.ensureHostedMemberForPhoneResolutionTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -513,7 +514,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneResolutionTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
@@ -1006,10 +1007,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: null,
     });
-    mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-      billingStatus: HostedBillingStatus.not_started,
-      id: "member_123",
-      suspendedAt: null,
+    mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+      created: true,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.issueHostedInviteTx.mockResolvedValue({
       id: "invite_123",
@@ -1032,7 +1036,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "sent-signup-link",
     });
 
-    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
       phoneNumber: "+447911123456",
       prisma,
     });
@@ -1087,10 +1091,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: null,
     });
-    mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-      billingStatus: HostedBillingStatus.not_started,
-      id: "member_123",
-      suspendedAt: null,
+    mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+      created: true,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.issueHostedInviteTx.mockResolvedValue({
       id: "invite_123",
@@ -1173,10 +1180,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(
         new Error("Hosted domain root envelope authority signature verification failed."),
       );
-      mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-        billingStatus: HostedBillingStatus.not_started,
-        id: "member_123",
-        suspendedAt: null,
+      mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+        created: true,
+        member: {
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          suspendedAt: null,
+        },
       });
       mocks.issueHostedInviteTx.mockResolvedValue({
         id: "invite_123",
@@ -1198,7 +1208,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         reason: "sent-signup-link",
       });
 
-      expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
         phoneNumber: "+447911123456",
         prisma,
       });
