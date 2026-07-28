@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from "node:buffer";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -22,6 +22,7 @@ import {
 
 const CLEANUP_FLAG = "--cleanup-static-workspace";
 const CLEANUP_ONLY_FLAG = "--cleanup-static-workspace-only";
+const INTERNAL_RUN_FLAG = "--internal-static-verification-child";
 const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
 const STATIC_ARCHIVE_PROBE_MAX_BYTES = 1024 * 1024;
 const STATIC_ARCHIVE_ZSTD_FRAME_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
@@ -371,6 +372,191 @@ function runGit(repoRoot, args, description) {
   }
 }
 
+function createRunLifetimeSignalOwner() {
+  let activeChild = null;
+  let firstSignal = null;
+  const handlers = new Map();
+
+  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+    const handler = () => {
+      firstSignal ??= signal;
+      if (activeChild) {
+        signalChildProcessGroup(activeChild, signal);
+      }
+    };
+    handlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+
+  return {
+    clearActiveChild(child) {
+      if (activeChild === child) {
+        activeChild = null;
+      }
+    },
+    dispose() {
+      for (const [signal, handler] of handlers) {
+        process.off(signal, handler);
+      }
+    },
+    get firstSignal() {
+      return firstSignal;
+    },
+    setActiveChild(child) {
+      activeChild = child;
+      if (firstSignal) {
+        signalChildProcessGroup(child, firstSignal);
+      }
+    },
+  };
+}
+
+function signalChildProcessGroup(child, signal) {
+  if (!child.pid) {
+    return;
+  }
+  try {
+    if (process.platform === "win32") {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      child.kill(signal);
+    } else {
+      process.kill(-child.pid, signal);
+    }
+  } catch (error) {
+    if (!error || error.code !== "ESRCH") {
+      process.stderr.write(
+        `[ssh-verification] Unable to forward ${signal} to the active verifier process group.\n`,
+      );
+    }
+  }
+}
+
+async function waitForChildProcessGroupExit(processGroupId) {
+  if (process.platform === "win32" || !processGroupId) {
+    return;
+  }
+  while (isProcessGroupRunning(processGroupId)) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function isProcessGroupRunning(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return !error || error.code !== "ESRCH";
+  }
+}
+
+function signalExitCode(signal) {
+  switch (signal) {
+    case "SIGHUP":
+      return 129;
+    case "SIGINT":
+      return 130;
+    case "SIGTERM":
+      return 143;
+    default:
+      return 1;
+  }
+}
+
+function runStaticVerificationChild(argv, signalOwner) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [fileURLToPath(import.meta.url), INTERNAL_RUN_FLAG, ...argv],
+      {
+        cwd: process.cwd(),
+        detached: process.platform !== "win32",
+        env: process.env,
+        stdio: "inherit",
+      },
+    );
+    signalOwner.setActiveChild(child);
+    child.once("error", (error) => {
+      signalOwner.clearActiveChild(child);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      void waitForChildProcessGroupExit(child.pid).then(
+        () => {
+          signalOwner.clearActiveChild(child);
+          resolve({ code, signal });
+        },
+        reject,
+      );
+    });
+  });
+}
+
+async function runStaticVerification(argv) {
+  const signalOwner = createRunLifetimeSignalOwner();
+  try {
+    const request = parseSshVerificationRequest(argv);
+    const workspaceRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../..",
+    );
+    if (request.cleanupOnly) {
+      cleanupStaticWorkspace({ workspaceRoot });
+      return signalOwner.firstSignal
+        ? signalExitCode(signalOwner.firstSignal)
+        : 0;
+    }
+
+    let result;
+    try {
+      result = await runStaticVerificationChild(argv, signalOwner);
+    } finally {
+      if (request.cleanupWorkspace) {
+        cleanupStaticWorkspace({ workspaceRoot });
+      }
+    }
+
+    const terminatingSignal = signalOwner.firstSignal ?? result.signal;
+    if (terminatingSignal) {
+      return signalExitCode(terminatingSignal);
+    }
+    return result.code ?? 1;
+  } finally {
+    signalOwner.dispose();
+  }
+}
+
+async function runStaticVerificationChildProcess(argv) {
+  const signalOwner = createRunLifetimeSignalOwner();
+  try {
+    const request = parseSshVerificationRequest(argv);
+    if (request.cleanupOnly) {
+      throw new Error(
+        "Static SSH cleanup-only execution must remain owned by the run supervisor.",
+      );
+    }
+    assertStaticWorkerArchiveCapabilities(process.env);
+    if (request.cleanupWorkspace) {
+      const workspaceRoot = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "../..",
+      );
+      restoreStaticGitSnapshot({ workspaceRoot });
+    }
+    const result = await runSanitizedVerification(
+      request.verificationArgs,
+      process.env,
+      { verificationProfile: STATIC_SSH_VERIFICATION_PROFILE },
+    );
+    return signalOwner.firstSignal
+      ? signalExitCode(signalOwner.firstSignal)
+      : result;
+  } finally {
+    signalOwner.dispose();
+  }
+}
+
 function isDirectEntrypoint() {
   const entrypoint = process.argv[1];
   return Boolean(entrypoint) && import.meta.url === pathToFileURL(path.resolve(entrypoint)).href;
@@ -378,27 +564,13 @@ function isDirectEntrypoint() {
 
 if (isDirectEntrypoint()) {
   try {
-    const request = parseSshVerificationRequest(process.argv.slice(2));
-    const workspaceRoot = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../..",
-    );
-    try {
-      if (!request.cleanupOnly) {
-        assertStaticWorkerArchiveCapabilities(process.env);
-        if (request.cleanupWorkspace) {
-          restoreStaticGitSnapshot({ workspaceRoot });
-        }
-        process.exitCode = await runSanitizedVerification(
-          request.verificationArgs,
-          process.env,
-          { verificationProfile: STATIC_SSH_VERIFICATION_PROFILE },
-        );
-      }
-    } finally {
-      if (request.cleanupWorkspace) {
-        cleanupStaticWorkspace({ workspaceRoot });
-      }
+    const argv = process.argv.slice(2);
+    if (argv[0] === INTERNAL_RUN_FLAG) {
+      process.exitCode = await runStaticVerificationChildProcess(
+        argv.slice(1),
+      );
+    } else {
+      process.exitCode = await runStaticVerification(argv);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

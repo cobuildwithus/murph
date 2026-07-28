@@ -58,6 +58,16 @@ Done:
   unchanged.
 - Focused runner/dispatcher/workspace coverage passed 67 tests. Canonical local
   `pnpm test:diff` passed 30 repo-tool files and 455 tests.
+- The exact-head ReviewGPT check reproduced a signal arriving during the
+  synchronous archive-readiness probe and leaving the transported run
+  directory behind. A run-lifetime supervisor now owns signals before
+  readiness, forwards them to the isolated verifier process group, waits for
+  every process in that group to exit, performs exact cleanup, and preserves
+  the first signal status.
+- New interruption regressions cover repeated signals during archive readiness
+  and termination during Git reconstruction. Focused runner/dispatcher/workspace
+  coverage passed 69 tests, and canonical local `pnpm test:diff` passed 30
+  repo-tool files and 457 tests.
 
 Now:
 - Make `zstd` available in the dedicated account's non-interactive `PATH`, then

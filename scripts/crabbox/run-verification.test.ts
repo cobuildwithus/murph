@@ -427,6 +427,202 @@ describe("Crabbox verification environment", () => {
     expect(existsSync(childMarkerPath)).toBe(false);
   });
 
+  it("preserves the first signal and exact cleanup during static archive readiness", async () => {
+    const tempRoot = makeTempRoot();
+    const { runDirectory, workspaceRoot } =
+      createStaticRunnerWorkspace(tempRoot);
+    const siblingRunDirectory = path.join(
+      path.dirname(runDirectory),
+      "fedcba9876543210-0123456789abcdef",
+    );
+    const siblingMarkerPath = path.join(siblingRunDirectory, "keep");
+    const binDir = path.join(tempRoot, "bin");
+    const tarReadyPath = path.join(tempRoot, "tar-ready");
+    const tarHupPath = path.join(tempRoot, "tar-hup");
+    const tarPidPath = path.join(tempRoot, "tar-pid");
+    const laterCommandMarkerPath = path.join(
+      tempRoot,
+      "later-command-started",
+    );
+    mkdirSync(siblingRunDirectory, { recursive: true });
+    writeFileSync(siblingMarkerPath, "keep\n");
+    writeExecutable(
+      path.join(binDir, "tar"),
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "$$" > ${shellQuote(tarPidPath)}`,
+        `trap ': > ${shellQuote(tarHupPath)}; /bin/sleep 0.2; exit 129' HUP`,
+        `: > ${shellQuote(tarReadyPath)}`,
+        "while :; do /bin/sleep 0.05; done",
+      ].join("\n"),
+    );
+    for (const command of ["zstd", "git", "corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(laterCommandMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const runner = spawn(
+      process.execPath,
+      [
+        path.join(
+          workspaceRoot,
+          "scripts",
+          "crabbox",
+          "run-ssh-verification.mjs",
+        ),
+        "--cleanup-static-workspace",
+        "verify:acceptance",
+      ],
+      {
+        cwd: workspaceRoot,
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+        stdio: "ignore",
+      },
+    );
+    try {
+      await waitForFile(tarReadyPath);
+      const tarPid = Number.parseInt(
+        readFileSync(tarPidPath, "utf8").trim(),
+        10,
+      );
+      expect(Number.isInteger(tarPid)).toBe(true);
+
+      runner.kill("SIGHUP");
+      await waitForFile(tarHupPath);
+      expect(runner.exitCode).toBeNull();
+      runner.kill("SIGTERM");
+
+      expect(await waitForChild(runner)).toEqual({
+        code: 129,
+        signal: null,
+      });
+      await waitForCondition(
+        () => !isProcessRunning(tarPid),
+        "the static archive readiness process to exit",
+      );
+      expect(existsSync(runDirectory)).toBe(false);
+      expect(existsSync(siblingMarkerPath)).toBe(true);
+      expect(existsSync(laterCommandMarkerPath)).toBe(false);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) {
+        runner.kill("SIGHUP");
+      }
+      await Promise.allSettled([waitForChild(runner)]);
+    }
+  });
+
+  it("preserves SIGTERM and exact cleanup during static Git reconstruction", async () => {
+    const tempRoot = makeTempRoot();
+    const { runDirectory, workspaceRoot } =
+      createStaticRunnerWorkspace(tempRoot);
+    const siblingRunDirectory = path.join(
+      path.dirname(runDirectory),
+      "fedcba9876543210-0123456789abcdef",
+    );
+    const siblingMarkerPath = path.join(siblingRunDirectory, "keep");
+    const binDir = path.join(tempRoot, "bin");
+    const gitReadyPath = path.join(tempRoot, "git-ready");
+    const gitTermPath = path.join(tempRoot, "git-term");
+    const gitPidPath = path.join(tempRoot, "git-pid");
+    const installMarkerPath = path.join(tempRoot, "install-started");
+    const metadataRoot = path.join(
+      workspaceRoot,
+      ".murph-static-git-snapshot",
+    );
+    mkdirSync(siblingRunDirectory, { recursive: true });
+    writeFileSync(siblingMarkerPath, "keep\n");
+    mkdirSync(metadataRoot);
+    for (const metadataName of [
+      "base-commit",
+      "base-tree",
+      "candidate-tree",
+    ]) {
+      writeFileSync(
+        path.join(metadataRoot, metadataName),
+        `${"0".repeat(40)}\n`,
+      );
+    }
+    writeStaticArchiveCapabilityTools(binDir);
+    writeExecutable(
+      path.join(binDir, "git"),
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "$$" > ${shellQuote(gitPidPath)}`,
+        `trap ': > ${shellQuote(gitTermPath)}; exit 143' TERM`,
+        `: > ${shellQuote(gitReadyPath)}`,
+        "while :; do /bin/sleep 0.05; done",
+      ].join("\n"),
+    );
+    for (const command of ["corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(installMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const runner = spawn(
+      process.execPath,
+      [
+        path.join(
+          workspaceRoot,
+          "scripts",
+          "crabbox",
+          "run-ssh-verification.mjs",
+        ),
+        "--cleanup-static-workspace",
+        "verify:acceptance",
+      ],
+      {
+        cwd: workspaceRoot,
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: binDir,
+        },
+        stdio: "ignore",
+      },
+    );
+    try {
+      await waitForFile(gitReadyPath);
+      const gitPid = Number.parseInt(
+        readFileSync(gitPidPath, "utf8").trim(),
+        10,
+      );
+      expect(Number.isInteger(gitPid)).toBe(true);
+
+      runner.kill("SIGTERM");
+      await waitForFile(gitTermPath);
+      expect(await waitForChild(runner)).toEqual({
+        code: 143,
+        signal: null,
+      });
+      await waitForCondition(
+        () => !isProcessRunning(gitPid),
+        "the static Git reconstruction process to exit",
+      );
+      expect(existsSync(runDirectory)).toBe(false);
+      expect(existsSync(siblingMarkerPath)).toBe(true);
+      expect(existsSync(installMarkerPath)).toBe(false);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) {
+        runner.kill("SIGTERM");
+      }
+      await Promise.allSettled([waitForChild(runner)]);
+    }
+  });
+
   it("cleans only an exact opaque static SSH run workspace", () => {
     const tempRoot = makeTempRoot();
     const workerRoot = path.join(tempRoot, "murph-crabbox");
