@@ -1,6 +1,6 @@
 # PlanetScale database health alerts
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -127,15 +127,57 @@ Updated: 2026-07-28
 
 ## Verification
 
-- Commands to run:
-  - Focused Cloudflare node tests for metric parsing, monitor state, Linq
-    delivery, deploy config, and scheduled dispatch.
-  - `pnpm --filter @murphai/cloudflare-runner typecheck`
-  - `pnpm test:diff <changed paths>`
-  - `pnpm verify:acceptance`
-  - Required completion-specialist and final PR review gates.
-- Expected outcomes:
-  - All focused and canonical checks pass.
-  - Generated and checked-in Wrangler configuration agree.
-  - Review gates find no unresolved correctness, security/privacy,
-    reliability, copy/deliverability, or missing-coverage issue.
+### Completed focused and canonical checks
+
+- Focused metric, monitor, deploy-config, preflight, scheduled-dispatch, and
+  Workers-runtime tests passed.
+- The direct monitor scenario proved one immediate page, one 30-minute deferral,
+  one provider POST, and two persisted samples:
+  `{"first":"alert_sent","second":"alert_deferred","messagePosts":1,"persistedSamples":2}`.
+- `pnpm --filter @murphai/cloudflare-runner typecheck` passed.
+- Canonical `pnpm test:diff` over every changed owner and durable-doc path
+  passed:
+  - 112 Cloudflare Node test files and 2,059 tests.
+  - Three Workers-runtime test files and three tests.
+  - 26 hosted-local-harness test files with 410 passing tests and one expected
+    skip, plus the package-boundary check.
+  - Shell/Node syntax, dependency, workspace-boundary, architecture/privacy,
+    and affected-owner typechecks.
+- `git diff --check` passed, and the final parent review found no identifier,
+  secret, debug-hook, unsafe-cast, or unrelated production-source residue.
+
+### Acceptance fallback
+
+- `pnpm verify:acceptance` passed the full workspace typecheck, dependency,
+  architecture/privacy, doc-gardening, tracked-artifact, web test, and web lint
+  stages before unrelated package-coverage workers became host-load
+  constrained.
+- The run was already irrecoverably red when it was stopped through its exact
+  owned terminal session. Unchanged targets that failed included:
+  - `packages/setup-cli/test/setup-assistant-wizard-flow.test.ts` (input timing
+    selected the default instead of Venice).
+  - Three `packages/assistant-runtime` tests at their 60-second timeout.
+  - Multiple `packages/core` tests at 60- or 120-second timeouts.
+  - Two `packages/importers` forks that did not start before the worker
+    response timeout, producing derivative coverage-threshold failures.
+- None of those packages or tests is changed by this task. Per
+  `verification-and-runtime.md` scoped-verification mode applies: the
+  coverage-bearing canonical diff lane above passed every touched owner and
+  reverse dependent, including the real scheduled Worker plus SQLite Durable
+  Object boundary.
+
+### Reviews
+
+- Product/deliverability review completed with no findings.
+- The preliminary `completion-specialists` pass reviewed commit
+  `ea5664246b3c7fcadea7c11e18a4228216d28b38` and requested four missing proofs:
+  the real scheduled/SQLite Durable Object boundary, overlapping-run and
+  restart durability, pod-local saturation plus abnormal Postgres states, and
+  unsafe Linq authority shapes.
+- All four were added in commit
+  `664784d74d9311bd1bec1e2a87641980552813d4`. The specialist's optional
+  coverage attachment was unavailable after two exact-thread download
+  attempts, so its findings were implemented and inspected manually rather
+  than claiming the attachment was applied.
+- The final PR-specific ReviewGPT and CI gates remain the completion gate.
+Completed: 2026-07-28
