@@ -433,7 +433,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   </p>
                   <p className="text-sm leading-6 text-muted-foreground">
                     {paymentNeedsRecovery
-                      ? "Retry the same amount to check or continue it. We won’t start a second payment."
+                      ? "Check the same amount to recover any payment already in progress. This check can’t start a new payment."
                       : selectionError}
                   </p>
                 </div>
@@ -461,7 +461,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                         : "Opening checkout…"
                       : controller.selectedOffer
                         ? paymentNeedsRecovery
-                          ? `Retry payment · ${controller.selectedOffer.amountLabel}`
+                          ? `Check payment · ${controller.selectedOffer.amountLabel}`
                           : `Try again · ${controller.selectedOffer.amountLabel}`
                         : "Try again"}
                   </Button>

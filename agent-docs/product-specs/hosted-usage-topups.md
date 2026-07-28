@@ -92,7 +92,8 @@ An authenticated member can open `/groups/fund/[joinCode]`, see only the
 group's coarse `healthy`, `low`, or `exhausted` usage state, and buy the same
 fixed packs for that group's synthetic runtime beneficiary. This does not
 require the payer to have an individual paid plan. The browser still submits
-only offer code and request key; Web resolves payer and beneficiary. Pressing
+only offer code and request key for creation; a recovery attempt adds only the
+literal recovery-only capability. Web resolves payer and beneficiary. Pressing
 **Add messages** authorizes exactly one charge for the selected fixed amount.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
@@ -175,9 +176,10 @@ The target composition is:
 - Secondary action: **Cancel**
 - An inline accessible error for checkout-creation failure
 
-Offer descriptors come from the server projection. The browser submits only an
-opaque offer code and a single-use client request key, never a dollar amount,
-grant amount, Stripe Price ID, payer ID, or beneficiary ID.
+Offer descriptors come from the server projection. A normal authorization
+submits only an opaque offer code and a single-use client request key. An
+ambiguous-response check adds the literal recovery-only capability, never a
+dollar amount, grant amount, Stripe Price ID, payer ID, or beneficiary ID.
 
 Home or a private assistant handoff opens the same dialog through a one-shot
 Settings URL such as `/settings?addUsage=true#subscription`. An explicit
@@ -358,7 +360,7 @@ One row represents one intentional attempt to purchase one offer.
 | `cashCurrency` / `cashAmountMinor` | Expected Checkout subtotal, initially USD cents. |
 | `grantUsdMicros` | Usage capacity promised by the offer. |
 | `remainingCreditUsdMicros` | Rebuildable per-purchase unused-credit projection for settlement and financial adjustments. |
-| `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely retryable. |
+| `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely recoverable without granting a later create-capable retry. |
 | `checkoutRequestPolicyVersion` | Version of the fixed Checkout builder used to reconstruct provider parameters. |
 | `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, or `payment_failed`. Refund/dispute adjustments remain ledger entries. |
 | Stripe references | Checkout Session, PaymentIntent, Charge, and Customer lookup/encrypted references using the existing hosted billing-ref pattern. |
@@ -384,8 +386,15 @@ browser authorization. While a purchase is nonterminal, a fresh request
 key for that same target may recover it only when the submitted offer still
 matches the frozen offer. A different amount returns the earlier purchase's
 status/cancel-only projection instead of continuing it under new button copy;
-the rejected fresh key is not retained as a payment retry. Account deletion suspends new
-payment creation. A direct intent that already won the payer-lock binding
+the rejected fresh key has no create authority. If that response is lost,
+times out, or is dismissed, **Check payment** resends the key only in
+recovery-only mode. Under the payer lock, recovery-only may continue an exact
+persisted request or return the current nonterminal purchase. When neither
+exists, it returns a typed miss before offer authorization, Customer creation,
+purchase insertion, or Stripe I/O; the dialog clears the rejected key and
+returns to an unselected picker. Only a later fresh amount selection and
+explicit Add action can invoke normal purchase creation. Account deletion
+suspends new payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The
 payer-owned cancel endpoint can retrieve and cancel that exact sessionless
@@ -529,8 +538,9 @@ The authenticated personal Settings route, Family member route, and group
 funding route share this sequence:
 
 1. Verify same-origin/CSRF protections and the hosted app session.
-2. Parse a strict bounded body containing only offer code and client request
-   key.
+2. Parse a strict bounded body containing offer code and client request key,
+   plus only the literal `recoveryOnly: true` capability when recovering an
+   unparsed response.
 3. Derive the payer from the app session and resolve the beneficiary server
    side: the payer for personal funding, the exact active member selected from
    the payer's active Family roster, or the active group's synthetic member for
@@ -541,7 +551,9 @@ funding route share this sequence:
    ended, then recover a nonterminal purchase only when its payer and
    beneficiary match the requested target. A purchase for another target
    conflicts. Only one created, open, or payment-pending purchase may exist for
-   one payer at a time.
+   one payer at a time. If recovery-only finds neither an exact-key purchase nor
+   a current nonterminal payer purchase, return a typed miss without resolving
+   a Customer, inserting a purchase, or entering Stripe.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
    funding also requires the direct-paid eligibility projection. Family
    funding requires the current active owner, active group and billing, and an

@@ -128,9 +128,13 @@ Last verified: 2026-07-26
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
   to its frozen offer and original client request. A different submitted amount
-  returns the frozen purchase's status/cancel-only projection and discards the
-  rejected fresh request key; it cannot become a later retry. Choosing an amount
-  has no payment effect, and each
+  returns the frozen purchase's status/cancel-only projection. If that response
+  is lost or dismissed, the browser can reuse the rejected key only with the
+  server's recovery-only capability. The payer lock may continue an existing
+  matching purchase but cannot create one; when none exists, it returns a miss
+  before resolving a new Customer or entering Stripe. The miss discards the key
+  and requires a fresh unselected authorization, so it cannot become a later
+  retry. Choosing an amount has no payment effect, and each
   explicit **Add usage** or **Add messages** click authorizes only the selected
   one-time charge. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.

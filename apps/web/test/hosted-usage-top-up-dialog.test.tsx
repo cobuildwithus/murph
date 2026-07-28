@@ -22,6 +22,28 @@ const mocks = vi.hoisted(() => ({
   routerRefresh: vi.fn(),
 }));
 
+const USAGE_TOP_UP_TARGET_CASES = [
+  {
+    addLabel: "Add usage · $5",
+    checkoutUrl: "/api/settings/billing/usage-credit/checkout",
+    openLabel: "Add usage",
+    scope: "personal",
+  },
+  {
+    addLabel: "Add usage · $5",
+    checkoutUrl:
+      "/api/settings/billing/family/members/hbm_familymember1/usage-credit/checkout",
+    openLabel: "Add usage",
+    scope: "family",
+  },
+  {
+    addLabel: "Add messages · $5",
+    checkoutUrl: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    openLabel: "Add messages",
+    scope: "group",
+  },
+] as const;
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.routerRefresh,
@@ -906,7 +928,7 @@ test("rejects a malformed recovery restart timestamp", async () => {
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /Retry the same amount to check or continue it\./,
+      /This check can’t start a new payment\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Change amount/);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Checkout not open yet/);
@@ -966,6 +988,7 @@ test("retries a frozen reconciling purchase through the existing checkout route"
       payload: {
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_10_usd",
+        recoveryOnly: true,
       },
       signal: expect.any(AbortSignal),
       url: "/api/settings/billing/usage-credit/checkout",
@@ -1032,6 +1055,7 @@ test("retries the exact pending saved-card payment from the group dialog", async
       payload: {
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_10_usd",
+        recoveryOnly: true,
       },
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
@@ -1194,14 +1218,14 @@ test("keeps an uncertain group payment locked to the original amount and request
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /Retry the same amount to check or continue it\./,
+      /This check can’t start a new payment\./,
     );
     assert.equal(hasButton(rendered.container, "Change amount"), false);
 
     await clickButton(
       rendered.container,
       rendered.window,
-      "Retry payment · $25",
+      "Check payment · $25",
     );
 
     const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
@@ -1216,6 +1240,7 @@ test("keeps an uncertain group payment locked to the original amount and request
       {
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_2500",
+        recoveryOnly: true,
       },
     ]);
     expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
@@ -1290,7 +1315,7 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
       /We couldn’t confirm this payment yet/,
     );
     assert.equal(
-      buttonByText(rendered.container, "Retry payment · $5").disabled,
+      buttonByText(rendered.container, "Check payment · $5").disabled,
       false,
     );
     assert.equal(
@@ -1444,7 +1469,7 @@ test.each([
             ? /Checkout not open yet/
             : /Confirming payment/,
       );
-      assert.equal(hasButton(rendered.container, "Retry payment · $5"), false);
+      assert.equal(hasButton(rendered.container, "Check payment · $5"), false);
       assert.equal(hasButton(rendered.container, "Retry checkout"), false);
       assert.equal(hasButton(rendered.container, "Change amount"), false);
       if (status === "checkout_open") {
@@ -1478,7 +1503,7 @@ test.each([
         rendered.container.textContent ?? "",
         /Usage added/,
       );
-      assert.equal(hasButton(rendered.container, "Retry payment · $5"), false);
+      assert.equal(hasButton(rendered.container, "Check payment · $5"), false);
       assert.equal(
         mocks.requestHostedOnboardingJson.mock.calls.filter(
           ([request]) => request.method === "POST",
@@ -1684,7 +1709,9 @@ test("shows recovered reconciliation without offering an unsafe early cancel", a
   }
 });
 
-test("bounds checkout creation and restores retry and dismiss controls", async () => {
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "bounds a timed-out $scope checkout with recovery-only controls",
+  async ({ addLabel, checkoutUrl, scope }) => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson.mockImplementationOnce(
     ({ signal }: { signal: AbortSignal }) =>
@@ -1699,8 +1726,10 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      checkoutUrl,
       initialOpen: true,
       offers: usageCreditOffers(),
+      scope,
     }),
     {
       location: { href: "https://example.test/settings?addUsage=true" },
@@ -1710,7 +1739,7 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Add usage · $5");
+    await clickButton(rendered.container, rendered.window, addLabel);
 
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     await act(async () => {
@@ -1724,16 +1753,19 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
     );
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     assert.equal(
-      buttonByText(rendered.container, "Retry payment · $5").disabled,
+      buttonByText(rendered.container, "Check payment · $5").disabled,
       false,
     );
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
   }
-});
+  },
+);
 
-test("aborts an owned checkout on close and preserves its retry key", async () => {
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "aborts a dismissed $scope checkout and preserves its recovery key",
+  async ({ addLabel, checkoutUrl, openLabel, scope }) => {
   const checkout = deferred<unknown>();
   mocks.requestHostedOnboardingJson
     .mockImplementationOnce(() => checkout.promise)
@@ -1747,8 +1779,10 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      checkoutUrl,
       initialOpen: true,
       offers: usageCreditOffers(),
+      scope,
     }),
     {
       location: { href: "https://example.test/settings?addUsage=true" },
@@ -1758,7 +1792,7 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Add usage · $5");
+    await clickButton(rendered.container, rendered.window, addLabel);
     const firstPayload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
 
     await clickButton(rendered.container, rendered.window, "Cancel");
@@ -1778,22 +1812,26 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
     });
     expect(rendered.assign).not.toHaveBeenCalled();
 
-    await clickButton(rendered.container, rendered.window, "Add usage");
+    await clickButton(rendered.container, rendered.window, openLabel);
     assert.match(
       rendered.container.textContent ?? "",
       /We couldn’t confirm this payment yet/,
     );
-    await clickButton(rendered.container, rendered.window, "Retry payment · $5");
+    await clickButton(rendered.container, rendered.window, "Check payment · $5");
 
     assert.deepEqual(
       mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload,
-      firstPayload,
+      {
+        ...firstPayload,
+        recoveryOnly: true,
+      },
     );
     expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
-});
+  },
+);
 
 test("restores controls when the browser cannot create a request key", async () => {
   vi.stubGlobal("crypto", {});
@@ -1861,10 +1899,13 @@ test("retries a failed checkout with the same client request key", async () => {
       /We couldn’t confirm this payment yet/,
     );
 
-    await clickButton(rendered.container, rendered.window, "Retry payment · $25");
+    await clickButton(rendered.container, rendered.window, "Check payment · $25");
     const checkoutCalls = mocks.requestHostedOnboardingJson.mock.calls;
     assert.equal(checkoutCalls.length, 2);
-    assert.deepEqual(checkoutCalls[0]?.[0]?.payload, checkoutCalls[1]?.[0]?.payload);
+    assert.deepEqual(checkoutCalls[1]?.[0]?.payload, {
+      ...checkoutCalls[0]?.[0]?.payload,
+      recoveryOnly: true,
+    });
     expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -1878,6 +1919,83 @@ test("retries a failed checkout with the same client request key", async () => {
     vi.useRealTimers();
   }
 });
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "requires a fresh $scope authorization after recovery finds no owned purchase",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    mocks.randomUUID
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000201")
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000202");
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new Error("Response was lost."))
+      .mockResolvedValueOnce({ recoveryMiss: true })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_fresh_after_recovery",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/fresh-after-recovery",
+      });
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+      await clickButton(rendered.container, rendered.window, "Check payment · $5");
+
+      assert.equal(
+        rendered.container.querySelector('[role="radiogroup"]')?.getAttribute(
+          "data-value",
+        ),
+        "",
+      );
+      assert.equal(
+        buttonByText(rendered.container, "Choose an amount").disabled,
+        true,
+      );
+
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000201",
+          offerCode: "usage_500",
+        },
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000201",
+          offerCode: "usage_500",
+          recoveryOnly: true,
+        },
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000202",
+          offerCode: "usage_500",
+        },
+      ]);
+      expect(rendered.assign).toHaveBeenCalledWith(
+        "https://checkout.stripe.test/fresh-after-recovery",
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
 
 test("keeps the exact amount and request key after an ambiguous payment failure", async () => {
   mocks.randomUUID
@@ -1922,7 +2040,7 @@ test("keeps the exact amount and request key after an ambiguous payment failure"
     await clickButton(rendered.container, rendered.window, "Add usage · $5");
     const lockedActions = buttonByText(
       rendered.container,
-      "Retry payment · $5",
+      "Check payment · $5",
     ).parentElement;
     assert.ok(lockedActions);
     assert.equal(lockedActions.classList.contains("grid"), true);
@@ -1932,7 +2050,7 @@ test("keeps the exact amount and request key after an ambiguous payment failure"
       /We couldn’t confirm this payment yet/,
     );
     assert.equal(
-      buttonByText(rendered.container, "Retry payment · $5").dataset.size,
+      buttonByText(rendered.container, "Check payment · $5").dataset.size,
       "xl",
     );
     assert.equal(
@@ -1942,7 +2060,7 @@ test("keeps the exact amount and request key after an ambiguous payment failure"
       false,
     );
 
-    await clickButton(rendered.container, rendered.window, "Retry payment · $5");
+    await clickButton(rendered.container, rendered.window, "Check payment · $5");
     const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
       .map(([request]) => request)
       .filter((request) => request.method === "POST")
@@ -1955,6 +2073,7 @@ test("keeps the exact amount and request key after an ambiguous payment failure"
       {
         clientRequestKey: "00000000-0000-4000-8000-000000000101",
         offerCode: "usage_500",
+        recoveryOnly: true,
       },
     ]);
     expect(mocks.randomUUID).toHaveBeenCalledTimes(1);

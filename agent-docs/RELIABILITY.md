@@ -95,9 +95,14 @@ Last verified: 2026-07-27
   retrieves and continues only that intent. A fresh request for the same
   target may recover a nonterminal purchase only when its offer matches the
   frozen offer. A different amount receives only the frozen purchase's status
-  and cancellation capability; the rejected amount and fresh request key are
-  not retained as a retry. The frozen offer and original request key remain the
-  only payable recovery path while the outcome is uncertain.
+  and cancellation capability. After any unparsed selection response, the
+  browser may reuse that request key only through the same endpoint's
+  recovery-only mode. Under the payer lock, that mode can continue an exact-key
+  purchase or the current matching nonterminal purchase, but it cannot create a
+  purchase. When neither exists, it returns a miss before Stripe I/O and clears
+  the rejected key to an unselected picker. The frozen offer and original
+  purchase remain the only payable recovery path while the outcome is
+  uncertain.
   Authentication or card failure
   may fall back to Checkout only after the exact intent is verified canceled
   and its binding is cleared under the same reconciliation fence. Direct

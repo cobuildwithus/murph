@@ -11,6 +11,7 @@ import {
 
 import {
   createClientRequestKey,
+  readCheckoutAttemptResponse,
   readCheckoutUrl,
   readPurchaseResponse,
   readReturnKey,
@@ -358,6 +359,8 @@ function useHostedUsageTopUpDialog({
         : sourceScreen.retryOfferCode === offerCode
           ? sourceScreen.retryRequestKey
           : null;
+    const recoveryOnly =
+      sourceScreen.kind === "purchase" || previousRequestKey !== null;
 
     let requestKey: string;
     try {
@@ -399,11 +402,21 @@ function useHostedUsageTopUpDialog({
     const outcome = await runOwnedCheckoutRequest(async (signal) => {
       const value = await requestHostedOnboardingJson<unknown>({
         method: "POST",
-        payload: { offerCode, clientRequestKey: requestKey },
+        payload: {
+          offerCode,
+          clientRequestKey: requestKey,
+          ...(recoveryOnly ? { recoveryOnly: true } : {}),
+        },
         signal,
         url: checkoutUrl,
       });
-      const response = readPurchaseResponse(value);
+      const response = readCheckoutAttemptResponse(value);
+      if ("recoveryMiss" in response) {
+        if (!recoveryOnly) {
+          throw new Error("Checkout didn’t open. Try again.");
+        }
+        return { kind: "recovery_miss" as const };
+      }
       const resolvedCheckoutUrl = response.url ? readCheckoutUrl(response.url) : null;
       if (
         response.recovered
@@ -414,26 +427,38 @@ function useHostedUsageTopUpDialog({
       ) {
         throw new Error("Checkout didn’t open. Try again.");
       }
-      return { checkoutUrl: resolvedCheckoutUrl, response };
+      return {
+        checkoutUrl: resolvedCheckoutUrl,
+        kind: "purchase" as const,
+        response,
+      };
     });
 
     if (outcome.ok) {
-      const { checkoutUrl, response } = outcome.value;
-      if (response.recovered || !checkoutUrl) {
+      if (outcome.value.kind === "recovery_miss") {
         dispatch({
-          type: "checkout_response",
+          type: "checkout_recovery_missed",
           offerCode,
           requestKey,
-          response: { ...response, url: checkoutUrl },
         });
       } else {
-        window.location.assign(checkoutUrl);
-        if (sourceScreen.kind === "selection") {
+        const { checkoutUrl, response } = outcome.value;
+        if (response.recovered || !checkoutUrl) {
           dispatch({
-            type: "selection_checkout_redirected",
+            type: "checkout_response",
             offerCode,
             requestKey,
+            response: { ...response, url: checkoutUrl },
           });
+        } else {
+          window.location.assign(checkoutUrl);
+          if (sourceScreen.kind === "selection") {
+            dispatch({
+              type: "selection_checkout_redirected",
+              offerCode,
+              requestKey,
+            });
+          }
         }
       }
     } else {

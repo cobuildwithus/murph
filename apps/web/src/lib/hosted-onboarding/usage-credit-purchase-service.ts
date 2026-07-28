@@ -116,6 +116,39 @@ const HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES = [
 export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedUsageCreditOfferCode;
+  recoveryOnly: boolean;
+}
+
+export interface HostedUsageCreditCheckoutRecoveryMiss {
+  recoveryMiss: true;
+}
+
+export type HostedUsageCreditCheckoutAttemptResult =
+  | HostedUsageCreditCheckoutRecoveryMiss
+  | HostedUsageCreditCheckoutResult;
+
+interface HostedUsageCreditCheckoutCommonInput {
+  clientRequestKey: string;
+  now?: Date;
+  offerCode: HostedUsageCreditOfferCode;
+  prisma?: PrismaClient;
+}
+
+interface HostedPersonalUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  memberId: string;
+}
+
+interface HostedGroupUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  joinCode: string;
+  payerMemberId: string;
+}
+
+interface HostedFamilyUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  beneficiaryMemberId: string;
+  payerMemberId: string;
 }
 
 type HostedUsageCreditCheckoutTarget =
@@ -141,10 +174,12 @@ export function parseHostedUsageCreditCheckoutRequest(
   value: Record<string, unknown>,
 ): HostedUsageCreditCheckoutRequest {
   const keys = Object.keys(value).sort();
+  const recoveryOnly = value.recoveryOnly === true;
   if (
-    keys.length !== 2 ||
+    keys.length !== (recoveryOnly ? 3 : 2) ||
     keys[0] !== "clientRequestKey" ||
-    keys[1] !== "offerCode"
+    keys[1] !== "offerCode" ||
+    (recoveryOnly && keys[2] !== "recoveryOnly")
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_CHECKOUT_INVALID_REQUEST",
@@ -177,21 +212,25 @@ export function parseHostedUsageCreditCheckoutRequest(
   return {
     clientRequestKey,
     offerCode,
+    recoveryOnly,
   };
 }
 
-export async function createHostedUsageCreditCheckout(input: {
-  clientRequestKey: string;
-  memberId: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  prisma?: PrismaClient;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
     now: input.now,
     offerCode: input.offerCode,
     prisma: input.prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: input.memberId,
       kind: "personal",
@@ -200,14 +239,15 @@ export async function createHostedUsageCreditCheckout(input: {
   });
 }
 
-export async function createHostedGroupUsageCreditCheckout(input: {
-  clientRequestKey: string;
-  joinCode: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  payerMemberId: string;
-  prisma?: PrismaClient;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   const prisma = input.prisma ?? getPrisma();
   const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
   const fundingTarget = locator
@@ -216,17 +256,20 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   if (!fundingTarget) {
     throw buildHostedUsageCreditNotEligibleError("group");
   }
-  const stripeCustomerId = await ensureHostedMemberStripeCustomer({
-    memberId: input.payerMemberId,
-    prisma,
-  });
+  const stripeCustomerId = input.recoveryOnly
+    ? null
+    : await ensureHostedMemberStripeCustomer({
+        memberId: input.payerMemberId,
+        prisma,
+      });
 
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
-    groupStripeCustomerId: stripeCustomerId,
+    ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
     now: input.now,
     offerCode: input.offerCode,
     prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: fundingTarget.runtimeMemberId,
       joinCode: fundingTarget.joinCode,
@@ -236,19 +279,21 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   });
 }
 
-export async function createHostedFamilyMemberUsageCreditCheckout(input: {
-  beneficiaryMemberId: string;
-  clientRequestKey: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  payerMemberId: string;
-  prisma?: PrismaClient;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
     now: input.now,
     offerCode: input.offerCode,
     prisma: input.prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: input.beneficiaryMemberId,
       groupId: null,
@@ -264,8 +309,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   now?: Date;
   offerCode: HostedUsageCreditOfferCode;
   prisma?: PrismaClient;
+  recoveryOnly?: true;
   target: HostedUsageCreditCheckoutTarget;
-}): Promise<HostedUsageCreditCheckoutResult> {
+}): Promise<HostedUsageCreditCheckoutAttemptResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
@@ -311,6 +357,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         ) {
           return {
             offerConflict: false,
+            kind: "purchase" as const,
             purchase: racedExisting,
             recovered: true,
             targetConflict: true,
@@ -319,6 +366,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       }
       return {
         offerConflict: false,
+        kind: "purchase" as const,
         purchase: racedExisting,
         recovered: false,
         targetConflict: false,
@@ -364,6 +412,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         if (existingActive.offerCode !== input.offerCode) {
           return {
             offerConflict: true,
+            kind: "purchase" as const,
             purchase: existingActive,
             recovered: true,
             targetConflict: false,
@@ -371,6 +420,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         }
         return {
           offerConflict: false,
+          kind: "purchase" as const,
           purchase: existingActive,
           recovered: true,
           targetConflict: false,
@@ -378,10 +428,15 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       }
       return {
         offerConflict: false,
+        kind: "purchase" as const,
         purchase: existingActive,
         recovered: true,
         targetConflict: true,
       };
+    }
+
+    if (input.recoveryOnly) {
+      return { kind: "recovery_miss" as const };
     }
 
     let authorizedOfferCodes: HostedUsageCreditOfferCode[];
@@ -525,11 +580,16 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     });
     return {
       offerConflict: false,
+      kind: "purchase" as const,
       purchase: created,
       recovered: false,
       targetConflict: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (resolution.kind === "recovery_miss") {
+    return { recoveryMiss: true };
+  }
 
   if (resolution.targetConflict) {
     const projected = projectHostedUsageCreditPurchaseStatusResult(

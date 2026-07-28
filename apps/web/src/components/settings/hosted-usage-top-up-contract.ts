@@ -63,6 +63,27 @@ interface HostedUsageTopUpPurchaseResponse {
   url: string | null;
 }
 
+interface HostedUsageTopUpRecoveryMissResponse {
+  recoveryMiss: true;
+}
+
+type HostedUsageTopUpCheckoutAttemptResponse =
+  | HostedUsageTopUpPurchaseResponse
+  | HostedUsageTopUpRecoveryMissResponse;
+
+function readCheckoutAttemptResponse(
+  value: unknown,
+): HostedUsageTopUpCheckoutAttemptResponse {
+  if (
+    isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    value.recoveryMiss === true
+  ) {
+    return { recoveryMiss: true };
+  }
+  return readPurchaseResponse(value);
+}
+
 function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse {
   if (
     !isRecord(value) ||
@@ -320,6 +341,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export {
   createClientRequestKey,
+  readCheckoutAttemptResponse,
   readCheckoutUrl,
   readOptionalCheckoutUrl,
   readOptionalRestartAt,
@@ -330,6 +352,7 @@ export {
 };
 export type {
   HostedUsageTopUpActivePurchase,
+  HostedUsageTopUpCheckoutAttemptResponse,
   HostedUsageTopUpDialogProps,
   HostedUsageTopUpOffer,
   HostedUsageTopUpPurchaseResponse,

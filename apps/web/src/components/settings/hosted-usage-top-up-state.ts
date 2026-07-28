@@ -75,6 +75,11 @@ type HostedUsageTopUpAction =
       requestKey: string;
     }
   | {
+      type: "checkout_recovery_missed";
+      offerCode: string;
+      requestKey: string;
+    }
+  | {
       type: "purchase_checkout_started";
       purchaseId: string;
       requestKey: string;
@@ -214,6 +219,8 @@ function hostedUsageTopUpReducer(
           requestKey: action.requestKey,
         },
       }));
+    case "checkout_recovery_missed":
+      return applyCheckoutRecoveryMiss(state, action);
     case "purchase_checkout_started":
       return updatePurchaseScreen(state, action.purchaseId, (screen) => ({
         ...screen,
@@ -379,6 +386,28 @@ function applyCheckoutResponse(
       true,
     ),
   };
+}
+
+function applyCheckoutRecoveryMiss(
+  state: HostedUsageTopUpState,
+  action: Extract<
+    HostedUsageTopUpAction,
+    { type: "checkout_recovery_missed" }
+  >,
+): HostedUsageTopUpState {
+  const selectionMatches =
+    state.screen.kind === "selection" &&
+    state.screen.attempt.kind === "opening" &&
+    state.screen.attempt.offerCode === action.offerCode &&
+    state.screen.attempt.requestKey === action.requestKey;
+  const purchaseMatches =
+    state.screen.kind === "purchase" &&
+    state.screen.operation === "opening_checkout" &&
+    state.screen.retryOfferCode === action.offerCode &&
+    state.screen.retryRequestKey === action.requestKey;
+  return selectionMatches || purchaseMatches
+    ? { ...state, screen: createSelectionScreen() }
+    : state;
 }
 
 function screenFromResponse(
