@@ -230,7 +230,10 @@ Referral production is fail-closed unless Web reads the exact value
    Vercel function window to drain, and run the DML-only contract migration
    `20260728031000_resynchronize_hosted_usage_credit_purchase_grants`. It
    resynchronizes any purchase projection written during the expand window
-   without changing table constraints.
+   without changing table constraints. It takes affected beneficiary locks in
+   the same deterministic order as live grant/debit/adjustment writers before
+   reading purchase capacity, and rolls back unless purchase/grant projections
+   converge.
 4. Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`, redeploy that same or newer Web
    head, then deploy Cloudflare/hosted runtime and assistant packages. Older
    runtimes never emit the new actions.

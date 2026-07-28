@@ -38,6 +38,9 @@ Updated: 2026-07-27
 - The exact DML-only contract migration inserts missing purchase projections,
   corrects stale values, leaves referral grants unchanged, and is replay-safe
   in real PostgreSQL.
+- The DML-only resync serializes with live grant/debit/adjustment writers via
+  their shared beneficiary lock and proves an in-flight debit cannot be
+  overwritten by an older purchase snapshot.
 - The protected deployment workflow's scheduled-reminder E2E has enough
   deterministic runway for its pre-delivery checkpoint/wake proof and still
   observes the scheduled send without a test nudge.
@@ -88,6 +91,10 @@ Updated: 2026-07-27
    credit-entry amount and source-shape constraints predated
    `referral_grant`; the later referral migration added the enum and authority
    column without replacing those checks.
+5. The first DML-only projection resync read purchase capacity before waiting
+   on a locked grant row. A concurrent debit could commit a lower purchase and
+   grant value while resync waited, after which resync could restore the stale
+   higher snapshot and break parity.
 
 ## Risks and mitigations
 
@@ -121,6 +128,11 @@ Updated: 2026-07-27
    Mitigation: distinguish committed history from current state and make the
    recovery read authoritative, including later cancellation, supersession, or
    re-arming.
+8. Risk: contract resync snapshots purchase capacity while a live debit is
+   blocked on the grant row, then overwrites the newer lower projection.
+   Mitigation: lock affected beneficiaries in runtime writer order in a
+   separate statement before reading capacity, fail closed on post-upsert
+   parity, and prove the blocking interleaving in real PostgreSQL.
 
 ## Tasks
 

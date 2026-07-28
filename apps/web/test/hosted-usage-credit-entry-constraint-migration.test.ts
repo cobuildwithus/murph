@@ -153,6 +153,17 @@ describe("hosted usage-credit entry constraint migrations", () => {
     expect(referralProjectionContractMigration).toContain(
       '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
     );
+    expect(referralProjectionContractMigration).toContain(
+      'ORDER BY member."id"\nFOR UPDATE;',
+    );
+    expect(referralProjectionContractMigration).toContain(
+      'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
+    );
+    expect(referralProjectionContractMigration.indexOf(
+      'ORDER BY member."id"\nFOR UPDATE;',
+    )).toBeLessThan(referralProjectionContractMigration.indexOf(
+      'INSERT INTO "hosted_usage_credit_grant"',
+    ));
     expect(referralProjectionContractMigration).not.toMatch(
       /ALTER\s+TABLE|ADD\s+CONSTRAINT|DROP\s+CONSTRAINT/iu,
     );

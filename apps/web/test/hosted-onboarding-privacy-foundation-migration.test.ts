@@ -1063,6 +1063,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
       '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
     );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'ORDER BY member."id"\nFOR UPDATE;',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
+    );
     expect(hostedUsageReferralProjectionContractMigrationSql).not.toContain(
       'ALTER TABLE "hosted_usage_credit_entry"',
     );

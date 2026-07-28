@@ -268,6 +268,21 @@ async function waitForBlockedBackend(input: {
   throw new Error("Expected the PostgreSQL transaction to wait on a held lock.");
 }
 
+async function applyPurchaseGrantResynchronizationContractMigration(
+  client: pg.Client,
+): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(
+      purchaseGrantResynchronizationContractMigrationSql,
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 function isClearlyLocalPostgresUrl(value: string): boolean {
   let parsed: URL;
   try {
@@ -508,8 +523,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const client = new pg.Client({ connectionString: databaseUrl });
         await client.connect();
         try {
-          await client.query(purchaseGrantResynchronizationContractMigrationSql);
-          await client.query(purchaseGrantResynchronizationContractMigrationSql);
+          await applyPurchaseGrantResynchronizationContractMigration(client);
+          await applyPurchaseGrantResynchronizationContractMigration(client);
         } finally {
           await client.end();
         }
@@ -569,6 +584,96 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         await observer.$disconnect();
+      }
+    });
+
+    it("waits for an in-flight debit before resynchronizing purchase grant projections", async () => {
+      const fixture = await createUsageCreditFixture();
+      const paidAt = new Date("2026-07-16T12:12:00.000Z");
+      const debitApplied = createDeferred();
+      const releaseDebit = createDeferred();
+      const resyncClient = new pg.Client({ connectionString: databaseUrl });
+      let debitTransaction: Promise<Awaited<ReturnType<
+        typeof settleHostedUsageCreditForUsageTx
+      >>> | null = null;
+      let resync: Promise<void> | null = null;
+
+      try {
+        await fixture.firstClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions
+        );
+        debitTransaction = fixture.secondClient.$transaction(async (tx) => {
+          const result = await settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T12:13:00.000Z"),
+            sourceUsageId: `usage_resync_race_${randomUUID()}`,
+            tx,
+          });
+          debitApplied.resolve();
+          await releaseDebit.promise;
+          return result;
+        }, transactionOptions);
+        await Promise.race([debitApplied.promise, debitTransaction]);
+
+        await resyncClient.connect();
+        const pidResult = await resyncClient.query<{ pid: number }>(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        const resyncPid = pidResult.rows[0]?.pid;
+        if (typeof resyncPid !== "number") {
+          throw new Error("Expected a contract-migration PostgreSQL backend pid.");
+        }
+        resync =
+          applyPurchaseGrantResynchronizationContractMigration(resyncClient);
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: resyncPid,
+        });
+
+        releaseDebit.resolve();
+        await expect(debitTransaction).resolves.toMatchObject({
+          debitedUsdMicros: 1_000_000n,
+        });
+        await expect(resync).resolves.toBeUndefined();
+
+        await expect(Promise.all([
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: { remainingCreditUsdMicros: true },
+            where: { id: fixture.purchaseId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findFirstOrThrow({
+            select: { remainingUsdMicros: true },
+            where: {
+              entry: {
+                kind: "purchase_grant",
+                purchaseId: fixture.purchaseId,
+              },
+            },
+          }),
+          fixture.observer.hostedUsageCreditEntry.count({
+            where: {
+              kind: "usage_debit",
+              purchaseId: fixture.purchaseId,
+            },
+          }),
+        ])).resolves.toEqual([
+          { remainingCreditUsdMicros: 4_000_000n },
+          { remainingUsdMicros: 4_000_000n },
+          1,
+        ]);
+      } finally {
+        releaseDebit.resolve();
+        await Promise.allSettled([
+          ...(debitTransaction ? [debitTransaction] : []),
+          ...(resync ? [resync] : []),
+        ]);
+        await resyncClient.end().catch(() => undefined);
+        await cleanupUsageCreditFixture(fixture);
       }
     });
 
