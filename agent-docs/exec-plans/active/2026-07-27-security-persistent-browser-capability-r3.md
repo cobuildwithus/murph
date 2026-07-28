@@ -163,9 +163,17 @@ Updated: 2026-07-27
     phase then timed out eight unchanged subprocess cases because their
     `build:test-runtime:prepared` children re-entered the outer workspace
     artifact lock and remained asleep after the test timeout. The parent stopped
-    only that proven run tree. The branch still needs its scoped commit, merge
-    to current `main`, and a fresh canonical run before this can be classified
-    as a product failure.
+    only that proven run tree.
+  - The 18-file correction was committed as
+    `38611b4c4d49` and merged cleanly with current `origin/main`; focused
+    verification remains green after that reconciliation.
+  - The post-reconciliation focused rerun passed Hosted Execution (40 tests),
+    Assistant Engine (285 tests), and Web (184 tests). Hosted Execution,
+    Assistant Engine, and Web typechecks also passed.
+  - After `origin/main` advanced again, the branch merged those 20 commits
+    cleanly as `badbaaf965`. The exact refreshed head then passed Hosted
+    Execution (40 tests), Assistant Engine (286 tests), Web (184 tests), and
+    all three affected typechecks.
 - Remaining:
   - Canonical diff-aware verification and acceptance.
   - Preliminary specialist, final ReviewGPT, and CI gates.
