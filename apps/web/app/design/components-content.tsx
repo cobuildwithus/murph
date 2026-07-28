@@ -10,6 +10,7 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -95,7 +96,10 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
-import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import {
+  DESIGN_GROUP_SPONSORSHIP_OFFERS,
+  DESIGN_USAGE_OFFERS,
+} from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -823,10 +827,10 @@ export function ComponentsContent() {
             >
               <GroupUsageFundingCard
                 action={
-                  <HostedUsageTopUpDialog
+                  <GroupSponsorshipDialog
                     checkoutUrl="/api/design/usage-credit-preview"
-                    offers={DESIGN_USAGE_OFFERS}
-                    scope="group"
+                    customizationAllowed
+                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
                   />
                 }
                 groupName="Sunday sleep crew"

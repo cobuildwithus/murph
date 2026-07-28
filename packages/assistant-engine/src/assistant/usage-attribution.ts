@@ -77,6 +77,7 @@ export function resolveAssistantUsageFeatureKey(input: {
   promptProfile:
     | 'assistant-ask-continuation'
     | 'conversation'
+    | 'creative-notification'
     | 'maintenance'
     | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null

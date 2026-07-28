@@ -138,7 +138,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
-    (props.scope === "group" ? "Add messages" : "Add usage");
+    (props.scope === "group" ? "Sponsor this chat" : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -216,7 +216,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "Usage credit unavailable"
                 : props.scope === "group"
-                  ? "How many messages?"
+                  ? "How many messages do you want to sponsor?"
                   : familyTarget
                     ? `Choose an amount for ${familyTarget}`
                     : "Choose an amount"}
@@ -233,7 +233,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Shared with everyone in the chat. We’ll use your saved card when available. Stripe will ask when card details or verification are needed."
+                  ? "Choose a one-time contribution to keep Murph talking for everyone here. We’ll use your saved card when available and ask only when card details or verification are needed."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}.`
                     : "Choose a one-time credit amount for your account."}
@@ -251,6 +251,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 {statusContent.message}
               </p>
             </div>
+            {props.renderPurchaseDetails}
             <FieldError>{purchase.checkoutError}</FieldError>
             <div className="flex flex-col gap-2">
               {canResume ? (
@@ -416,6 +417,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 ))}
               </RadioGroup>
             </FieldSet>
+            {props.renderSelectionDetails?.({
+              disabled: hasAttempt,
+              selectedOffer: controller.selectedOffer,
+            })}
             {selectionNeedsRecovery ? (
               <div
                 className="flex gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4"
@@ -508,11 +513,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   {controller.checkoutInFlight
                     ? props.scope === "group"
-                      ? "Adding messages…"
+                      ? "Sponsoring chat…"
                       : "Opening checkout…"
                     : controller.selectedOffer
                       ? props.scope === "group"
-                        ? `Add messages · ${controller.selectedOffer.amountLabel}`
+                        ? `Sponsor ~${controller.selectedOffer.estimatedMessages} messages · ${controller.selectedOffer.amountLabel}`
                         : `Continue to checkout · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
                 </Button>

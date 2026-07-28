@@ -89,7 +89,8 @@ Last verified: 2026-07-26
   Family checkout binds payer to the active Family owner, rechecks the selected
   active unsuspended direct member in that owner's active group, and resolves
   the Customer only from the group's active billing reference. The fixed
-  $5/$10/$25 offer and reusable Price come from server configuration. Before
+  personal/Family $5/$10/$25 or group $5/$10/$20 offer and reusable Price come
+  from server configuration. Before
   Checkout creation, the service must re-fetch
   that Price and fail closed unless its mode, active state, one-time per-unit
   shape, single currency, and exact amount match the frozen purchase; Adaptive
@@ -113,6 +114,29 @@ Last verified: 2026-07-26
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
+- Group sponsorship separates funding authority from permission to speak into
+  the room. A valid current funding locator may identify only the frozen group
+  beneficiary. Alias, note, or running-bit content is accepted only from the
+  current container owner or an active participant under the canonical
+  participant lease, and that authority is rechecked after verified payment.
+  The content is normalized, bounded, HMAC-bound to request-key replay,
+  encrypted through the hosted member secure-box owner, omitted from logs, and
+  quoted to the Assistant only as untrusted data. Losing authority suppresses
+  publication without weakening or reversing the verified usage grant. The
+  creative notification prompt profile supplies only the task and bounded
+  committed group history in an isolated thread, projects only
+  `generate_song`, and applies the output-only native-capability deny set:
+  approval never, read-only sandbox, and no shell, browser, apps, plugins,
+  delegated agents, web search, public fetch, artifact materialization,
+  generated-image upload, or progress delivery. The bound provider transport
+  remains available only to the application-owned song tool so ElevenLabs and
+  Linq egress retain their runtime authority headers. Its prompt asks for one
+  short original song through exactly one `generate_song` call and forbids
+  separate contact, scheduling, state mutation, or disclosure of private
+  health, account, payment, or routing details. Running bits may reach only fresh
+  route-authorized non-direct Linq or Telegram input
+  for the exact beneficiary, and account deletion removes the creator-owned
+  authored row while retained financial purchase history remains detached.
 - Saved-card group funding may select only one canonical card already attached
   to the authenticated payer's verified Stripe Customer: one consistent
   Customer or nonterminal Subscription default, or the sole attached card.

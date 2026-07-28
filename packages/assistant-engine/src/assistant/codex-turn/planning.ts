@@ -75,6 +75,7 @@ import type {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
+  buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -223,6 +224,7 @@ export type AssistantCodexTurnPromptProfile =
   | 'maintenance'
   | 'assistant-ask-continuation'
   | 'system-notification'
+  | 'creative-notification'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
@@ -463,14 +465,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
   const systemNotificationTurn =
-    input.profile.promptProfile === 'system-notification'
+    input.profile.promptProfile === 'system-notification' ||
+    input.profile.promptProfile === 'creative-notification'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
-    input.profile.promptProfile === 'assistant-ask-continuation'
+    input.profile.promptProfile === 'assistant-ask-continuation' ||
+    input.profile.promptProfile === 'creative-notification'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -578,7 +582,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ].join('\n')
   })()
   const hostedDynamicContextPrompts =
-    maintenanceTurn || outputOnlyTurn
+    maintenanceTurn || systemNotificationTurn
       ? []
       : [
           ...(input.executionContext?.hosted?.dynamicContextPrompts ?? []),
@@ -678,6 +682,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     }
 
+    if (input.profile.promptProfile === 'creative-notification') {
+      return buildAssistantCreativeNotificationPromptWithCacheMetadata({
+        channel: resolvedChannel,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
     return buildAssistantSystemPromptWithCacheMetadata({
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
@@ -767,7 +779,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = outputOnlyTurn
+  const availableDynamicTools = outputOnlyTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
@@ -839,6 +851,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
+  const dynamicTools: readonly MurphDynamicTool[] =
+    input.profile.promptProfile === 'creative-notification'
+      ? availableDynamicTools.filter(
+          (tool) => tool.namespace === 'murph' && tool.name === 'generate_song',
+        )
+      : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -958,7 +976,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !outputOnlyTurn
+      !outputOnlyTurn &&
+      !systemNotificationTurn
       ? {
           binding: input.session.binding,
         }

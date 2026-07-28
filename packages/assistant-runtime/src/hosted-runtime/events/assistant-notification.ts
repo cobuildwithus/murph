@@ -334,7 +334,8 @@ function shouldSkipFailedHostedAssistantNotification(
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      wake.notification.firstContact != null
+      wake.notification.notificationPromptProfile === "creative-response"
+      || wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )
   );
@@ -559,6 +560,12 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
+    ...(wake.notification.notificationPromptProfile
+      ? {
+          notificationPromptProfile:
+            wake.notification.notificationPromptProfile,
+        }
+      : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     route: wake.notification.route,
@@ -581,6 +588,7 @@ function buildAssistantNotificationInputFromRoute(input: {
   firstContactPolicy: AssistantNotificationInput["firstContactPolicy"];
   instructions: string;
   logDetails: HostedExecutionStructuredLogDetails;
+  notificationPromptProfile?: AssistantNotificationInput["notificationPromptProfile"];
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
   responsePolicy: AssistantNotificationInput["responsePolicy"];
   route: HostedExecutionAssistantNotificationRoute;
@@ -629,6 +637,9 @@ function buildAssistantNotificationInputFromRoute(input: {
     firstContactPolicy: input.firstContactPolicy,
     identityId: route.identityId,
     instructions: input.instructions,
+    ...(input.notificationPromptProfile
+      ? { notificationPromptProfile: input.notificationPromptProfile }
+      : {}),
     onTraceEvent(event) {
       const contextEntry = emitHostedAssistantContextTraceLog({
         event,

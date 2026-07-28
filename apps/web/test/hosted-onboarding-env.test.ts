@@ -12,6 +12,7 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_usage_5_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_usage_10_123",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD: "price_usage_20_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_usage_25_123",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
@@ -34,6 +35,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.stripeUsageCreditPriceIdsByOffer).toEqual({
       usage_5_usd: "price_usage_5_123",
       usage_10_usd: "price_usage_10_123",
+      usage_20_usd: "price_usage_20_123",
       usage_25_usd: "price_usage_25_123",
     });
   });
