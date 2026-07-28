@@ -2295,21 +2295,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     ? input.intent
     : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
-  if (!authority && !input.intent?.automationAuthority) {
-    if (reviewedCompletion) {
-      throw new VaultCliError(
-        "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
-        "Reviewed Assistant Ask completion requires its original Telegram route authority.",
-        { retryable: false },
-      );
-    }
-    return null;
-  }
   if (!authority) {
+    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+      return null;
+    }
     throw new VaultCliError(
       "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
       "Hosted group delivery requires live thread route authority before provider work.",
-      { retryable: true },
+      { retryable: reviewedCompletion === null },
     );
   }
 

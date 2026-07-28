@@ -107,10 +107,17 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   ) {
     return createOutcome();
   }
+  if (!canCommit()) {
+    return createOutcome();
+  }
+
+  // The accepted input stores only a trusted authority-presence marker.
+  // Rebuild the narrow outbox authority from its bound runtime route.
   const reviewedTelegramRouteAuthority:
     HostedExecutionTelegramExternalThreadRouteAuthority | null =
       reviewedExact
       && route.channel === "telegram"
+      && route.threadIsDirect === false
       && origin.sourceMetadata?.kind === "telegram"
       && origin.sourceMetadata.externalThreadRouteAuthorityPresent === true
         ? {
@@ -119,16 +126,6 @@ export async function executeHostedAssistantAskCompletedWake(input: {
             threadId: route.deliveryTarget,
           }
         : null;
-  if (
-    reviewedExact
-    && route.channel === "telegram"
-    && !reviewedTelegramRouteAuthority
-  ) {
-    return createOutcome();
-  }
-  if (!canCommit()) {
-    return createOutcome();
-  }
 
   const cancellation = createHostedBackgroundMaintenanceCancellation({
     signal: input.signal ?? null,

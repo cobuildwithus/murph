@@ -100,9 +100,14 @@ describe("hosted Assistant Ask completion production", () => {
         memberId: "member-telegram-group-runtime",
         occurredAt: "2026-07-15T12:05:00.000Z",
       });
-
       await executeHostedAssistantAskCompletedWake({
-        executionContext: { hosted: null },
+        executionContext: {
+          hosted: {
+            defaultTarget: createDefaultLocalAssistantModelTarget(),
+            memberId: "member-telegram-group-runtime",
+            userEnvKeys: [],
+          },
+        },
         sourceMailboxItemId: eventId,
         vaultRoot: vault,
         wake,
@@ -111,6 +116,10 @@ describe("hosted Assistant Ask completion production", () => {
       expect(await listAssistantOutboxIntents(vault)).toEqual([
         expect.objectContaining({
           answeredMailboxItemIds: [eventId],
+          bindingDelivery: {
+            kind: "thread",
+            target: threadId,
+          },
           channel: "telegram",
           deliveryIdempotencyKey,
           externalThreadRouteAuthority: {
@@ -122,6 +131,8 @@ describe("hosted Assistant Ask completion production", () => {
           reviewedAssistantAskCompletionExpiresAt:
             "2099-07-15T12:10:00.000Z",
           status: "pending",
+          threadId,
+          threadIsDirect: false,
         }),
       ]);
     } finally {

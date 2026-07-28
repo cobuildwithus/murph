@@ -7661,8 +7661,13 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("routes Telegram deliveries through the shared Telegram runtime with Telegram-only env", async () => {
-    const effect = createEffect();
+  it("preserves legacy Telegram group delivery without route authority", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_123",
+      threadId: "chat_123",
+      threadIsDirect: false,
+    });
     mocks.sendTelegramMessage.mockResolvedValueOnce({
       providerMessageId: "provider_123",
       target: "chat_123",
@@ -7684,6 +7689,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
     const assertLiveness = vi.fn(async () => undefined);
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
     const providerFetch = vi.fn<typeof fetch>();
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
@@ -7699,12 +7705,15 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
@@ -7959,6 +7968,17 @@ describe("hosted runtime callbacks", () => {
     expect(
       assertExternalThreadRouteAuthority.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.sendTelegramMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      {
+        idempotencyKey,
+        message: reviewedAnswer,
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      },
+      expect.objectContaining({
+        authorityBoundTarget: routeAuthority.threadId,
+      }),
+    );
   });
 
   it("blocks a reviewed Telegram completion whose persisted route authority is missing", async () => {
@@ -8021,7 +8041,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
-      code: "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
       context: expect.objectContaining({ retryable: false }),
     });
 
