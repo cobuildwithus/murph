@@ -37,7 +37,13 @@ surface through Crabbox's static SSH provider on a dedicated macOS account or
 through the direct Blacksmith Testbox provider; the command semantics in this
 map remain authoritative and only the finite executor changes. Ordinary GitHub
 Actions and already-remote invocations stay on their existing runner-local
-path. See `agent-docs/operations/verification-and-runtime.md`.
+path. Static SSH routing requires validated command-local host, user, and port
+inputs; dispatcher coverage proves they become Crabbox CLI flags but do not
+enter its sanitized environment. Focused transport coverage proves the remote
+rebuilds the exact detached base and staged candidate after Crabbox excludes
+`.git`, while macOS wrapper coverage proves nested runs share one `lockf` and
+retain exact cleanup and exit status. See
+`agent-docs/operations/verification-and-runtime.md`.
 
 Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or

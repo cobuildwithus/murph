@@ -2,7 +2,14 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -22,6 +29,7 @@ const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
 const SSH_RUN_ROOT = `${SSH_WORK_ROOT}/runs`;
 const SSH_VERIFICATION_ENTRYPOINT =
   "scripts/crabbox/run-ssh-locked-verification.sh";
+const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
 const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
 const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
@@ -115,7 +123,7 @@ export function resolveVerificationExecutor({
   if (requestedExecutor === "crabbox") {
     assertSafeBlacksmithRoutingInputs(env);
   } else {
-    readSshHostAlias(env);
+    readSshRoutingInputs(env);
   }
   if (!isExecutorAvailable(requestedExecutor)) {
     const requiredStack = requestedExecutor === "crabbox"
@@ -172,7 +180,7 @@ export function buildCrabboxInvocation(request) {
   return { args, command: "crabbox" };
 }
 
-export function buildSshInvocation(request, hostAlias, repoRoot) {
+export function buildSshInvocation(request, routing, repoRoot) {
   const identity = buildSshWorktreeIdentity(repoRoot);
   return {
     args: [
@@ -182,13 +190,17 @@ export function buildSshInvocation(request, hostAlias, repoRoot) {
       "--target",
       SSH_TARGET,
       "--static-host",
-      hostAlias,
+      routing.host,
+      "--static-user",
+      routing.user,
+      "--static-port",
+      routing.port,
       "--static-work-root",
       identity.workRoot,
       "--full-resync",
       "--preflight",
       "--preflight-tools",
-      "git,rsync,node,corepack,lockf",
+      "git,node,corepack,pnpm",
       "--label",
       `murph ${request.verificationCommand}`,
       "--timing-json",
@@ -256,7 +268,7 @@ export async function runVerification(argv, env = process.env) {
   const remoteInvocation = resolution.executor === "crabbox"
     ? buildCrabboxInvocation(request)
     : resolution.executor === "ssh"
-      ? buildSshInvocation(request, readSshHostAlias(env), repoRoot)
+      ? buildSshInvocation(request, readSshRoutingInputs(env), repoRoot)
       : null;
   const invocation = remoteInvocation ?? buildLocalInvocation(request);
 
@@ -341,6 +353,22 @@ export function createRemoteCandidateSnapshot(
       environment,
       "candidate tree",
     );
+    const baseTree = readGitValue(
+      repoRoot,
+      ["rev-parse", `${baseCommit}^{tree}`],
+      environment,
+      "candidate base tree",
+    );
+    const baseSensitivePaths = findSensitiveRemoteSyncPaths(
+      listGitPaths(
+        repoRoot,
+        ["ls-tree", "-r", "-z", "--name-only", baseTree],
+        environment,
+      ),
+    );
+    if (baseSensitivePaths.length > 0) {
+      throw new Error(renderSensitiveRemoteSyncError(baseSensitivePaths));
+    }
     const indexTree = candidateCommit
       ? readGitValue(
           repoRoot,
@@ -461,6 +489,10 @@ export function createRemoteCandidateSnapshot(
       { cwd: snapshotRoot, env: environment },
       "bind the remote verification candidate to its public origin",
     );
+    writeStaticGitSnapshotMetadata(
+      { baseTree, candidateTree, snapshotRoot },
+      environment,
+    );
 
     let disposed = false;
     return {
@@ -477,6 +509,202 @@ export function createRemoteCandidateSnapshot(
   } catch (error) {
     rmSync(snapshotRoot, { force: true, recursive: true });
     throw error;
+  }
+}
+
+export function writeStaticGitSnapshotMetadata(
+  { baseTree, candidateTree, snapshotRoot },
+  environment = process.env,
+) {
+  const metadataRoot = path.join(
+    snapshotRoot,
+    STATIC_GIT_SNAPSHOT_DIRECTORY,
+  );
+  mkdirSync(metadataRoot, { mode: 0o700 });
+
+  const syntheticBaseCommit = createSyntheticBaseCommit(
+    snapshotRoot,
+    baseTree,
+    environment,
+  );
+  const candidateObjectIds = new Set(
+    [...readGitTreeEntries(snapshotRoot, candidateTree, environment).values()]
+      .map(readTreeEntryObjectId),
+  );
+  const missingBaseObjectIds = [
+    ...readGitTreeEntries(snapshotRoot, baseTree, environment).values(),
+  ]
+    .map(readTreeEntryObjectId)
+    .filter((objectId) => !candidateObjectIds.has(objectId));
+  const packedObjectIds = [
+    syntheticBaseCommit,
+    baseTree,
+    ...readGitTreeObjectIds(snapshotRoot, baseTree, environment),
+    ...missingBaseObjectIds,
+  ];
+
+  writeFileSync(
+    path.join(metadataRoot, "base-commit"),
+    `${syntheticBaseCommit}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(metadataRoot, "base-tree"),
+    `${baseTree}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(metadataRoot, "candidate-tree"),
+    `${candidateTree}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  writeGitTreeManifest(
+    snapshotRoot,
+    candidateTree,
+    path.join(metadataRoot, "candidate-index"),
+    environment,
+  );
+  writeFileSync(
+    path.join(metadataRoot, "candidate-paths"),
+    Buffer.from(
+      `${listGitPaths(
+        snapshotRoot,
+        ["ls-tree", "-r", "-z", "--name-only", candidateTree],
+        environment,
+      ).join("\0")}\0`,
+      "utf8",
+    ),
+    { mode: 0o600 },
+  );
+  writeGitObjectPack(
+    snapshotRoot,
+    path.join(metadataRoot, "objects.pack"),
+    [...new Set(packedObjectIds)],
+    environment,
+  );
+}
+
+function writeGitTreeManifest(
+  repoRoot,
+  treeish,
+  manifestPath,
+  environment,
+) {
+  const manifestDescriptor = openSync(manifestPath, "w", 0o600);
+  try {
+    const result = spawnSync(
+      "git",
+      ["ls-tree", "-r", "-z", "--full-tree", treeish],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: environment,
+        maxBuffer: 16 * 1024 * 1024,
+        stdio: ["ignore", manifestDescriptor, "pipe"],
+      },
+    );
+    if (result.status !== 0) {
+      throw new Error(
+        "Unable to write the static verification candidate index.",
+      );
+    }
+  } finally {
+    closeSync(manifestDescriptor);
+  }
+}
+
+function createSyntheticBaseCommit(repoRoot, baseTree, environment) {
+  const result = spawnSync("git", ["commit-tree", baseTree], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...environment,
+      GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+      GIT_AUTHOR_EMAIL: "verification@localhost",
+      GIT_AUTHOR_NAME: "Murph Verification",
+      GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+      GIT_COMMITTER_EMAIL: "verification@localhost",
+      GIT_COMMITTER_NAME: "Murph Verification",
+    },
+    input: "Murph static verification base\n",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0 || !/^[a-f0-9]{40}\n?$/u.test(result.stdout)) {
+    throw new Error(
+      "Unable to create the static verification base commit.",
+    );
+  }
+  return result.stdout.trim();
+}
+
+function readGitTreeObjectIds(repoRoot, treeish, environment) {
+  const result = spawnSync(
+    "git",
+    ["ls-tree", "-r", "-t", "-z", "--full-tree", treeish],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      "Unable to inspect static verification base tree objects.",
+    );
+  }
+  const objectIds = [];
+  for (const record of result.stdout.split("\0")) {
+    if (!record) {
+      continue;
+    }
+    const separator = record.indexOf("\t");
+    const header = separator < 0 ? "" : record.slice(0, separator);
+    const match = /^[0-7]{6} tree ([a-f0-9]{40})$/u.exec(header);
+    if (match) {
+      objectIds.push(match[1]);
+    }
+  }
+  return objectIds;
+}
+
+function readTreeEntryObjectId(entry) {
+  const match = /^[0-7]{6} (?:blob|commit) ([a-f0-9]{40})$/u.exec(entry);
+  if (!match) {
+    throw new Error(
+      "Unable to parse a static verification Git tree entry.",
+    );
+  }
+  return match[1];
+}
+
+function writeGitObjectPack(repoRoot, packPath, objectIds, environment) {
+  const packDescriptor = openSync(packPath, "w", 0o600);
+  try {
+    const result = spawnSync(
+      "git",
+      [
+        "pack-objects",
+        "--stdout",
+        "--no-reuse-delta",
+        "--no-reuse-object",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: environment,
+        input: `${objectIds.join("\n")}\n`,
+        maxBuffer: 16 * 1024 * 1024,
+        stdio: ["pipe", packDescriptor, "pipe"],
+      },
+    );
+    if (result.status !== 0) {
+      throw new Error(
+        "Unable to pack the static verification Git base.",
+      );
+    }
+  } finally {
+    closeSync(packDescriptor);
   }
 }
 
@@ -841,22 +1069,53 @@ function readOptionalValue(value, name) {
   return normalized;
 }
 
-export function readSshHostAlias(environment) {
-  const hostAlias = readOptionalValue(
+export function readSshRoutingInputs(environment) {
+  const host = readOptionalValue(
     environment.MURPH_VERIFY_SSH_HOST,
     "MURPH_VERIFY_SSH_HOST",
   );
-  if (!hostAlias) {
+  if (!host) {
     throw new Error(
-      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_HOST to name a dedicated host in the local SSH config.",
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_HOST to name a dedicated resolvable host.",
     );
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/u.test(hostAlias)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/u.test(host)) {
     throw new Error(
-      "MURPH_VERIFY_SSH_HOST must be a safe SSH host alias containing only letters, digits, dots, underscores, and hyphens.",
+      "MURPH_VERIFY_SSH_HOST must be a safe resolvable SSH host containing only letters, digits, dots, underscores, and hyphens.",
     );
   }
-  return hostAlias;
+  const user = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_USER,
+    "MURPH_VERIFY_SSH_USER",
+  );
+  if (!user) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_USER to name the dedicated worker account.",
+    );
+  }
+  if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/u.test(user)) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_USER must be a safe SSH user containing only letters, digits, dots, underscores, and hyphens.",
+    );
+  }
+  const port = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_PORT,
+    "MURPH_VERIFY_SSH_PORT",
+  );
+  if (!port) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_PORT to name the dedicated worker SSH port.",
+    );
+  }
+  if (
+    !/^[1-9][0-9]{0,4}$/u.test(port) ||
+    Number.parseInt(port, 10) > 65_535
+  ) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_PORT must be an integer from 1 through 65535.",
+    );
+  }
+  return { host, port, user };
 }
 
 function readBooleanFlag(value, name) {

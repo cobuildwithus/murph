@@ -1210,15 +1210,22 @@ The repository uses the current verification commands described in
 by default and exposes two explicit, fail-closed, secret-free remote executors:
 Crabbox's first-party static SSH provider for a dedicated macOS worker account,
 and its direct Blacksmith Testbox provider for the bounded paid fallback. The
-static lane derives one opaque lease id per initiating worktree and creates a
-unique remote directory for every invocation. After admission, the dispatcher
+static lane validates explicit operator-local host, user, and port routing,
+passes those facts only as Crabbox CLI arguments, derives one opaque lease id
+per initiating worktree, and creates a unique remote directory for every
+invocation. After admission, the dispatcher
 materializes one process-owned immutable Git candidate over its original base
 as detached `HEAD`, verifies and logs its tree id, and performs a full sync
-from that candidate without requiring a source branch. Later checkout writes
-cannot change the run, while the dirty candidate preserves implicit diff
-scope. A native macOS `lockf` descriptor
-inherited by the verifier is the single remote-capacity owner until its exact
-child groups exit, after which the verifier removes only that run directory.
+from that candidate without requiring a source branch. Because Crabbox excludes
+the local `.git` directory, the dispatcher also transports a bounded generated
+object pack for the base objects absent from the candidate. The remote
+entrypoint rebuilds the detached base plus staged candidate and verifies both
+tree ids before installing dependencies. Later checkout writes cannot change
+the run, while the dirty candidate preserves implicit diff scope. A native
+macOS `lockf` descriptor inherited by the verifier is the single
+remote-capacity owner until its exact child groups exit. For that same finite
+lifetime, native `caffeinate` prevents idle system sleep without changing a
+persistent power setting. The verifier then removes only that run directory.
 The local artifact lock protects cooperating local producers and candidate
 capture, not remote completion. The lane reuses the same synthetic verification
 core and adds no daemon, coordinator, queue, scheduler, shared checkout, or

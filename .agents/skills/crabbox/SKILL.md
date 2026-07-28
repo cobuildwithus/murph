@@ -31,9 +31,9 @@ entrypoint.
 ## Environment and sync boundary
 
 - Blacksmith runs require one-time `blacksmith auth login`; static SSH runs use
-  the configured SSH alias and require no Blacksmith authentication. Neither
-  direct provider uses a Crabbox coordinator, `crabbox login`, or a coordinator
-  token.
+  explicit non-secret host, user, and port routing plus the local SSH key
+  configuration and require no Blacksmith authentication. Neither direct
+  provider uses a Crabbox coordinator, `crabbox login`, or a coordinator token.
 - GitHub can dispatch the hydration workflow only after its configured path
   exists on the default branch. A PR that adds or moves
   `.github/workflows/crabbox-bounded.yml` must finish on local verification;
@@ -81,18 +81,22 @@ entrypoint.
 - Canonical completion verification does not need Vercel development variables.
   When a separate direct scenario truly requires Vercel development state, set
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.
-- Static SSH uses only a safe alias from `MURPH_VERIFY_SSH_HOST`, a dedicated
-  standard macOS account with no personal or product credentials, a
+- Static SSH uses only validated local routing from `MURPH_VERIFY_SSH_HOST`,
+  `MURPH_VERIFY_SSH_USER`, and `MURPH_VERIFY_SSH_PORT`, a dedicated standard
+  macOS account with no personal or product credentials, a
   run-unique opaque workspace below `/Users/Shared/murph-crabbox/runs`, and
   full resync. The existing local artifact lock protects cooperating local
   producers and candidate capture only; it is neither an editor lock nor the
   remote capacity authority. On the Mac, native `lockf` places one
   kernel-owned lock on a descriptor inherited by the verifier. A busy worker
   fails closed without waiting or falling back. The verifier holds that
-  descriptor while it reaps its exact child process groups, then removes only
-  its exact run directory. Static SSH never forwards an SSH agent or
-  environment allowlist. Follow the one-time host setup and doctor command in
-  the verification guide.
+  descriptor while it reaps its exact child process groups and uses the native
+  `caffeinate` binary to prevent idle sleep for that finite lifetime only.
+  Crabbox excludes `.git`, so the locked entrypoint first reconstructs and
+  verifies the detached base plus staged candidate from bounded generated
+  transport metadata. It then removes only the validated outer run directory.
+  Static SSH never forwards an SSH agent or environment allowlist. Follow the
+  one-time host setup and doctor command in the verification guide.
 
 ## Controls
 
@@ -105,7 +109,9 @@ MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance
 
 # Use the configured free static macOS worker and fail rather than falling back.
 MURPH_VERIFY_EXECUTOR=ssh \
-MURPH_VERIFY_SSH_HOST=murph-worker \
+MURPH_VERIFY_SSH_HOST=verification-worker.local \
+MURPH_VERIFY_SSH_USER=verification-worker \
+MURPH_VERIFY_SSH_PORT=22 \
 pnpm verify:acceptance
 
 # Force a fresh one-shot Blacksmith Testbox and fail rather than falling back.
@@ -125,8 +131,8 @@ Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,
 command transport, and idle expiry. Crabbox owns provider selection, the local
 claim, command invocation, timing, and one-shot cleanup. Preserve the printed
 Testbox ID, Crabbox timing summary, and linked Actions run in Blacksmith
-verification evidence. For static SSH, preserve the command, host alias, result,
-and timing without recording account or local-path identifiers.
+verification evidence. For static SSH, preserve the command, result, and timing
+without recording host, account, or local-path identifiers.
 On the standard 16-vCPU Testbox, `verify:acceptance` automatically selects the
 same bounded composed-parallel profile as a capable local host; confirm the
 printed `resources` line rather than adding provider-specific worker overrides.

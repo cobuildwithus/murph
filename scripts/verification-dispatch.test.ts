@@ -18,6 +18,11 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const dispatcherPath = path.join(repoRoot, "scripts", "verification-dispatch.mjs");
 const tempRoots: string[] = [];
+const validSshRoutingEnvironment = {
+  MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+  MURPH_VERIFY_SSH_PORT: "22",
+  MURPH_VERIFY_SSH_USER: "verification-worker",
+};
 
 afterEach(() => {
   for (const tempRoot of tempRoots.splice(0)) {
@@ -95,16 +100,16 @@ describe("verification dispatcher", () => {
 
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
-      MURPH_VERIFY_SSH_HOST: "worker-mac",
+      ...validSshRoutingEnvironment,
     }, false)).toContain("Crabbox CLI is unavailable");
   });
 
-  it("requires a safe SSH-config host alias", () => {
+  it("requires safe explicit SSH routing inputs", () => {
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
     }, true)).toContain("requires MURPH_VERIFY_SSH_HOST");
 
-    for (const hostAlias of [
+    for (const host of [
       "-worker",
       "worker@example.test",
       "worker.example.test:22",
@@ -112,17 +117,44 @@ describe("verification dispatcher", () => {
     ]) {
       expect(resolveExecutorFailure({
         MURPH_VERIFY_EXECUTOR: "ssh",
-        MURPH_VERIFY_SSH_HOST: hostAlias,
-      }, true)).toContain("must be a safe SSH host alias");
+        ...validSshRoutingEnvironment,
+        MURPH_VERIFY_SSH_HOST: host,
+      }, true)).toContain("must be a safe resolvable SSH host");
     }
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
+      ...validSshRoutingEnvironment,
       MURPH_VERIFY_SSH_HOST: "worker\nexample",
     }, true)).toContain("must not contain control characters");
 
-    expect(resolveExecutor({
+    expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "ssh",
       MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+    }, true)).toContain("requires MURPH_VERIFY_SSH_USER");
+    for (const user of ["-worker", "worker@example.test", "worker example"]) {
+      expect(resolveExecutorFailure({
+        MURPH_VERIFY_EXECUTOR: "ssh",
+        ...validSshRoutingEnvironment,
+        MURPH_VERIFY_SSH_USER: user,
+      }, true)).toContain("must be a safe SSH user");
+    }
+
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+      MURPH_VERIFY_SSH_USER: "verification-worker",
+    }, true)).toContain("requires MURPH_VERIFY_SSH_PORT");
+    for (const port of ["0", "65536", "22.0", "-22", "022"]) {
+      expect(resolveExecutorFailure({
+        MURPH_VERIFY_EXECUTOR: "ssh",
+        ...validSshRoutingEnvironment,
+        MURPH_VERIFY_SSH_PORT: port,
+      }, true)).toContain("must be an integer from 1 through 65535");
+    }
+
+    expect(resolveExecutor({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      ...validSshRoutingEnvironment,
     }, true)).toMatchObject({ executor: "ssh", reason: "explicit" });
   });
 
@@ -338,7 +370,7 @@ describe("verification dispatcher", () => {
         "#!/bin/sh",
         'if [ "${1:-}" = "--version" ]; then exit 0; fi',
         `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
-        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
+        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nMURPH_VERIFY_SSH_USER=%s\\nMURPH_VERIFY_SSH_PORT=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${MURPH_VERIFY_SSH_USER-unset}" "\${MURPH_VERIFY_SSH_PORT-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
       ].join("\n"),
     );
     const result = spawnSync(
@@ -350,7 +382,7 @@ describe("verification dispatcher", () => {
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "ssh",
-          MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+          ...validSshRoutingEnvironment,
           MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
@@ -364,13 +396,15 @@ describe("verification dispatcher", () => {
     expect(flagValue(args, "--provider")).toBe("ssh");
     expect(flagValue(args, "--target")).toBe("macos");
     expect(flagValue(args, "--static-host")).toBe("worker-mac.local");
+    expect(flagValue(args, "--static-user")).toBe("verification-worker");
+    expect(flagValue(args, "--static-port")).toBe("22");
     expect(flagValue(args, "--static-work-root")).toMatch(
       /^\/Users\/Shared\/murph-crabbox\/runs\/[a-f0-9]{16}-[a-f0-9]{16}$/u,
     );
     expect(args).toContain("--full-resync");
     expect(args).toContain("--preflight");
     expect(flagValue(args, "--preflight-tools")).toBe(
-      "git,rsync,node,corepack,lockf",
+      "git,node,corepack,pnpm",
     );
     expect(args).not.toContain("--allow-env");
     expect(args).not.toContain("--env-from-profile");
@@ -383,7 +417,7 @@ describe("verification dispatcher", () => {
       "packages/assistant-engine",
     ]);
     expect(readFileSync(environmentPath, "utf8")).toMatch(
-      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=unset\nMURPH_VERIFY_SSH_HOST=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
+      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=unset\nMURPH_VERIFY_SSH_HOST=unset\nMURPH_VERIFY_SSH_USER=unset\nMURPH_VERIFY_SSH_PORT=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
     );
 
     const firstIdentity = callDispatcherExport<Record<string, string>>(
@@ -510,7 +544,7 @@ describe("verification dispatcher", () => {
         env: {
           ...baseEnvironment,
           MURPH_VERIFY_EXECUTOR: "ssh",
-          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          ...validSshRoutingEnvironment,
         },
         stdio: ["ignore", "ignore", "pipe"],
       },
@@ -624,7 +658,7 @@ describe("verification dispatcher", () => {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
-          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
         stdio: ["ignore", "ignore", "pipe"],
@@ -734,7 +768,7 @@ describe("verification dispatcher", () => {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
-          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
         stdio: ["ignore", "ignore", "pipe"],
@@ -745,7 +779,9 @@ describe("verification dispatcher", () => {
 
     expect(await waitForChild(dispatcher)).toEqual({ code: 0, signal: null });
     expect(readFileSync(providerHeadPath, "utf8").trim()).toBe(expectedBase);
-    expect(readFileSync(providerStatusPath, "utf8")).toBe("");
+    expect(readFileSync(providerStatusPath, "utf8")).toBe(
+      "?? .murph-static-git-snapshot/\n",
+    );
     expect(readFileSync(providerDiffPath, "utf8")).toBe("");
     expect(Buffer.concat(stderrChunks).toString("utf8")).toContain(
       `[verification-dispatch] candidate-tree=${expectedTree}\n`,
@@ -820,7 +856,7 @@ describe("verification dispatcher", () => {
           ...insideWorkspaceArtifactLockEnvironment(process.env),
           HOME: path.join(tempRoot, "home"),
           MURPH_VERIFY_EXECUTOR: "ssh",
-          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          ...validSshRoutingEnvironment,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
         stdio: ["ignore", "ignore", "pipe"],
@@ -866,13 +902,18 @@ describe("verification dispatcher", () => {
       const remotePidPath = path.join(tempRoot, "remote-pid");
       const providerStartedPath = path.join(tempRoot, "provider-started");
       const providerCwdPath = path.join(tempRoot, "provider-cwd");
-      const remoteWorkerRoot = path.join(tempRoot, "remote-worker");
+      const remoteWorkerRoot = path.join(tempRoot, "murph-crabbox");
       const remoteRunRoot = path.join(remoteWorkerRoot, "runs");
       const remoteWorkspaces = [
         "0123456789abcdef-0000000000000001",
         "0123456789abcdef-0000000000000002",
         "0123456789abcdef-0000000000000003",
-      ].map((directory) => path.join(remoteRunRoot, directory));
+      ].map((directory) => path.join(
+        remoteRunRoot,
+        directory,
+        "static_murph_0123456789abcdef",
+        "murph",
+      ));
       const blockedPath = path.join(tempRoot, "retry-blocked");
       const overlapPath = path.join(tempRoot, "overlap");
       const retryPath = path.join(tempRoot, "retry-complete");
@@ -975,7 +1016,7 @@ describe("verification dispatcher", () => {
         ...withoutVerificationRoutingEnvironment(process.env),
         HOME: path.join(tempRoot, "home"),
         MURPH_VERIFY_EXECUTOR: "ssh",
-        MURPH_VERIFY_SSH_HOST: "worker-mac",
+        ...validSshRoutingEnvironment,
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       };
       const lockWrapperPath = path.join(
@@ -1554,6 +1595,8 @@ function withoutVerificationRoutingEnvironment(
   delete sanitized.MURPH_VERIFY_EXECUTOR;
   delete sanitized.MURPH_VERIFY_REQUIRES_VERCEL_ENV;
   delete sanitized.MURPH_VERIFY_SSH_HOST;
+  delete sanitized.MURPH_VERIFY_SSH_PORT;
+  delete sanitized.MURPH_VERIFY_SSH_USER;
   delete sanitized.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD;
   return sanitized;
 }

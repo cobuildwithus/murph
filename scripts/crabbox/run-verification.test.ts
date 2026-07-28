@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -21,6 +22,11 @@ const sshRunnerPath = path.join(
   "scripts",
   "crabbox",
   "run-ssh-verification.mjs",
+);
+const dispatcherPath = path.join(
+  repoRoot,
+  "scripts",
+  "verification-dispatch.mjs",
 );
 const tempRoots: string[] = [];
 
@@ -201,10 +207,16 @@ describe("Crabbox verification environment", () => {
 
   it("cleans only an exact opaque static SSH run workspace", () => {
     const tempRoot = makeTempRoot();
-    const runRoot = path.join(tempRoot, "runs");
-    const workspaceRoot = path.join(
+    const workerRoot = path.join(tempRoot, "murph-crabbox");
+    const runRoot = path.join(workerRoot, "runs");
+    const runDirectory = path.join(
       runRoot,
       "0123456789abcdef-fedcba9876543210",
+    );
+    const workspaceRoot = path.join(
+      runDirectory,
+      "static_murph_0123456789abcdef",
+      "murph",
     );
     mkdirSync(workspaceRoot, { recursive: true });
     writeFileSync(path.join(workspaceRoot, "candidate.txt"), "candidate\n");
@@ -229,23 +241,96 @@ describe("Crabbox verification environment", () => {
       "cleanupStaticWorkspace",
       { runRoot, workspaceRoot },
     )).toBeNull();
+    expect(existsSync(runDirectory)).toBe(false);
     expect(existsSync(workspaceRoot)).toBe(false);
 
     expect(callSshModuleFailure(
       "assertSafeStaticWorkspace",
       { runRoot, workspaceRoot: runRoot },
-    )).toContain("one opaque run directory");
+    )).toContain("exact opaque nested run directory");
+  });
+
+  it("reconstructs the exact detached base and staged candidate after Crabbox excludes .git", () => {
+    const tempRoot = makeTempRoot();
+    const sourceRoot = path.join(tempRoot, "source");
+    const remoteRoot = path.join(tempRoot, "remote");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(path.join(sourceRoot, ".gitignore"), "ignored.txt\n");
+    writeFileSync(path.join(sourceRoot, "changed.txt"), "base\n");
+    writeFileSync(path.join(sourceRoot, "deleted.txt"), "delete\n");
+    writeFileSync(path.join(sourceRoot, "ignored.txt"), "tracked ignored\n");
+    runGit(sourceRoot, ["init", "--quiet"]);
+    runGit(sourceRoot, [
+      "add",
+      "--force",
+      ".gitignore",
+      "changed.txt",
+      "deleted.txt",
+      "ignored.txt",
+    ]);
+    runGit(sourceRoot, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "base",
+    ]);
+    const baseTree = readGit(sourceRoot, ["rev-parse", "HEAD^{tree}"]);
+
+    writeFileSync(path.join(sourceRoot, "changed.txt"), "candidate\n");
+    rmSync(path.join(sourceRoot, "deleted.txt"));
+    writeFileSync(path.join(sourceRoot, "added.txt"), "added\n");
+    runGit(sourceRoot, ["add", "--all", "--force"]);
+    const candidateTree = readGit(sourceRoot, ["write-tree"]);
+
+    expect(callModule(
+      "writeStaticGitSnapshotMetadata",
+      { baseTree, candidateTree, snapshotRoot: sourceRoot },
+      dispatcherPath,
+    )).toBeNull();
+    cpSync(sourceRoot, remoteRoot, {
+      filter: (source) => path.basename(source) !== ".git",
+      recursive: true,
+    });
+
+    expect(callSshModule(
+      "restoreStaticGitSnapshot",
+      { workspaceRoot: remoteRoot },
+    )).toBeNull();
+    expect(readGit(remoteRoot, ["rev-parse", "HEAD^{tree}"])).toBe(baseTree);
+    expect(readGit(remoteRoot, ["write-tree"])).toBe(candidateTree);
+    expect(readGit(remoteRoot, ["diff", "--cached", "--name-only"]).split("\n"))
+      .toEqual(["added.txt", "changed.txt", "deleted.txt"]);
+    expect(readGit(remoteRoot, ["status", "--porcelain"]).split("\n"))
+      .toEqual([
+        "A  added.txt",
+        "M  changed.txt",
+        "D  deleted.txt",
+      ]);
+    expect(existsSync(path.join(
+      remoteRoot,
+      ".git",
+      "murph-static-snapshot",
+    ))).toBe(false);
   });
 
   it.runIf(process.platform === "darwin")(
     "preserves verifier failure through the production lock wrapper and exact cleanup",
     () => {
       const tempRoot = makeTempRoot();
-      const workerRoot = path.join(tempRoot, "worker");
-      const workspaceRoot = path.join(
+      const workerRoot = path.join(tempRoot, "murph-crabbox");
+      const runDirectory = path.join(
         workerRoot,
         "runs",
         "0123456789abcdef-fedcba9876543210",
+      );
+      const workspaceRoot = path.join(
+        runDirectory,
+        "static_murph_0123456789abcdef",
+        "murph",
       );
       const workspaceScriptDir = path.join(
         workspaceRoot,
@@ -268,6 +353,32 @@ describe("Crabbox verification environment", () => {
           "utf8",
         );
       }
+      runGit(workspaceRoot, ["init", "--quiet"]);
+      runGit(workspaceRoot, ["add", "--all", "--force"]);
+      runGit(workspaceRoot, [
+        "-c",
+        "user.name=Crabbox Test",
+        "-c",
+        "user.email=crabbox-test@users.noreply.github.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "base",
+      ]);
+      const baseTree = readGit(workspaceRoot, ["rev-parse", "HEAD^{tree}"]);
+      expect(callModule(
+        "writeStaticGitSnapshotMetadata",
+        {
+          baseTree,
+          candidateTree: baseTree,
+          snapshotRoot: workspaceRoot,
+        },
+        dispatcherPath,
+      )).toBeNull();
+      rmSync(path.join(workspaceRoot, ".git"), {
+        force: true,
+        recursive: true,
+      });
       writeExecutable(path.join(binDir, "corepack"), "#!/bin/sh\nexit 37");
 
       const result = spawnSync(
@@ -288,6 +399,7 @@ describe("Crabbox verification environment", () => {
       );
 
       expect(result.status, result.stderr).toBe(37);
+      expect(existsSync(runDirectory)).toBe(false);
       expect(existsSync(workspaceRoot)).toBe(false);
       const releasedLock = spawnSync(
         "/usr/bin/lockf",
@@ -438,6 +550,23 @@ function writeExecutable(filePath: string, content: string): void {
   chmodSync(parentDir, 0o700);
 }
 
+function runGit(repoDir: string, args: string[]): void {
+  const result = spawnSync("git", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+  });
+  expect(result.status, result.stderr).toBe(0);
+}
+
+function readGit(repoDir: string, args: string[]): string {
+  const result = spawnSync("git", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.trim();
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -494,8 +623,12 @@ function isProcessRunning(pid: number): boolean {
   }
 }
 
-function callModule<T>(exportName: string, argument: unknown): T {
-  const result = runModuleCall(exportName, argument);
+function callModule<T>(
+  exportName: string,
+  argument: unknown,
+  modulePath = runnerPath,
+): T {
+  const result = runModuleCall(exportName, argument, modulePath);
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as T;
 }

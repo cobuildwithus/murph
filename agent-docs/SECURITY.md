@@ -286,18 +286,28 @@ Last verified: 2026-07-27
   sensitive, or private sync candidates before transport, forward no
   environment allowlist or SSH agent, and enter the same deterministic
   synthetic test environment.
-  Static SSH must use only a validated local SSH-config alias, a dedicated
-  standard macOS account with no personal, product, cloud, Keychain, `.env*`,
-  or Full Disk Access authority, an isolated opaque workspace per invocation,
-  and full resync. A mutable-checkout preflight may fail fast, but remote
+  Static SSH must use only validated operator-local host, user, and port routing,
+  a dedicated standard macOS account with no personal, product, cloud, Keychain,
+  `.env*`, or Full Disk Access authority, an isolated opaque workspace per
+  invocation, and full resync. The host must resolve independently of an
+  SSH-config-only alias so Crabbox's raw readiness probe and SSH transport select
+  the same machine. Routing values may enter only as Crabbox CLI arguments, not
+  the rebuilt CLI environment or the remote test environment. A mutable-checkout
+  preflight may fail fast, but remote
   admission, sensitive-path checks, logged tree proof, and executed bytes must
   derive from one frozen Git candidate. Materialization must preserve the
   captured base as detached `HEAD` with that candidate staged so implicit diff
-  selection remains intact without depending on a local branch. The local
-  artifact lock protects cooperating local producers and candidate capture
-  only. A native macOS `lockf` descriptor inherited by the remote verifier is
-  the sole static-worker capacity authority; the verifier must retain it
-  through exact child-group cleanup and delete only its exact run directory.
+  selection remains intact without depending on a local branch. Crabbox excludes
+  `.git`, so the dispatcher may add only generated base-tree/object metadata
+  after candidate admission; the remote entrypoint must move it out of the
+  worktree, reconstruct detached `HEAD`, and verify both admitted tree ids before
+  candidate-controlled install or verification starts. The local artifact lock
+  protects cooperating local producers and candidate capture only. A native
+  macOS `lockf` descriptor inherited by the remote verifier is the sole
+  static-worker capacity authority; its path must resolve above Crabbox's nested
+  lease/repository directories so every run contends on the same kernel lock.
+  The verifier must retain it through exact child-group cleanup and delete only
+  its exact outer run directory.
   Candidate code has arbitrary execution authority within that account, so a
   personal or credential-bearing account is never an acceptable worker.
   The Blacksmith workflow must retain read-only repository contents permission,

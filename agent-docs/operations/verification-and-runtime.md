@@ -16,7 +16,8 @@ through `scripts/verification-dispatch.mjs`:
   and smaller hosts keep their conservative shared-host worker budgets.
 - `MURPH_VERIFY_EXECUTOR=local|ssh|crabbox` explicitly selects an executor.
   `ssh` uses a configured, dedicated static macOS worker through Crabbox and
-  fails closed when its safe host alias or the Crabbox CLI is unavailable.
+  fails closed when its validated host, user, port, or the Crabbox CLI is
+  unavailable.
   `crabbox` requests a fresh one-shot Blacksmith Testbox and fails closed when
   either CLI is unavailable. No remote failure silently duplicates work
   locally. The `:local` package aliases exist only for executor diagnosis
@@ -46,37 +47,50 @@ checks once it is configured. Select it intentionally; `auto` remains local:
 
 ```bash
 MURPH_VERIFY_EXECUTOR=ssh \
-MURPH_VERIFY_SSH_HOST=murph-worker \
+MURPH_VERIFY_SSH_HOST=verification-worker.local \
+MURPH_VERIFY_SSH_USER=verification-worker \
+MURPH_VERIFY_SSH_PORT=22 \
 pnpm test:diff <path ...>
 ```
 
-`MURPH_VERIFY_SSH_HOST` must be a plain host alias from the initiating Mac's SSH
-config. The dispatcher does not accept inline users, ports, paths, or shell
-syntax. Crabbox's first-party static SSH provider owns transport and sync; Murph
-adds no daemon, queue, scheduler, shared checkout, or fallback selector.
+`MURPH_VERIFY_SSH_HOST` must be a neutral host name or address that the
+initiating Mac can resolve directly; Crabbox's readiness probe does not resolve
+an SSH-config-only alias. `MURPH_VERIFY_SSH_USER` names the dedicated account,
+and `MURPH_VERIFY_SSH_PORT` is an integer from 1 through 65535. Keep all three
+as operator-local command inputs. Never commit a machine address, personal host
+label, account, or SSH key path. The dispatcher rejects inline users, combined
+host-and-port values, paths, and shell syntax, passes the validated routing only
+as Crabbox CLI flags, and omits the three variables from the Crabbox process
+environment. Crabbox's first-party static SSH provider owns transport and sync;
+Murph adds no daemon, queue, scheduler, shared checkout, or fallback selector.
 
 Prepare the worker once:
 
 1. Create a dedicated standard macOS account used only for verification. Keep
    it out of iCloud, Keychain, password managers, developer cloud CLIs, product
    credentials, repository `.env*` files, and Full Disk Access.
-2. Enable Remote Login and restrict SSH access to that account. Put its
-   key-based connection behind a neutral local SSH alias such as
-   `murph-worker`; use `IdentityFile` and `IdentitiesOnly yes` in the local SSH
-   config instead of forwarding an agent.
+2. Enable Remote Login and restrict SSH access to that account. Give the Mac a
+   neutral resolvable DNS or mDNS name. Match that name in local SSH config for
+   `IdentityFile` and `IdentitiesOnly yes`; disable agent forwarding.
 3. Give only that account access to `/Users/Shared/murph-crabbox`. Install
    `git`, `rsync`, Node `>=24.14.1`, and Corepack; the repository pins pnpm
    `10.33.0`. The native `/bin/sh` and `/usr/bin/lockf` must also be present.
    Make `git`, `rsync`, `node`, `corepack`, and `lockf` visible in the account's
    non-interactive SSH `PATH`; the doctor probe must see the same command
    surface that a run will use.
-4. Keep the Mac awake while it is offered as a worker, then prove reachability:
+4. Keep the Mac reachable while it is offered as a worker, then prove
+   reachability. The verifier cannot wake a Mac that is already offline. Once
+   admitted, each run uses native `caffeinate` to prevent idle system sleep for
+   the verifier lifetime only; no persistent power change or daemon is
+   required:
 
 ```bash
 crabbox doctor \
   --provider ssh \
   --target macos \
-  --static-host murph-worker \
+  --static-host verification-worker.local \
+  --static-user verification-worker \
+  --static-port 22 \
   --static-work-root /Users/Shared/murph-crabbox/doctor \
   --doctor-probe-ssh
 ```
@@ -99,16 +113,31 @@ verifies and logs the tree, invokes Crabbox from that candidate with full
 resync, and removes the local snapshot when the provider exits. Later checkout
 writes and late untracked files cannot enter the run.
 
+Crabbox deliberately excludes `.git` from rsync. After admission, the
+dispatcher therefore adds generated transport metadata containing the exact
+base tree, candidate tree, tree objects, and only base blobs absent from the
+candidate. On the worker, the locked entrypoint moves that metadata under a new
+private `.git`, reconstructs the base as detached `HEAD`, stages the transported
+candidate, proves both tree ids, and checks base connectivity before dependency
+installation. The metadata is not part of the admitted candidate tree and is
+removed after reconstruction. This preserves no-argument `test:diff` and
+Git-backed acceptance guards without a source branch or remote repository
+credential.
+
 On the worker, `/Users/Shared/murph-crabbox/verification.lock` is the single
 static-worker capacity boundary. Native `lockf -t 0` acquires it on a file
 descriptor inherited by the remote verifier. A concurrent invocation fails
 closed as busy without waiting or falling back. If local transport disappears,
 the remote verifier still owns the kernel lock while it reaps its exact child
-process groups. It then removes only its run-unique directory. The remote
-account may retain only machine-level package-manager caches outside those
-directories.
+process groups. Native `caffeinate` prevents idle sleep during that same finite
+lock-owning lifetime and preserves the verifier's exit status. Crabbox nests
+its static lease and repository below the run-unique directory; the wrapper
+resolves the shared lock above that nesting, and cleanup validates the complete
+nesting before removing the outer run directory. The remote account may retain
+only machine-level package-manager caches outside those directories.
 
-The SSH path forwards no environment allowlist. Candidate code enters through
+The three routing variables are non-secret local control inputs and are not
+forwarded as an environment allowlist. Candidate code enters through
 `scripts/crabbox/run-ssh-locked-verification.sh`; its Node verifier rebuilds
 the same synthetic test-only environment as the Blacksmith path. The dedicated
 account is the trust boundary: candidate code can execute arbitrary repository

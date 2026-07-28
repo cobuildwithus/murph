@@ -13,14 +13,18 @@ Last verified: 2026-07-27
   retry the same head only after recording a concrete infrastructure failure.
   Each admitted run uses one logged immutable Git candidate, so later checkout
   writes cannot change the work in flight. Static SSH gives every invocation a
-  unique remote directory and uses one native macOS `lockf` descriptor as the
+  unique remote directory. Missing, malformed, or unresolvable local host, user,
+  or port routing fails before remote execution; no other executor is selected.
+  Crabbox's nested static lease and repository directories still resolve to one
+  native macOS `lockf` descriptor above the run root, which remains the
   worker-capacity authority. A busy worker fails closed. The remote verifier
   inherits that descriptor, retains it while reaping its exact child process
-  groups after `SIGHUP` or transport loss, and then removes only its exact run
-  directory. The local artifact lock protects cooperating local producers and
-  candidate capture; it does not claim remote completion. Availability, sleep,
-  and shutdown stay outside Murph rather than introducing a daemon or
-  lease-recovery owner.
+  groups after `SIGHUP` or transport loss, and holds a native `caffeinate`
+  idle-sleep assertion for the same finite lifetime. It then validates and
+  removes only its exact outer run directory. The local artifact lock protects
+  cooperating local producers and candidate capture; it does not claim remote
+  completion. Availability before admission and shutdown stay outside Murph
+  rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
 ## Runtime Expectations
