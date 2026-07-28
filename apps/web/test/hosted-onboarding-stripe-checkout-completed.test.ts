@@ -408,6 +408,159 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it.each(["canceled", "incomplete_expired"] as const)(
+    "preserves a terminal Family handoff after %s across browser and webhook replay",
+    async (terminalStatus) => {
+      const clearedDirectProjection = makeMemberSnapshot({
+        billingRef: {
+          checkoutAttemptId: "attempt_new_retry",
+          currentCheckoutOffer: null,
+          lastStripeEventCreatedAt: new Date("2025-04-12T00:30:00.000Z"),
+          memberId: "member_123",
+          stripeCheckoutSessionId: "cs_new_retry",
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+        },
+      });
+      const canonicalFamilySubscription = {
+        customer: "cus_123",
+        id: "sub_123",
+        metadata: {
+          accountGroupId: "hbag_family",
+          billingPlanCode: "launch_family_monthly",
+          kind: "hosted_family_plan",
+          ownerMemberId: "member_123",
+        },
+        status: terminalStatus,
+      };
+      const tx = {
+        hostedAccountGroup: {
+          findUnique: vi.fn().mockResolvedValue({ ownerMemberId: "member_123" }),
+        },
+      };
+      mocks.findMemberForStripeCheckoutSession.mockResolvedValue(
+        clearedDirectProjection,
+      );
+      mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+        clearedDirectProjection,
+      );
+      mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
+        groupId: "hbag_family",
+        kind: "bound_subscription",
+        ownerMemberId: "member_123",
+      });
+
+      for (const source of ["browser", "webhook"] as const) {
+        if (source === "webhook") {
+          mocks.retrieveStripeSubscription.mockResolvedValueOnce(
+            canonicalFamilySubscription,
+          );
+        }
+        const session = {
+          created: 1_744_416_000,
+          customer: "cus_123",
+          id: "cs_accepted_before_family",
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutAttemptId: "attempt_accepted_before_family",
+            checkoutIntentHash: "intent_accepted_before_family",
+            checkoutOffer: "standard",
+            memberId: "member_123",
+          },
+          subscription:
+            source === "browser" ? canonicalFamilySubscription : "sub_123",
+        };
+
+        await expect(applyStripeCheckoutCompleted(
+          session as never,
+          tx as never,
+          {
+            eventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
+            occurredAt: "2025-04-12T00:00:00.000Z",
+            sourceEventId:
+              source === "browser"
+                ? "checkout-success:cs_accepted_before_family"
+                : "evt_checkout_redelivery",
+            sourceType: "stripe.checkout.session.completed",
+          },
+          undefined,
+        )).resolves.toEqual({
+          activatedMemberId: null,
+          activatedMembers: [],
+          hostedExecutionEventId: null,
+          welcomeEmailMemberId: null,
+        });
+      }
+
+      expect(tx.hostedAccountGroup.findUnique).toHaveBeenCalledTimes(2);
+      expect(mocks.retrieveStripeSubscription).toHaveBeenCalledOnce();
+      expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
+      expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+      expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx)
+        .toHaveBeenCalledTimes(2);
+      expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
+      expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+      expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a different terminal Family replay on the existing loser-cleanup path", async () => {
+    const clearedDirectProjection = makeMemberSnapshot({
+      billingRef: {
+        checkoutAttemptId: "attempt_new_retry",
+        currentCheckoutOffer: null,
+        lastStripeEventCreatedAt: new Date("2025-04-12T00:30:00.000Z"),
+        memberId: "member_123",
+        stripeCheckoutSessionId: "cs_new_retry",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+      },
+    });
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+      kind: "cleanup_superseded",
+    });
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      customer: "cus_123",
+      id: "sub_different",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    });
+    await expect(applyStripeCheckoutCompleted(
+      {
+        created: 1_744_416_000,
+        customer: "cus_123",
+        id: "cs_different_after_family",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutAttemptId: "attempt_different_after_family",
+          checkoutIntentHash: "intent_different_after_family",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        subscription: "sub_different",
+      } as never,
+      {} as never,
+    )).resolves.toMatchObject({
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_different",
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledOnce();
+    expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx).not.toHaveBeenCalled();
+    expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_different");
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("treats an already-absent sponsored checkout subscription as cleaned up", async () => {
     mocks.cancelStripeSubscription.mockRejectedValueOnce({ code: "resource_missing" });
 

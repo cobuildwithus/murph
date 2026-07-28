@@ -438,6 +438,61 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     });
   });
 
+  it("keeps an expanded terminal Family handoff out of browser loser cleanup", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (innerTx: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    const canonicalFamilySubscription = {
+      customer: "cus_123",
+      id: "sub_123",
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+        ownerMemberId: "member_123",
+      },
+      status: "canceled",
+    };
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
+      client_reference_id: "member_123",
+      customer: "cus_123",
+      id: "cs_accepted_before_family",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutAttemptId: "attempt_accepted_before_family",
+        checkoutIntentHash: "intent_accepted_before_family",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "complete",
+      subscription: canonicalFamilySubscription,
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_accepted_before_family",
+    })).resolves.toEqual(createStatus({ stage: "activating" }));
+
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cs_accepted_before_family",
+        subscription: canonicalFamilySubscription,
+      }),
+      tx,
+    );
+    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).not.toHaveBeenCalled();
+    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
+    expect(mocks.cleanupHostedStandardCheckoutLoser).not.toHaveBeenCalled();
+  });
+
   it("passes checkout welcome candidates through the durable welcome gate without waking runtime", async () => {
     const tx = {
       __tag: "tx",

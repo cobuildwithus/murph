@@ -3995,6 +3995,24 @@ describe("hosted Family plan", () => {
     })).resolves.toBeNull();
 
     const groupWriteCount = tx.hostedAccountGroup.update.mock.calls.length;
+    for (const eventCreatedAt of [
+      new Date("2026-06-18T12:15:00.000Z"),
+      terminalEventCreatedAt,
+    ]) {
+      await expect(applyHostedFamilyStripeCheckoutCompletedTx({
+        dispatchContext: { eventCreatedAt },
+        session: makeFamilyStripeCheckoutSession(),
+        tx,
+      })).resolves.toEqual({
+        groupId: "hbag_family",
+      });
+    }
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledTimes(groupWriteCount);
+    expect(currentBillingRef).toMatchObject({
+      lastStripeEventCreatedAt: terminalEventCreatedAt,
+      stripeSubscriptionIdEncrypted: null,
+    });
+
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:15:00.000Z"),

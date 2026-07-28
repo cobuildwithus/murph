@@ -1398,10 +1398,15 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     },
   });
   if (
-    !input.preserveLastStripeEventCreatedAt &&
     input.stripeEventCreatedAt &&
     currentBillingRef?.lastStripeEventCreatedAt &&
-    currentBillingRef.lastStripeEventCreatedAt.getTime() > input.stripeEventCreatedAt.getTime()
+    (
+      input.preserveLastStripeEventCreatedAt
+        ? currentBillingRef.lastStripeEventCreatedAt.getTime() >=
+          input.stripeEventCreatedAt.getTime()
+        : currentBillingRef.lastStripeEventCreatedAt.getTime() >
+          input.stripeEventCreatedAt.getTime()
+    )
   ) {
     return projectHostedAccountGroupBillingRefSnapshot(currentBillingRef, input.tx);
   }
