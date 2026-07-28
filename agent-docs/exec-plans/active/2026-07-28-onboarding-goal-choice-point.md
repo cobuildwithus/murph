@@ -71,6 +71,11 @@ Updated: 2026-07-28
    one-shot profile with bounded transcript and vault CLI reads, while engine
    planning and provider execution remove hosted dynamic tools, broad context,
    network fetches, writable filesystem access, and mutation-capable overrides.
+6. Risk: a rollback after the new bundle installs the stable record returns
+   execution to code that does not recognize its owner or read-only profile.
+   Mitigation: engine and runtime support ship together, the first installing
+   bundle is a hard rollback floor, and production uses immediate container
+   rollout plus runner-bundle fingerprint convergence proof.
 
 ## Tasks
 

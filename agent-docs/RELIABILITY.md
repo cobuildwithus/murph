@@ -108,6 +108,12 @@ Last verified: 2026-07-27
   transcript and vault CLI reads but no hosted dynamic tools, network fetch,
   writable filesystem, or product-state mutation surface. A skip consumes the
   one-shot normally and creates no retrying outreach loop.
+  Engine and runtime support ship in one runner bundle. Once that bundle writes
+  the stable choice-point record, it is the hard rollback floor because an
+  older bundle cannot enforce the record's immutable owner, onboarding
+  precondition, or read-only execution profile. Use immediate container rollout
+  and runner-bundle fingerprint proof; do not roll back below that floor while
+  any installed record can still execute.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - A usage-credit purchase persists one reconstructible `created` purchase before

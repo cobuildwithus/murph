@@ -135,6 +135,12 @@ canonical vault CLI reads needed for reflection, while removing hosted dynamic
 tools, broad health-context injection, network fetches, writable filesystem
 access, and product-state mutation surfaces. This adds no database table,
 migration, recurring cadence, rollout state, or second onboarding lifecycle.
+The first production runner bundle that can install this stable automation ID
+is the rollback floor after any such record is written: an older bundle does
+not know the ID's member ownership, onboarding precondition, or read-only turn
+profile. Deploy this additive change with immediate container rollout and prove
+the runner-bundle fingerprint before managed maintenance can be treated as
+converged.
 
 No built-in member-facing group social automation currently ships. The removed
 Sunday superlatives ID remains only as a permanent retirement tombstone:
