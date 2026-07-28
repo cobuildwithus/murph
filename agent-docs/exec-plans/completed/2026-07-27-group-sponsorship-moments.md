@@ -1,7 +1,8 @@
 # Group sponsorship moments
 
-Status: active
+Status: completed
 Created: 2026-07-27
+Updated: 2026-07-28
 PR: #1026
 
 ## Goal
@@ -62,17 +63,32 @@ only financial owners.
 
 ## Verification
 
-- `pnpm test:diff <all touched production owners>`
-- `pnpm test:frontend-design-proof`
-- focused migrated-PostgreSQL sponsorship proof where schema/state races apply
-- desktop and mobile `/design` proof for the real production surface
-- `pnpm verify:acceptance`
-- `git diff --check`
-- required preliminary specialist, UI, product-experience, parent, final
-  ReviewGPT, and GitHub CI gates
+- Focused Web sponsorship notification tests passed 6/6.
+- Focused Web dialog tests passed 45/45, including the ReviewGPT-supplied
+  nonparticipant customization case.
+- Focused Assistant planning, notification-runtime, and song-tool tests passed
+  107/107 after restricting the creative turn to exactly `generate_song`.
+- Canonical acceptance passed every feature-owning workspace. Its only failure
+  was an unrelated Setup CLI TTY selection under parallel load; the exact file
+  passed 6/6 in isolation and the full Setup CLI package passed 124/124 with
+  coverage.
+- `pnpm test:frontend-design-proof` passed locally for all five changed
+  user-facing UI paths after the PR evidence labels were corrected.
+- Desktop and mobile `/design` captures exercise the real reusable sponsorship
+  component at the $20/three-day and $10/one-day states.
+- Preliminary `completion-specialists` ReviewGPT returned two findings. Both
+  were resolved: the creative turn now receives only `generate_song`, the
+  shared song-tool description defers content policy to the owning prompt, and
+  the supplied focused UI coverage patch was inspected before application.
+- `git diff --check` passed on the clean pushed candidate.
+- Final ReviewGPT, exact-head CI, merge, superseded-PR closure, and worktree
+  retirement remain the post-plan PR gates.
 
 ## Deployment compatibility
 
 The database migration must be additive. The runtime consumer must accept an
 absent sidecar before Web starts producing it. Final rollout guidance must state
 the safe database, Cloudflare/runtime, and Web ordering and the rollback floor.
+
+Completed: 2026-07-28
+Completed: 2026-07-28
