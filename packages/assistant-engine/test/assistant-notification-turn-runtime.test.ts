@@ -2564,7 +2564,7 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     instructions: 'Offer one low-pressure health direction choice.',
     scheduledOccurrenceAt: '2026-07-18T15:00:00.000Z',
     turnPolicy: {
-      kind: 'read-only-send-or-skip',
+      kind: 'onboarding-goal-checkin',
     },
     vault: '/vaults/notification-device-scope',
   })
@@ -2582,10 +2582,42 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   expect(observedHostedToolContexts[3]).toBeNull()
   expect(observedProfiles[3]).toEqual({
     nativeResumePolicy: 'disabled',
-    promptProfile: 'conversation',
+    promptProfile: 'onboarding-goal-checkin',
     threadScope: 'isolated-thread',
-    toolProfile: 'read-only-turn',
+    toolProfile: 'output-only-turn',
   })
+})
+
+test('sendAssistantNotificationLocal keeps onboarding goal check-in skips silent', async () => {
+  const providerResult = createProviderResult({
+    response:
+      '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    providerResult,
+    turnId: 'turn-onboarding-goal-checkin-skip',
+  })
+
+  const result = await sendAssistantNotificationLocal({
+    instructions: 'Offer one low-pressure health direction choice.',
+    scheduledOccurrenceAt: '2026-07-18T15:00:00.000Z',
+    turnPolicy: {
+      kind: 'onboarding-goal-checkin',
+    },
+    vault: '/vaults/onboarding-goal-checkin-skip',
+  })
+
+  expect(result.decision).toEqual({
+    kind: 'skip',
+    privateSummary: 'No notification required.',
+  })
+  expect(result.response).toBeNull()
+  expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {

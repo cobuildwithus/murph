@@ -546,11 +546,10 @@ describe('Codex model catalog', () => {
   })
 
   async function verifyRestrictedProviderExecution(scenario: {
-    promptProfile: 'conversation' | 'system-notification'
-    shellDisabled: boolean
-    toolProfile: 'output-only-turn' | 'read-only-turn'
+    promptProfile: 'onboarding-goal-checkin' | 'system-notification'
+    toolProfile: 'output-only-turn'
   }): Promise<void> {
-    const { promptProfile, shellDisabled, toolProfile } = scenario
+    const { promptProfile, toolProfile } = scenario
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -677,15 +676,9 @@ describe('Codex model catalog', () => {
         'features.multi_agent=false',
       ]),
     )
-    if (shellDisabled) {
-      expect(providerInput?.codexConfigOverrides).toContain(
-        'features.shell_tool=false',
-      )
-    } else {
-      expect(providerInput?.codexConfigOverrides).not.toContain(
-        'features.shell_tool=false',
-      )
-    }
+    expect(providerInput?.codexConfigOverrides).toContain(
+      'features.shell_tool=false',
+    )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=true',
     )
@@ -712,13 +705,11 @@ describe('Codex model catalog', () => {
   it.each([
     {
       promptProfile: 'system-notification' as const,
-      shellDisabled: true,
       toolProfile: 'output-only-turn' as const,
     },
     {
-      promptProfile: 'conversation' as const,
-      shellDisabled: false,
-      toolProfile: 'read-only-turn' as const,
+      promptProfile: 'onboarding-goal-checkin' as const,
+      toolProfile: 'output-only-turn' as const,
     },
   ])(
     'enforces the $toolProfile boundary at provider execution',

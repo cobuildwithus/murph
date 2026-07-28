@@ -104,14 +104,15 @@ Last verified: 2026-07-27
   late-day completion or timezone transition while rejecting a recently
   replaced completion. The cron owner rechecks that fact before model work and
   at every existing provider, tool, delivery, and commit boundary. Its exact
-  automation identity also selects a fresh one-shot read-only turn with bounded
-  transcript and vault CLI reads but no hosted dynamic tools, network fetch,
+  automation identity also selects a fresh one-shot output-only turn with a
+  bounded transcript and engine-projected active-goal titles but no memory
+  document, generic CLI contract, shell, hosted dynamic tools, network fetch,
   writable filesystem, or product-state mutation surface. A skip consumes the
   one-shot normally and creates no retrying outreach loop.
   Engine and runtime support ship in one runner bundle. Once that bundle writes
   the stable choice-point record, it is the hard rollback floor because an
   older bundle cannot enforce the record's immutable owner, onboarding
-  precondition, or read-only execution profile. Use immediate container rollout
+  precondition, or output-only execution profile. Use immediate container rollout
   and runner-bundle fingerprint proof; do not roll back below that floor while
   any installed record can still execute.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.

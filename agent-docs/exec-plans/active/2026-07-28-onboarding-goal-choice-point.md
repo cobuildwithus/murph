@@ -67,12 +67,13 @@ Updated: 2026-07-28
    to follow specific reliable evidence.
 5. Risk: prompt-only mutation guidance leaves ordinary scheduled-turn tools
    available.
-   Mitigation: the exact immutable automation id selects a fresh read-only
-   one-shot profile with bounded transcript and vault CLI reads, while engine
-   planning and provider execution remove hosted dynamic tools, broad context,
+   Mitigation: the exact immutable automation id selects a fresh output-only
+   one-shot profile with bounded transcript and engine-projected active-goal
+   titles, while engine planning and provider execution remove the memory
+   document, generic CLI contract, shell, hosted dynamic tools, broad context,
    network fetches, writable filesystem access, and mutation-capable overrides.
 6. Risk: a rollback after the new bundle installs the stable record returns
-   execution to code that does not recognize its owner or read-only profile.
+   execution to code that does not recognize its owner or output-only profile.
    Mitigation: engine and runtime support ship together, the first installing
    bundle is a hard rollback floor, and production uses immediate container
    rollout plus runner-bundle fingerprint convergence proof.
@@ -116,11 +117,32 @@ Updated: 2026-07-28
   agent-docs/references/testing-ci-map.md`
 - `pnpm verify:acceptance`
 - PR-specific ReviewGPT and GitHub CI on the exact final pushed head.
-- Completed: focused Assistant Engine suite passed 268 tests across scheduling,
-  legacy reconciliation, lifecycle races, read-only planning, notification
-  routing, and provider execution; Assistant Engine typecheck passed.
-- Completed: fresh product-experience re-review returned no findings and
-  confirmed the earlier mutation-capability finding is resolved. Remaining
-  evidence gaps are a production-faithful hosted longest path and sampled
-  actual-model branch quality; canonical acceptance, prompt/coverage specialist
-  review, final ReviewGPT, and CI remain the bounded completion evidence.
+- Completed: focused Assistant Engine suite passed 294 tests across scheduling,
+  legacy reconciliation, lifecycle races, output-only planning, notification
+  routing, silent skip, and provider execution; Assistant Engine and Assistant
+  Runtime typechecks passed.
+- Completed: the preliminary specialist pass found an over-broad memory/CLI
+  evidence surface, an unmeasured high-reasoning override, and a missing
+  production-faithful longest-path proof. The implementation now uses a
+  dedicated output-only prompt built from bounded committed conversation and
+  engine-projected active-goal titles, exposes no memory/CLI/shell/hosted tools,
+  and inherits the ordinary reasoning setting. A cross-owner actual-provider
+  mega-test was not added because the established owner boundaries are covered
+  independently; the remaining actual-model evidence gap stays explicit.
+- Completed: fresh product-experience re-review confirmed the earlier
+  mutation-capability concern is resolved and found one material quiet-skip
+  issue. The onboarding profile now starts no typing indicator, and focused
+  coverage proves a skipped turn produces neither typing nor delivery. The
+  follow-up product verdict is pending.
+- The scoped canonical `test:diff` passed all repository guards, affected
+  typechecks, 2,791 Assistant Engine tests, 128 Assistant CLI tests, 1,937
+  Assistant Runtime tests, and 40 assistantd tests. Its unrelated CLI
+  integration tail blocked waiting for a shared prepared-runtime artifact held
+  by another checkout, so the owned process was stopped after the affected
+  lanes completed. Canonical acceptance, parent final review, final ReviewGPT,
+  and fresh CI remain.
+- Two direct standalone runtime probes could not start because their ad hoc
+  harness lacked prebuilt workspace artifacts. The focused Vitest owner tests
+  exercise the same vault and notification paths; the remaining evidence gaps
+  are the production-faithful hosted actual-model longest path and a sampled
+  actual-model branch-quality matrix.

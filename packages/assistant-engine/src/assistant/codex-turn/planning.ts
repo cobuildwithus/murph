@@ -76,11 +76,15 @@ import type {
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantOnboardingGoalCheckinSystemPromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
+import {
+  buildOnboardingGoalCheckinEvidenceContext,
+} from '../onboarding-goal-checkin-automation.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantCodexContinuation,
@@ -222,12 +226,12 @@ export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'maintenance'
   | 'assistant-ask-continuation'
+  | 'onboarding-goal-checkin'
   | 'system-notification'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
-  | 'read-only-turn'
   | 'output-only-turn'
 
 export type AssistantCodexThreadScope =
@@ -463,7 +467,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
-  const readOnlyTurn = input.profile.toolProfile === 'read-only-turn'
+  const onboardingGoalCheckinTurn =
+    input.profile.promptProfile === 'onboarding-goal-checkin'
   const systemNotificationTurn =
     input.profile.promptProfile === 'system-notification'
   const privateInteractiveProviderTurn =
@@ -473,7 +478,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
-    readOnlyTurn
+    onboardingGoalCheckinTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -549,7 +554,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
   const hostedDynamicContextPrompts =
-    maintenanceTurn || outputOnlyTurn || readOnlyTurn
+    maintenanceTurn || outputOnlyTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const groupRoomModelPrompt =
@@ -566,7 +571,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const voiceMemoDeliveryChannel = outputOnlyTurn || readOnlyTurn
+  const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
         messageInput: input.input,
@@ -590,10 +595,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
   })
+  const onboardingGoalCheckinEvidence = onboardingGoalCheckinTurn
+    ? await buildOnboardingGoalCheckinEvidenceContext(input.input.vault)
+    : null
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn ||
-    readOnlyTurn ||
+    onboardingGoalCheckinTurn ||
     systemNotificationTurn ||
     !privateInteractiveAudience
       ? null
@@ -647,6 +655,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
       })
     }
 
+    if (input.profile.promptProfile === 'onboarding-goal-checkin') {
+      return buildAssistantOnboardingGoalCheckinSystemPromptWithCacheMetadata({
+        activeGoalEvidence:
+          onboardingGoalCheckinEvidence ??
+          'Bounded active-goal evidence is unavailable.',
+        channel: resolvedChannel,
+        currentLocalDate: input.promptTimeContext.currentLocalDate,
+        currentTimeZone: input.promptTimeContext.currentTimeZone,
+        scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
     return buildAssistantSystemPromptWithCacheMetadata({
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
@@ -662,7 +684,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         privateInteractiveProviderTurn &&
         input.hostedToolContext?.labsTool != null,
       assistantKnowledgeToolsAvailable:
-        !readOnlyTurn &&
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
@@ -738,7 +759,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools =
-    outputOnlyTurn || readOnlyTurn
+    outputOnlyTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
@@ -895,7 +916,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
-    environments: outputOnlyTurn || readOnlyTurn ? [] : undefined,
+    environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -929,8 +950,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !outputOnlyTurn &&
-      !readOnlyTurn
+      !outputOnlyTurn
       ? {
           binding: input.session.binding,
         }

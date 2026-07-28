@@ -579,10 +579,12 @@ the conversation is urgent or sensitive, or trustworthy evidence cannot support
 the proposed claim. The turn cannot create, update, complete, or archive goals,
 plans, experiments, regimens, memories, or automations. Those changes remain
 with the normal conversational owner after a reply. The engine enforces that
-boundary with a fresh read-only turn: bounded committed conversation history
-and canonical vault CLI reads remain available, while hosted dynamic tools,
+boundary with a fresh output-only turn: bounded committed conversation history
+and an engine-projected list of bounded active-goal titles remain available,
+while the memory document, generic CLI contract, shell, hosted dynamic tools,
 broad health-context injection, network fetches, and writable filesystem access
-do not.
+do not. The dedicated system prompt owns the evidence and no-mutation contract
+above untrusted conversation, goal, and task text.
 
 Canonical onboarding remains the execution authority. Cron rechecks that the
 state is still completed with `user_answered` and old enough for the claimed

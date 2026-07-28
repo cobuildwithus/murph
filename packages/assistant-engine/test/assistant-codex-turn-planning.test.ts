@@ -293,7 +293,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('plans scheduled read-only turns with bounded history and vault CLI access only', async () => {
+  it('plans onboarding goal check-ins with bounded history and no tool or broad-context prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'READ_ONLY_CLI_CONTRACT',
     )
@@ -344,9 +344,9 @@ describe('assistant Codex turn planning', () => {
           vault,
         },
         profile: {
-          promptProfile: 'conversation',
+          promptProfile: 'onboarding-goal-checkin',
           threadScope: 'isolated-thread',
-          toolProfile: 'read-only-turn',
+          toolProfile: 'output-only-turn',
         },
         promptTimeContext: {
           currentLocalDate: '2026-07-20',
@@ -360,17 +360,25 @@ describe('assistant Codex turn planning', () => {
       expect(plan.resume).toBeNull()
       expect(plan.dynamicTools).toEqual([])
       expect(plan.environments).toEqual([])
-      expect(plan.assistantCliContract).toContain('READ_ONLY_CLI_CONTRACT')
+      expect(plan.assistantCliContract).toBeNull()
       expect(plan.sessionContext).toBeUndefined()
       expect(plan.conversationHistoryMessages).toEqual([
         { content: 'I may want to leave this open for now.', role: 'user' },
         { content: 'That is completely fine.', role: 'assistant' },
       ])
-      expect(plan.systemPrompt).toContain('READ_ONLY_CLI_CONTRACT')
+      expect(plan.systemPrompt).toContain('output-only turn')
+      expect(plan.systemPrompt).toContain('No active canonical goal is available.')
+      expect(plan.systemPrompt).not.toContain('READ_ONLY_CLI_CONTRACT')
+      expect(plan.systemPrompt).not.toContain('vault-cli memory show')
+      expect(plan.systemPrompt).not.toContain('goal save')
+      expect(plan.systemPrompt).not.toContain('memory upsert')
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(
         planningMocks.readAssistantContextSnapshotPrompt,
+      ).not.toHaveBeenCalled()
+      expect(
+        planningMocks.readAssistantCliSurfaceBootstrapContext,
       ).not.toHaveBeenCalled()
     } finally {
       await rm(vault, { force: true, recursive: true })

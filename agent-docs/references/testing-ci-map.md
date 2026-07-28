@@ -66,11 +66,12 @@ catalog or expose a production credential.
 The post-onboarding choice-point coverage spans managed-automation installation,
 legacy answered-onboarding catch-up, stable one-shot reconciliation, immutable
 member ownership, execution-time onboarding replacement/reopen races, and the
-exact read-only cron profile. Assistant planning and provider-runner tests prove
-that the profile retains bounded committed history plus vault CLI reads while
-removing hosted dynamic tools, broad context, network fetches, writable
-filesystem access, generated artifacts, progress hooks, and mutation-capable
-configuration overrides.
+exact output-only cron profile. Assistant planning and provider-runner tests
+prove that the profile retains bounded committed history plus bounded
+engine-projected active-goal titles while removing the whole memory document,
+generic CLI contract, shell, hosted dynamic tools, broad context, network
+fetches, writable filesystem access, generated artifacts, progress hooks, and
+mutation-capable configuration overrides.
 
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,

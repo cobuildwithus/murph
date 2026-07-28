@@ -1556,7 +1556,7 @@ function resolveAssistantCronNotificationTurnPolicy(
     job.source.kind === 'automation' &&
     job.source.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
   ) {
-    return { kind: 'read-only-send-or-skip' }
+    return { kind: 'onboarding-goal-checkin' }
   }
 
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)

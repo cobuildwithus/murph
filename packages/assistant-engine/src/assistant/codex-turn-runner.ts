@@ -102,9 +102,10 @@ const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
-const ASSISTANT_READ_ONLY_CODEX_CONFIG_OVERRIDES = [
+const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
+  'features.shell_tool=false',
   'web_search="disabled"',
   'features.web_search_request=false',
   'features.standalone_web_search=false',
@@ -116,10 +117,6 @@ const ASSISTANT_READ_ONLY_CODEX_CONFIG_OVERRIDES = [
   'features.multi_agent_v2=false',
   'features.tool_suggest=false',
 ] as const
-const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_READ_ONLY_CODEX_CONFIG_OVERRIDES,
-  'features.shell_tool=false',
-] as const
 const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=false',
   'features.multi_agent=false',
@@ -130,14 +127,10 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
   outputOnlyTurn: boolean
-  readOnlyTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
   if (input.outputOnlyTurn) {
     return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
-  }
-  if (input.readOnlyTurn) {
-    return ASSISTANT_READ_ONLY_CODEX_CONFIG_OVERRIDES
   }
   if (!input.filesystemDisabledTurn) {
     return input.requested
@@ -462,8 +455,8 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
-    const readOnlyTurn = executionPlan.profile.toolProfile === 'read-only-turn'
-    const restrictedReadOnlySurface = outputOnlyTurn || readOnlyTurn
+    const onboardingGoalCheckinTurn =
+      executionPlan.profile.promptProfile === 'onboarding-goal-checkin'
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification'
     const groupRoomModelMaintenanceTurn =
@@ -479,7 +472,7 @@ async function executeAssistantCodexAttempt(input: {
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
-        approvalPolicy: restrictedReadOnlySurface
+        approvalPolicy: outputOnlyTurn
           ? 'never'
           : attemptPlan.route.providerOptions.approvalPolicy,
         codexCommand:
@@ -493,7 +486,7 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: restrictedReadOnlySurface || groupEmailTurn
+        sandbox: outputOnlyTurn || groupEmailTurn
           ? 'read-only'
           : attemptPlan.route.providerOptions.sandbox,
       },
@@ -510,28 +503,27 @@ async function executeAssistantCodexAttempt(input: {
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
           outputOnlyTurn,
-          readOnlyTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
-        dynamicTools: restrictedReadOnlySurface
+        dynamicTools: outputOnlyTurn
           ? []
           : attemptPlan.routePlan.dynamicTools,
-        environments: restrictedReadOnlySurface
+        environments: outputOnlyTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
-        generatedImageUploader: restrictedReadOnlySurface
+        generatedImageUploader: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        hostedToolContext: restrictedReadOnlySurface
+        hostedToolContext: outputOnlyTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts: restrictedReadOnlySurface
+        materializeWorkspaceArtifacts: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -560,35 +552,35 @@ async function executeAssistantCodexAttempt(input: {
               }
             : {}),
           productFeedbackRecorder:
-            restrictedReadOnlySurface
+            outputOnlyTurn
               ? null
               : executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),
         providerThreadEphemeral: groupRoomModelMaintenanceTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery: restrictedReadOnlySurface
+        progressDelivery: outputOnlyTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions: groupRoomModelMaintenanceTurn
           ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
           : null,
         ...(systemNotificationTurn ||
-          readOnlyTurn ||
+          onboardingGoalCheckinTurn ||
           groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
-        providerFetch: restrictedReadOnlySurface
+        providerFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch: restrictedReadOnlySurface
+        publicInternetFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
-        requireGeneratedImageUploader: restrictedReadOnlySurface
+        requireGeneratedImageUploader: outputOnlyTurn
           ? false
           : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
         resume: attemptPlan.routePlan.resume,

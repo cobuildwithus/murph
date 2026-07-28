@@ -20,11 +20,13 @@ Last verified: 2026-07-26
   scope. The post-onboarding choice point is the current registered dynamic
   member identity; its execution additionally requires canonical onboarding to
   remain completed with `user_answered` and old enough for the claimed
-  occurrence. That exact identity selects an engine-owned read-only one-shot
-  profile: the model receives bounded committed conversation history and
-  canonical vault CLI reads, but no hosted dynamic tools, broad health-context
+  occurrence. That exact identity selects an engine-owned output-only one-shot
+  profile: the model receives bounded committed conversation history and an
+  engine-projected list of bounded active-goal titles, but no memory document,
+  generic CLI contract, shell, hosted dynamic tools, broad health-context
   snapshot, network fetch, writable filesystem, or mutation-capable product
-  surface. Prompt text is not the authority for this restriction. `member`
+  surface. The dedicated system prompt owns the evidence and no-mutation
+  contract above untrusted conversation, goal, and task text. `member`
   identities require a personal/direct route;
   `authenticated-group` identities require a live exact non-direct
   Linq/iMessage or Telegram route, and group email is excluded. The runtime

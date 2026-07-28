@@ -78,6 +78,7 @@ export function resolveAssistantUsageFeatureKey(input: {
     | 'assistant-ask-continuation'
     | 'conversation'
     | 'maintenance'
+    | 'onboarding-goal-checkin'
     | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {

@@ -4762,7 +4762,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         turnPolicy: {
-          kind: 'read-only-send-or-skip',
+          kind: 'onboarding-goal-checkin',
         },
       }),
     )

@@ -127,17 +127,18 @@ active window. Ordinary managed maintenance also reconciles members whose
 answered onboarding predates the feature: it derives one future occurrence on
 the same local weekday as completion, then the canonical automation record
 anchors that occurrence so later passes cannot move or recreate it. Open,
-declined, and manual completion never create it. The execution prompt reads
-only current goals and relevant memory by default, treats unclear or unshared
-goals as a first-class branch, and runs through an exact engine-owned read-only
-turn profile. That profile keeps a bounded committed transcript and the
-canonical vault CLI reads needed for reflection, while removing hosted dynamic
-tools, broad health-context injection, network fetches, writable filesystem
-access, and product-state mutation surfaces. This adds no database table,
+declined, and manual completion never create it. The engine projects only
+bounded active-goal titles alongside bounded committed conversation history;
+the turn receives no memory document, generic CLI contract, shell, hosted
+dynamic tools, broad health-context injection, network fetch, writable
+filesystem access, or product-state mutation surface. Its dedicated
+output-only prompt treats unclear or unshared goals as a first-class branch and
+keeps the evidence and no-mutation boundary above untrusted conversation and
+goal text. This adds no database table,
 migration, recurring cadence, rollout state, or second onboarding lifecycle.
 The first production runner bundle that can install this stable automation ID
 is the rollback floor after any such record is written: an older bundle does
-not know the ID's member ownership, onboarding precondition, or read-only turn
+not know the ID's member ownership, onboarding precondition, or output-only turn
 profile. Deploy this additive change with immediate container rollout and prove
 the runner-bundle fingerprint before managed maintenance can be treated as
 converged.

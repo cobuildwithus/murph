@@ -130,13 +130,13 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_READ_ONLY_NOTIFICATION_TURN_PROFILE: Required<
+const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
-  promptProfile: 'conversation',
+  promptProfile: 'onboarding-goal-checkin',
   threadScope: 'isolated-thread',
-  toolProfile: 'read-only-turn',
+  toolProfile: 'output-only-turn',
 }
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
@@ -154,7 +154,7 @@ export type AssistantNotificationTurnPolicy =
       privateSummary: string
     }
   | {
-      kind: 'read-only-send-or-skip'
+      kind: 'onboarding-goal-checkin'
     }
 
 export type AssistantNotificationResponsePolicy =
@@ -393,7 +393,7 @@ export async function sendAssistantNotificationLocal(
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
-        isAssistantNotificationMaintenanceExactSkip(input)
+        assistantNotificationUsesRestrictedToolProfile(input)
           ? null
           : startAssistantChannelTypingIndicator({
               channelDependencies:
@@ -1483,10 +1483,10 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
-function isAssistantNotificationReadOnlySendOrSkip(
+function isAssistantNotificationOnboardingGoalCheckin(
   input: AssistantNotificationInput,
 ): boolean {
-  return input.turnPolicy?.kind === 'read-only-send-or-skip'
+  return input.turnPolicy?.kind === 'onboarding-goal-checkin'
 }
 
 function assistantNotificationUsesRestrictedToolProfile(
@@ -1494,7 +1494,7 @@ function assistantNotificationUsesRestrictedToolProfile(
 ): boolean {
   return (
     isAssistantNotificationMaintenanceExactSkip(input) ||
-    isAssistantNotificationReadOnlySendOrSkip(input)
+    isAssistantNotificationOnboardingGoalCheckin(input)
   )
 }
 
@@ -1520,8 +1520,8 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
-  if (isAssistantNotificationReadOnlySendOrSkip(input)) {
-    return ASSISTANT_READ_ONLY_NOTIFICATION_TURN_PROFILE
+  if (isAssistantNotificationOnboardingGoalCheckin(input)) {
+    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
