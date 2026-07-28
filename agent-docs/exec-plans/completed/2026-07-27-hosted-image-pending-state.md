@@ -1,8 +1,8 @@
 # Hosted image pending-state honesty
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -93,3 +93,11 @@ Updated: 2026-07-27
   3 image assertions were skipped rather than failed.
 - Required product-experience review findings were fixed and the final rerun
   returned `PASS` with no findings.
+- The branch was merged with current `origin/main`; the reconciled head passed
+  105/105 focused engine tests, the assistant-runtime package's full 1,936-test
+  suite (with 2 skips), and both owning package typechecks.
+- Exact-head PR CI passed all 28 required checks. The Linq webhook/media suite
+  initially timed out in an unrelated group-chat workspace-isolation wait; its
+  failed-job-only rerun passed without source changes, as did the media/provider,
+  delivery-ambiguity, foreground-priority, and runtime-durability suites.
+Completed: 2026-07-28
