@@ -7,7 +7,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import pg from "pg";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   grantHostedUsageCreditForPurchaseTx,
@@ -35,6 +35,9 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  getHostedAiUsageMonthlyAllowanceUsdMicros,
+} from "@/src/lib/hosted-onboarding/billing-plans";
+import {
   upsertHostedMemberHomeLinqBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
@@ -54,6 +57,13 @@ const runPostgresConcurrencyProof =
 const detachedDirectProofMigrationSql = readFileSync(
   new URL(
     "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const referralCreditEntryConstraintMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260728030000_hosted_usage_referral_credit_entry_constraints/migration.sql",
     import.meta.url,
   ),
   "utf8",
@@ -94,6 +104,10 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function stringifyWarningValue(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
 
 async function createUsageCreditFixture(input: {
@@ -274,6 +288,63 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       await client.connect();
       try {
         await client.query(detachedDirectProofMigrationSql);
+        await client.query(referralCreditEntryConstraintMigrationSql);
+      } finally {
+        await client.end();
+      }
+    });
+
+    it("installs validated amount and source checks for every database enum kind", async () => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        const enumResult = await client.query<{ enumLabel: string }>(`
+          SELECT enum_value.enumlabel AS "enumLabel"
+          FROM pg_type AS enum_type
+          INNER JOIN pg_enum AS enum_value
+            ON enum_value.enumtypid = enum_type.oid
+          WHERE enum_type.typname = 'HostedUsageCreditEntryKind'
+          ORDER BY enum_value.enumsortorder
+        `);
+        const constraintResult = await client.query<{
+          convalidated: boolean;
+          definition: string;
+          name: string;
+        }>(`
+          SELECT
+            constraint_row.conname AS "name",
+            constraint_row.convalidated AS "convalidated",
+            pg_get_constraintdef(constraint_row.oid, true) AS "definition"
+          FROM pg_constraint AS constraint_row
+          WHERE constraint_row.conrelid = 'hosted_usage_credit_entry'::regclass
+            AND constraint_row.conname IN (
+              'hosted_usage_credit_entry_amount_direction_valid',
+              'hosted_usage_credit_entry_source_shape_valid'
+            )
+          ORDER BY constraint_row.conname
+        `);
+        const constraintsByName = new Map(
+          constraintResult.rows.map((row) => [row.name, row]),
+        );
+        const enumLabels = enumResult.rows.map(({ enumLabel }) => enumLabel);
+
+        expect(new Set(enumLabels)).toEqual(new Set([
+          "purchase_grant",
+          "referral_grant",
+          "usage_debit",
+          "refund_adjustment",
+          "dispute_adjustment",
+        ]));
+        expect([...constraintsByName.keys()]).toEqual([
+          "hosted_usage_credit_entry_amount_direction_valid",
+          "hosted_usage_credit_entry_source_shape_valid",
+        ]);
+        for (const constraint of constraintsByName.values()) {
+          expect(constraint.convalidated).toBe(true);
+          for (const enumLabel of enumLabels) {
+            expect(constraint.definition).toContain(`'${enumLabel}'`);
+          }
+        }
       } finally {
         await client.end();
       }
@@ -949,6 +1020,173 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: { in: [referrerMemberId, targetContainerMemberId] } },
         });
         await observer.$disconnect();
+      }
+    });
+
+    it("completes the direct-personal referral read-arm-read-cancel flow on one PostgreSQL pool connection", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_referral_direct_${fixtureId}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
+      const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
+      const sourceConversation = {
+        channel: "telegram" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: true,
+      };
+      const processWarningSpy = vi.spyOn(process, "emitWarning");
+      const consoleWarningSpy = vi.spyOn(console, "warn");
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingRef: {
+              create: {
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: "active",
+            hostedAiUsagePeriods: {
+              create: {
+                billingPlanCode: "launch_monthly",
+                limitUsdMicros:
+                  getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"),
+                periodEnd,
+                periodStart,
+                spentUsdMicros: 0n,
+              },
+            },
+            id: memberId,
+          },
+        });
+
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "read_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "read",
+            referral: {
+              active: null,
+              availablePolicies: expect.arrayContaining([
+                expect.objectContaining({
+                  code: "new_person_activation_v1",
+                }),
+              ]),
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: {
+            action: "arm_usage_referral",
+            policyCode: "new_person_activation_v1",
+            sourceConversation,
+          },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "armed",
+            referral: {
+              active: {
+                destinationKind: "personal",
+                policyCode: "new_person_activation_v1",
+                state: "armed",
+              },
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "read_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "read",
+            referral: {
+              active: {
+                destinationKind: "personal",
+                policyCode: "new_person_activation_v1",
+                state: "armed",
+              },
+            },
+            status: "ok",
+          },
+        });
+        await expect(handleHostedUsageReferralGroupTool({
+          enabled: true,
+          memberId,
+          prisma,
+          request: { action: "cancel_usage_referral" },
+        })).resolves.toMatchObject({
+          result: {
+            outcome: "canceled",
+            referral: { active: null },
+            status: "ok",
+          },
+        });
+
+        await expect(prisma.hostedUsageReferral.findMany({
+          select: {
+            beneficiaryMemberId: true,
+            referrerMemberId: true,
+            sourceConversationJson: true,
+            status: true,
+            terminalAt: true,
+            terminalReason: true,
+          },
+          where: { beneficiaryMemberId: memberId },
+        })).resolves.toEqual([{
+          beneficiaryMemberId: memberId,
+          referrerMemberId: memberId,
+          sourceConversationJson: null,
+          status: "canceled",
+          terminalAt: expect.any(Date),
+          terminalReason: "referrer_canceled",
+        }]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const concurrentQueryWarnings = [
+          ...processWarningSpy.mock.calls.map((call) =>
+            stringifyWarningValue(call[0])
+          ),
+          ...consoleWarningSpy.mock.calls.map((call) =>
+            call.map(stringifyWarningValue).join(" ")
+          ),
+        ].filter((message) =>
+          message.includes(
+            "client.query() when the client is already executing a query",
+          )
+        );
+        const databasePoolPressureWarnings =
+          consoleWarningSpy.mock.calls.filter((call) =>
+            call[0] === "Hosted web database pool pressure."
+          );
+        expect(concurrentQueryWarnings).toEqual([]);
+        for (const warning of databasePoolPressureWarnings) {
+          expect(warning[1]).toEqual(expect.objectContaining({
+            waitingRequests: 0,
+          }));
+        }
+      } finally {
+        consoleWarningSpy.mockRestore();
+        processWarningSpy.mockRestore();
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { beneficiaryMemberId: memberId },
+        });
+        await prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId } });
+        await prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
       }
     });
 

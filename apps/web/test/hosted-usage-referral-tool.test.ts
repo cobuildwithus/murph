@@ -52,14 +52,31 @@ type ReferralState = {
     channel: "linq" | "telegram";
     threadId: string;
     threadIsDirect: boolean;
-  };
+  } | null;
   status: "armed" | "canceled" | "superseded";
+  terminalAt?: Date | null;
+  terminalReason?: string | null;
 };
 
 const PERSONAL_SOURCE = {
   channel: "telegram" as const,
   threadId: `hid_${"1".repeat(32)}`,
   threadIsDirect: true,
+};
+
+const ACTIVE_PERSONAL_USAGE_STATUS = {
+  accessKind: "paid",
+  forecast: null,
+  generatedAt: "2026-07-26T12:00:00.000Z",
+  periodEnd: "2026-08-01T00:00:00.000Z",
+  periodKind: "monthly",
+  periodStart: "2026-07-01T00:00:00.000Z",
+  planCode: "launch_monthly",
+  planName: "Pulse",
+  recommendedAction: null,
+  remainingPercent: 95,
+  status: "active",
+  usedPercent: 5,
 };
 
 describe("hosted usage referral tool", () => {
@@ -83,20 +100,9 @@ describe("hosted usage referral tool", () => {
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
       model: "gpt-5.6-terra",
     });
-    mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
-      accessKind: "paid",
-      forecast: null,
-      generatedAt: "2026-07-26T12:00:00.000Z",
-      periodEnd: "2026-08-01T00:00:00.000Z",
-      periodKind: "monthly",
-      periodStart: "2026-07-01T00:00:00.000Z",
-      planCode: "launch_monthly",
-      planName: "Pulse",
-      recommendedAction: null,
-      remainingPercent: 95,
-      status: "active",
-      usedPercent: 5,
-    });
+    mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(
+      ACTIVE_PERSONAL_USAGE_STATUS,
+    );
   });
 
   it("fails closed until production explicitly enables referrals", async () => {
@@ -277,7 +283,7 @@ describe("hosted usage referral tool", () => {
   });
 
   it("serializes every database query inside the arm transaction", async () => {
-    const { prisma } = buildPrisma({ guardTransactionQueries: true });
+    const { peakTransactionQueries, prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
       enabled: true,
@@ -295,13 +301,12 @@ describe("hosted usage referral tool", () => {
         status: "ok",
       },
     });
+    expect(peakTransactionQueries()).toBe(1);
   });
 
   it("commits personal arm and cancel snapshots through the real usage-status graph", async () => {
     mocks.useRealUsageStatus = true;
-    const { peakTransactionQueries, prisma, referrals } = buildPrisma({
-      guardTransactionQueries: true,
-    });
+    const { peakTransactionQueries, prisma, referrals } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
       enabled: true,
@@ -322,9 +327,7 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: {
-        action: "cancel_usage_referral",
-      },
+      request: { action: "cancel_usage_referral" },
     })).resolves.toMatchObject({
       result: {
         outcome: "canceled",
@@ -336,98 +339,237 @@ describe("hosted usage referral tool", () => {
     expect(referrals[0]?.status).toBe("canceled");
     expect(peakTransactionQueries()).toBe(1);
   });
+
+  it("builds snapshots after commit with one root-client query at a time", async () => {
+    const { prisma, referrals, runQuery, transactionState } = buildPrisma();
+    const projectionTransactionStates: boolean[] = [];
+    mocks.readActiveHostedMemberAccess.mockImplementation(
+      () => runQuery(() => true),
+    );
+    mocks.readHostedPersonalAiUsageStatus.mockImplementation(
+      (input) => runQuery(() => {
+        projectionTransactionStates.push(transactionState.open);
+        expect(input.prisma).toBe(prisma);
+        return ACTIVE_PERSONAL_USAGE_STATUS;
+      }),
+    );
+    mocks.readHostedMemberAssistantModelPreference.mockImplementation(
+      (input) => runQuery(() => {
+        projectionTransactionStates.push(transactionState.open);
+        expect(input.prisma).toBe(prisma);
+        return { model: "gpt-5.6-terra" };
+      }),
+    );
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "read_usage_referral" },
+    })).resolves.toMatchObject({
+      result: { outcome: "read", referral: { active: null }, status: "ok" },
+    });
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "armed",
+        referral: {
+          active: { policyCode: "new_person_activation_v1", state: "armed" },
+        },
+        status: "ok",
+      },
+    });
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "read_usage_referral" },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          active: { policyCode: "new_person_activation_v1", state: "armed" },
+        },
+        status: "ok",
+      },
+    });
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "cancel_usage_referral" },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "canceled",
+        referral: { active: null },
+        status: "ok",
+      },
+    });
+
+    expect(projectionTransactionStates).not.toContain(true);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(referrals).toHaveLength(1);
+    expect(referrals[0]).toMatchObject({
+      sourceConversationJson: null,
+      status: "canceled",
+      terminalReason: "referrer_canceled",
+    });
+  });
 });
 
-function buildPrisma(input: {
-  guardTransactionQueries?: boolean;
-} = {}): {
+function buildPrisma(): {
   peakTransactionQueries: () => number;
   prisma: Record<string, unknown>;
   referrals: ReferralState[];
+  runQuery: <T>(query: () => T | Promise<T>) => Promise<T>;
+  transactionState: {
+    open: boolean;
+    rootQueryInFlight: boolean;
+    txQueryInFlight: boolean;
+  };
 } {
   const referrals: ReferralState[] = [];
   const transactionQueryTracker = { active: 0, peak: 0 };
+  const transactionState = {
+    open: false,
+    rootQueryInFlight: false,
+    txQueryInFlight: false,
+  };
+
+  const runQuery = async <T>(query: () => T | Promise<T>): Promise<T> => {
+    const queryState = transactionState.open
+      ? "txQueryInFlight"
+      : "rootQueryInFlight";
+    if (transactionState[queryState]) {
+      throw new TypeError(
+        transactionState.open
+          ? "Concurrent transaction query"
+          : "Concurrent root-client query",
+      );
+    }
+    transactionState[queryState] = true;
+    if (transactionState.open) {
+      transactionQueryTracker.active += 1;
+      transactionQueryTracker.peak = Math.max(
+        transactionQueryTracker.peak,
+        transactionQueryTracker.active,
+      );
+    }
+    try {
+      await Promise.resolve();
+      return await query();
+    } finally {
+      if (transactionState.open) {
+        transactionQueryTracker.active -= 1;
+      }
+      transactionState[queryState] = false;
+    }
+  };
+
   const referralDelegate = {
-    aggregate: vi.fn(async () => ({ _sum: { rewardUsdMicros: null } })),
-    count: vi.fn(async () => 0),
-    create: vi.fn(async (input: {
-      data: ReferralState;
-    }) => {
+    aggregate: vi.fn(async () => runQuery(
+      () => ({ _sum: { rewardUsdMicros: null } }),
+    )),
+    count: vi.fn(async () => runQuery(() => 0)),
+    create: vi.fn(async (input: { data: ReferralState }) => runQuery(() => {
       referrals.push({ ...input.data });
       return referrals.at(-1);
-    }),
-    findFirst: vi.fn(async () =>
+    })),
+    findFirst: vi.fn(async () => runQuery(() =>
       [...referrals]
         .reverse()
         .find((referral) => referral.status === "armed")
         ?? null
-    ),
+    )),
     update: vi.fn(async (input: {
-      data: Partial<ReferralState>;
+      data: Partial<ReferralState> & { sourceConversationJson?: unknown };
       where: { id: string };
-    }) => {
-      const referral = referrals.find((candidate) =>
-        candidate.id === input.where.id
+    }) => runQuery(() => {
+      const referral = referrals.find(
+        (candidate) => candidate.id === input.where.id,
       );
       if (!referral) {
-        throw new Error("Referral was not found.");
+        throw new TypeError("Referral not found");
       }
-      Object.assign(referral, input.data);
+      Object.assign(referral, input.data, {
+        ...(Object.hasOwn(input.data, "sourceConversationJson")
+          ? { sourceConversationJson: null }
+          : {}),
+      });
       return referral;
-    }),
+    })),
     updateMany: vi.fn(async (input: {
-      data?: { status?: ReferralState["status"] | "expired" };
-    }) => {
-      if (input.data?.status !== "superseded") {
+      data: Omit<Partial<ReferralState>, "status"> & { status?: string };
+    }) => runQuery(() => {
+      if (input.data.status === "expired") {
         return { count: 0 };
       }
       let count = 0;
       for (const referral of referrals) {
-        if (referral.status === "armed") {
-          referral.status = "superseded";
-          count += 1;
+        if (referral.status !== "armed") {
+          continue;
         }
+        Object.assign(referral, input.data, {
+          ...(Object.hasOwn(input.data, "sourceConversationJson")
+            ? { sourceConversationJson: null }
+            : {}),
+        });
+        count += 1;
       }
       return { count };
-    }),
+    })),
   };
   const prisma = {
-    $executeRaw: vi.fn(async () => 1),
-    $queryRaw: vi.fn(async () => [{
+    $executeRaw: vi.fn(async () => runQuery(() => 1)),
+    $queryRaw: vi.fn(async () => runQuery(() => [{
       balanceUsdMicros: 0n,
       beneficiaryMemberId: "member_personal",
       ledgerVersion: 0n,
-    }]),
+    }])),
     $transaction: vi.fn(async (
       callback: (tx: Record<string, unknown>) => Promise<unknown>,
-    ) => callback(
-      input.guardTransactionQueries
-        ? createSingleQueryTransactionClient(prisma, transactionQueryTracker)
-        : prisma,
-    )),
+    ) => {
+      if (transactionState.open) {
+        throw new TypeError("Concurrent nested transactions are not supported");
+      }
+      transactionState.open = true;
+      try {
+        return await callback(prisma);
+      } finally {
+        transactionState.open = false;
+      }
+    }),
     hostedAiUsage: {
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async () => runQuery(() => null)),
     },
     hostedMember: {
-      findUnique: vi.fn(async () => ({
+      findUnique: vi.fn(async () => runQuery(() => ({
         billingStatus: "active",
         createdAt: new Date("2026-07-28T00:00:00.000Z"),
         id: "member_personal",
         suspendedAt: null,
         updatedAt: new Date("2026-07-28T12:00:00.000Z"),
-      })),
+      }))),
     },
     hostedMemberBillingRef: {
-      findUnique: vi.fn(async () => ({
+      findUnique: vi.fn(async () => runQuery(() => ({
         currentBillingPhase: "trial",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         stripeCustomerLookupKey: "customer_lookup",
         stripeSubscriptionLookupKey: "subscription_lookup",
-      })),
+      }))),
     },
     hostedThreadContainer: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async () => runQuery(() => null)),
     },
     hostedUsageReferral: referralDelegate,
   };
@@ -435,58 +577,7 @@ function buildPrisma(input: {
     peakTransactionQueries: () => transactionQueryTracker.peak,
     prisma,
     referrals,
-  };
-}
-
-function createSingleQueryTransactionClient(
-  prisma: Record<string, unknown>,
-  tracker: { active: number; peak: number },
-): Record<string, unknown> {
-  const guard = async <Result>(
-    operation: () => Promise<Result>,
-  ): Promise<Result> => {
-    if (tracker.active !== 0) {
-      throw new Error("Concurrent transaction query started.");
-    }
-    tracker.active += 1;
-    tracker.peak = Math.max(tracker.peak, tracker.active);
-    try {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      return await operation();
-    } finally {
-      tracker.active -= 1;
-    }
-  };
-
-  return {
-    $executeRaw: (...args: never[]) =>
-      guard(() =>
-        (prisma.$executeRaw as (...args: never[]) => Promise<unknown>)(...args)
-      ),
-    $queryRaw: (...args: never[]) =>
-      guard(() =>
-        (prisma.$queryRaw as (...args: never[]) => Promise<unknown>)(...args)
-      ),
-    ...Object.fromEntries([
-      "hostedAiUsage",
-      "hostedMember",
-      "hostedMemberBillingRef",
-      "hostedThreadContainer",
-      "hostedUsageReferral",
-    ].map((delegateName) => {
-      const delegate = prisma[delegateName] as Record<
-        string,
-        (...args: never[]) => Promise<unknown>
-      >;
-      return [
-        delegateName,
-        Object.fromEntries(
-          Object.entries(delegate).map(([key, operation]) => [
-            key,
-            (...args: never[]) => guard(() => operation(...args)),
-          ]),
-        ),
-      ];
-    })),
+    runQuery,
+    transactionState,
   };
 }

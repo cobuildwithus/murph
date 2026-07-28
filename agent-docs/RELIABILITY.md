@@ -203,12 +203,22 @@ Last verified: 2026-07-27
   provider-ingress transaction without acquiring the beneficiary lock.
   Arming reserves both rolling caps under referrer plus stable-order
   beneficiary locks, counting recent rewards, nonexpired armed commitments,
-  and bound commitments through a 25-hour late-evidence grace. Qualification
-  records a pre-expiry durable fence with its evidence; post-commit
-  reconciliation rechecks the frozen policy but cannot reject that qualified
-  commitment because processing ran after expiry or another mission armed. A
-  post-expiry event does not terminate the row during that grace, so pre-expiry
-  provider evidence delivered later can still qualify; the first
+  and bound commitments through a 25-hour late-evidence grace. Every arming,
+  cancellation, qualification, reward-reconciliation, and celebration-queue
+  transaction-client read or write is issued sequentially because Prisma
+  interactive transactions own one database connection. Referral response
+  projections, including personal usage status, run only on the root client
+  after arm/cancel commits. Snapshot and rolling-cap database reads issue one
+  root-client operation at a time, and celebration preparation invokes its
+  destination, model, and preference projections sequentially. The referral
+  owner therefore does not multiply connection demand by overlapping
+  independent root-client work. These projections never run inside the
+  lock-holding referral transaction or start a nested transaction there.
+  Qualification records a pre-expiry durable fence with its evidence;
+  post-commit reconciliation rechecks the frozen policy but cannot reject that
+  qualified commitment because processing ran after expiry or another mission
+  armed. A post-expiry event does not terminate the row during that grace, so
+  pre-expiry provider evidence delivered later can still qualify; the first
   referrer-serialized expiry boundary after the grace is authoritative
   finality. The immediate ingress handoff and a bounded
   Vercel-authenticated minute recovery pass both retry idempotent reward
@@ -219,10 +229,13 @@ Last verified: 2026-07-27
   fixed target, so provider entry rejects source-route loss instead of applying
   current-home fallback. Durable mailbox reconciliation owns a missed wake, so
   stale route, append, or signal failure cannot reverse or duplicate earned
-  credit. Referral production is disabled through the expand
-  deployment and prior-function drain. The
-  post-drain contract migration resynchronizes purchase projections before it
-  widens and validates the ledger checks; only then may Web enable referral
+  credit. Referral production is disabled through the expand deployment and
+  prior-function drain. The normal forward migration replaces the amount and
+  source checks in one bounded metadata transaction, commits that unavoidable
+  brief exclusive lock before validating retained rows, and enforces the new
+  referral shape immediately through `NOT VALID` constraints. The post-drain
+  contract migration then resynchronizes purchase projections without another
+  constraint replacement. Only after both boundaries may Web enable referral
   arming, binding, and observation.
 - A fulfilled group purchase may materialize one optional social effect after
   the grant commits. The purchase id owns mailbox deduplication, so Checkout,
