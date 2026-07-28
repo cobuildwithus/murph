@@ -1243,7 +1243,7 @@ reactions remain on the silent group context path above (or ignored outside
 groups).
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
-the signup-link path only. It runs after cheap deterministic ingress filters and
+the first-contact path. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
 persists only the event-id keyed terminal allow/block decision, stores no
@@ -1261,9 +1261,32 @@ Classifier-unavailable states, including missing keys, timeouts, ordinary
 non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
-permanently dropped. Active members, explicit thread routes, own messages, group
-chats, local guard rejects, deterministic URL/STOP-style spam, and other
-non-invite paths bypass the classifier.
+permanently dropped. With enforcement off, only a genuinely unknown member on a
+provider-authenticated direct iMessage from a configured E.164 phone prefix may
+use a persisted model-source allow to enter instant start. The selected permanent
+home line must be the same line the person contacted, and the existing no-card
+Pulse-trial owner must start from an unbound Stripe customer so an old saved card
+cannot silently auto-convert a text-initiated trial. The first planner transaction
+creates the canonical member, verified phone identity, pending route, and invite.
+That invite carries only the event id of the persisted model-source allow and is
+the single-owner token for that exact original inbound. Only the transaction
+creating a genuinely new member may mint that token; an existing inactive
+member without the exact same-event token remains on the signup path. The phone
+identity owner reports whether its unique insert actually won; a stale outer
+lookup that loses that insert exits retryably before invite or accounting work.
+While the token remains pending, a different inbound for the inactive member
+exits retryably before counting or creating an effect; it cannot continue or
+cancel the admitted start.
+The existing Stripe/activation owner locks the member, revalidates the exact
+invite and event before any Stripe mutation, then clears the token atomically
+with activation. A second ordinary planner pass counts and appends the original
+inbound exactly once after active access is visible. Ordinary signup delivery
+retains its existing exact-invite and member-ownership checks. Any block,
+deterministic fail-open, unsupported prefix/channel, cross-line route, existing
+member or billing customer, or definitive enrollment failure keeps the existing
+signup-link or ignored behavior. Active members, explicit thread routes, own
+messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
+and other non-invite paths bypass the classifier.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable
