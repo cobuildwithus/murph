@@ -100,7 +100,14 @@ describe('onboarding goal check-in automation', () => {
     })
     expect(seed?.instructions).toContain('This is a choice point, not a report card.')
     expect(seed?.instructions).toContain(
-      'vault-cli assistant onboarding resume-context --format json',
+      'vault-cli assistant onboarding status --format json',
+    )
+    expect(seed?.instructions).toContain(
+      'vault-cli goal list --status active --format json',
+    )
+    expect(seed?.instructions).toContain('vault-cli memory show --format json')
+    expect(seed?.instructions).toContain(
+      'Do not use the broader onboarding resume snapshot',
     )
     expect(seed?.instructions).toContain(
       'goals were unclear, not shared, explicitly left open, or the member chose an explore path',
