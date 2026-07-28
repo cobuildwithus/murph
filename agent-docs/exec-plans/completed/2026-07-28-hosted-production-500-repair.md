@@ -1,6 +1,6 @@
 # Hosted production 500 repair
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -54,7 +54,7 @@ Updated: 2026-07-28
 3. [x] Implement the smallest owner-bound fixes and focused regressions.
 4. [x] Run focused tests, canonical diff verification, acceptance verification,
    typecheck, and direct scenarios required by the verification guide.
-5. [ ] Run the preliminary completion-specialists pass, resolve findings, and
+5. [x] Run the preliminary completion-specialists pass, resolve findings, and
    perform the parent's final diff review.
 6. [ ] Commit, push, open the PR, then run final ReviewGPT concurrently with CI.
 7. [ ] Resolve final findings and CI failures, close this plan through
@@ -92,3 +92,16 @@ Updated: 2026-07-28
   flag passed the complete acceptance suite.
 - Secret-safe production log verification after deployment remains a separate
   operational follow-up unless deployment is explicitly requested.
+- The exact merged-head focused rerun passed 185 tests across the seven
+  affected unit suites, the hosted workflow guard passed 3 tests, the local
+  PostgreSQL regression passed both scenarios, hosted-web prepared typecheck
+  passed, and `pnpm docs:drift` passed.
+- The merged-head canonical `pnpm test:diff` passed repository guards, affected
+  CLI typecheck, and reached the full CLI source suite. Eight unrelated
+  assistant/session command tests each timed out at exactly 60 seconds under
+  shared-host contention; after the failed worker exited, its idle task-owned
+  parent was interrupted. The only touched CLI suite then passed directly.
+- Candidate-head GitHub CI passed completely after retrying one unchanged-head
+  hosted job whose first attempt failed while downloading the Temporal CLI
+  with a connection reset. Final-head CI and final ReviewGPT remain open.
+Completed: 2026-07-28
