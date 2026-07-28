@@ -2474,13 +2474,19 @@ describe("hosted device-sync wakes", () => {
     ["a newer connection epoch", buildHostedConnection({
       connectedAt: "2026-03-26T12:01:00.000Z",
     })],
-  ])("does not persist a late connection-established wake over %s", async (_label, current) => {
+  ])("rejects a late callback over %s without admitting work", async (_label, current) => {
     mocks.getConnectionForUser.mockResolvedValue(current);
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+      retryable: false,
+    });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
@@ -2491,6 +2497,52 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("rejects callback establishment when the connection owner is missing", async () => {
+    mocks.getConnectionOwnerId.mockResolvedValue(null);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.withConnectionMutationLock).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects a conflicting connection-established mailbox identity", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_conflict",
+        userId: "user-123",
+      },
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 

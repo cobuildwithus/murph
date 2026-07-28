@@ -598,6 +598,10 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   now: string;
 }
 
+export interface DeviceSyncPublicIngressConnectionEstablishedResult {
+  sourceAdmissionCommitted: true;
+}
+
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
@@ -640,7 +644,14 @@ export interface DeviceSyncPublicIngressHooks {
     input: DeviceSyncPublicIngressConnectionMutationInput,
     operation: () => Promise<Result>,
   ): Promise<Result>;
-  onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
+  // This is the sole runtime-specific admission boundary. A Junction callback
+  // that names a source succeeds only when this hook atomically commits that
+  // source with its durable initial work and returns sourceAdmissionCommitted.
+  onConnectionEstablished?(
+    input: DeviceSyncPublicIngressConnectionEstablishedInput,
+  ): void
+    | DeviceSyncPublicIngressConnectionEstablishedResult
+    | Promise<void | DeviceSyncPublicIngressConnectionEstablishedResult>;
   onLevelDirtyWebhookAlreadySatisfied?(
     input: DeviceSyncPublicIngressWebhookAlreadySatisfiedInput,
   ): DeviceSyncPublicIngressWebhookAlreadySatisfiedResult

@@ -415,7 +415,12 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   const ownerId = await input.store.getConnectionOwnerId(input.account.id);
 
   if (!ownerId) {
-    return;
+    throw deviceSyncError({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      message: "Device connection ownership changed during completion. Start the connection again.",
+      retryable: false,
+      httpStatus: 409,
+    });
   }
 
   const hint = {
@@ -449,7 +454,12 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         || current.status !== input.account.status
         || current.connectedAt !== input.account.connectedAt
       ) {
-        return null;
+        throw deviceSyncError({
+          code: "CONNECTION_ESTABLISHMENT_STALE",
+          message: "Device connection changed during completion. Start the connection again.",
+          retryable: false,
+          httpStatus: 409,
+        });
       }
 
       const linkedSource = resolveHostedJunctionLinkedSource({
@@ -479,10 +489,19 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         tx,
       });
 
-      return appendHostedMailboxEnvelopeTx({
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
         envelope: wake,
         tx,
       });
+      if (mailboxAppend.dedupeConflict) {
+        throw deviceSyncError({
+          code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
+          message: "Device connection completion conflicted with existing initial work. Start the connection again.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      return mailboxAppend;
     },
   );
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
 import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../src/junction-historical-backfill-progress.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
@@ -991,6 +992,7 @@ test("starting another Junction source preserves an established shared account",
   const store = new InMemoryPublicIngressStore();
   let acceptedWebhookCount = 0;
   let connectionHookFailureSource: string | null = null;
+  let connectionHookNoopSource: string | null = null;
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -1076,10 +1078,31 @@ test("starting another Junction source preserves an established shared account",
     registry: createDeviceSyncRegistry([provider]),
     store,
     hooks: {
-      onConnectionEstablished({ sourceProviderSlug }) {
+      onConnectionEstablished({ account, now, provider, sourceProviderSlug }) {
         if (sourceProviderSlug === connectionHookFailureSource) {
           throw new Error("connection wake persistence failed");
         }
+        if (sourceProviderSlug === connectionHookNoopSource) {
+          return;
+        }
+        if (provider.provider === "junction" && sourceProviderSlug) {
+          const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+            connectionId: account.id,
+            sourceProviderSlug,
+          });
+          assert.ok(sourceInstanceKey);
+          store.upsertConnectionSource({
+            connectionId: account.id,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            status: "connected",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          });
+        }
+        return {
+          sourceAdmissionCommitted: true as const,
+        };
       },
       onWebhookAccepted({ account, claimToken, traceId }) {
         acceptedWebhookCount += 1;
@@ -1228,6 +1251,35 @@ test("starting another Junction source preserves an established shared account",
   assert.equal(
     store.getConnectionByExternalAccount("junction", "shared-junction-account")?.setupPhase,
     "source_confirmed",
+  );
+
+  const polar = await ingress.startConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    sourceProviderSlug: "polar",
+  });
+  connectionHookFailureSource = null;
+  connectionHookNoopSource = "polar";
+  await assert.rejects(
+    ingress.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: polar.state,
+        result: "success",
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SOURCE_ADMISSION_NOT_COMMITTED"
+      && error.httpStatus === 409,
+  );
+  assert.equal(
+    store.listConnectionSources({
+      connectionId: established.account.id,
+      sourceProviderSlug: "polar",
+    })[0]?.status,
+    "disconnected",
   );
 });
 

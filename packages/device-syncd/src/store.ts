@@ -61,6 +61,7 @@ import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
   upsertConnectionSource as upsertStoredConnectionSource,
+  upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
   markSyncFailed as markStoredSyncFailed,
@@ -402,6 +403,32 @@ export class SqliteDeviceSyncStore {
     return withImmediateTransaction(this.database, () =>
       enqueueDeviceSyncJobInTransaction(this.database, input)
     );
+  }
+
+  commitConnectionEstablished(input: {
+    accountId: string;
+    jobs: readonly DeviceSyncJobInput[];
+    provider: string;
+    source?: UpsertDeviceConnectionSourceInput | null;
+  }): DeviceSyncJobRecord[] {
+    return withImmediateTransaction(this.database, () => {
+      if (input.source) {
+        upsertStoredConnectionSourceInTransaction(this.database, input.source);
+      }
+
+      return input.jobs.map((job) =>
+        enqueueDeviceSyncJobInTransaction(this.database, {
+          provider: input.provider,
+          accountId: input.accountId,
+          kind: job.kind,
+          payload: job.payload ?? {},
+          priority: job.priority ?? 0,
+          availableAt: job.availableAt,
+          maxAttempts: job.maxAttempts,
+          dedupeKey: job.dedupeKey,
+        })
+      );
+    });
   }
 
   enqueueJobsAndCompleteWebhookTrace(input: {

@@ -79,6 +79,9 @@ export class HostedDeviceSyncPublicIngressService {
           });
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
+          return {
+            sourceAdmissionCommitted: true,
+          };
         },
         onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
           const pending = await this.context.store.hasPendingDirtyConnection(account.id);

@@ -344,18 +344,25 @@ class DeviceSyncServiceController {
                 sourceProviderSlug,
               })
             : null;
-          if (sourceInstanceKey && sourceProviderSlug) {
-            this.store.upsertConnectionSource({
-              connectionId: account.id,
-              sourceInstanceKey,
-              sourceProviderSlug,
-              status: "connected",
-              firstSeenAt: now,
-              lastSeenAt: now,
-            });
-          }
-          this.enqueueJobs(account, connection.initialJobs ?? []);
+          this.store.commitConnectionEstablished({
+            accountId: account.id,
+            jobs: this.normalizeJobsForEnqueue(account, connection.initialJobs ?? []),
+            provider: account.provider,
+            source: sourceInstanceKey && sourceProviderSlug
+              ? {
+                  connectionId: account.id,
+                  sourceInstanceKey,
+                  sourceProviderSlug,
+                  status: "connected",
+                  firstSeenAt: now,
+                  lastSeenAt: now,
+                }
+              : null,
+          });
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
+          return {
+            sourceAdmissionCommitted: true,
+          };
         },
         onWebhookAccepted: async ({ account, claimToken, traceId, webhook }) => {
           this.store.enqueueJobsAndCompleteWebhookTrace({

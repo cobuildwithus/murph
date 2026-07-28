@@ -59,7 +59,12 @@ Last verified: 2026-07-28
   account back into a pending phase. Its `DeviceConnectionSource` remains
   `disconnected`, and source-attributed webhooks, dirty-state commit races, and
   provider pulls fail or exit without admitting target data until callback
-  confirmation connects that source. Established siblings continue normally.
+  confirmation reaches the sole runtime connection-established admission
+  boundary. Hosted admission commits the source, signal, and mailbox work in one
+  transaction; local admission commits the source and initial jobs in one SQLite
+  transaction. Shared ingress never performs a second source write. A missing,
+  disconnected, or newer account makes the callback fail and leaves the source
+  disconnected. Established siblings continue normally.
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.

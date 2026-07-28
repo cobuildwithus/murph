@@ -1208,7 +1208,7 @@ export class DeviceSyncPublicIngress {
       });
       connectionPersisted = true;
 
-      await this.hooks.onConnectionEstablished?.({
+      const establishment = await this.hooks.onConnectionEstablished?.({
         account,
         ...(connectSourceId ? { connectSourceId } : {}),
         ...(connectTarget ? { connectTarget } : {}),
@@ -1221,20 +1221,19 @@ export class DeviceSyncPublicIngress {
         now,
       } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
 
-      const linkedSourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
-        ? buildJunctionProviderSourceInstanceKey({
-            connectionId: account.id,
-            sourceProviderSlug,
-          })
-        : null;
-      if (linkedSourceInstanceKey && sourceProviderSlug) {
-        await this.store.upsertConnectionSource({
-          connectionId: account.id,
-          sourceInstanceKey: linkedSourceInstanceKey,
-          sourceProviderSlug,
-          status: "connected",
-          firstSeenAt: now,
-          lastSeenAt: now,
+      if (
+        provider.provider === "junction"
+        && sourceProviderSlug
+        && (
+          !establishment
+          || establishment.sourceAdmissionCommitted !== true
+        )
+      ) {
+        throw deviceSyncError({
+          code: "CONNECTION_SOURCE_ADMISSION_NOT_COMMITTED",
+          message: "Device connection completion did not commit the requested source. Start the connection again.",
+          retryable: false,
+          httpStatus: 409,
         });
       }
 

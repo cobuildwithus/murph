@@ -225,10 +225,14 @@ jobs, provider execution, import, or setup promotion. Callback confirmation is
 the only path to `source_confirmed`. Adding or retrying another Junction-backed
 source on an established shared account preserves the account phase and sibling
 sources. The target `DeviceConnectionSource` remains `disconnected`; target
-webhooks and provider pulls stay inert until callback confirmation connects it.
-The start path retries provider cleanup for that target source only and returns
-a retryable error rather than issuing a new link when cleanup is ambiguous.
-Whole-account revoke remains the explicit connection-wide disconnect path.
+webhooks and provider pulls stay inert until the hosted connection-established
+hook commits that source, its signal, and mailbox work in one transaction.
+Shared ingress does not independently connect the source. If explicit disconnect
+or a newer connection epoch wins the locked recheck, the callback fails and the
+target remains disconnected. The start path retries provider cleanup for that
+target source only and returns a retryable error rather than issuing a new link
+when cleanup is ambiguous. Whole-account revoke remains the explicit
+connection-wide disconnect path.
 
 ### Hosted settings-authenticated routes
 

@@ -1011,11 +1011,15 @@ or promote itself through sync success. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
-confirmation marks that source connected. Retry cleanup deregisters only the
-target source; whole-account revoke remains the explicit connection-wide
-disconnect path. Ambiguous target cleanup blocks the new link and remains
-retryable. Local and tunneled `device-syncd` callbacks remain explicit and
-unchanged.
+confirmation reaches the runtime connection-established hook. That hook is the
+sole source-admission owner: hosted mode commits the source, signal, and mailbox
+work in one transaction, while local mode commits the source and initial jobs in
+one SQLite transaction. Shared ingress never writes source admission after the
+hook. Explicit disconnect or a newer connection epoch wins the locked recheck,
+fails the stale callback, and leaves the target disconnected. Retry cleanup
+deregisters only the target source; whole-account revoke remains the explicit
+connection-wide disconnect path. Ambiguous target cleanup blocks the new link
+and remains retryable.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
