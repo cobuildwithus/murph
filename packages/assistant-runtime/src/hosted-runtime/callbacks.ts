@@ -687,6 +687,9 @@ async function preflightHostedAssistantDispatch(input: {
   const targetKind = input.payload.explicitTarget
     ? "explicit"
     : input.payload.bindingDeliveryKind;
+  if (input.payload.channel === "telegram") {
+    return { action: "continue" };
+  }
   if (!target || !targetKind || input.payload.channel !== "linq") {
     throw new VaultCliError(
       "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
@@ -736,7 +739,7 @@ async function preflightHostedAssistantDispatch(input: {
 function isHostedReviewedAssistantAskCompletionIntent(
   intent: AssistantOutboxIntent,
 ): boolean {
-  return intent.channel === "linq"
+  return (intent.channel === "linq" || intent.channel === "telegram")
     && intent.operation === null
     && intent.deliveryIdempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -2269,11 +2272,16 @@ async function assertHostedDeliveryCanEnterProvider(input: {
 
 async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  delivery?: {
+    media: readonly AssistantResponseMedia[];
+    message: string;
+  };
   effectsPort: HostedRuntimeEffectsPort;
   intent: AssistantOutboxIntent | null;
   signal: AbortSignal | null;
   target: string | null;
   userId: string;
+  vaultRoot: string;
 }): Promise<string | null> {
   const payload = input.assistantDeliveryEffect.payload;
   if (
@@ -2283,9 +2291,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
 
+  const reviewedCompletion = input.intent
+    && isHostedReviewedAssistantAskCompletionIntent(input.intent)
+    ? input.intent
+    : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
   if (
     !authority
+    && !reviewedCompletion
     && (
       payload.threadIsDirect === true
       || !input.intent?.automationAuthority
@@ -2294,10 +2307,13 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
   if (!authority) {
+    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+      return null;
+    }
     throw new VaultCliError(
       "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
       "Hosted group delivery requires live thread route authority before provider work.",
-      { retryable: true },
+      { retryable: reviewedCompletion === null },
     );
   }
 
@@ -2321,7 +2337,64 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
       { retryable: true },
     );
   }
-  await assertAuthority(authority, { signal: input.signal });
+  if (
+    reviewedCompletion
+    && (
+      !input.delivery
+      || input.delivery.media.length !== 0
+      || payload.media.length !== 0
+    )
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_TRANSPORT_INVALID",
+      "Reviewed Assistant Ask completion must use the text-only Telegram transport.",
+      { retryable: false },
+    );
+  }
+  const completionExpiresAt = reviewedCompletion
+    ? await prepareHostedReviewedAssistantAskProviderEntry({
+        intentId: reviewedCompletion.intentId,
+        media: input.delivery?.media ?? [],
+        message: input.delivery?.message ?? "",
+        now: new Date(),
+        vaultRoot: input.vaultRoot,
+      })
+    : null;
+  const completionIdempotencyKey =
+    reviewedCompletion?.deliveryIdempotencyKey ?? null;
+  const assertion = await assertAuthority(authority, {
+    ...(reviewedCompletion && completionExpiresAt && completionIdempotencyKey
+      ? {
+          assistantAskCompletion: {
+            answeredMailboxItemIds: reviewedCompletion.answeredMailboxItemIds,
+            assistantAskCompletionExpiresAt: completionExpiresAt,
+            assistantAskFallback:
+              isHostedReviewedAssistantAskFallbackPayload(reviewedCompletion),
+            idempotencyKey: completionIdempotencyKey,
+          },
+        }
+      : {}),
+    signal: input.signal,
+  });
+  if (assertion?.assistantAskFallbackRequired === true) {
+    if (!reviewedCompletion) {
+      throw new VaultCliError(
+        "ASSISTANT_ASK_COMPLETION_AUTHORITY_INVALID",
+        "Assistant Ask fallback authority requires a reviewed completion.",
+        { retryable: false },
+      );
+    }
+    await persistHostedAssistantAskFallbackSupersession({
+      intentId: reviewedCompletion.intentId,
+      now: new Date(),
+      vaultRoot: input.vaultRoot,
+    });
+    throw new VaultCliError(
+      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+      { retryable: true },
+    );
+  }
   return target;
 }
 
@@ -2743,11 +2816,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
+              delivery: {
+                media: [],
+                message: request.message,
+              },
               effectsPort: input.effectsPort,
               intent: mirrorState.intent,
               signal: input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2769,11 +2847,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
+              delivery: {
+                media: request.media,
+                message: request.message,
+              },
               effectsPort: input.effectsPort,
               intent: mirrorState.intent,
               signal: request.signal ?? input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2822,6 +2905,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               signal: input.signal,
               target: request.target,
               userId: input.userId,
+              vaultRoot: input.vaultRoot,
             });
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
@@ -2853,6 +2937,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 signal: input.signal,
                 target,
                 userId: input.userId,
+                vaultRoot: input.vaultRoot,
               });
             },
             onTelegramVoiceMemoDispatchEntered: () => {

@@ -294,6 +294,17 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   threadIsDirect?: boolean | null;
 }
 
+export interface HostedRuntimeAssistantAskCompletionAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  assistantAskFallback: boolean;
+  idempotencyKey: string;
+}
+
+export interface HostedRuntimeExternalThreadRouteAuthorityResult {
+  assistantAskFallbackRequired?: boolean | null;
+}
+
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
   answeredMailboxItemIds?: readonly string[] | null;
@@ -351,8 +362,11 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<HostedRuntimeLinqRecentInboundEngagementResult | void>;
   assertExternalThreadRouteAuthority?(
     authority: HostedExecutionExternalThreadRouteAuthority,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+    context?: {
+      assistantAskCompletion?: HostedRuntimeAssistantAskCompletionAuthority | null;
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;

@@ -93,7 +93,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('does not arm one')
     expect(skill).toContain('include it in the same segment as a plain first-party link')
     expect(skill).toContain("Match the room's energy")
-    expect(skill).toContain('nominating someone to cover it')
+    expect(skill).toContain('without naming or singling out a nonpayer')
+    expect(skill).toContain('guilt-trip, call out nonpayers')
     expect(skill).toContain('skip the heads-up entirely')
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
@@ -154,7 +155,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'never reveal who paid, amounts, or',
     )
-    expect(skill).toContain('never claim usage was added when it was not')
+    expect(skill).toContain('never claim messages were sponsored when they were not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })

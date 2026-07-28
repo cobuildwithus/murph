@@ -18,6 +18,7 @@ interface CompletedImageGeneration {
   operationId: string;
   originAssistantInputId: string;
   result: AssistantHostedImageGenerationResult;
+  scopeId: string | null;
 }
 
 interface PendingCanonicalWrite {
@@ -33,6 +34,10 @@ export interface HostedImageGenerationController {
   ): Promise<number>;
   hasCompleted(): boolean;
   hasWork(): boolean;
+  releaseAcceptedInputs(
+    inputIds: readonly string[],
+    hasCompleteTerminalEvidence: (inputId: string) => Promise<boolean>,
+  ): Promise<void>;
   stageCompleted(): Promise<number>;
 }
 
@@ -51,7 +56,16 @@ export function createHostedImageGenerationController(input: {
     : closeController.signal;
   const completed: CompletedImageGeneration[] = [];
   const canonicalWrites: PendingCanonicalWrite[] = [];
+  const acceptedCompletionInputIds = new Set<string>();
+  const completionInputScopes = new Map<string, {
+    operationId: string;
+    scopeId: string;
+  }>();
   const operations = new Set<string>();
+  const pendingScopes = new Map<string, {
+    operationId: string;
+    status: "pending" | "queued";
+  }>();
   const tasks = new Set<Promise<void>>();
   const enqueuePendingInputId =
     input.enqueuePendingInputId ?? enqueueHostedPendingAssistantInputId;
@@ -77,7 +91,17 @@ export function createHostedImageGenerationController(input: {
       if (operations.has(request.operationId)) {
         return "already-started";
       }
+      const scopeId = request.scopeId?.trim() || null;
+      if (scopeId && pendingScopes.has(scopeId)) {
+        return "already-pending";
+      }
       operations.add(request.operationId);
+      if (scopeId) {
+        pendingScopes.set(scopeId, {
+          operationId: request.operationId,
+          status: "pending",
+        });
+      }
       input.onStarted();
       const task = (async () => {
         try {
@@ -90,7 +114,14 @@ export function createHostedImageGenerationController(input: {
             operationId: request.operationId,
             originAssistantInputId: request.originAssistantInputId,
             result,
+            scopeId,
           });
+          if (scopeId) {
+            pendingScopes.set(scopeId, {
+              operationId: request.operationId,
+              status: "queued",
+            });
+          }
           input.notifyReady();
         } catch {
           if (signal.aborted) {
@@ -105,13 +136,23 @@ export function createHostedImageGenerationController(input: {
               runtimeIssue: null,
               savedImageRef: null,
             },
+            scopeId,
           });
+          if (scopeId) {
+            pendingScopes.set(scopeId, {
+              operationId: request.operationId,
+              status: "queued",
+            });
+          }
           input.notifyReady();
         }
       })();
       tasks.add(task);
       void task.finally(() => tasks.delete(task));
       return "started";
+    },
+    readStatus(scopeId) {
+      return pendingScopes.get(scopeId)?.status ?? null;
     },
   };
 
@@ -125,6 +166,9 @@ export function createHostedImageGenerationController(input: {
       }
       await Promise.allSettled([...tasks]);
       completed.splice(0);
+      acceptedCompletionInputIds.clear();
+      completionInputScopes.clear();
+      pendingScopes.clear();
     },
     async flushCanonicalWrites(persist) {
       let flushed = 0;
@@ -144,6 +188,7 @@ export function createHostedImageGenerationController(input: {
       let staged = 0;
       while (completed.length > 0) {
         const completion = completed[0]!;
+        let completionInputId: string | null = null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
             const inputId = await stageImageGenerationCompletion({
@@ -154,6 +199,7 @@ export function createHostedImageGenerationController(input: {
               inputId,
               vaultRoot: input.vaultRoot,
             });
+            completionInputId = inputId;
             break;
           } catch {
             if (attempt === 1) {
@@ -165,6 +211,15 @@ export function createHostedImageGenerationController(input: {
           input.recordRuntimeIssue?.(completion.result.runtimeIssue);
         }
         completed.shift();
+        if (
+          completion.scopeId
+          && completionInputId
+        ) {
+          completionInputScopes.set(completionInputId, {
+            operationId: completion.operationId,
+            scopeId: completion.scopeId,
+          });
+        }
         staged += 1;
       }
       return staged;
@@ -176,6 +231,39 @@ export function createHostedImageGenerationController(input: {
       return tasks.size > 0
         || completed.length > 0
         || canonicalWrites.length > 0;
+    },
+    async releaseAcceptedInputs(inputIds, hasCompleteTerminalEvidence) {
+      for (const inputId of inputIds) {
+        if (completionInputScopes.has(inputId)) {
+          acceptedCompletionInputIds.add(inputId);
+        }
+      }
+      for (const inputId of acceptedCompletionInputIds) {
+        const scope = completionInputScopes.get(inputId);
+        if (!scope) {
+          acceptedCompletionInputIds.delete(inputId);
+          continue;
+        }
+        let terminalEvidenceComplete = false;
+        try {
+          terminalEvidenceComplete = await hasCompleteTerminalEvidence(inputId);
+        } catch {
+          // Status is advisory invocation-local truth. An evidence read failure
+          // must retain it fail-closed without replacing the assistant turn's
+          // own success or failure. A later pass can prove terminal evidence.
+          continue;
+        }
+        if (!terminalEvidenceComplete) {
+          continue;
+        }
+        acceptedCompletionInputIds.delete(inputId);
+        completionInputScopes.delete(inputId);
+        if (
+          pendingScopes.get(scope.scopeId)?.operationId === scope.operationId
+        ) {
+          pendingScopes.delete(scope.scopeId);
+        }
+      }
     },
   };
 }

@@ -27,6 +27,46 @@ afterEach(async () => {
 });
 
 describe("hosted image generation", () => {
+  test("keeps pending generation isolated to one assistant session", async () => {
+    const onStarted = vi.fn();
+    const controller = createHostedImageGenerationController({
+      notifyReady: () => undefined,
+      onStarted,
+      vaultRoot: "/unused",
+      withCanonicalWritePersistence: async (run) => await run(),
+    });
+    const run = vi.fn(async () => ({
+      media: null,
+      runtimeIssue: null,
+      savedImageRef: null,
+    }));
+
+    assert.equal(controller.launcher.launch({
+      operationId: "image_session_1",
+      originAssistantInputId: "input_session_1",
+      scopeId: "session_1",
+      run,
+    }), "started");
+    assert.equal(controller.launcher.launch({
+      operationId: "image_session_1_followup",
+      originAssistantInputId: "input_session_1_followup",
+      scopeId: "session_1",
+      run,
+    }), "already-pending");
+    assert.equal(controller.launcher.launch({
+      operationId: "image_session_2",
+      originAssistantInputId: "input_session_2",
+      scopeId: "session_2",
+      run,
+    }), "started");
+
+    assert.equal(onStarted.mock.calls.length, 2);
+    assert.equal(run.mock.calls.length, 2);
+    assert.equal(controller.launcher.readStatus?.("session_1"), "pending");
+    assert.equal(controller.launcher.readStatus?.("session_2"), "pending");
+    await controller.close();
+  });
+
   test("stages a completed image once on the original trusted route", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-"));
     tempRoots.push(vaultRoot);
@@ -125,6 +165,7 @@ describe("hosted image generation", () => {
     assert.equal(controller.launcher.launch({
       operationId: "image_operation_1",
       originAssistantInputId: origin.inputId,
+      scopeId: "session_1",
       async run(_signal, persistCanonicalWrite) {
         await heldImage;
         const savedImageRef = await persistCanonicalWrite(async () =>
@@ -137,6 +178,7 @@ describe("hosted image generation", () => {
         };
       },
     }), "started");
+    assert.equal(controller.launcher.readStatus?.("session_1"), "pending");
     assert.equal(controller.hasWork(), true);
     assert.equal(controller.hasCompleted(), false);
     assert.equal(onStarted.mock.calls.length, 1);
@@ -148,8 +190,17 @@ describe("hosted image generation", () => {
     assert.equal(controller.launcher.launch({
       operationId: "image_operation_1",
       originAssistantInputId: origin.inputId,
+      scopeId: "session_1",
       run: duplicateRun,
     }), "already-started");
+    assert.equal(duplicateRun.mock.calls.length, 0);
+    assert.equal(onStarted.mock.calls.length, 1);
+    assert.equal(controller.launcher.launch({
+      operationId: "image_operation_2",
+      originAssistantInputId: origin.inputId,
+      scopeId: "session_1",
+      run: duplicateRun,
+    }), "already-pending");
     assert.equal(duplicateRun.mock.calls.length, 0);
     assert.equal(onStarted.mock.calls.length, 1);
 
@@ -166,11 +217,47 @@ describe("hosted image generation", () => {
       assert.equal(notifyReadyOnce.mock.calls.length, 2);
     });
     assert.equal(controller.hasCompleted(), true);
+    assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
     assert.equal(await controller.stageCompleted(), 1);
     assert.equal(enqueueAttempt, 2);
     assert.equal(controller.hasCompleted(), false);
-
     const completionInputId = await findCompletionInputId(vaultRoot);
+    assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
+    assert.equal(controller.launcher.launch({
+      operationId: "image_operation_2",
+      originAssistantInputId: origin.inputId,
+      scopeId: "session_1",
+      run: duplicateRun,
+    }), "already-pending");
+    const hasCompleteTerminalEvidence = vi.fn(async (inputId: string) =>
+      inputId === completionInputId
+    );
+    await controller.releaseAcceptedInputs(
+      ["unrelated_input"],
+      hasCompleteTerminalEvidence,
+    );
+    assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
+    assert.equal(hasCompleteTerminalEvidence.mock.calls.length, 0);
+    await controller.releaseAcceptedInputs(
+      [completionInputId],
+      async () => false,
+    );
+    assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
+    await assert.doesNotReject(
+      controller.releaseAcceptedInputs(
+        [completionInputId],
+        async () => {
+          throw new Error("Synthetic terminal-evidence read failure.");
+        },
+      ),
+    );
+    assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
+    await controller.releaseAcceptedInputs(
+      [],
+      hasCompleteTerminalEvidence,
+    );
+    assert.equal(controller.launcher.readStatus?.("session_1"), null);
+
     const completion = await readAssistantInputEvent({
       inputId: completionInputId,
       vault: vaultRoot,
@@ -214,6 +301,7 @@ describe("hosted image generation", () => {
     assert.equal(controller.launcher.launch({
       operationId: "image_operation_2",
       originAssistantInputId: origin.inputId,
+      scopeId: "session_1",
       async run() {
         return {
           media: null,

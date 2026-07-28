@@ -121,7 +121,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Sunday sleep crew");
   expect(sectionsMarkup).toContain("Keep Murph going");
-  expect(sectionsMarkup).toContain("Add messages");
+  expect(sectionsMarkup).toContain("Sponsor this chat");
   expect(sectionsMarkup).toContain('data-design-state="usage-added-follow-up"');
   expect(sectionsMarkup).toContain("Preview group usage added");
   expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
@@ -158,7 +158,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
   expect(componentsMarkup).toContain("Sunday sleep crew");
   expect(componentsMarkup).toContain("Keep Murph going");
-  expect(componentsMarkup).toContain("Add messages");
+  expect(componentsMarkup).toContain("Sponsor this chat");
   expect(componentsMarkup).toMatch(
     /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,
   );

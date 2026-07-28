@@ -70,6 +70,9 @@ import {
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
 import {
+  requestHostedGroupCurrentSenderAssistantAsk,
+} from "./group-current-sender-assistant-ask";
+import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
@@ -78,7 +81,11 @@ import {
   recordHostedGroupDisclosurePermissionTx,
   revokeHostedGroupDisclosureGrantForMemberTx,
 } from "./group-disclosure-store";
-import { readHostedGroupUsageStatus } from "./group-usage-funding";
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
+  readHostedGroupUsageStatus,
+} from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -142,6 +149,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  ask_current_sender: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -186,6 +194,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "ask_current_sender") {
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {
@@ -448,16 +467,42 @@ async function handleHostedRuntimeGroupListMemberships(input: {
         groupLabel,
         permissionText,
       })),
-      memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
+      memberships: memberships.map(({
+        ownerJoinCode,
+        runtimeMemberId,
+        ...membership
+      }) => ({
         ...membership,
         permissionsUrl: ownerJoinCode
           ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
           : null,
+        sponsorshipUrl: buildMembershipSponsorshipUrl({
+          publicBaseUrl,
+          runtimeMemberId,
+        }),
       })),
       status: "ok",
       truncated,
     },
   };
+}
+
+function buildMembershipSponsorshipUrl(input: {
+  publicBaseUrl: string | null;
+  runtimeMemberId: string | null;
+}): string | null {
+  if (!input.runtimeMemberId) {
+    return null;
+  }
+  const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+    input.runtimeMemberId,
+  );
+  return locator
+    ? buildHostedGroupUsageFundingUrl({
+        joinCode: locator,
+        publicBaseUrl: input.publicBaseUrl,
+      })
+    : null;
 }
 
 async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {
@@ -1402,23 +1447,17 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     resolvedParticipants,
   });
 
-  try {
-    const ownerAdvisoryNames =
-      await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
-        containerMemberId: input.memberId,
-        phoneHandles: participants.map((participant) => participant.handle),
-        prisma,
-      });
-    for (const participant of participants) {
-      const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
-      if (ownerAdvisoryName) {
-        participant.ownerAdvisoryName = ownerAdvisoryName;
-      }
+  const ownerAdvisoryNames =
+    await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+      containerMemberId: input.memberId,
+      phoneHandles: participants.map((participant) => participant.handle),
+      prisma,
+    });
+  for (const participant of participants) {
+    const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+    if (ownerAdvisoryName) {
+      participant.ownerAdvisoryName = ownerAdvisoryName;
     }
-  } catch {
-    // Address-book labels are optional presentation hints. Any KMS, storage,
-    // consent, or decryption failure omits the entire overlay without changing
-    // the truthful live roster or its activation proof.
   }
 
   return {
@@ -1430,23 +1469,49 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
 ): Promise<ReadonlyMap<string, string>> {
-  const lookup = readHostedOwnerAddressBookAdvisoryNames(input);
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
+    (result) => ({ kind: "completed" as const, result }),
+    (error: unknown) => ({
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      kind: "failed" as const,
+    }),
+  );
   // Prisma operations do not consume AbortSignal. Bound the entire optional
   // overlay at its caller so a stuck read can never delay the truthful roster.
-  // The underlying lookup still receives its own KMS abort signal, and this
-  // handler makes a rejection after the deadline explicitly harmless.
-  void lookup.catch(() => undefined);
+  // The underlying lookup still receives its own KMS abort signal.
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
-    timeout = setTimeout(
-      () => resolve(new Map()),
-      HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
-    );
+  const deadline = new Promise<{ kind: "deadline_exceeded" }>((resolve) => {
+    timeout = setTimeout(() => {
+      resolve({ kind: "deadline_exceeded" });
+    }, HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
   });
 
   try {
-    return await Promise.race([lookup, deadline]);
+    const terminal = await Promise.race([lookup, deadline]);
+    if (terminal.kind === "completed") {
+      console.info("Hosted address-book advisory lookup finished.", {
+        canonicalHandleCount: terminal.result.canonicalHandleCount,
+        contactMatchCount: terminal.result.contactMatchCount,
+        labelMatchCount: terminal.result.names.size,
+        outcome: terminal.result.outcome,
+        requestedHandleCount: terminal.result.requestedHandleCount,
+      });
+      return terminal.result.names;
+    }
+    if (terminal.kind === "failed") {
+      console.warn("Hosted address-book advisory lookup unavailable.", {
+        ...sanitizeHostedOnboardingStructuredLogDetails({
+          errorName: terminal.errorName,
+          outcome: "lookup_failed",
+        }),
+      });
+    } else {
+      console.info("Hosted address-book advisory lookup unavailable.", {
+        outcome: "deadline_exceeded",
+      });
+    }
+    return new Map<string, string>();
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);

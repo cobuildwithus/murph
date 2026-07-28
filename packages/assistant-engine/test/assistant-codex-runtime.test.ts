@@ -18509,6 +18509,7 @@ describe('steered final segments', () => {
             { projectionKind: 'hrv-days.v0' as const },
           ],
           role: 'owner',
+          sponsorshipUrl: 'https://example.test/groups/fund/funding_locator',
         }],
         status: 'ok' as const,
         truncated: false,

@@ -31,7 +31,7 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_import";
 
 describe("hosted mailbox import loop", () => {
-  test("attaches low usage only to fresh conversation imports, not consumed replay or system work", async () => {
+  test("attaches trusted turn context only to fresh conversation imports", async () => {
     const consumedConversation = createMailboxItem({
       id: "mailbox_item_usage_low_consumed_conversation",
       laneSeq: "1",
@@ -48,17 +48,29 @@ describe("hosted mailbox import loop", () => {
     });
     const { mailboxPort } = createMailboxPort({
       conversationUsageStatus: "low",
+      groupRunningBit: {
+        expiresAt: "2026-04-27T00:00:00.000Z",
+        publicAlias: "Fiscal Department",
+        requestedBit: "Treat me like the exhausted CFO.",
+        schema: "murph.group-sponsorship-bit.v1",
+      },
       consumedSeqByLane: [
         { consumedSeq: "1", lane: "conversation" },
       ],
       items: [consumedConversation, freshConversation, system],
     });
-    const imported: Array<{ id: string; usageRunningLow: boolean }> = [];
+    const imported: Array<{
+      groupRunningBit: boolean;
+      id: string;
+      usageRunningLow: boolean;
+    }> = [];
 
     await fetchAndProcessHostedMailboxPrefix({
       expectedUserId: TEST_USER_ID,
       async importItem(item) {
         imported.push({
+          groupRunningBit: item.groupRunningBit !== null &&
+            item.groupRunningBit !== undefined,
           id: item.item.id,
           usageRunningLow: item.usageRunningLow === true,
         });
@@ -72,9 +84,17 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.deepEqual(imported, [
-      { id: system.id, usageRunningLow: false },
-      { id: consumedConversation.id, usageRunningLow: false },
-      { id: freshConversation.id, usageRunningLow: true },
+      { groupRunningBit: false, id: system.id, usageRunningLow: false },
+      {
+        groupRunningBit: false,
+        id: consumedConversation.id,
+        usageRunningLow: false,
+      },
+      {
+        groupRunningBit: true,
+        id: freshConversation.id,
+        usageRunningLow: true,
+      },
     ]);
   });
 
@@ -2222,6 +2242,7 @@ describe("hosted mailbox import loop", () => {
 function createMailboxPort(input: {
   conversationUsageStatus?: HostedMailboxFetchResponse["conversationUsageStatus"];
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
+  groupRunningBit?: HostedMailboxFetchResponse["groupRunningBit"];
   items: readonly HostedMailboxItem[];
   payloadResponse?: HostedMailboxPayloadFetchResponse;
   userId?: string;
@@ -2245,6 +2266,9 @@ function createMailboxPort(input: {
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),
+          ...(input.groupRunningBit === undefined
+            ? {}
+            : { groupRunningBit: input.groupRunningBit }),
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

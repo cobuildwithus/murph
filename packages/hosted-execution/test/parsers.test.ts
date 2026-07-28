@@ -1293,6 +1293,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           memberCount: 7,
           membershipId: "hgm_self_123",
           permissionsUrl: "https://example.com/groups/join/abc123",
+          sponsorshipUrl: "https://example.com/groups/fund/funding-locator",
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
             { projectionKind: "hrv-days.v0" },
@@ -1309,6 +1310,30 @@ describe("parseHostedRuntimeGroupTool", () => {
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      sponsorshipUrl: _omittedSponsorshipUrl,
+      ...legacyMembershipWithoutSponsorship
+    } = response.result.memberships[0];
+    void _omittedSponsorshipUrl;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutSponsorship],
+        status: "ok",
+        truncated: false,
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        disclosureGrants: [],
+        memberships: [{
+          ...legacyMembershipWithoutSponsorship,
+          sponsorshipUrl: null,
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",
       result: {

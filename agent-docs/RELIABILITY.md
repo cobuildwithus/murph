@@ -12,6 +12,8 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
+- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
+
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
@@ -73,6 +75,7 @@ Last verified: 2026-07-27
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
+- Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. Every create retry during the first 30 minutes uses the
@@ -172,6 +175,23 @@ Last verified: 2026-07-27
   post-drain contract migration resynchronizes purchase projections before it
   widens and validates the ledger checks; only then may Web enable referral
   arming, binding, and observation.
+- A fulfilled group purchase may materialize one optional social effect after
+  the grant commits. The purchase id owns mailbox deduplication, so Checkout,
+  PaymentIntent, and webhook replay converge on one creative notification.
+  Failure to activate or queue the moment keeps the Stripe receipt retryable
+  but cannot roll back or duplicate the grant. An existing mailbox item is
+  re-signaled rather than regenerated. The creative turn adds no reservation,
+  attempt counter, or media-specific retry state: the prompt tells the model to
+  make one short original song with one `generate_song` call, and a provider
+  failure terminally skips this optional effect instead of regenerating it.
+  Once a delivery intent commits, the ordinary outbox owns retry and
+  deduplication. Running bits need no timer or cleanup job: Web reads
+  only fulfilled rows whose `expiresAt` is still in the future, and the
+  Assistant rechecks expiry before prompt construction.
+- Group payment recovery compares and resubmits the effective authorized
+  sponsor draft. Its digest never represents customization that authorization
+  discarded. An unreadable encrypted draft fails closed before the UI can offer
+  a retry, while an intentionally empty draft remains visible and replayable.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or
@@ -207,6 +227,13 @@ Last verified: 2026-07-27
   reviewed shapes remain checkpoint-gated. Completion ordering uses the
   existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
+  deterministic request identity, ten-minute expiry, isolated reviewed
+  personal read, completion append, and exact-origin group delivery. Exact
+  replay reopens and revalidates the stored group input; changed identity,
+  question, permission, target, route, or expiry becomes unavailable rather
+  than creating replacement work. It adds no scheduler, callback wait, status
+  row, grant row, retry owner, or delivery ledger.
 - The same dirty-runtime prefix admits only two server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and

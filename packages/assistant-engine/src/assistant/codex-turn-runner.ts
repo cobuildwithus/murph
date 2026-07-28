@@ -126,10 +126,10 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
-  outputOnlyTurn: boolean
+  nativeCapabilitiesRestrictedTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (input.outputOnlyTurn) {
+  if (input.nativeCapabilitiesRestrictedTurn) {
     return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
   }
   if (!input.filesystemDisabledTurn) {
@@ -455,8 +455,12 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
+    const nativeCapabilitiesRestrictedTurn =
+      outputOnlyTurn ||
+      executionPlan.profile.promptProfile === 'creative-notification'
     const systemNotificationTurn =
-      executionPlan.profile.promptProfile === 'system-notification'
+      executionPlan.profile.promptProfile === 'system-notification' ||
+      executionPlan.profile.promptProfile === 'creative-notification'
     const groupRoomModelMaintenanceTurn =
       executionPlan.profile.toolProfile === 'maintenance-turn' &&
       executionPlan.input.maintenanceProfile === 'group-room-model' &&
@@ -470,7 +474,7 @@ async function executeAssistantCodexAttempt(input: {
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
-        approvalPolicy: outputOnlyTurn
+        approvalPolicy: nativeCapabilitiesRestrictedTurn
           ? 'never'
           : attemptPlan.route.providerOptions.approvalPolicy,
         codexCommand:
@@ -484,7 +488,7 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: outputOnlyTurn || groupEmailTurn
+        sandbox: nativeCapabilitiesRestrictedTurn || groupEmailTurn
           ? 'read-only'
           : attemptPlan.route.providerOptions.sandbox,
       },
@@ -500,7 +504,7 @@ async function executeAssistantCodexAttempt(input: {
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          outputOnlyTurn,
+          nativeCapabilitiesRestrictedTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         conversationHistoryMessages:
@@ -509,16 +513,16 @@ async function executeAssistantCodexAttempt(input: {
         dynamicTools: outputOnlyTurn
           ? []
           : attemptPlan.routePlan.dynamicTools,
-        environments: outputOnlyTurn
+        environments: nativeCapabilitiesRestrictedTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        hostedToolContext: outputOnlyTurn
+        hostedToolContext: nativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts: outputOnlyTurn
+        materializeWorkspaceArtifacts: nativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -552,7 +556,7 @@ async function executeAssistantCodexAttempt(input: {
         providerThreadEphemeral: groupRoomModelMaintenanceTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery: outputOnlyTurn
+        progressDelivery: nativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions: groupRoomModelMaintenanceTurn
@@ -565,11 +569,12 @@ async function executeAssistantCodexAttempt(input: {
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch: outputOnlyTurn
+        publicInternetFetch: nativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
-          !outputOnlyTurn && Boolean(executionPlan.executionContext?.hosted),
+          !nativeCapabilitiesRestrictedTurn &&
+          Boolean(executionPlan.executionContext?.hosted),
         runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,

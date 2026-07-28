@@ -240,6 +240,25 @@ Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
+The `group_sender` adapter is a one-time first-party disclosure path, not a
+grant shortcut. The group model supplies only one opaque Message ref from the
+accepted inputs in the current group turn. Web reopens the exact encrypted
+conversation wake under the synthetic group runtime, revalidates its live
+non-direct route, resolves its author through the channel's canonical identity
+index, and derives the exact authored text plus a fixed self-only permission.
+The transport's optional `senderMemberId` remains attribution metadata and is
+never runtime authority. The target must be an active personal runtime rather
+than another thread container. A deterministic request id binds the group
+runtime, accepted input, and fixed permission; admission, personal-read
+preparation, completion, and final group egress all re-open the same authority.
+Linq and Telegram repeat that disclosure check at their existing provider-entry
+authority boundary; if it has become stale, the outbox durably supersedes the
+reviewed answer with the fixed non-disclosing fallback before any provider call.
+Textless, oversized, direct, email, stale-route, unresolved-sender,
+cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
+creates no group, membership, permission, grant, queue, workflow, or table and
+grants no future disclosure authority.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -260,8 +279,9 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member target, the private read-only child receives the exact
-permission context and produces a candidate from the member workspace. One
+For a consented member or one-time current-sender target, the private read-only
+child receives the exact permission context and produces a candidate from the
+member workspace. One
 separate fresh-context outgoing reviewer then receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
 history, application tools, network, or delivery authority and returns only `allow` or
@@ -707,6 +727,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   acknowledges dirty-pending rows through signed callbacks. Hosted provider
   registration reuses the shared `device-syncd` provider-manifest assembly path
   rather than maintaining an app-local provider list.
+- Group sponsorship remains an extension of the existing Web-owned
+  usage-credit purchase, not a second billing or entitlement system. A group
+  purchase may own one encrypted participant-authored sponsorship moment.
+  Verified fulfillment activates its optional Web-timed running bit and
+  appends one purchase-deduplicated creative notification to the existing
+  mailbox. The isolated creative turn exposes only `generate_song`, inherits
+  the output-only native-capability deny set, retains only the bound provider
+  transport required by that application-owned tool, and makes at most one
+  provider attempt; a committed delivery intent remains ordinary outbox work. Web
+  projects only the current bit as an optional typed mailbox
+  sidecar; `packages/assistant-runtime` attaches it only to fresh,
+  route-authorized non-direct group input, and `packages/assistant-engine`
+  renders it as low-priority quoted data after rechecking expiry. The vault,
+  group-room model, Temporal, and Cloudflare own no sponsorship state,
+  financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
@@ -1256,7 +1291,7 @@ reactions remain on the silent group context path above (or ignored outside
 groups).
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
-the signup-link path only. It runs after cheap deterministic ingress filters and
+the first-contact path. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
 persists only the event-id keyed terminal allow/block decision, stores no
@@ -1274,9 +1309,32 @@ Classifier-unavailable states, including missing keys, timeouts, ordinary
 non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
-permanently dropped. Active members, explicit thread routes, own messages, group
-chats, local guard rejects, deterministic URL/STOP-style spam, and other
-non-invite paths bypass the classifier.
+permanently dropped. With enforcement off, only a genuinely unknown member on a
+provider-authenticated direct iMessage from a configured E.164 phone prefix may
+use a persisted model-source allow to enter instant start. The selected permanent
+home line must be the same line the person contacted, and the existing no-card
+Pulse-trial owner must start from an unbound Stripe customer so an old saved card
+cannot silently auto-convert a text-initiated trial. The first planner transaction
+creates the canonical member, verified phone identity, pending route, and invite.
+That invite carries only the event id of the persisted model-source allow and is
+the single-owner token for that exact original inbound. Only the transaction
+creating a genuinely new member may mint that token; an existing inactive
+member without the exact same-event token remains on the signup path. The phone
+identity owner reports whether its unique insert actually won; a stale outer
+lookup that loses that insert exits retryably before invite or accounting work.
+While the token remains pending, a different inbound for the inactive member
+exits retryably before counting or creating an effect; it cannot continue or
+cancel the admitted start.
+The existing Stripe/activation owner locks the member, revalidates the exact
+invite and event before any Stripe mutation, then clears the token atomically
+with activation. A second ordinary planner pass counts and appends the original
+inbound exactly once after active access is visible. Ordinary signup delivery
+retains its existing exact-invite and member-ownership checks. Any block,
+deterministic fail-open, unsupported prefix/channel, cross-line route, existing
+member or billing customer, or definitive enrollment failure keeps the existing
+signup-link or ignored behavior. Active members, explicit thread routes, own
+messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
+and other non-invite paths bypass the classifier.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable
