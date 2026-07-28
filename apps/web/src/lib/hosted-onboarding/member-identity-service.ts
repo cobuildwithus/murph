@@ -90,6 +90,18 @@ export async function ensureHostedMemberForPhoneTx(input: {
   phoneNumberVerifiedAt?: Date | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
+  const resolution = await ensureHostedMemberForPhoneResolutionTx(input);
+  return resolution.member;
+}
+
+export async function ensureHostedMemberForPhoneResolutionTx(input: {
+  phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  created: boolean;
+  member: HostedMemberCoreState;
+}> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
   if (!phoneLookupKey) {
@@ -111,13 +123,16 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (existingIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: existingIdentity.identity,
-      member: existingIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: existingIdentity.identity,
+        member: existingIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   const phoneIdentityFields = {
@@ -142,7 +157,10 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (identityCreated) {
-    return createdMember;
+    return {
+      created: true,
+      member: createdMember,
+    };
   }
 
   await input.prisma.hostedMember.delete({
@@ -156,13 +174,16 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (concurrentIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: concurrentIdentity.identity,
-      member: concurrentIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: concurrentIdentity.identity,
+        member: concurrentIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   throw new Prisma.PrismaClientKnownRequestError(

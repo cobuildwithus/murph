@@ -7,7 +7,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
-  ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx,
   reconcileHostedPrivyIdentityOnMember,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
@@ -120,7 +120,7 @@ describe("hosted-onboarding member-identity-service", () => {
     }));
   });
 
-  it("can persist a provider-verified phone identity while ensuring a phone member", async () => {
+  it("reports creation while persisting a provider-verified phone identity", async () => {
     const createdMember = makeMember({
       id: "member_created",
     });
@@ -139,11 +139,14 @@ describe("hosted-onboarding member-identity-service", () => {
       },
     });
 
-    await expect(ensureHostedMemberForPhoneTx({
+    await expect(ensureHostedMemberForPhoneResolutionTx({
       phoneNumber: "+1 555 123 4567",
       phoneNumberVerifiedAt: NOW,
       prisma: prisma as never,
-    })).resolves.toEqual(createdMember);
+    })).resolves.toEqual({
+      created: true,
+      member: createdMember,
+    });
 
     expect(identityCreateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({

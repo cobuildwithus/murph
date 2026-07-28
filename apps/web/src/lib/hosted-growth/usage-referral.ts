@@ -1207,22 +1207,20 @@ async function referralStillQualifiesTx(input: {
     return false;
   }
 
-  const [member, activation] = await Promise.all([
-    input.tx.hostedMember.findUnique({
-      select: { createdAt: true },
-      where: { id: input.referral.introducedMemberId },
-    }),
-    input.tx.hostedMailboxItem.findFirst({
-      select: { id: true },
-      where: {
-        kind: "member.activated",
-        occurredAt: {
-          gte: input.referral.armedAt,
-        },
-        userId: input.referral.introducedMemberId,
+  const member = await input.tx.hostedMember.findUnique({
+    select: { createdAt: true },
+    where: { id: input.referral.introducedMemberId },
+  });
+  const activation = await input.tx.hostedMailboxItem.findFirst({
+    select: { id: true },
+    where: {
+      kind: "member.activated",
+      occurredAt: {
+        gte: input.referral.armedAt,
       },
-    }),
-  ]);
+      userId: input.referral.introducedMemberId,
+    },
+  });
   return member !== null
     && member.createdAt >= input.referral.armedAt
     && activation !== null
@@ -1249,24 +1247,22 @@ async function resolveNewlyActivatedIntroducedMemberTx(input: {
     return null;
   }
 
-  const [member, activation] = await Promise.all([
-    input.tx.hostedMember.findUnique({
-      where: { id: memberId },
-      select: { createdAt: true, suspendedAt: true },
-    }),
-    input.tx.hostedMailboxItem.findFirst({
-      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-      select: { id: true },
-      where: {
-        kind: "member.activated",
-        occurredAt: {
-          gte: input.referral.armedAt,
-          lte: input.now,
-        },
-        userId: memberId,
+  const member = await input.tx.hostedMember.findUnique({
+    where: { id: memberId },
+    select: { createdAt: true, suspendedAt: true },
+  });
+  const activation = await input.tx.hostedMailboxItem.findFirst({
+    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    select: { id: true },
+    where: {
+      kind: "member.activated",
+      occurredAt: {
+        gte: input.referral.armedAt,
+        lte: input.now,
       },
-    }),
-  ]);
+      userId: memberId,
+    },
+  });
   if (
     !member
     || member.suspendedAt
@@ -1434,42 +1430,39 @@ async function readHostedUsageReferralAvailablePolicyCodes(input: {
 
   const now = input.now ?? new Date();
   const since = new Date(now.getTime() - THIRTY_DAYS_MS);
-  const [
-    boundCount,
-    currentArmed,
-    referrerCommitments,
-    beneficiaryCommitments,
-  ] = await Promise.all([
-    input.prisma.hostedUsageReferral.count({
-      where: {
-        referrerMemberId: input.actor.referrerMemberId,
-        OR: outstandingHostedUsageReferralCommitmentWhere(now),
-        status: "target_bound",
-      },
-    }),
-    input.prisma.hostedUsageReferral.findFirst({
-      orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-      select: {
-        beneficiaryMemberId: true,
-        rewardUsdMicros: true,
-      },
-      where: {
-        expiresAt: { gt: now },
-        referrerMemberId: input.actor.referrerMemberId,
-        status: "armed",
-      },
-    }),
-    input.prisma.hostedUsageReferral.aggregate({
-      where: {
-        referrerMemberId: input.actor.referrerMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...outstandingHostedUsageReferralCommitmentWhere(now),
-        ],
-      },
-      _sum: { rewardUsdMicros: true },
-    }),
-    input.prisma.hostedUsageReferral.aggregate({
+  // This helper also runs against Prisma interactive-transaction clients.
+  // Their pg adapter owns one connection and rejects overlapping queries.
+  const boundCount = await input.prisma.hostedUsageReferral.count({
+    where: {
+      referrerMemberId: input.actor.referrerMemberId,
+      OR: outstandingHostedUsageReferralCommitmentWhere(now),
+      status: "target_bound",
+    },
+  });
+  const currentArmed = await input.prisma.hostedUsageReferral.findFirst({
+    orderBy: [{ armedAt: "desc" }, { id: "desc" }],
+    select: {
+      beneficiaryMemberId: true,
+      rewardUsdMicros: true,
+    },
+    where: {
+      expiresAt: { gt: now },
+      referrerMemberId: input.actor.referrerMemberId,
+      status: "armed",
+    },
+  });
+  const referrerCommitments = await input.prisma.hostedUsageReferral.aggregate({
+    where: {
+      referrerMemberId: input.actor.referrerMemberId,
+      OR: [
+        { rewardedAt: { gte: since } },
+        ...outstandingHostedUsageReferralCommitmentWhere(now),
+      ],
+    },
+    _sum: { rewardUsdMicros: true },
+  });
+  const beneficiaryCommitments =
+    await input.prisma.hostedUsageReferral.aggregate({
       where: {
         beneficiaryMemberId: input.actor.beneficiaryMemberId,
         OR: [
@@ -1478,8 +1471,7 @@ async function readHostedUsageReferralAvailablePolicyCodes(input: {
         ],
       },
       _sum: { rewardUsdMicros: true },
-    }),
-  ]);
+    });
   if (boundCount >= HOSTED_USAGE_REFERRAL_MAX_BOUND_PER_REFERRER) {
     return [];
   }
@@ -1514,43 +1506,38 @@ async function readHostedUsageReferralSnapshot(input: {
     input.actor.beneficiaryMemberId === input.actor.referrerMemberId
       ? "personal"
       : "group";
-  const [
-    active,
-    availablePolicyCodes,
-    personalUsage,
-    destinationModel,
-  ] = await Promise.all([
-    input.prisma.hostedUsageReferral.findFirst({
-      orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-      where: {
-        beneficiaryMemberId: input.actor.beneficiaryMemberId,
-        expiresAt: { gt: now },
-        referrerMemberId: input.actor.referrerMemberId,
-        status: { in: [...ACTIVE_REFERRAL_STATUSES] },
-      },
-      select: {
-        beneficiaryMemberId: true,
-        expiresAt: true,
-        policyCode: true,
-        status: true,
-      },
-    }),
-    readHostedUsageReferralAvailablePolicyCodes({
+  const active = await input.prisma.hostedUsageReferral.findFirst({
+    orderBy: [{ armedAt: "desc" }, { id: "desc" }],
+    where: {
+      beneficiaryMemberId: input.actor.beneficiaryMemberId,
+      expiresAt: { gt: now },
+      referrerMemberId: input.actor.referrerMemberId,
+      status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+    },
+    select: {
+      beneficiaryMemberId: true,
+      expiresAt: true,
+      policyCode: true,
+      status: true,
+    },
+  });
+  const availablePolicyCodes =
+    await readHostedUsageReferralAvailablePolicyCodes({
       ...input,
       now,
-    }),
+    });
+  const personalUsage =
     input.actor.beneficiaryMemberId === input.actor.referrerMemberId
-      ? readHostedPersonalAiUsageStatus({
+      ? await readHostedPersonalAiUsageStatus({
           memberId: input.actor.beneficiaryMemberId,
           prisma: input.prisma,
         })
-      : Promise.resolve(null),
-    readHostedUsageReferralDestinationModel({
-      beneficiaryMemberId: input.actor.beneficiaryMemberId,
-      destinationKind,
-      prisma: input.prisma,
-    }),
-  ]);
+      : null;
+  const destinationModel = await readHostedUsageReferralDestinationModel({
+    beneficiaryMemberId: input.actor.beneficiaryMemberId,
+    destinationKind,
+    prisma: input.prisma,
+  });
 
   return {
     active: active
@@ -1610,28 +1597,26 @@ async function assertHostedUsageReferralRewardCapacityTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const since = new Date(input.now.getTime() - THIRTY_DAYS_MS);
-  const [referrerCommitments, beneficiaryCommitments] = await Promise.all([
-    input.tx.hostedUsageReferral.aggregate({
-      where: {
-        referrerMemberId: input.referrerMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...outstandingHostedUsageReferralCommitmentWhere(input.now),
-        ],
-      },
-      _sum: { rewardUsdMicros: true },
-    }),
-    input.tx.hostedUsageReferral.aggregate({
-      where: {
-        beneficiaryMemberId: input.beneficiaryMemberId,
-        OR: [
-          { rewardedAt: { gte: since } },
-          ...outstandingHostedUsageReferralCommitmentWhere(input.now),
-        ],
-      },
-      _sum: { rewardUsdMicros: true },
-    }),
-  ]);
+  const referrerCommitments = await input.tx.hostedUsageReferral.aggregate({
+    where: {
+      referrerMemberId: input.referrerMemberId,
+      OR: [
+        { rewardedAt: { gte: since } },
+        ...outstandingHostedUsageReferralCommitmentWhere(input.now),
+      ],
+    },
+    _sum: { rewardUsdMicros: true },
+  });
+  const beneficiaryCommitments = await input.tx.hostedUsageReferral.aggregate({
+    where: {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      OR: [
+        { rewardedAt: { gte: since } },
+        ...outstandingHostedUsageReferralCommitmentWhere(input.now),
+      ],
+    },
+    _sum: { rewardUsdMicros: true },
+  });
 
   if (
     (referrerCommitments._sum.rewardUsdMicros ?? 0n) + input.rewardUsdMicros

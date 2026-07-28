@@ -52,6 +52,10 @@ import { getPrisma } from "../prisma";
 import {
   readHostedGroupDisclosureGrantAuthorityTx,
 } from "./group-disclosure-store";
+import {
+  createHostedGroupCurrentSenderAssistantAskRequestId,
+  readHostedGroupCurrentSenderAssistantAskAuthorityTx,
+} from "./group-current-sender-assistant-ask";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-assistant-ask.request.v1";
@@ -1001,6 +1005,44 @@ async function readHostedAssistantAskAuthorityTx(input: {
         originSessionId: wake.ask.originSessionId,
         question: wake.ask.question,
         targetLabel: membershipAuthority.targetLabel,
+      },
+      terminalReason: null,
+    };
+  }
+
+  if (wake.ask.target.kind === "group_sender") {
+    if (wake.ask.origin.kind !== "accepted_input") {
+      return { authority: null, terminalReason: "unavailable" };
+    }
+    const currentSenderAuthority =
+      await readHostedGroupCurrentSenderAssistantAskAuthorityTx({
+        expectedGroupRuntimeMemberId:
+          wake.ask.target.groupRuntimeMemberId,
+        expectedTargetMemberId: item.userId,
+        now: input.now,
+        origin: wake.ask.origin,
+        tx: input.tx,
+      });
+    if (
+      !currentSenderAuthority
+      || currentSenderAuthority.question !== wake.ask.question
+      || currentSenderAuthority.permissionDigest
+        !== wake.ask.target.permissionDigest
+      || createHostedGroupCurrentSenderAssistantAskRequestId({
+        groupRuntimeMemberId: currentSenderAuthority.groupRuntimeMemberId,
+        originAssistantInputId: wake.ask.origin.assistantInputId,
+      }) !== input.requestId
+    ) {
+      return { authority: null, terminalReason: "unavailable" };
+    }
+    return {
+      authority: {
+        expiresAt: wake.ask.expiresAt,
+        origin: wake.ask.origin,
+        originMemberId: currentSenderAuthority.groupRuntimeMemberId,
+        permissionText: currentSenderAuthority.permissionText,
+        question: currentSenderAuthority.question,
+        targetLabel: null,
       },
       terminalReason: null,
     };

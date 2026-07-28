@@ -32,6 +32,7 @@ function createHostedOnboardingEnvironment(
     linqFirstContactAdmissionMode: "off",
     linqFirstContactAdmissionModel: "gpt-5.4-nano",
     linqFirstContactAdmissionOpenAiApiKey: null,
+    linqInstantStartPhonePrefixes: ["+1"],
     linqMaxActiveMembersPerConversationPhone: 1000,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 5 * 60_000,
@@ -50,6 +51,7 @@ function createHostedOnboardingEnvironment(
     stripeUsageCreditPriceIdsByOffer: {
       usage_5_usd: "price_usage_5_123",
       usage_10_usd: "price_usage_10_123",
+      usage_20_usd: "price_usage_20_123",
       usage_25_usd: "price_usage_25_123",
     },
     stripeSecretKey: "sk_test_123",
@@ -143,6 +145,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripeUsageCreditPriceIdsByOffer: {
           usage_5_usd: "price_usage_5_123",
           usage_10_usd: null,
+          usage_20_usd: "price_usage_20_123",
           usage_25_usd: "price_usage_25_123",
         },
       });

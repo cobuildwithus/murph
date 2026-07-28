@@ -10,6 +10,7 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -95,7 +96,10 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
-import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import {
+  DESIGN_GROUP_SPONSORSHIP_OFFERS,
+  DESIGN_USAGE_OFFERS,
+} from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -810,23 +814,48 @@ export function ComponentsContent() {
 
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Group funding uses a saved card when available and sends card entry
-            or verification to Stripe only when needed. Family owners reuse the
-            standard amount dialog with an exact member label and status-only
-            recovery when another target owns the active checkout. Credit is
-            added only after Stripe confirms payment.
+            Personal, Family, and group funding use a saved card when available
+            and send card entry or verification to Stripe only when needed.
+            Family owners reuse the standard amount dialog with an exact member
+            label and status-only recovery when another target owns the active
+            checkout. Credit is added only after Stripe confirms payment.
           </p>
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div
+              className="rounded-3xl border border-border bg-card p-6"
+              data-design-component="personal-usage-top-up"
+              id="personal-usage-top-up-component"
+            >
+              <p className="text-sm font-medium text-muted-foreground">
+                Personal usage
+              </p>
+              <p className="mt-1 font-serif text-2xl font-semibold tracking-normal text-foreground">
+                Keep the conversation going
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Add one-time usage with a saved card or continue securely in
+                Stripe when needed.
+              </p>
+              <div className="mt-6">
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
+                  scope="personal"
+                />
+              </div>
+            </div>
             <div
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
               <GroupUsageFundingCard
                 action={
-                  <HostedUsageTopUpDialog
+                  <GroupSponsorshipDialog
                     checkoutUrl="/api/design/usage-credit-preview"
-                    offers={DESIGN_USAGE_OFFERS}
-                    scope="group"
+                    customizationAllowed
+                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                    payerMemberId="design_usage_top_up_payer"
                   />
                 }
                 groupName="Sunday sleep crew"
@@ -851,6 +880,7 @@ export function ComponentsContent() {
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -864,6 +894,7 @@ export function ComponentsContent() {
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={[]}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -987,6 +1018,7 @@ export function ComponentsContent() {
           >
             <HostedFamilyManager
               billingActive
+              payerMemberId="design_usage_top_up_payer"
               invites={[
                 {
                   acceptUrl: "/family/accept/design-preview",

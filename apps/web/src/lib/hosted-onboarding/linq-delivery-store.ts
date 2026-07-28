@@ -289,6 +289,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
+  returnExistingFailureCode?: boolean;
   source: string;
   sourceRef?: string | null;
   status?: HostedLinqDeliveryProviderDispatchData["status"];
@@ -298,6 +299,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
 
 export type HostedLinqDeliveryProviderDispatchClaim = {
   claimed: boolean;
+  failureCode?: string | null;
   id: string | null;
   outcome?: "completed" | "incompatible";
   retryAt?: Date;
@@ -423,6 +425,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
       delivery: existing,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      returnExistingFailureCode: input.returnExistingFailureCode,
       source: input.source,
     });
   }
@@ -451,6 +454,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     delivery: concurrent,
     prisma: input.prisma,
     reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+    returnExistingFailureCode: input.returnExistingFailureCode,
     source: input.source,
   });
 }
@@ -1838,6 +1842,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     acceptedAt: Date | null;
     attemptedAt: Date;
     deliveredAt: Date | null;
+    failureCode: string | null;
     failedAt: Date | null;
     groupJoinOutreachId: string | null;
     groupJoinReplyOccurredAt: Date | null;
@@ -1856,6 +1861,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
+  returnExistingFailureCode?: boolean;
   source: string;
 }): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   if (
@@ -1976,6 +1982,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   if (reclaimPredicates.length === 0) {
     return {
       claimed: false,
+      ...(input.returnExistingFailureCode
+        ? { failureCode: input.delivery.failureCode }
+        : {}),
       id: input.delivery.id,
     };
   }
@@ -1994,6 +2003,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
 
   return {
     claimed: updated.count === 1,
+    ...(updated.count === 0 && input.returnExistingFailureCode
+      ? { failureCode: input.delivery.failureCode }
+      : {}),
     id: input.delivery.id,
   };
 }

@@ -52,11 +52,14 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
 The forced executor creates a fresh one-shot Testbox through the fully pinned
-route. Its invocation always requests cleanup, a 10-minute idle timeout, and a
-45-minute maximum lease lifetime; the hydration workflow has a 50-minute
-last-resort ceiling. Do not leave the local waiter running concurrently, forward
-local environment values, bypass the canonical command, warm a lease separately,
-or return automatically to another unbounded local wait.
+route. Blacksmith owns the delegated run lifecycle and stops a fresh, non-kept
+Testbox after the command exits, so the invocation does not pass Crabbox's
+generic `--stop-after` flag. A 10-minute idle timeout and 45-minute maximum lease
+lifetime remain provider-side cleanup bounds; the hydration workflow has a
+50-minute last-resort ceiling. Do not leave the local waiter running
+concurrently, forward local environment values, bypass the canonical command,
+warm a lease separately, or return automatically to another unbounded local
+wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and

@@ -25,7 +25,7 @@ import {
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
-  ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx,
 } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import {
@@ -71,6 +71,7 @@ import {
 } from "../hosted-groups/thread-container-participant-access";
 import {
   bindHostedMemberHomeLinqChat,
+  bindHostedMemberPendingLinqChat,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
@@ -109,8 +110,13 @@ import {
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
 import type {
+  HostedLinqFirstContactAdmissionDecision,
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
+import {
+  isHostedLinqInstantStartCandidate,
+  isHostedLinqInstantStartEligible,
+} from "./linq-instant-start";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   readHostedGroupJoinOutreachReplyContextTx,
@@ -145,6 +151,8 @@ import type { HostedOnboardingReadClient } from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
+import { getHostedOnboardingEnvironment } from "./runtime";
+
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
@@ -394,7 +402,8 @@ async function isHostedLinqMailboxRootPrewarmEligible(input: {
 export async function planHostedOnboardingLinqWebhook(input: {
   affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
-  firstContactAdmitted?: boolean;
+  firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
+  instantStartAllowed?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -595,6 +604,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         prisma: input.prisma,
       })
     : false;
+  let instantStartOwner: HostedLinqInstantStartOwner | null = null;
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -848,6 +858,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       prisma: input.prisma,
     });
+    if (!existingMemberEffectiveActive) {
+      instantStartOwner = await readHostedLinqInstantStartOwner({
+        memberId: existingMember.id,
+        now: new Date(),
+        prisma: input.prisma,
+      });
+      if (
+        instantStartOwner
+        && instantStartOwner.eventId !== input.event.event_id
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_INSTANT_START_IN_PROGRESS",
+          httpStatus: 503,
+          message: "Murph is still finishing this instant start. Try again.",
+          retryable: true,
+        });
+      }
+    }
   }
 
   // A member who already owns billing can never be onboarded as a first contact
@@ -1131,10 +1159,30 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  const instantStartPhonePrefixes =
+    getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes;
+  const instantStartCandidate = input.instantStartAllowed === true
+    && isHostedLinqInstantStartCandidate({
+      event: messageEvent,
+      participantContact,
+      phonePrefixes: instantStartPhonePrefixes,
+    });
+  const pendingInstantStartAdmissionEventId =
+    existingMember
+    && instantStartCandidate
+    && instantStartOwner?.eventId === input.event.event_id
+    && instantStartOwner.chatId === summary.chatId
+    && instantStartOwner.participantKind === participantContact.kind
+    && instantStartOwner.participantLookupKey === participantContact.lookupKey
+    && instantStartOwner.recipientPhoneNumber
+      === normalizePhoneNumber(recipientPhoneNumber)
+      ? instantStartOwner.eventId
+      : null;
+
   if (
     existingMember === null
-    && input.requireFirstContactAdmission === true
-    && input.firstContactAdmitted !== true
+    && (input.requireFirstContactAdmission === true || instantStartCandidate)
+    && input.firstContactAdmissionDecision?.kind !== "allow"
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
@@ -1250,17 +1298,54 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
   const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
-  const member = existingMember
-    ?? (participantContact.kind === "phone"
-      ? await ensureHostedMemberForPhoneTx({
+  const currentEventInstantStartEligible = instantStartCandidate
+    && assignedPhone !== null
+    && assignedPhone === incomingLinePhone
+    && isHostedLinqInstantStartEligible({
+      admissionDecision: input.firstContactAdmissionDecision,
+      event: messageEvent,
+      participantContact,
+      phonePrefixes: instantStartPhonePrefixes,
+    });
+  const phoneMemberResolution =
+    existingMember === null && participantContact.kind === "phone"
+      ? await ensureHostedMemberForPhoneResolutionTx({
           phoneNumber: participantContact.value,
+          ...(currentEventInstantStartEligible
+            ? { phoneNumberVerifiedAt: new Date(occurredAt) }
+            : {}),
           prisma: input.prisma,
         })
-      : await ensureHostedMemberForPendingLinqParticipantContactTx({
-          contact: participantContact,
-          observedAt: new Date(occurredAt),
-          prisma: input.prisma,
-        }));
+      : null;
+  const member = existingMember
+    ?? phoneMemberResolution?.member
+    ?? await ensureHostedMemberForPendingLinqParticipantContactTx({
+      contact: participantContact,
+      observedAt: new Date(occurredAt),
+      prisma: input.prisma,
+    });
+  // The earlier identity lookup is not creation authority: a concurrent
+  // signup can commit while this transaction waits on the unique phone insert.
+  // Retry that loser before it can attach this event to the winner's invite.
+  if (
+    currentEventInstantStartEligible
+    && phoneMemberResolution?.created === false
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
+      httpStatus: 503,
+      message: "Murph is resolving another message from this phone. Try again.",
+      retryable: true,
+    });
+  }
+  const instantStartAdmissionEventId =
+    phoneMemberResolution?.created === true && currentEventInstantStartEligible
+    ? input.event.event_id
+    : pendingInstantStartAdmissionEventId;
+  const instantStartEligible = instantStartCandidate
+    && assignedPhone !== null
+    && assignedPhone === incomingLinePhone
+    && instantStartAdmissionEventId !== null;
 
   if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
     const memberPhone = normalizePhoneNumber(participantPhoneNumber);
@@ -1345,6 +1430,50 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (instantStartEligible) {
+    await bindHostedMemberPendingLinqChat({
+      chatId: summary.chatId,
+      homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+      memberId: member.id,
+      occurredAt,
+      participantContact,
+      prisma: input.prisma,
+      recipientPhone: bindingResult.recipientPhone,
+    });
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      instantStartAdmissionEventId,
+      memberId: member.id,
+      prisma: input.prisma,
+    });
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      {
+        ...buildActiveMemberDirectPlan({
+          desiredSideEffects: [],
+          response: {
+            ignored: true,
+            ok: true,
+            reason: "instant-start-enrollment-required",
+          },
+        }),
+        instantStartEnrollment: {
+          admissionEventId: instantStartAdmissionEventId,
+          inviteCode: invite.inviteCode,
+          memberId: member.id,
+        },
+      },
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        chatDirectAttested: true,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "instant-start-enrollment-required",
+        routeDecision: bindingResult.kind,
+        routeStage: "first-contact-instant-start-enrollment",
+      }),
+    );
+  }
+
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
     homeLineAssignedAt: bindingResult.homeLineAssignedAt,
@@ -1397,6 +1526,80 @@ export async function planHostedOnboardingLinqWebhook(input: {
       routeStage: "first-contact-signup-link",
     }),
   );
+}
+
+type HostedLinqInstantStartOwner = {
+  chatId: string;
+  eventId: string;
+  participantKind: HostedLinqParticipantContact["kind"];
+  participantLookupKey: string;
+  recipientPhoneNumber: string;
+};
+
+async function readHostedLinqInstantStartOwner(input: {
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqInstantStartOwner | null> {
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const pendingParticipant = routing?.pendingLinqParticipantContact;
+  const recipientPhoneNumber = normalizePhoneNumber(
+    routing?.pendingLinqRecipientPhone ?? null,
+  );
+  if (
+    !routing?.pendingLinqChatId
+    || !pendingParticipant
+    || !recipientPhoneNumber
+  ) {
+    return null;
+  }
+
+  const invite = await input.prisma.hostedInvite.findFirst({
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      instantStartAdmissionEventId: true,
+    },
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      instantStartAdmissionEventId: {
+        not: null,
+      },
+      memberId: input.memberId,
+      sentAt: null,
+    },
+  });
+  const admissionEventId = invite?.instantStartAdmissionEventId ?? null;
+  if (!admissionEventId) {
+    return null;
+  }
+
+  const admissionDecision =
+    await input.prisma.hostedLinqFirstContactAdmissionDecision.findUnique({
+      select: {
+        decision: true,
+        source: true,
+      },
+      where: {
+        eventId: admissionEventId,
+      },
+    });
+  return admissionDecision?.decision === "allow"
+    && admissionDecision.source === "model"
+      ? {
+          chatId: routing.pendingLinqChatId,
+          eventId: admissionEventId,
+          participantKind: pendingParticipant.kind,
+          participantLookupKey: pendingParticipant.lookupKey,
+          recipientPhoneNumber,
+        }
+      : null;
 }
 
 const HOSTED_LINQ_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
@@ -1497,11 +1700,11 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       });
   }
 
-  let containerAccessActive = await readActiveHostedMemberAccess({
+  let containerAccessActive = (await readHostedRuntimeAiAccessDecision({
     memberId: input.route.containerMemberId,
     now: participantAccessNow,
     prisma: input.prisma,
-  });
+  })).allowed;
   if (!containerAccessActive && !summary.isFromMe) {
     await renewHostedThreadContainerParticipantAccessFromRosterTx({
       chatId: summary.chatId,
@@ -1510,11 +1713,11 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       prisma: input.prisma,
       verifiedInboundParticipant,
     });
-    containerAccessActive = await readActiveHostedMemberAccess({
+    containerAccessActive = (await readHostedRuntimeAiAccessDecision({
       memberId: input.route.containerMemberId,
       now: participantAccessNow,
       prisma: input.prisma,
-    });
+    })).allowed;
   }
 
   if (!containerAccessActive) {
@@ -1896,10 +2099,10 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
   if (
     isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readActiveHostedMemberAccess({
+    || !(await readHostedRuntimeAiAccessDecision({
       memberId: sender.id,
       prisma: input.prisma,
-    }))
+    })).allowed
   ) {
     return ignored("group-chat-sender-inactive");
   }

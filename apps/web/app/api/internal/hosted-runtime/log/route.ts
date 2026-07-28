@@ -40,7 +40,7 @@ export const POST = withJsonError(async (request: Request) => {
     await signalAcceptedRuntimeAttemptFailureBestEffort({ userId });
   }
 
-  await recordHostedRuntimeLogs({
+  const loggedCount = await recordHostedRuntimeLogs({
     entries: body.entries.map((entry) => ({
       at: entry.at,
       component: entry.component,
@@ -62,7 +62,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(parseHostedRuntimeLogResponse({
-    loggedCount: body.entries.length,
+    loggedCount,
   }));
 });
 

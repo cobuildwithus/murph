@@ -151,6 +151,8 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
+  'murph-managed:monthly-improvement-coach',
+  // Legacy tag retained while existing records reconcile to the monthly seed.
   'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])

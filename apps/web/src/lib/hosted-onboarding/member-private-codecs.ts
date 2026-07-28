@@ -9,6 +9,7 @@ import {
 } from "@murphai/messaging-ingress/telegram-webhook";
 
 import {
+  decryptHostedWebNullableFields,
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
   type HostedWebEncryptionPrismaClient,
@@ -125,36 +126,35 @@ export async function readHostedMemberIdentityPrivateState(
     privyUserId,
     signupPhoneNumber,
     walletAddress,
-  ] = await Promise.all([
-    readHostedMemberIdentityPhoneNumber(identity, prisma),
-    decryptHostedWebNullableString({
+  ] = await decryptHostedWebNullableFields({
+    entries: [{
+      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+      memberId: identity.memberId,
+      value: identity.phoneNumberEncrypted,
+    }, {
       field: HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD,
       memberId: identity.memberId,
-      prisma,
       value: identity.privyUserIdEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
       memberId: identity.memberId,
-      prisma,
       value: identity.signupPhoneNumberEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD,
       memberId: identity.memberId,
-      prisma,
       value: identity.walletAddressEncrypted,
-    }),
-  ]);
+    }],
+    prisma,
+  });
 
   return {
-    phoneNumber,
-    privyUserId,
+    phoneNumber: phoneNumber ?? null,
+    privyUserId: privyUserId ?? null,
     signupPhoneCodeSendAttemptId: normalizeNullableString(identity.signupPhoneCodeSendAttemptId),
     signupPhoneCodeSendAttemptStartedAt: identity.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: identity.signupPhoneCodeSentAt,
-    signupPhoneNumber,
-    walletAddress,
+    signupPhoneNumber: signupPhoneNumber ?? null,
+    walletAddress: walletAddress ?? null,
   };
 }
 
@@ -241,55 +241,50 @@ export async function readHostedMemberRoutingPrivateState(
   prisma?: HostedWebEncryptionPrismaClient,
 ): Promise<HostedMemberRoutingPrivateState> {
   const [
-    telegramState,
+    telegramPrivateValue,
     linqChatId,
     linqRecipientPhone,
     pendingLinqChatId,
     pendingLinqParticipantContact,
     pendingLinqRecipientPhone,
-  ] = await Promise.all([
-    readHostedMemberRoutingTelegramPrivateState({
+  ] = await decryptHostedWebNullableFields({
+    entries: [{
+      field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
       memberId: routing.memberId,
-      telegramUserIdEncrypted: routing.telegramUserIdEncrypted,
-    }, prisma),
-    decryptHostedWebNullableString({
+      value: routing.telegramUserIdEncrypted,
+    }, {
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
       memberId: routing.memberId,
-      prisma,
       value: routing.linqChatIdEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: routing.memberId,
-      prisma,
       value: routing.linqRecipientPhoneEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD,
       memberId: routing.memberId,
-      prisma,
       value: routing.pendingLinqChatIdEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD,
       memberId: routing.memberId,
-      prisma,
       value: routing.pendingLinqParticipantContactEncrypted,
-    }),
-    decryptHostedWebNullableString({
+    }, {
       field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD,
       memberId: routing.memberId,
-      prisma,
       value: routing.pendingLinqRecipientPhoneEncrypted,
-    }),
-  ]);
+    }],
+    prisma,
+  });
+  const telegramState = parseHostedMemberRoutingTelegramPrivateValue(
+    telegramPrivateValue ?? null,
+  );
 
   return {
-    linqChatId,
-    linqRecipientPhone,
-    pendingLinqChatId,
-    pendingLinqParticipantContact,
-    pendingLinqRecipientPhone,
+    linqChatId: linqChatId ?? null,
+    linqRecipientPhone: linqRecipientPhone ?? null,
+    pendingLinqChatId: pendingLinqChatId ?? null,
+    pendingLinqParticipantContact: pendingLinqParticipantContact ?? null,
+    pendingLinqRecipientPhone: pendingLinqRecipientPhone ?? null,
     telegramThreadId: telegramState.telegramThreadId,
     telegramUserId: telegramState.telegramUserId,
   };
@@ -517,30 +512,27 @@ export async function readHostedMemberBillingPrivateState(
   },
   prisma?: HostedWebEncryptionPrismaClient,
 ): Promise<HostedMemberBillingPrivateState> {
-  const [stripeCustomerId, stripeSubscriptionId, stripeSubscriptionScheduleId] = await Promise.all([
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
-      memberId: billingRef.memberId,
+  const [stripeCustomerId, stripeSubscriptionId, stripeSubscriptionScheduleId] =
+    await decryptHostedWebNullableFields({
+      entries: [{
+        field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
+        memberId: billingRef.memberId,
+        value: billingRef.stripeCustomerIdEncrypted,
+      }, {
+        field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
+        memberId: billingRef.memberId,
+        value: billingRef.stripeSubscriptionIdEncrypted,
+      }, {
+        field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD,
+        memberId: billingRef.memberId,
+        value: billingRef.stripeSubscriptionScheduleIdEncrypted,
+      }],
       prisma,
-      value: billingRef.stripeCustomerIdEncrypted,
-    }),
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD,
-      memberId: billingRef.memberId,
-      prisma,
-      value: billingRef.stripeSubscriptionIdEncrypted,
-    }),
-    decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD,
-      memberId: billingRef.memberId,
-      prisma,
-      value: billingRef.stripeSubscriptionScheduleIdEncrypted,
-    }),
-  ]);
+    });
 
   return {
-    stripeCustomerId,
-    stripeSubscriptionId,
-    stripeSubscriptionScheduleId,
+    stripeCustomerId: stripeCustomerId ?? null,
+    stripeSubscriptionId: stripeSubscriptionId ?? null,
+    stripeSubscriptionScheduleId: stripeSubscriptionScheduleId ?? null,
   };
 }

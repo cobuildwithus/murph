@@ -49,7 +49,7 @@ export interface HostedGroupUsageStatus {
 // the signed funding-only locator.
 export async function readHostedGroupUsageFundingTargetByJoinCode(input: {
   joinCode: string;
-  prisma?: HostedGroupUsageFundingClient;
+  prisma?: PrismaClient;
 }): Promise<HostedGroupUsageFundingTarget | null> {
   const joinCode = normalizeHostedGroupUsageJoinCode(input.joinCode);
   if (!joinCode) {
@@ -99,21 +99,24 @@ export async function readHostedGroupUsageStatus(input: {
   runtimeMemberId: string;
 }): Promise<HostedGroupUsageStatus | null> {
   const prisma = input.prisma ?? getPrisma();
-  const [decision, group, container, hasActiveAccess] = await Promise.all([
-    readHostedAiUsageGate({
-      memberId: input.runtimeMemberId,
-      prisma,
-    }),
-    prisma.hostedGroup.findUnique({
-      select: { joinCode: true },
-      where: { runtimeMemberId: input.runtimeMemberId },
-    }),
-    prisma.hostedThreadContainer.findUnique({
-      select: { memberId: true },
-      where: { memberId: input.runtimeMemberId },
-    }),
-    hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma }),
-  ]);
+  // Usage-referral snapshots call this with an interactive-transaction client,
+  // whose pg adapter permits only one query at a time on its connection.
+  const decision = await readHostedAiUsageGate({
+    memberId: input.runtimeMemberId,
+    prisma,
+  });
+  const group = await prisma.hostedGroup.findUnique({
+    select: { joinCode: true },
+    where: { runtimeMemberId: input.runtimeMemberId },
+  });
+  const container = await prisma.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: input.runtimeMemberId },
+  });
+  const hasActiveAccess = await hasHostedRuntimeActiveAccess(
+    input.runtimeMemberId,
+    { prisma },
+  );
   if (
     !container
     || !hasActiveAccess
@@ -208,7 +211,7 @@ export function normalizeHostedGroupUsageFundingLocator(value: unknown): string 
 
 export async function readHostedGroupUsageFundingTargetByLocator(input: {
   locator: string;
-  prisma?: HostedGroupUsageFundingClient;
+  prisma?: PrismaClient;
 }): Promise<HostedGroupUsageFundingTarget | null> {
   const joinCode = normalizeHostedGroupUsageJoinCode(input.locator);
   if (joinCode) {

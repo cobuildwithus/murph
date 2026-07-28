@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { sendAssistantMessage } from '../service.js'
 import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
+import { readAssistantOutboxIntent } from '../outbox.js'
 import {
   ensureAssistantStateDir,
   writeAssistantStateJson,
@@ -68,6 +69,14 @@ export async function hasCompleteAssistantAutoReplyTerminalEvidence(input: {
   inputId: string
   vault: string
 }): Promise<boolean> {
+  return (await readCompleteAssistantAutoReplyTerminalEvidence(input)) !== null
+}
+
+export async function readCompleteAssistantAutoReplyTerminalEvidence(input: {
+  captureId?: string | null
+  inputId: string
+  vault: string
+}): Promise<AssistantAutoReplyTerminalEvidence | null> {
   const evidence =
     await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
       input.vault,
@@ -82,13 +91,64 @@ export async function hasCompleteAssistantAutoReplyTerminalEvidence(input: {
         : null
     )
   if (!evidence) {
-    return false
+    return null
   }
 
   return await assistantAutoReplyTerminalEvidenceGroupComplete({
     evidence,
     vault: input.vault,
   })
+    ? evidence
+    : null
+}
+
+export async function hasCompleteAssistantAutoReplyDeliveryTerminalEvidence(input: {
+  captureId?: string | null
+  inputId: string
+  vault: string
+}): Promise<boolean> {
+  const evidence =
+    await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+      input.vault,
+      input.inputId,
+    )
+    ?? (
+      input.captureId
+        ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+            input.vault,
+            input.captureId,
+          )
+        : null
+    )
+  if (
+    !evidence
+    || !await assistantAutoReplyTerminalEvidenceGroupComplete({
+      evidence,
+      vault: input.vault,
+    })
+  ) {
+    return false
+  }
+
+  const terminal = evidence.terminal
+  if (
+    terminal.kind === 'suppressed'
+    || terminal.kind === 'retry_exhausted'
+    || terminal.kind === 'replied'
+  ) {
+    return true
+  }
+  if (!terminal.deliveryIntentId) {
+    return false
+  }
+
+  const intent = await readAssistantOutboxIntent(
+    input.vault,
+    terminal.deliveryIntentId,
+  )
+  return intent?.status === 'sent'
+    || intent?.status === 'failed'
+    || intent?.status === 'abandoned'
 }
 
 export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(

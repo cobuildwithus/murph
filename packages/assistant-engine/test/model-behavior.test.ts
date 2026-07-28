@@ -183,7 +183,10 @@ describe('assistant execution prompt contract', () => {
       'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'use the existing brief watch before composing or reacting',
+      'finish without a reply or reaction immediately',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Do not sleep or watch for a follow-up',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'This does not suppress open factual or task requests',
@@ -216,7 +219,7 @@ describe('assistant execution prompt contract', () => {
       'Human ownership can be collective.',
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
-      'use the existing brief watch before composing or reacting',
+      'finish without a reply or reaction immediately',
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'a new decision unit even inside the same accepted provider turn',

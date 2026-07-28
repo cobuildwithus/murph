@@ -142,8 +142,6 @@ export function buildCrabboxInvocation(request) {
     CRABBOX_IDLE_TIMEOUT,
     "--ttl",
     CRABBOX_TTL,
-    "--stop-after",
-    "always",
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
