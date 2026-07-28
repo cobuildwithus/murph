@@ -157,6 +157,19 @@ export async function runHostedDeviceSyncPass(
       controlPlaneSynced = true;
     }
 
+    if (syncState.wakeSuperseded === true) {
+      const stagedDirtyAcks = options.stagedDirtyAcks ?? [];
+      return {
+        nextWakeAt: service.getNextWakeAt(),
+        postCheckpointRecord: null,
+        processedJobs: 0,
+        skipped: false,
+        ...(stagedDirtyAcks.length > 0
+          ? { stagedDirtyAcks: [...stagedDirtyAcks] }
+          : {}),
+      };
+    }
+
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
         processedJobs: 0,

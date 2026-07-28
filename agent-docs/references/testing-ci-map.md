@@ -28,7 +28,7 @@ Last verified: 2026-07-27
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | The final daily slot admits exactly one claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition, reversal freshness/suspension ownership, and the Privy deletion/authentication handoff. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits; full-refund and withdrawn-dispute progress commits and exact replay stays idempotent; two distinct reversals defeat an older restore in sequential and concurrent schedules; terminal Privy cleanup deletes the provider principal and receipt before stale authentication resumes, after which live-provider authority rejects replacement member, identity, and session state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for concurrent hosted Telegram routing writes. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | In both writer orders, hosted-member serialization makes identity-only sync and the production webhook planner converge on the exact inbound thread. A completed relink also rejects the stale account before any mailbox write. |
-| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, referral grant, cap-reservation, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent purchase-grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, deletion-first ordering cannot append an orphaned grant, a pre-expiry qualification reconciles after expiry into one purchase-free grant that the ordinary FIFO settlement consumes, the replay-safe group celebration resolves its live source route, and different group referrers serialize so only one can reserve the destination's final cap capacity |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 
 The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
@@ -76,7 +76,13 @@ included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
-request idempotency. Family coverage additionally proves owner/group/member
+request idempotency. Group purchase-service coverage additionally proves
+canonical saved-card selection, durable PaymentIntent binding before
+confirmation, exact-intent recovery after an ambiguous confirmation, verified
+cancellation before Checkout fallback, account-deletion-before-bind
+cancellation, sessionless payer-owned cancel resolution, and group-only card
+saving. Family
+coverage additionally proves owner/group/member
 authorization, use of the Family billing Customer, distinct owner-self target
 identity, exact frozen replay after membership changes, per-member Settings
 routing, all ordered cross-target conflict directions, and server-withheld
@@ -85,12 +91,22 @@ authority during deferred Stripe creation, exact-key replay, and ambiguous
 provider retry recovery to prove that URL and retry capability remain withheld;
 page and dialog suites prove payer-wide
 offer suppression and status/cancel-only cross-target recovery. Reconciliation
-suites exercise live Stripe re-fetch,
-one-time/subscription dispatch separation, replay-safe grants, refund/dispute
-signed adjustments in both directions; component suites exercise the Settings
-dialog selection, redirect, return polling, and error states. A guarded
+suites exercise live Stripe re-fetch, Checkout-free direct PaymentIntent
+success and processing, late terminal direct events after safe fallback,
+retryable unbound success events, one-time/subscription dispatch separation,
+replay-safe grants, and refund/dispute signed adjustments in both directions
+after direct payer detachment; component suites
+exercise the Settings dialog selection, redirect, return polling, and error
+states. A guarded
 real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
-grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
+grant/debit serialization, purchase/referral FIFO over entry-keyed projections,
+purchase-only reversal, and deletion-first cleanup. Referral
+coverage additionally proves exact threshold boundaries, provider-event
+dedupe, next-new-container binding, trusted runtime sender injection,
+unlinked-Telegram evidence isolation, dynamic-tool/parser contracts, source
+celebration replay, and deletion-time anonymization without group-credit
+clawback. Provider-normalization fixtures contain no Linq SDK or Telegram
+payload types in the shared policy assertions. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
 
@@ -198,14 +214,26 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
   excludes consumed traces with best-effort missing delivery links, and proves
-  cron auth, incident claim coalescing, provider-idempotent retry, later
-  recurrence, PII-free copy, and fail-safe scan truncation.
+  cron auth, incident claim coalescing, operator-time quiet hours, stable
+  wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
+  provider-idempotent retry, naturally distinct later-incident copy, PII-free
+  evidence, fail-safe scan truncation, pre-provider recovery cancellation,
+  zero-attempt quiet-hour deferral with fresh first-alert wake evidence, exact
+  ambiguous retry identity across quiet hours, and post-provider recovery
+  coalescing until the admitted effect settles. Row-version race cases prove
+  stale healthy candidates cannot report recovery or bypass pacing after a
+  concurrent incident cycles the singleton back to healthy.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
-  accepted operator alert through a lost-ack retry, active-incident coalescing,
-  silent healthy reset, and a new alert for recurrence.
+  accepted operator alert through a paced lost-ack retry, active-incident
+  coalescing, silent healthy reset, and a paced new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- That matrix starts from the hosted-local harness's intentional `prisma db
+  push` schema. The usage-credit PostgreSQL suite therefore applies the exact
+  checked-in detached direct-payment migration before creating fixtures, so
+  its positive detachment and missing-proof rejections exercise migration-only
+  constraints instead of silently testing the unconstrained Prisma schema.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command
   `pnpm release:production:migrate && pnpm build`, so the guarded migration
@@ -227,7 +255,12 @@ not enter evidence; and attachment-only input fails closed before provider work.
   successful predeploy migration can outlive a later build failure. Required
   columns, renames, `SET NOT NULL`, and incompatible type changes require
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
-  `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
+  `apps/web/prisma/contract-migrations`. The exact detached direct-payment proof
+  migration is a tested backward-compatible exception: migration-guard tests
+  restrict it to its constraint replacement, static migration tests pin the
+  required shape, and the opt-in real-PostgreSQL suite proves sessionless
+  fulfilled detachment succeeds while missing PaymentIntent or Charge lookup
+  proof is rejected. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from
@@ -360,8 +393,17 @@ not enter evidence; and attachment-only input fails closed before provider work.
   is visibly present both before and after the outbound progress-message boundary.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, stubbed control-plane callers, and the hosted-local device-connect smoke that creates a signed WHOOP connect link against synthetic provider config.
-- Automatic meal-photo capture is covered by hosted-web enrollment/upload, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant a real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit physical-device capture.
+- Automatic meal-photo capture is covered by hosted-web enrollment/upload, companion bearer-consent status/acceptance, verified-email route fallback and current-recipient resolution, accepted-capture member-wide engagement, and model-gate-with-system-lag tests; hosted-execution wake/route parsing tests; Cloudflare private-object, processing-mode, and signed control-proxy tests; Temporal blocked-system and foreground-fairness tests; assistant-runtime system-only cron projection/post-checkpoint cleanup, canonical import/idempotency/automation-postcondition, and fail-closed email-authority tests; managed-automation tests; oldest-first closeout-work CLI tests; and canonical meal photo-retirement tests. Routine CI does not grant a real iPhone Photos permission or upload to the production R2 bucket, so deployed product proof still requires an explicit physical-device capture.
 - No routine repo verification command validates a real Cloudflare Worker deploy or a real Cloudflare-managed native-container rollout. `apps/cloudflare` tests now cover the in-repo worker, direct Durable Object RPC and alarms in the Workers runtime, the Durable Object/container boundary, configurable container idle-timeout wiring, container activity-expiry cleanup behavior, runtime-owned hard-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, selective artifact materialization plus preserved-artifact snapshot behavior, keyring-aware hosted ciphertext reads by stored `keyId`, bundle/artifact cleanup on successful transitions, and Node container-image seams. The repo also ships `pnpm --dir apps/cloudflare test:e2e:runner-python:local` as a targeted final-image Python PATH E2E: it assembles a fresh runner bundle, prepares the cached native base image, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, and checks as the non-root `runner` user from immutable `/app` with the baked runner PATH to prove `python` and `python3` resolve to Python 3. `pnpm --dir apps/cloudflare runner:docker:smoke` remains the broader local final-image smoke: it overlays smoke entrypoints into a derived bundle, restores a real fixture vault into an isolated smoke workspace inside the container, exercises `vault-cli` through Codex App Server `command/exec` for default vault reads, explicit raw `--vault`, measurement and scheduled-measurement writes, representative list commands, and hidden-vault schema/LLM metadata, exercises the shared `@murphai/parsers` attachment pipeline, and records metadata-only CLI proof counts plus the selected provider ids so the proof explicitly covers the shipped `murph` / `vault-cli` bins plus native `python` / `python3`, `pdftotext`, and ffmpeg-backed audio normalization/preparation behavior under the hosted runner's rebound `HOME` / `VAULT` model; hosted transcription itself is Worker-mediated Workers AI and is covered by `apps/cloudflare/test/runner-egress-intercept.test.ts`, the parsers remote-transcription provider tests, and the `linq-webhook` hosted-local E2E CI gate (fake `AI` binding, real egress route) instead of an in-image speech model. The runner bundle packer uses runner-specific tarballs for the CLI shell and Health Commons so E2E and deploy bundles keep the same CLI/runtime/catalog surfaces without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts. The manual workflow `.github/workflows/deploy-cloudflare-hosted.yml` runs protected-main-only Cloudflare deploy jobs on Blacksmith: hosted-local E2E gates start loopback Postgres containers, install Temporal CLI, run `codex-gateway-prefix` and `linq-delivery` with `MURPH_HOSTED_LOCAL_E2E_FAST_GATE=1`, and run `linq-scheduled-reminder` with its full one-minute reminder lead and 10-second idle checkpoint. Normal Worker deploy runs add a Blacksmith runner smoke gate that prepares the runner bundle/base image before running the focused Cloudflare verify lane plus `runner:docker:smoke:prepared-base` from the same commit. `pnpm cf:deploy:immediate` remains the break-glass path that skips those E2E/smoke gates while still requiring the protected-main hosted Codex auth guard. The Blacksmith deploy job attaches the production environment, verifies the protected-main checkout, assembles the runner bundle and native base image without step-scoped production secrets, renders deploy config and Worker secrets, dry-runs the generated Wrangler deploy bundle, executes a direct `wrangler deploy`, reads `wrangler deployments status --json` for the smoke version and final traffic summary, validates the required GitHub environment wiring up front including `CF_PUBLIC_BASE_URL` for smoke runs, declares the required hosted runtime secrets through generated Wrangler config, and pairs the deploy docs with a checked-in transient R2 lifecycle config/helper. Gradual deploys run deployed managed-container runner-bundle and assistant CLI surface smoke with a longer retry window so Cloudflare has time to surface the new container application version; `container_rollout=immediate` adds the stricter direct-R2 managed-container smoke, and the `live_model_turn` workflow input (default on) adds one real `gpt-5.6-terra` `codex exec` turn from the deployed container through the Worker OpenAI egress intercept; that turn runs in production-deploy smoke only, never per-PR CI or hosted-local E2E. Hosted prompt-cache prefix drift, core Linq delivery regressions, scheduled Linq reminder regressions, runner-image regressions, missing deployed assistant CLI hot-path schemas, or invalid generated deploy bundles therefore block `pnpm cf:deploy`-triggered deploys before or immediately after the real deploy step; the immediate path keeps the deploy job's own build validation, deploy, and strict managed-container smoke checks. Live deployment still depends on operator-supplied Cloudflare credentials, GitHub environment wiring, first-time container provisioning in Cloudflare, and an operator applying the bucket lifecycle rules to the real R2 buckets.
+- The protected-main Cloudflare workflow's reusable `preview` option is covered
+  by deploy-automation and preflight tests rather than a routine live deploy.
+  The tests lock the single workflow/config owner, selected-context Vercel OIDC
+  derivation, production-only paid live-model smoke, preview crypto/OIDC
+  matching, staging-scoped Worker/R2 names, distinct staging Worker/Web origins,
+  and staging device-callback HTTPS/DNS rejection before mutation. The live
+  preview deployment still depends on an isolated Vercel preview
+  data/crypto/control plane plus environment-scoped Cloudflare credentials and
+  R2 resources.
 - The tag-driven release workflow is present, uses npm trusted publishing for package publication, runs a slimmer `release:check` guard path that now validates release metadata plus `pnpm build:workspace:clean` and `pnpm verify:acceptance` without re-installing/re-building/re-packing inside the script, and is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
 
 ## Update Rule

@@ -9,7 +9,6 @@ import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
 import type {
-  HostedRuntimeManagedGroupActivityDecisionStatus,
   HostedRuntimeNewsletterScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
@@ -39,16 +38,13 @@ import {
 } from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
-  MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+  isRetiredMurphManagedAutomationId,
   resolveMurphManagedAutomationSeed,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
   type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
-import {
-  buildAssistantManagedGroupRecapEvidence,
-} from '../maintenance-evidence.js'
 import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
@@ -103,7 +99,6 @@ import {
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
-  resolveAssistantCronDefaultTimeZone,
   resolveCanonicalAssistantCronJobId,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalRuntimeState,
@@ -138,12 +133,10 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR =
   'Managed automation owner no longer matches the live delivery route.'
-const ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR =
-  'Managed group automation did not meet its private activity eligibility policy.'
-const ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_UNAVAILABLE_ERROR =
-  'Managed group automation activity eligibility could not be proven.'
-const ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR =
-  'Managed group automation composition evidence could not be proven.'
+const HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH =
+  'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH'
+const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
+  'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
@@ -531,9 +524,6 @@ export async function executeClaimedAssistantCronJob(
     kind: 'unmanaged',
   }
   let managedOwnerSkipReason: string | null = null
-  let managedActivitySkipReason: string | null = null
-  let managedGroupRecapEvidence: string | null = null
-  let managedGroupActivityTimeZone: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -611,52 +601,8 @@ export async function executeClaimedAssistantCronJob(
         })
       if (managedOwnerAuthorization.kind === 'mismatch') {
         managedOwnerSkipReason = ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR
-      }
-    }
-
-    if (
-      managedOwnerSkipReason === null &&
-      managedOwnerAuthorization.kind === 'authorized' &&
-      managedOwnerAuthorization.seed.automationId ===
-        MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID
-    ) {
-      managedGroupActivityTimeZone =
-        input.job.kind === 'canonical' &&
-          input.job.source.kind === 'automation'
-          ? input.job.source.timeZone ??
-            await resolveAssistantCronDefaultTimeZone(input.vault)
-          : null
-      const status = await readAssistantCronManagedGroupActivityDecision({
-        authorization: managedOwnerAuthorization,
-        executionContext: input.executionContext ?? null,
-        job: input.job,
-        occurrenceAt,
-        signal: yieldCancellation.signal,
-        timeZone: managedGroupActivityTimeZone,
-      })
-      if (
-        status === 'eligible' &&
-        (managedOwnerAuthorization.channel === 'linq' ||
-          managedOwnerAuthorization.channel === 'telegram') &&
-        managedOwnerAuthorization.target &&
-        managedGroupActivityTimeZone
-      ) {
-        managedGroupRecapEvidence =
-          await buildAssistantManagedGroupRecapEvidence({
-            channel: managedOwnerAuthorization.channel,
-            occurrenceAt,
-            target: managedOwnerAuthorization.target,
-            timeZone: managedGroupActivityTimeZone,
-            vault: input.vault,
-          })
-        if (managedGroupRecapEvidence === null) {
-          managedActivitySkipReason =
-            ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR
-        }
-      } else if (status !== 'eligible') {
-        managedActivitySkipReason = status === 'ineligible'
-          ? ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR
-          : ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_UNAVAILABLE_ERROR
+      } else if (managedOwnerAuthorization.kind === 'retired') {
+        managedOwnerSkipReason = ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR
       }
     }
 
@@ -668,7 +614,6 @@ export async function executeClaimedAssistantCronJob(
       deviceActivityAuthority.error === null &&
       canonicalSourceSkipReason === null &&
       managedOwnerSkipReason === null &&
-      managedActivitySkipReason === null &&
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
@@ -704,18 +649,11 @@ export async function executeClaimedAssistantCronJob(
       errorText = deviceActivityAuthority.error
     } else if (managedOwnerSkipReason !== null) {
       outcome = 'skipped_gate'
-      reason = 'managed_owner_scope_mismatch'
+      reason = managedOwnerSkipReason ===
+          ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR
+        ? 'managed_automation_retired'
+        : 'managed_owner_scope_mismatch'
       errorText = managedOwnerSkipReason
-    } else if (managedActivitySkipReason !== null) {
-      outcome = 'skipped_gate'
-      reason = managedActivitySkipReason ===
-          ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR
-        ? 'managed_group_activity_ineligible'
-        : managedActivitySkipReason ===
-            ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR
-          ? 'managed_group_evidence_unavailable'
-          : 'managed_group_activity_unavailable'
-      errorText = managedActivitySkipReason
     } else if (staleError) {
       outcome = 'expired'
       reason = 'late_occurrence'
@@ -820,8 +758,7 @@ export async function executeClaimedAssistantCronJob(
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
-            : managedOwnerAuthorization.kind === 'authorized' &&
-                managedOwnerAuthorization.ownerScope === 'authenticated-group'
+            : managedOwnerAuthorization.kind === 'authorized'
               ? managedOwnerAuthorization.authorizedDelivery
               : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                   executionContext: input.executionContext ?? null,
@@ -889,37 +826,6 @@ export async function executeClaimedAssistantCronJob(
               }
             }
           }
-          let executionInstructions = buildAssistantCronExecutionInstructions(
-            input.job,
-          )
-          if (
-            input.job.kind === 'canonical' &&
-            input.job.source.kind === 'automation' &&
-            input.job.source.automationId ===
-              MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID
-          ) {
-            await assertNotificationStillAuthorized()
-            if (
-              managedOwnerAuthorization.kind !== 'authorized' ||
-              managedOwnerAuthorization.ownerScope !== 'authenticated-group' ||
-              (managedOwnerAuthorization.channel !== 'linq' &&
-                managedOwnerAuthorization.channel !== 'telegram') ||
-              !managedOwnerAuthorization.target ||
-              !managedGroupActivityTimeZone
-            ) {
-              throw new AssistantCronManagedOwnerInvalidatedError()
-            }
-            if (managedGroupRecapEvidence === null) {
-              throw new VaultCliError(
-                'ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE',
-                ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR,
-              )
-            }
-            executionInstructions = [
-              executionInstructions,
-              managedGroupRecapEvidence,
-            ].join('\n\n')
-          }
           const notificationInput: Parameters<
             typeof sendAssistantNotificationLocal
           >[0] = {
@@ -956,7 +862,7 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
             },
-            instructions: executionInstructions,
+            instructions: buildAssistantCronExecutionInstructions(input.job),
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
               trigger: input.trigger,
@@ -2258,13 +2164,11 @@ function scopeAssistantCronScheduledGroupTools(input: {
     groupPermissionOfferTool: _unscopedGroupPermissionOfferTool,
     groupSharedReader: _unscopedGroupSharedReader,
     groupTool: _unscopedGroupTool,
-    managedGroupActivityDecisionReader: _privateActivityDecisionReader,
     ...hostedWithoutScheduledGroupTools
   } = hosted
   void _unscopedGroupPermissionOfferTool
   void _unscopedGroupSharedReader
   void _unscopedGroupTool
-  void _privateActivityDecisionReader
   const unscopedExecutionContext: AssistantExecutionContext = {
     hosted: hostedWithoutScheduledGroupTools,
   }
@@ -2306,6 +2210,7 @@ type AssistantCronAuthorizedNotificationDelivery = Awaited<
 type AssistantCronManagedOwnerAuthorization =
   | { kind: 'unmanaged' }
   | { kind: 'mismatch' }
+  | { kind: 'retired' }
   | {
       authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
       channel: string | null
@@ -2327,6 +2232,9 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     input.job.source.kind !== 'automation'
   ) {
     return { kind: 'unmanaged' }
+  }
+  if (isRetiredMurphManagedAutomationId(input.job.source.automationId)) {
+    return { kind: 'retired' }
   }
 
   // Only immutable current built-in identities carry hidden owner policy.
@@ -2359,16 +2267,37 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'mismatch' }
   }
 
-  const authorizedDelivery = ownerScope === 'authenticated-group'
-    ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-        executionContext: input.executionContext,
-        signal: input.signal,
-        target: input.target,
-      })
-    : {
-        externalThreadRouteAuthority: null,
-        route: declaredRoute,
+  let authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  if (
+    ownerScope === 'authenticated-group'
+    || !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  ) {
+    try {
+      authorizedDelivery =
+        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+          executionContext: input.executionContext,
+          signal: input.signal,
+          target: input.target,
+        })
+    } catch (error) {
+      if (
+        ownerScope === 'member'
+        && input.target.channel === 'linq'
+        && readAssistantCronErrorCode(error)
+          === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
+      ) {
+        return { kind: 'mismatch' }
       }
+      throw error
+    }
+  } else {
+    authorizedDelivery = {
+      externalThreadRouteAuthority: null,
+      route: declaredRoute,
+    }
+  }
   const route = authorizedDelivery.route
   const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
   const target = normalizeNullableString(
@@ -2402,56 +2331,6 @@ function assistantCronManagedRouteIsAuthenticatedGroup(input: {
   const channel = normalizeNullableString(input.channel)?.toLowerCase()
   return input.threadIsDirect === false &&
     (channel === 'linq' || channel === 'telegram')
-}
-
-async function readAssistantCronManagedGroupActivityDecision(input: {
-  authorization: AssistantCronManagedOwnerAuthorization
-  executionContext: AssistantExecutionContext | null
-  job: ResolvedAssistantCronJob
-  occurrenceAt: string
-  signal: AbortSignal
-  timeZone: string | null
-}): Promise<HostedRuntimeManagedGroupActivityDecisionStatus> {
-  if (
-    input.authorization.kind !== 'authorized' ||
-    input.authorization.ownerScope !== 'authenticated-group' ||
-    (input.authorization.channel !== 'linq' &&
-      input.authorization.channel !== 'telegram') ||
-    !input.authorization.target ||
-    input.job.kind !== 'canonical' ||
-    input.job.source.kind !== 'automation' ||
-    !input.timeZone
-  ) {
-    return 'unavailable'
-  }
-  const reader = input.executionContext?.hosted?.managedGroupActivityDecisionReader
-  if (!reader) {
-    return 'unavailable'
-  }
-
-  try {
-    const response = await reader.read({
-      occurrenceAt: input.occurrenceAt,
-      policy: 'group-sunday-superlatives-v1',
-      route: {
-        channel: input.authorization.channel,
-        target: input.authorization.target,
-      },
-      timeZone: input.timeZone,
-    }, {
-      signal: input.signal,
-    })
-    return response.status === 'eligible' ||
-      response.status === 'ineligible' ||
-      response.status === 'unavailable'
-      ? response.status
-      : 'unavailable'
-  } catch (error) {
-    if (input.signal.aborted) {
-      throw error
-    }
-    return 'unavailable'
-  }
 }
 
 async function assertAssistantCronManagedOwnerStillAuthorized(input: {

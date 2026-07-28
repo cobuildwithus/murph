@@ -103,6 +103,13 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
   "20260707180000_hosted_vault_share_projection_scopes",
 ]);
 
+const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
+  [
+    "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+]);
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -302,8 +309,11 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
     const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
-    const destructivePattern = incompatiblePredeploySqlPatterns.find(({ pattern }) =>
-      pattern.test(sql),
+    const compatibleReasons =
+      hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
+    const destructivePattern = incompatiblePredeploySqlPatterns.find(
+      ({ label, pattern }) =>
+        pattern.test(sql) && !compatibleReasons?.has(label),
     );
 
     if (destructivePattern !== undefined) {

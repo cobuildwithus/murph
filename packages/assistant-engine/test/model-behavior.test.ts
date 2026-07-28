@@ -167,8 +167,29 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
     )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'not a position to endorse or reject by reflex',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'agreement and disagreement are both tools, never defaults',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'heighten it, challenge it, invert it, reframe it, nominate someone, choose a side',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If no strong move is earned, answer plainly, react, or stay silent.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'never random weirdness or invented facts',
+    )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'active, low-ego participant',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
     )
   })
 
@@ -1034,21 +1055,8 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
     )
-  })
-
-  it('warns before creating off-hours Linq/iMessage reminder automations', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain('Linq/iMessage off-hours reminder guard')
-    expect(prompt).toContain('23:00 through 04:59')
-    expect(prompt).toContain("recipient's local timezone")
-    expect(prompt).toContain('channel=linq')
-    expect(prompt).toContain(
-      'A clear user confirmation for that exact off-hours time is enough to proceed',
-    )
-    expect(prompt).toContain(
-      'Do not add this extra confirmation for non-Linq channels',
-    )
+    expect(prompt).not.toContain('Linq/iMessage off-hours reminder guard')
+    expect(prompt).not.toContain('23:00 through 04:59')
   })
 
   it('offers a weather check before saving outdoor reminder automations', () => {

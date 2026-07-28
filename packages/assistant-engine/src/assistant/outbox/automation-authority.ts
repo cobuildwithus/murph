@@ -10,6 +10,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
+import { isRetiredMurphManagedAutomationId } from '../managed-automations.js'
 
 export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   intent: AssistantOutboxIntent
@@ -18,6 +19,9 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   const authority = input.intent.automationAuthority
   if (!authority) {
     return null
+  }
+  if (isRetiredMurphManagedAutomationId(authority.automationId)) {
+    return createAssistantOutboxAutomationAuthorityStaleError()
   }
 
   const current = await readAssistantOutboxAuthorizedAutomation({

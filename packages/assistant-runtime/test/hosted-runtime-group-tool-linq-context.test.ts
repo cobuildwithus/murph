@@ -39,6 +39,75 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it("injects the exact current sender into referral actions", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "arm_usage_referral",
+      result: { outcome: "armed", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-group-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"f".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "linq",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+    });
+  });
+
+  it("denies referral actions on group email where the human sender is not authoritative", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      emailDeliveryContexts: [
+        buildEmailDeliveryContext({ senderHandle: "person@example.test" }),
+      ],
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({
+      action: "read_usage_referral",
+    })).resolves.toEqual({
+      action: "read_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",
@@ -358,10 +427,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("dedupes repeated contexts for the same thread and skips non-iMessage or direct contexts", async () => {
+  it("dedupes repeated contexts and keeps effectful actions iMessage-only", async () => {
     const request = vi.fn().mockResolvedValue({
-      action: "read_chat_participants",
-      result: { participants: [], status: "ok" },
+      action: "share_contact_card",
+      result: { status: "sent" },
     });
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
@@ -385,14 +454,110 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       ],
     });
 
-    await groupTool.request({ action: "read_chat_participants" });
+    await groupTool.request({ action: "share_contact_card" });
     expect(request).toHaveBeenLastCalledWith({
-      action: "read_chat_participants",
+      action: "share_contact_card",
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
       },
     });
+  });
+
+  it("injects a route-authorized SMS thread only for participant reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_chat_participants",
+      result: { participants: [], status: "ok" },
+    });
+    const smsRouteAuthority = {
+      ...ROUTE_AUTHORITY,
+      threadId: "chat_sms_group",
+    };
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: smsRouteAuthority,
+          service: "SMS",
+          target: "chat_sms_group",
+        }),
+      ],
+    });
+
+    await groupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_chat_participants",
+      linqThread: {
+        authority: smsRouteAuthority,
+        chatId: "chat_sms_group",
+      },
+    });
+
+    await groupTool.request({ action: "share_contact_card" });
+    expect(request.mock.calls).toEqual([
+      [{
+        action: "read_chat_participants",
+        linqThread: {
+          authority: smsRouteAuthority,
+          chatId: "chat_sms_group",
+        },
+      }],
+      [{ action: "share_contact_card" }],
+    ]);
+  });
+
+  it("fails participant reads closed for ambiguous, direct, or unsupported-service contexts", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+    const ambiguousGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_group" },
+          service: "sms",
+          target: "chat_sms_group",
+        }),
+      ],
+    });
+
+    await ambiguousGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    const directGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_direct" },
+          service: "sms",
+          target: "chat_sms_direct",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await directGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    const unsupportedServiceGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_rcs_group" },
+          service: "RCS",
+          target: "chat_rcs_group",
+        }),
+      ],
+    });
+
+    await unsupportedServiceGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
   });
 
   it("forwards chat-scoped actions without a linq thread when no route-authorized context exists", async () => {

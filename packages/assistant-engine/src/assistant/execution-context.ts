@@ -28,6 +28,7 @@ import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
+import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
@@ -42,8 +43,6 @@ import type {
   HostedRuntimeGroupSharedRecord,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeManagedGroupActivityDecisionRequest,
-  HostedRuntimeManagedGroupActivityDecisionResponse,
   HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -90,13 +89,6 @@ export interface AssistantHostedDeviceConnectLink {
 export interface AssistantHostedDeviceConnectProvider {
   label: string
   provider: string
-}
-
-export interface AssistantHostedManagedGroupActivityDecisionReader {
-  read(
-    request: HostedRuntimeManagedGroupActivityDecisionRequest,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<HostedRuntimeManagedGroupActivityDecisionResponse>
 }
 
 export type AssistantHostedDeviceToolRequest =
@@ -341,6 +333,23 @@ export interface AssistantHostedGeneratedImageUploader {
   ): Promise<AssistantResponseMedia>
 }
 
+export interface AssistantHostedImageGenerationResult {
+  media: AssistantResponseMedia | null
+  runtimeIssue: AssistantRuntimeIssueInput | null
+  savedImageRef: string | null
+}
+
+export interface AssistantHostedImageGenerationLauncher {
+  launch(input: {
+    operationId: string
+    originAssistantInputId: string
+    run(
+      signal: AbortSignal,
+      persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
+    ): Promise<AssistantHostedImageGenerationResult>
+  }): 'already-started' | 'started'
+}
+
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -380,8 +389,6 @@ export interface AssistantHostedExecutionContext {
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
-  managedGroupActivityDecisionReader?:
-    AssistantHostedManagedGroupActivityDecisionReader | null
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
@@ -389,6 +396,7 @@ export interface AssistantHostedExecutionContext {
   dynamicContextPrompts?: readonly string[] | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   generatedImageUploaderRequired?: boolean | null
+  imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
@@ -495,18 +503,14 @@ export function normalizeAssistantExecutionContext(
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(hosted?.imageGenerationLauncher
+        ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
+        : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
-      ...(hosted?.managedGroupActivityDecisionReader
-        && typeof hosted.managedGroupActivityDecisionReader.read === 'function'
-        ? {
-            managedGroupActivityDecisionReader:
-              hosted.managedGroupActivityDecisionReader,
-          }
-        : {}),
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),

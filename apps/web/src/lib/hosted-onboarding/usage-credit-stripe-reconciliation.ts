@@ -7,7 +7,8 @@ import { requireHostedStripeApiMode } from "./runtime";
 import { normalizeNullableString } from "./shared";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
-  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
 import {
   isHostedUsageCreditCheckoutEvent,
@@ -16,6 +17,12 @@ import {
   type HostedUsageCreditPreparedCheckoutEvent,
 } from "./usage-credit-stripe-checkout-reconciliation";
 import {
+  isHostedUsageCreditDirectPaymentEvent,
+  prepareHostedUsageCreditDirectPaymentEvent,
+  reconcileHostedUsageCreditDirectPaymentEventTx,
+  type HostedUsageCreditPreparedDirectPaymentEvent,
+} from "./usage-credit-stripe-direct-payment-reconciliation";
+import {
   isHostedUsageCreditFinancialReversalEvent,
   prepareHostedUsageCreditFinancialEvent,
   readHostedUsageCreditFinancialEventPaymentReferences,
@@ -23,7 +30,10 @@ import {
   resolveHostedUsageCreditFinancialEventKind,
   type HostedUsageCreditPreparedFinancialEvent,
 } from "./usage-credit-stripe-financial-reconciliation";
-import { readStringRecord } from "./usage-credit-stripe-payment-proof";
+import {
+  readHostedUsageCreditSavedCardPurchaseId,
+  readStringRecord,
+} from "./usage-credit-stripe-payment-proof";
 import {
   buildHostedUsageCreditStripeRetryableError,
   findHostedUsageCreditPurchaseById,
@@ -50,7 +60,7 @@ export {
 
 type HostedUsageCreditStripeEventCandidate = {
   beneficiaryMemberId: string;
-  eventKind: "checkout" | "dispute" | "refund";
+  eventKind: "checkout" | "direct_payment" | "dispute" | "refund";
   purchaseId: string;
 };
 
@@ -80,6 +90,11 @@ type HostedUsageCreditPreparedStripeEvent =
       value: HostedUsageCreditPreparedCheckoutEvent;
     }
   | {
+      eventKind: "direct_payment";
+      reconciliationVersion: bigint;
+      value: HostedUsageCreditPreparedDirectPaymentEvent;
+    }
+  | {
       eventKind: "dispute" | "refund";
       reconciliationVersion: bigint;
       value: HostedUsageCreditPreparedFinancialEvent;
@@ -90,7 +105,7 @@ type HostedUsageCreditPreparedReconciliation =
       kind: "handled";
       result: Extract<
         HostedUsageCreditStripeReconcileResult,
-        { beneficiaryMemberId: null }
+        { handled: true }
       >;
     }
   | {
@@ -165,22 +180,32 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
           );
         }
 
-        return prepared.eventKind === "checkout"
-          ? reconcileHostedUsageCreditCheckoutEventTx({
-              event: input.event,
-              expectedReconciliationVersion: prepared.reconciliationVersion,
-              prepared: prepared.value,
-              purchase,
-              tx,
-            })
-          : reconcileHostedUsageCreditFinancialEventTx({
-              event: input.event,
-              eventKind: prepared.eventKind,
-              expectedReconciliationVersion: prepared.reconciliationVersion,
-              prepared: prepared.value,
-              purchase,
-              tx,
-            });
+        if (prepared.eventKind === "checkout") {
+          return reconcileHostedUsageCreditCheckoutEventTx({
+            event: input.event,
+            expectedReconciliationVersion: prepared.reconciliationVersion,
+            prepared: prepared.value,
+            purchase,
+            tx,
+          });
+        }
+        if (prepared.eventKind === "direct_payment") {
+          return reconcileHostedUsageCreditDirectPaymentEventTx({
+            event: input.event,
+            expectedReconciliationVersion: prepared.reconciliationVersion,
+            prepared: prepared.value,
+            purchase,
+            tx,
+          });
+        }
+        return reconcileHostedUsageCreditFinancialEventTx({
+          event: input.event,
+          eventKind: prepared.eventKind,
+          expectedReconciliationVersion: prepared.reconciliationVersion,
+          prepared: prepared.value,
+          purchase,
+          tx,
+        });
       },
     });
   } catch (error) {
@@ -231,17 +256,46 @@ async function prepareHostedUsageCreditStripeReconciliation(input: {
       "Usage-credit purchase ownership changed before Stripe preparation.",
     );
   }
-  return {
+  const prepared = await prepareHostedUsageCreditStripeEvent({
     candidate,
-    kind: "prepared",
-    prepared: await prepareHostedUsageCreditStripeEvent({
+    context: input.context,
+    event: input.event,
+    prisma: input.prisma,
+    purchase,
+  });
+  if (prepared) {
+    return {
       candidate,
-      context: input.context,
-      event: input.event,
-      prisma: input.prisma,
-      purchase,
-    }),
-  };
+      kind: "prepared",
+      prepared,
+    };
+  }
+  if (
+    candidate.eventKind === "direct_payment" &&
+    (
+      input.event.type === "payment_intent.succeeded" ||
+      input.event.type === "payment_intent.processing"
+    )
+  ) {
+    throw buildHostedUsageCreditStripeRetryableError(
+      new Error(
+        "Direct usage-credit payment event arrived before its exact intent was bound.",
+      ),
+    );
+  }
+  if (candidate.eventKind === "direct_payment") {
+    return {
+      kind: "handled",
+      result: {
+        beneficiaryMemberId: candidate.beneficiaryMemberId,
+        granted: false,
+        handled: true,
+        purchaseId: candidate.purchaseId,
+        wakeRequired: false,
+      },
+    };
+  }
+  return { kind: "unhandled" };
 }
 
 async function reconcileDeletedExpiredUsageCreditCheckout(input: {
@@ -289,8 +343,17 @@ async function reconcileDeletedExpiredUsageCreditCheckout(input: {
         options,
       ),
   });
+  const eventPolicyVersion =
+    parseHostedUsageCreditCheckoutRequestPolicyVersion(
+      eventSession.metadata?.policyVersion ?? "",
+    );
+  if (!eventPolicyVersion) {
+    throw new Error(
+      "Deleted usage-credit Checkout did not have a supported policy.",
+    );
+  }
   const expectedMetadata = {
-    policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+    policyVersion: eventPolicyVersion,
     purchaseId,
     purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   };
@@ -355,6 +418,25 @@ async function resolveHostedUsageCreditStripeEventCandidate(input: {
     };
   }
 
+  if (isHostedUsageCreditDirectPaymentEvent(input.event.type)) {
+    const paymentIntent = input.event.data.object as Stripe.PaymentIntent;
+    const purchaseId = readHostedUsageCreditSavedCardPurchaseId(
+      paymentIntent.metadata,
+    );
+    if (!purchaseId) {
+      return null;
+    }
+    const purchase = await findHostedUsageCreditPurchaseById({
+      prisma: input.prisma,
+      purchaseId,
+    });
+    return {
+      beneficiaryMemberId: purchase.beneficiaryMemberId,
+      eventKind: "direct_payment",
+      purchaseId: purchase.id,
+    };
+  }
+
   if (!isHostedUsageCreditFinancialReversalEvent(input.event.type)) {
     return null;
   }
@@ -400,9 +482,10 @@ async function resolveHostedUsageCreditStripeEventCandidate(input: {
       })
     : null;
   const metadata = paymentIntent?.metadata ?? charge?.metadata;
+  const purpose = normalizeNullableString(metadata?.purpose);
   if (
-    normalizeNullableString(metadata?.purpose) !==
-    HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE
+    purpose !== HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE &&
+    purpose !== HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE
   ) {
     return null;
   }
@@ -425,7 +508,7 @@ async function prepareHostedUsageCreditStripeEvent(input: {
   event: Stripe.Event;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchaseForReconciliation;
-}): Promise<HostedUsageCreditPreparedStripeEvent> {
+}): Promise<HostedUsageCreditPreparedStripeEvent | null> {
   if (input.candidate.eventKind === "checkout") {
     return {
       eventKind: "checkout",
@@ -437,6 +520,20 @@ async function prepareHostedUsageCreditStripeEvent(input: {
         purchase: input.purchase,
       }),
     };
+  }
+  if (input.candidate.eventKind === "direct_payment") {
+    const directPayment =
+      await prepareHostedUsageCreditDirectPaymentEvent({
+        context: input.context,
+        event: input.event,
+        prisma: input.prisma,
+        purchase: input.purchase,
+      });
+    return directPayment ? {
+      eventKind: "direct_payment",
+      reconciliationVersion: input.purchase.reconciliationVersion,
+      value: directPayment,
+    } : null;
   }
   return {
     eventKind: input.candidate.eventKind,
@@ -464,6 +561,11 @@ function readHostedUsageCreditPurchaseIdFromMetadata(
 function shouldGuardHostedUsageCreditStripeEvent(event: Stripe.Event): boolean {
   if (isHostedUsageCreditFinancialReversalEvent(event.type)) {
     return true;
+  }
+  if (isHostedUsageCreditDirectPaymentEvent(event.type)) {
+    return readHostedUsageCreditSavedCardPurchaseId(
+      (event.data.object as Stripe.PaymentIntent).metadata,
+    ) !== null;
   }
   if (!isHostedUsageCreditCheckoutEvent(event.type)) {
     return false;

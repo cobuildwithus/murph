@@ -50,6 +50,9 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
 }
 
 interface HostedLocalTestRunnerContainerStubLike {
+  armGeneratedImageProviderBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   armGeneratedImageUploadTypeErrorForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
@@ -73,9 +76,24 @@ interface HostedLocalTestRunnerContainerStubLike {
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseGeneratedImageProviderBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   releaseShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true; released: boolean }>;
+}
+
+function hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
+  HostedLocalTestRunnerContainerStubLike,
+  "armGeneratedImageProviderBarrierForTest" | "releaseGeneratedImageProviderBarrierForTest"
+>> {
+  return "armGeneratedImageProviderBarrierForTest" in stub
+    && typeof stub.armGeneratedImageProviderBarrierForTest === "function"
+    && "releaseGeneratedImageProviderBarrierForTest" in stub
+    && typeof stub.releaseGeneratedImageProviderBarrierForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
@@ -186,6 +204,46 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     ),
     methods: ["POST"],
     name: "test-canonical-checkpoint-lost-ack",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestGeneratedImageProviderBarrierRoute(
+        context,
+        params.userId,
+        "arm",
+      );
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/generated-image-provider-barrier/arm",
+    ),
+    methods: ["POST"],
+    name: "test-arm-generated-image-provider-barrier",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestGeneratedImageProviderBarrierRoute(
+        context,
+        params.userId,
+        "release",
+      );
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/generated-image-provider-barrier/release",
+    ),
+    methods: ["POST"],
+    name: "test-release-generated-image-provider-barrier",
     wrongMethodResponse: "not-found",
   },
   {
@@ -468,6 +526,43 @@ export async function handleTestGeneratedImageUploadTypeErrorRoute(
     );
   }
   return json(await stub.armGeneratedImageUploadTypeErrorForTest({ userId }));
+}
+
+async function handleTestGeneratedImageProviderBarrierRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  action: "arm" | "release",
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    `test-${action}-generated-image-provider-barrier`,
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (!hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(stub)) {
+    throw new Error(
+      "Hosted runner container generated-image provider barrier test RPC is unavailable.",
+    );
+  }
+  const result = action === "arm"
+    ? await stub.armGeneratedImageProviderBarrierForTest({ userId })
+    : await stub.releaseGeneratedImageProviderBarrierForTest({ userId });
+  return json(result);
 }
 
 export async function handleTestSnapshotPublicationCorruptionRoute(

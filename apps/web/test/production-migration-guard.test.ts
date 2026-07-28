@@ -225,6 +225,44 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260727040000_relax_hosted_usage_credit_detached_direct_proof";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  DROP CONSTRAINT "hosted_usage_credit_purchase_active_payer_required",',
+          '  ADD CONSTRAINT "hosted_usage_credit_purchase_active_payer_required"',
+          '    CHECK ("payer_member_id" IS NOT NULL);',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("keeps known post-baseline destructive migration history exempt", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -569,6 +607,18 @@ describe("hosted web production migration guard", () => {
     } finally {
       await rm(migrationsDir, { force: true, recursive: true });
     }
+  });
+
+  test("omits the contract migration superseded by predeploy proof constraints", async () => {
+    const migrations = await listHostedWebContractMigrations();
+
+    assert.equal(
+      migrations.some(
+        ({ id }) =>
+          id === "20260720233000_hosted_group_usage_funding_invariants",
+      ),
+      false,
+    );
   });
 
   test("checks the canonical owner before contract migration SQL", async () => {
@@ -1222,6 +1272,7 @@ describe("hosted web production migration guard", () => {
     assert.deepEqual(cronPaths, [
       "/api/internal/hosted-execution/retention/cron",
       "/api/internal/hosted-growth/snapshot/cron",
+      "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
