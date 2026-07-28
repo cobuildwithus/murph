@@ -19,6 +19,7 @@ const DESIGN_USAGE_OFFERS = [
   { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_10_usd" },
   { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
 ] as const;
+const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
 
 const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
   {
@@ -120,6 +121,7 @@ function GroupUsageFundingStudy() {
               checkoutUrl="/api/design/usage-credit-preview"
               customizationAllowed
               offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+              payerMemberId={DESIGN_PAYER_MEMBER_ID}
             />
           }
           groupName="Sunday sleep crew"
@@ -180,6 +182,7 @@ function GroupUsageFundingStudy() {
             customizationAllowed
             initialOpen
             offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
         ) : null}
         {groupPaymentRecoveryPreviewKey > 0 ? (
@@ -196,6 +199,7 @@ function GroupUsageFundingStudy() {
             customizationAllowed
             initialOpen
             offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
         ) : null}
         {fulfilledPreviewKey > 0 ? (
@@ -211,6 +215,7 @@ function GroupUsageFundingStudy() {
             deferTerminalRefreshUntilClose
             initialOpen
             offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
         ) : null}
         {multiChannelPreviewKey > 0 ? (
@@ -226,6 +231,7 @@ function GroupUsageFundingStudy() {
             deferTerminalRefreshUntilClose
             initialOpen
             offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
         ) : null}
       </div>
@@ -283,6 +289,7 @@ function PersonalUsageCreditOwnerStudy() {
             billingStatus="active"
             currentBillingPhase="paid"
             currentBillingPlanCode="launch_monthly"
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
             usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
             usageTopUpActivePurchase={{
               offerCode: "usage_5_usd",
@@ -319,6 +326,7 @@ function PersonalUsageCreditState(props: {
           billingStatus="active"
           currentBillingPhase="paid"
           currentBillingPlanCode="launch_monthly"
+          payerMemberId={DESIGN_PAYER_MEMBER_ID}
           usageStatus={props.usageStatus}
           usageTopUpOffers={DESIGN_USAGE_OFFERS}
         />

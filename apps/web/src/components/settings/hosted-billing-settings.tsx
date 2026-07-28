@@ -73,6 +73,7 @@ export function HostedBillingSettings(props: {
   currentCheckoutOffer?: unknown;
   currentPeriodEnd?: Date | null;
   familyState?: "none" | "owner" | "sponsored";
+  payerMemberId?: string | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   pulseTrialBillingContinuationPending?: boolean;
@@ -202,6 +203,7 @@ export function HostedBillingSettings(props: {
         usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
+        payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
@@ -233,17 +235,22 @@ function PlanUsageBand(props: {
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
+  payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
 }) {
+  const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
-    props.usageTopUpActivePurchase ||
-    props.usageTopUpInitialOpen ||
-    props.usageTopUpPurchaseReturn ? (
+    payerMemberId && (
+      props.usageTopUpActivePurchase ||
+      props.usageTopUpInitialOpen ||
+      props.usageTopUpPurchaseReturn
+    ) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
         contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
+        payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
       />
     ) : null;
@@ -300,15 +307,16 @@ function PlanUsageBand(props: {
   const forecast = status.forecast
     ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
-  const usageTopUpDialog = (
+  const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
+      payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
     />
-  );
+  ) : null;
 
   return (
     <div

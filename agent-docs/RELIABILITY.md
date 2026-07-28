@@ -103,9 +103,11 @@ Last verified: 2026-07-27
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
-- Current-policy group funding may create one unconfirmed saved-card
-  PaymentIntent with a purchase-derived idempotency key. The producer must bind
-  its encrypted exact reference under the payer lock before confirmation. The
+- Current-policy personal, Family, and group funding may create one unconfirmed
+  saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
+  purchases retain this behavior for groups only; v1 remains Checkout-only.
+  The producer must bind its encrypted exact reference under the payer lock
+  before confirmation. The
   locked bind must re-read both payer suspension and purchase status; a
   suspension, deletion, or terminal transition that wins first leaves the
   intent unbound, canceled, and never confirmed. A succeeded or processing
@@ -115,8 +117,35 @@ Last verified: 2026-07-27
   confirmation keeps the purchase `payment_pending`; exact request replay
   retrieves and continues only that intent. A fresh request for the same
   target may recover a nonterminal purchase only when its offer matches the
-  frozen offer; a different amount fails closed, and the client keeps the
-  original amount and request key locked while the outcome is uncertain.
+  frozen offer. A different amount receives only the frozen purchase's status
+  and cancellation capability. After any unparsed selection response, the
+  browser may reuse that request key only through the same endpoint's
+  recovery-only mode. Under the payer lock, that mode can continue an exact-key
+  purchase or the current matching nonterminal purchase, but it cannot create a
+  purchase. When neither exists, it returns a miss before Stripe I/O and clears
+  the visible selection to an unselected picker while retaining the unresolved
+  request key in payer-and-target-scoped browser session storage. Web derives
+  the payer scope from the authenticated server session, stores and verifies
+  that key before the first create-capable request, hydrates it before enabling
+  a remounted picker, and keeps it through timeout, dismissal, reload, account
+  switching, and recovery miss. The next explicit Add action by that payer
+  reuses that key in normal create-capable mode. Another payer in the same tab
+  receives an independent slot and cannot read or clear it. The payer lock and
+  request-key uniqueness then serialize the key with any delayed original
+  request: one purchase wins, and a changed offer receives only that winning
+  purchase's status/cancel-only projection. Only a durable purchase response
+  that proves the submitted selection key matched for that payer clears the
+  stored key; mounting an active or return projection, retrying a projected
+  purchase, or recovering another request cannot release it.
+  A group purchase that can still start or continue payment also requires the
+  submitted sponsorship digest to match the frozen draft. Once that exact-key
+  purchase is terminal, a remounted or changed draft cannot alter it and must
+  not turn durable recovery into a permanent 409 loop: Web returns the frozen
+  nonpayable purchase, marks the sponsorship selection conflict, and
+  acknowledges the key match. An effectively expired `created` purchase is
+  closed through the existing expiry owner before that projection.
+  Unavailable storage fails closed before request entry; the winning purchase
+  remains the only payable path.
   Authentication or card failure
   may fall back to Checkout only after the exact intent is verified canceled
   and its binding is cleared under the same reconciliation fence. Direct

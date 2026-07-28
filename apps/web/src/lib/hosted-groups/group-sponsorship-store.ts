@@ -195,6 +195,21 @@ export async function assertHostedGroupSponsorshipRequestMatchesTx(input: {
   purchaseId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  if (await hostedGroupSponsorshipRequestMatchesTx(input)) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+    httpStatus: 409,
+    message: "That request key was already used for another sponsorship.",
+  });
+}
+
+export async function hostedGroupSponsorshipRequestMatchesTx(input: {
+  draft: HostedGroupSponsorshipDraft | null;
+  purchaseId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
   const moment = await input.tx.hostedGroupSponsorshipMoment.findUnique({
     select: { configurationDigest: true },
     where: { purchaseId: input.purchaseId },
@@ -207,13 +222,8 @@ export async function assertHostedGroupSponsorshipRequestMatchesTx(input: {
     moment?.configurationDigest ?? digestHostedGroupSponsorshipDraft(null),
     "utf8",
   );
-  if (expected.byteLength !== actual.byteLength || !timingSafeEqual(expected, actual)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-      httpStatus: 409,
-      message: "That request key was already used for another sponsorship.",
-    });
-  }
+  return expected.byteLength === actual.byteLength
+    && timingSafeEqual(expected, actual);
 }
 
 export async function activateHostedGroupSponsorshipMomentTx(input: {

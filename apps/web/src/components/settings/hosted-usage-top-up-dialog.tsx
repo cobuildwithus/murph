@@ -125,7 +125,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     ? canResume
       ? "Continue checkout"
       : canRetry
-        ? props.scope === "group"
+        ? purchase.status === "payment_pending" || props.scope === "group"
           ? "Check payment"
           : "Continue checkout"
       : purchase.status === "checkout_open" && !returnedFromSuccessfulCheckout
@@ -146,6 +146,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         pollKind: purchase.poll.kind,
         returnedFromSuccessfulCheckout,
         scope: props.scope,
+        selectionConflict: purchase.selectionConflict,
         status: purchase.status,
         targetLabel: familyTarget ?? undefined,
         targetConflict: purchase.targetConflict,
@@ -155,6 +156,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
+    !purchase.selectionConflict &&
     !purchase.targetConflict;
   const showGroupMessagesAction =
     fulfilledConfirmation && props.scope === "group";
@@ -166,8 +168,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const selectionError =
     selection?.attempt.kind === "locked" ? selection.attempt.error : null;
   const selectionNeedsRecovery = selectionError !== null;
-  const groupPaymentNeedsRecovery =
-    props.scope === "group" &&
+  const paymentNeedsRecovery =
     selection?.attempt.kind === "locked" &&
     selection.attempt.requestKey !== null &&
     selectionError !== null;
@@ -225,18 +226,22 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             {purchase
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
-                : props.scope === "group"
-                  ? "We’ll update this group’s credit as soon as payment is complete."
-                  : familyTarget
-                    ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
-                    : "We’ll update your credit as soon as payment is complete."
+                : purchase.selectionConflict
+                  ? purchase.selectionConflict === "sponsorship"
+                    ? "The sponsor details you just entered were not applied. Review the original purchase below."
+                    : "The amount you just selected was not started. Review the earlier purchase below."
+                  : props.scope === "group"
+                    ? "We’ll update this group’s credit as soon as payment is complete."
+                    : familyTarget
+                      ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
+                      : "We’ll update your credit as soon as payment is complete."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
                   ? "Choose a one-time contribution to keep Murph talking for everyone here. We’ll use your saved card when available and ask only when card details or verification are needed."
                   : familyTarget
-                    ? `Choose a one-time credit amount for ${familyTarget}.`
-                    : "Choose a one-time credit amount for your account."}
+                    ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
+                    : "Choose a one-time credit amount for your account. We’ll use your saved card when available. Stripe will ask when card details or verification are needed."}
           </DialogDescription>
         </DialogHeader>
 
@@ -302,10 +307,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   }}
                 >
                   {purchase.operation === "opening_checkout"
-                    ? props.scope === "group"
+                    ? purchase.status === "payment_pending" || props.scope === "group"
                       ? "Continuing payment…"
                       : "Opening checkout…"
-                    : props.scope === "group"
+                    : purchase.status === "payment_pending" || props.scope === "group"
                       ? "Retry payment"
                       : "Retry checkout"}
                 </Button>
@@ -382,7 +387,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           </div>
         ) : selection ? (
           <div className="flex flex-col gap-5">
-            <FieldSet disabled={hasAttempt}>
+            <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
               <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
               <FieldDescription className="sr-only">
                 Choose one usage credit amount.
@@ -418,9 +423,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               </RadioGroup>
             </FieldSet>
             {props.renderSelectionDetails?.({
-              disabled: hasAttempt,
+              disabled: hasAttempt || !controller.requestIdentityReady,
               selectedOffer: controller.selectedOffer,
             })}
+            <FieldError>{controller.requestIdentityError}</FieldError>
             {selectionNeedsRecovery ? (
               <div
                 className="flex gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4"
@@ -432,13 +438,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 />
                 <div className="space-y-1">
                   <p className="font-semibold text-foreground">
-                    {groupPaymentNeedsRecovery
+                    {paymentNeedsRecovery
                       ? "We couldn’t confirm this payment yet"
                       : "Checkout didn’t open"}
                   </p>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {groupPaymentNeedsRecovery
-                      ? "Retry the same amount to check or continue it. We won’t start a second payment."
+                    {paymentNeedsRecovery
+                      ? "Check the same amount to recover any payment already in progress. This check can’t start a new payment."
                       : selectionError}
                   </p>
                 </div>
@@ -449,28 +455,32 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 <div
                   className={cn(
                     "grid gap-3",
-                    groupPaymentNeedsRecovery ? undefined : "sm:grid-cols-2",
+                    paymentNeedsRecovery ? undefined : "sm:grid-cols-2",
                   )}
                 >
                   <Button
                     type="button"
                     size="xl"
                     className="w-full"
-                    disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                    disabled={
+                      !controller.requestIdentityReady ||
+                      !controller.selectedOffer ||
+                      controller.checkoutInFlight
+                    }
                     aria-busy={controller.checkoutInFlight}
                     onClick={() => void controller.startCheckout()}
                   >
                     {controller.checkoutInFlight
-                      ? groupPaymentNeedsRecovery
+                      ? paymentNeedsRecovery
                         ? "Checking payment…"
                         : "Opening checkout…"
                       : controller.selectedOffer
-                        ? groupPaymentNeedsRecovery
-                          ? `Retry payment · ${controller.selectedOffer.amountLabel}`
+                        ? paymentNeedsRecovery
+                          ? `Check payment · ${controller.selectedOffer.amountLabel}`
                           : `Try again · ${controller.selectedOffer.amountLabel}`
                         : "Try again"}
                   </Button>
-                  {groupPaymentNeedsRecovery ? null : (
+                  {paymentNeedsRecovery ? null : (
                     <Button
                       type="button"
                       variant="outline"
@@ -506,7 +516,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 <Button
                   type="button"
                   className="w-full"
-                  disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                  disabled={
+                    !controller.requestIdentityReady ||
+                    !controller.selectedOffer ||
+                    controller.checkoutInFlight
+                  }
                   size="xl"
                   aria-busy={controller.checkoutInFlight}
                   onClick={() => void controller.startCheckout()}
@@ -514,11 +528,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   {controller.checkoutInFlight
                     ? props.scope === "group"
                       ? "Sponsoring chat…"
-                      : "Opening checkout…"
+                      : "Adding usage…"
                     : controller.selectedOffer
                       ? props.scope === "group"
                         ? `Sponsor ~${controller.selectedOffer.estimatedMessages} messages · ${controller.selectedOffer.amountLabel}`
-                        : `Continue to checkout · ${controller.selectedOffer.amountLabel}`
+                        : `Add usage · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
                 </Button>
               </div>

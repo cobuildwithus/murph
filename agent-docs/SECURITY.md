@@ -123,7 +123,10 @@ Last verified: 2026-07-26
   encrypted through the hosted member secure-box owner, omitted from logs, and
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
-  creative notification prompt profile supplies only the task and bounded
+  frozen digest remains strict while payment can start or continue. A terminal
+  exact-key replay may acknowledge a changed remounted draft only as a
+  nonpayable selection conflict; it never rewrites or activates that content.
+  The creative notification prompt profile supplies only the task and bounded
   committed group history in an isolated thread, projects only
   `generate_song`, and applies the output-only native-capability deny set:
   approval never, read-only sandbox, and no shell, browser, apps, plugins,
@@ -137,9 +140,11 @@ Last verified: 2026-07-26
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
-- Saved-card group funding may select only one canonical card already attached
-  to the authenticated payer's verified Stripe Customer: one consistent
-  Customer or nonterminal Subscription default, or the sole attached card.
+- Current-policy saved-card personal, Family, and group funding may select only
+  one canonical card already attached to the authenticated payer's verified
+  Stripe Customer: one consistent Customer or nonterminal Subscription
+  default, or the sole attached card. Frozen v2 purchases retain this behavior
+  for group targets only; v1 retains no saved-card path.
   The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
   attached cards must use Checkout. The server creates the PaymentIntent
   unconfirmed, stores its encrypted exact reference on the frozen purchase,
@@ -149,10 +154,34 @@ Last verified: 2026-07-26
   confirmation remains bound and
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
-  to its frozen offer and original client request; a different submitted amount
-  fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
-  explicit **Add messages** click authorizes only the selected one-time charge.
-  No raw card data enters Murph.
+  to its frozen offer and original client request. A different submitted amount
+  returns the frozen purchase's status/cancel-only projection. If that response
+  is lost or dismissed, the browser can reuse the rejected key only with the
+  server's recovery-only capability. The payer lock may continue an existing
+  matching purchase but cannot create one; when none exists, it returns a miss
+  before resolving a new Customer or entering Stripe. The miss clears the
+  visible amount but retains the unresolved key in payer-and-target-scoped
+  browser session storage. The authenticated server-rendered payer identity
+  selects the browser slot, so another account using the same target in that
+  tab cannot consume or clear the first payer's unresolved key. The browser
+  verifies storage before the first request,
+  hydrates it before enabling a remounted picker, and fails closed rather than
+  minting another create-capable identity when storage is unavailable. The next
+  explicit authorization reuses that key without the recovery-only capability,
+  so payer-lock and request-key uniqueness serialize it with any delayed
+  original request instead of authorizing a second purchase. Only a durable
+  selection response with server-owned proof that its submitted request key
+  matched clears the stored key; mounted active-purchase and return
+  projections, projected-purchase retries, and different-key recovery cannot
+  release it. The opaque key and payer-and-target-scoped browser slot are
+  navigation and idempotency hints only; every request rederives authenticated
+  payer and target authority. If the newly
+  selected amount differs from the delayed winner, the server returns the
+  winner's nonpayable status/cancel projection. Choosing an amount has no
+  payment effect, and each
+  explicit **Add usage** or **Add messages** click authorizes only the selected
+  one-time charge. Current-policy Checkout fallback saves the entered card for
+  later explicit top-ups. No raw card data enters Murph.
 - Direct-purchase cancellation requires only authenticated payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target
   authority may gate retry but must not gate cancellation. Payer deletion may
