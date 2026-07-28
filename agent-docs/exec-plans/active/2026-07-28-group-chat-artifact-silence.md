@@ -63,6 +63,10 @@ Updated: 2026-07-28
   later causal turn.
 - Use deletion as the correction: immediate terminal silence for the narrow
   ambiguous-artifact case; no grouping or admission changes.
+- Accept preliminary ReviewGPT's coverage finding on PR #1075: the real-model
+  candidate must distinguish a text reply, reaction, short watch, and immediate
+  no-output completion, with an explicitly open artifact as the answerable
+  control.
 
 ## Verification
 
@@ -72,3 +76,8 @@ Updated: 2026-07-28
 - Expected outcomes: focused suites and required CI pass; any unrelated local
   verification blocker is reproduced or clearly isolated; ReviewGPT returns
   `ROUND_OUTCOME: PASS` for the correction head.
+- Current evidence: focused assistant files passed; the canonical diff run
+  passed all touched owners and affected typechecks before unrelated CLI tests
+  timed out behind a contended prepared-runtime lock. The opt-in real-model
+  command remains credential-bound because neither supported provider key is
+  available in the current process environment.
