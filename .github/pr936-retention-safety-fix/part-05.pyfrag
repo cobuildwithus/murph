@@ -1,0 +1,110 @@
+          UPDATE "hosted_workspace"
+          SET
+            "inbox_media_retention_wake_at" = NULL,
+            "checkpointed_at" = '2026-07-26T15:00:00.000Z',
+            "version" = "version" + 1
+          WHERE "user_id" = 'snapshot-missing-wake'
+            AND "version" = 9
+        `);
+        expect(staleCheckpoint.rowCount).toBe(0);
+
+        expect(await readWorkspaceRows(client)).toEqual([
+          {
+            checkpointedAt: "2026-07-25T17:00:00.000",
+            signalAttemptedAt: "2026-07-25T18:00:00.000",
+            userId: "no-snapshot",
+            version: "2",
+            wakeAt: "2099-01-01T00:00:00.000",
+          },
+          {
+            checkpointedAt: "2026-07-25T17:00:00.000",
+            signalAttemptedAt: null,
+            userId: "snapshot-existing-wake",
+            version: "5",
+            wakeAt: transactionTimestamp,
+          },
+          {
+            checkpointedAt: "2026-07-25T17:00:00.000",
+            signalAttemptedAt: null,
+            userId: "snapshot-missing-wake",
+            version: "10",
+            wakeAt: transactionTimestamp,
+          },
+        ]);
+      } finally {
+        await client.query("ROLLBACK");
+        await client.end();
+      }
+    });
+  },
+);
+
+async function readWorkspaceRows(client: pg.Client): Promise<Array<{
+  checkpointedAt: string | null;
+  signalAttemptedAt: string | null;
+  userId: string;
+  version: string;
+  wakeAt: string | null;
+}>> {
+  const rows = await client.query<{
+    checkpointedAt: string | null;
+    signalAttemptedAt: string | null;
+    userId: string;
+    version: string;
+    wakeAt: string | null;
+  }>(`
+    SELECT
+      to_char(
+        "checkpointed_at",
+        'YYYY-MM-DD"T"HH24:MI:SS.MS'
+      ) AS "checkpointedAt",
+      to_char(
+        "inbox_media_retention_signal_attempted_at",
+        'YYYY-MM-DD"T"HH24:MI:SS.MS'
+      ) AS "signalAttemptedAt",
+      "user_id" AS "userId",
+      "version"::TEXT AS "version",
+      to_char(
+        "inbox_media_retention_wake_at",
+        'YYYY-MM-DD"T"HH24:MI:SS.MS'
+      ) AS "wakeAt"
+    FROM "hosted_workspace"
+    ORDER BY "user_id"
+  `);
+  return rows.rows;
+}
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol.startsWith("postgres")
+      && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+''',
+)
+
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''      skip_predeploy_e2e:
+        description: Skip predeploy hosted-local E2E gates
+        required: true
+        default: false
+        type: boolean
+''',
+    '''      skip_predeploy_e2e:
+        description: Skip predeploy hosted-local E2E gates
+        required: true
+        default: false
+        type: boolean
+      rearm_inbound_message_content_retention:
+        description: After a successful immediate production smoke, re-arm persisted snapshots for phase-one message-content retention
+        required: true
+        default: false
+        type: boolean
+      inbound_message_content_retention_max_snapshots:
+        description: Confirmed maximum persisted-snapshot count that the existing five-per-hour retention owner can safely drain
+        required: false
+        default: "0"
