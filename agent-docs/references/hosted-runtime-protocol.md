@@ -1204,6 +1204,34 @@ can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
+An already-dormant workspace that persisted `nextWakeAt = null` before a
+wake-preservation fix cannot self-start merely because the fixed runtime has
+been deployed. Recover it through the same bounded maintenance surface rather
+than writing workspace wake fields directly:
+
+1. Confirm Web, Temporal, Cloudflare, and the assistant runtime are all on the
+   wake-preserving deployment before producing a maintenance request.
+2. Target one known affected active checkpointed workspace from
+   `/ops/runtime-maintenance` and emit exactly one
+   `runtime.maintenance-requested` wake as the canary.
+3. Let Web append the durable system-mailbox row and signal the ordinary
+   per-user Temporal workflow. The restored assistant runtime owns canonical
+   automation reconciliation, overdue-occurrence policy, and the resulting
+   workspace wake projection.
+4. Verify the workspace version and checkpoint time advance. When eligible
+   canonical work remains, verify the checkpoint projects a non-null assistant
+   wake; if it does not, stop and inspect redacted runtime diagnostics instead
+   of repeatedly waking or manufacturing scheduler state.
+5. Repeat only for the explicitly identified affected workspaces, retaining the
+   existing one-workspace canary and tiny failure-stopping batch limits.
+
+A source-less `runtime_recheck_requested` signal is not a reseed for this
+state: with no mailbox lag and no persisted wake, Web reconciliation still
+projects an idle runtime. Do not add a periodic sweep, a Cloudflare alarm, a
+repair table, or a direct `nextWakeAt` update. The maintenance mailbox item is
+the durable handoff that admits one normal runtime pass while leaving encrypted
+automation state and occurrence decisions with the assistant runtime.
+
 The same ops page may also expose narrow hosted-runtime setup actions that reuse
 existing source-of-truth services. Those actions must use the same hosted
 app-session, allowlist, and same-origin mutation gate, and must delegate to the
