@@ -555,11 +555,7 @@ async function hasHostedGroupJoinOutreachLiveSignupDeliveryTx(input: {
       template: {
         in: ["invite_signup", "invite_signup_fallback"],
       },
-      OR: [
-        { acceptedAt: { not: null } },
-        { deliveredAt: { not: null } },
-        { status: { in: [...HOSTED_GROUP_JOIN_SIGNUP_DELIVERY_LIVE_STATUSES] } },
-      ],
+      status: { in: [...HOSTED_GROUP_JOIN_SIGNUP_DELIVERY_LIVE_STATUSES] },
     },
     select: { id: true },
   });

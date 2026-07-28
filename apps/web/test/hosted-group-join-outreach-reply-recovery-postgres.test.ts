@@ -1831,41 +1831,97 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("leaves buffered group failure unsuppressed and permits a fresh generic retry", async () => {
+    it("recovers the exact group after terminal failure and restores suppression after late delivery", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
         "https://join.example.test",
       );
       const fixture = await createDeletionReplyRaceFixture();
+      const recipientPhone = createUniqueTestPhone("+1303");
+      const participantPhoneLookupKey =
+        createHostedPhoneLookupKey(fixture.participantPhone);
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
       const providerMessageId = `linq-buffered-failure-${randomUUID()}`;
+      const recoveryProviderMessageId =
+        `linq-recovered-group-${randomUUID()}`;
       const failureEventId = `event-buffered-failure-${randomUUID()}`;
-      const failureEventLookupKey =
-        createHostedLinqProviderEventLookupKey(failureEventId);
-      const genericEffect = createHostedWebhookLinqMessageSideEffect({
+      const recoveryEventId = `event-group-recovery-${randomUUID()}`;
+      const recoveryFailureEventId =
+        `event-group-recovery-failed-${randomUUID()}`;
+      const lateDeliveredEventId =
+        `event-group-late-delivered-${randomUUID()}`;
+      const laterReplyEventId = `event-group-later-reply-${randomUUID()}`;
+      const providerEventLookupKeys = [
+        failureEventId,
+        recoveryEventId,
+        recoveryFailureEventId,
+        lateDeliveredEventId,
+        laterReplyEventId,
+      ]
+        .map(createHostedLinqProviderEventLookupKey)
+        .filter((value): value is string => Boolean(value));
+      const recoveryEvent = buildDirectReplyEvent({
         chatId: fixture.chatId,
-        inviteId: fixture.inviteId,
-        memberId: fixture.participantMemberId,
+        eventId: recoveryEventId,
+        messageId: `message-group-recovery-${randomUUID()}`,
         occurredAt: "2026-07-27T16:01:00.000Z",
-        sourceEventId: `event-generic-retry-${randomUUID()}`,
-        template: "invite_signup",
+        participantPhone: fixture.participantPhone,
+        recipientPhone,
       });
-      const genericDeliveryLookupKey =
-        createHostedLinqDeliveryIdempotencyLookupKey(genericEffect.effectId);
-      if (!failureEventLookupKey || !genericDeliveryLookupKey) {
-        throw new Error("Expected buffered-failure proof lookup keys.");
+      const laterReplyEvent = buildDirectReplyEvent({
+        chatId: fixture.chatId,
+        eventId: laterReplyEventId,
+        messageId: `message-group-later-reply-${randomUUID()}`,
+        occurredAt: "2026-07-27T16:04:00.000Z",
+        participantPhone: fixture.participantPhone,
+        recipientPhone,
+      });
+      if (
+        !participantPhoneLookupKey
+        || !recipientPhoneLookupKey
+        || providerEventLookupKeys.length !== 5
+      ) {
+        throw new Error("Expected terminal-recovery proof lookup keys.");
       }
       providerMocks.sendHostedLinqChatMessage
         .mockReset()
-        .mockResolvedValueOnce({
+        .mockResolvedValue({
           chatId: fixture.chatId,
           messageId: providerMessageId,
-        })
-        .mockResolvedValueOnce({
+        });
+      providerMocks.createHostedLinqChat
+        .mockReset()
+        .mockResolvedValue({
           chatId: fixture.chatId,
-          messageId: `linq-generic-retry-${randomUUID()}`,
+          messageId: recoveryProviderMessageId,
         });
 
       try {
+        await fixture.deletionPrisma.hostedMemberIdentity.create({
+          data: {
+            ...(await buildHostedMemberIdentityPrivateColumns({
+              memberId: fixture.participantMemberId,
+              phoneNumber: fixture.participantPhone,
+              prisma: fixture.deletionPrisma,
+              privyUserId: null,
+              signupPhoneCodeSendAttemptId: null,
+              signupPhoneCodeSendAttemptStartedAt: null,
+              signupPhoneCodeSentAt: null,
+              signupPhoneNumber: null,
+            })),
+            maskedPhoneNumberHint:
+              `*** ${fixture.participantPhone.slice(-4)}`,
+            memberId: fixture.participantMemberId,
+            phoneLookupKey: participantPhoneLookupKey,
+          },
+        });
+        await upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date("2026-07-27T15:59:00.000Z"),
+          phoneNumber: recipientPhone,
+          prisma: fixture.deletionPrisma,
+          source: "configured",
+        });
         await fixture.deletionPrisma.hostedLinqDailyState.create({
           data: {
             dayUtc: new Date("2026-07-27T00:00:00.000Z"),
@@ -1880,7 +1936,7 @@ describe.skipIf(!runPostgresProof)(
               eventId: failureEventId,
               messageId: providerMessageId,
               occurredAt: "2026-07-27T16:00:01.000Z",
-              recipientPhone: createUniqueTestPhone("+1303"),
+              recipientPhone,
             }),
             prisma: tx,
           })
@@ -1908,11 +1964,110 @@ describe.skipIf(!runPostgresProof)(
           dailyStateAfterBufferedFailure?.onboardingLinkSentAt ?? null,
         ).toBeNull();
 
+        const recoveryPlan = await fixture.replyPrisma.$transaction((tx) =>
+          planHostedOnboardingLinqWebhook({
+            event: recoveryEvent,
+            firstContactAdmitted: true,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          })
+        );
+        expect(recoveryPlan.response).toMatchObject({
+          joinUrl: expect.stringContaining(
+            `/groups/join/${fixture.joinCode}?invite=`,
+          ),
+          reason: "sent-signup-link",
+        });
+        const [recoveryEffect] = recoveryPlan.desiredSideEffects;
+        if (
+          !recoveryEffect
+          || recoveryEffect.payload.template !== "invite_signup_fallback"
+        ) {
+          throw new Error("Expected the recovered group signup effect.");
+        }
         await expect(drainDeletionReplyEffect({
-          effect: genericEffect,
+          effect: recoveryEffect,
           prisma: fixture.replyPrisma,
         })).resolves.toMatchObject({ sentCount: 1, skipped: [] });
-        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+        expect(providerMocks.createHostedLinqChat)
+          .toHaveBeenLastCalledWith(expect.objectContaining({
+            message: expect.stringContaining(
+              `/groups/join/${fixture.joinCode}?invite=`,
+            ),
+          }));
+
+        // Replaying the exact planned source-event identity cannot create a
+        // second group delivery or provider call.
+        await expect(drainDeletionReplyEffect({
+          effect: recoveryEffect,
+          prisma: fixture.replyPrisma,
+        })).resolves.toMatchObject({
+          sentCount: 0,
+          skipped: [{
+            effectId: recoveryEffect.effectId,
+            reason: "notice_already_claimed",
+          }],
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+
+        // Once the recovered delivery also fails, neither delivery is live and
+        // the shared suppression marker reopens.
+        await fixture.deletionPrisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: recoveryFailureEventId,
+              messageId: recoveryProviderMessageId,
+              occurredAt: "2026-07-27T16:02:00.000Z",
+              recipientPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(fixture.replyPrisma.hostedLinqDelivery.findMany({
+          orderBy: { attemptedAt: "asc" },
+          select: { status: true },
+          where: {
+            groupJoinOutreachId: fixture.outreachId,
+            template: {
+              in: ["invite_signup", "invite_signup_fallback"],
+            },
+          },
+        })).resolves.toEqual([
+          { status: "failed" },
+          { status: "failed" },
+        ]);
+        await expect(fixture.replyPrisma.hostedLinqDailyState.findUnique({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            memberId_dayUtc: {
+              dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toEqual({ onboardingLinkSentAt: null });
+
+        // A later winning delivered receipt makes the original delivery live
+        // again. Its current status restores both exact-outreach and shared
+        // member/day suppression even though the row retains failed history.
+        await fixture.deletionPrisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedDeliveredReceipt({
+              chatId: fixture.chatId,
+              eventId: lateDeliveredEventId,
+              messageId: providerMessageId,
+              occurredAt: "2026-07-27T16:03:00.000Z",
+              recipientPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(fixture.replyPrisma.hostedLinqDelivery.findUnique({
+          select: { status: true },
+          where: { idempotencyKey: fixture.deliveryLookupKey },
+        })).resolves.toEqual({ status: "delivered" });
         await expect(fixture.replyPrisma.hostedLinqDailyState.findUnique({
           select: { onboardingLinkSentAt: true },
           where: {
@@ -1924,22 +2079,39 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           onboardingLinkSentAt: expect.any(Date),
         });
+        // Keep this proof on the first-contact planner boundary rather than the
+        // home-line redirect installed by the recovered fallback send.
+        await fixture.replyPrisma.hostedMemberRouting.deleteMany({
+          where: { memberId: fixture.participantMemberId },
+        });
+        const laterPlan = await fixture.replyPrisma.$transaction((tx) =>
+          planHostedOnboardingLinqWebhook({
+            event: laterReplyEvent,
+            firstContactAdmitted: true,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          })
+        );
+        expect(laterPlan.response).toMatchObject({
+          ignored: true,
+          reason: "signup-link-already-sent",
+        });
+        expect(laterPlan.desiredSideEffects).toEqual([]);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
       } finally {
         await fixture.deletionPrisma.hostedLinqAlert.deleteMany({
-          where: { eventId: failureEventLookupKey },
+          where: { eventId: { in: providerEventLookupKeys } },
         });
         await fixture.deletionPrisma.hostedLinqProviderEvent.deleteMany({
-          where: { eventId: failureEventLookupKey },
+          where: { eventId: { in: providerEventLookupKeys } },
         });
-        await fixture.deletionPrisma.hostedLinqDelivery.deleteMany({
-          where: {
-            idempotencyKey: {
-              in: [fixture.deliveryLookupKey, genericDeliveryLookupKey],
-            },
-          },
+        await fixture.deletionPrisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
         });
         await cleanupDeletionReplyRaceFixture(fixture);
         providerMocks.sendHostedLinqChatMessage.mockReset();
+        providerMocks.createHostedLinqChat.mockReset();
         vi.unstubAllEnvs();
       }
     });
@@ -2205,6 +2377,7 @@ type DeletionReplyRaceFixture = {
   outreachId: string;
   ownerMemberId: string;
   participantMemberId: string;
+  participantPhone: string;
   replyPrisma: PrismaClient;
   runtimeMemberId: string;
 };
@@ -2273,9 +2446,9 @@ async function createDeletionReplyRaceFixture():
   const chatId = `chat-delete-fence-${randomUUID()}`;
   const joinCode = `join-delete-fence-${randomUUID()}`;
   const occurredAt = new Date("2026-07-27T16:00:00.000Z");
-  const participantPhoneLookupKey = createHostedPhoneLookupKey(
-    createUniqueTestPhone("+1202"),
-  );
+  const participantPhone = createUniqueTestPhone("+1202");
+  const participantPhoneLookupKey =
+    createHostedPhoneLookupKey(participantPhone);
   if (!participantPhoneLookupKey) {
     throw new Error("Expected an account-deletion fence phone lookup key.");
   }
@@ -2367,6 +2540,7 @@ async function createDeletionReplyRaceFixture():
     outreachId,
     ownerMemberId,
     participantMemberId,
+    participantPhone,
     replyPrisma,
     runtimeMemberId,
   };
@@ -2528,6 +2702,36 @@ function buildParsedFailureReceipt(input: {
   });
   if (!parsed) {
     throw new Error("Expected the terminal failure receipt to parse.");
+  }
+  return parsed;
+}
+
+function buildParsedDeliveredReceipt(input: {
+  chatId: string;
+  eventId: string;
+  messageId: string;
+  occurredAt: string;
+  recipientPhone: string;
+}) {
+  const parsed = parseHostedLinqProviderEvent({
+    event: parseHostedLinqWebhookEvent(JSON.stringify({
+      api_version: "v3",
+      created_at: input.occurredAt,
+      data: {
+        chat_id: input.chatId,
+        message_id: input.messageId,
+        phone_number: input.recipientPhone,
+        service: "sms",
+      },
+      event_id: input.eventId,
+      event_type: "message.delivered",
+      trace_id: `trace-${randomUUID()}`,
+      webhook_version: "2026-02-03",
+    })),
+    rawBody: "{}",
+  });
+  if (!parsed) {
+    throw new Error("Expected the delivered receipt to parse.");
   }
   return parsed;
 }
