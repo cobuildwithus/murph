@@ -20,10 +20,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   resolveHostedMemberRoutingByTelegramUserId:
     mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
-vi.mock("@/src/lib/hosted-onboarding/recognized-inbound-access", () => ({
-  resolveHostedRecognizedInboundAccess:
-    mocks.resolveHostedRecognizedInboundAccess,
-}));
+vi.mock("@/src/lib/hosted-onboarding/recognized-inbound-access", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/recognized-inbound-access")
+  >();
+  return {
+    ...actual,
+    resolveHostedRecognizedInboundAccess:
+      mocks.resolveHostedRecognizedInboundAccess,
+  };
+});
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
   buildHostedTelegramMessagePayload: mocks.buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId: mocks.buildHostedTelegramWebhookEventId,
@@ -154,13 +160,12 @@ describe("visible access webhook recovery", () => {
     );
   });
 
-  it("keeps inactive Telegram group conversations silent", async () => {
-    const original = {
+  it("privately recovers an inactive Telegram group sender without exposing billing in the room", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ignored: true,
       ok: true,
-      reason: "inactive-member" as const,
-    };
-    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue(original);
+      reason: "inactive-member",
+    });
     const update = { update_id: 323 };
     mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
     mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
@@ -172,15 +177,127 @@ describe("visible access webhook recovery", () => {
       messageId: "9",
       threadId: "group:456",
     });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_telegram", suspendedAt: null },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
 
     await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
       prisma,
       rawBody: "{}",
       secretToken: null,
-    })).resolves.toBe(original);
+    })).resolves.toEqual({
+      ignored: false,
+      ok: true,
+      reason: "sent-billing-inactive-notice",
+    });
 
-    expect(mocks.resolveHostedMemberRoutingByTelegramUserId).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
-    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledWith({
+      authorizedTelegramUserId: "456",
+      memberId: "member_telegram",
+      message: "Billing needs attention.\n\nOnce that's sorted, send me another message in the group and I'll try again.",
+      noticeCode: "billing_inactive",
+      prisma,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:321",
+      target: "456",
+    });
+  });
+
+  it("accepts an ambiguous private-send replay without sending neutral room guidance", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+    const update = { update_id: 324 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: false,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "10",
+      threadId: "group:456",
+    });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_telegram", suspendedAt: null },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({
+      status: "already_notified",
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toEqual({
+      ignored: false,
+      ok: true,
+      reason: "sent-billing-inactive-notice",
+    });
+  });
+
+  it("hands a definitely rejected private group recovery to the neutral room fallback", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+    const update = { update_id: 324 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: false,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "10",
+      threadId: "group:456",
+    });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_telegram", suspendedAt: null },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({
+      status: "definite_failure",
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
+    });
   });
 });

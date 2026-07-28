@@ -334,6 +334,7 @@ function createPrisma(input: {
   routeContainerActive?: boolean;
   routeOwnerActive?: boolean;
   routeOwnerSponsored?: boolean;
+  routeOwnerTrialEndsAt?: Date;
   routeParticipantAccessRequiresRosterRefresh?: boolean;
   routeParticipantActive?: boolean;
   routeParticipantHandleLookupKey?: string;
@@ -347,6 +348,18 @@ function createPrisma(input: {
   const routeContainerActive = input.routeContainerActive ?? true;
   const routeOwnerActive = input.routeOwnerActive ?? true;
   const routeOwnerSponsored = input.routeOwnerSponsored ?? false;
+  const routeOwnerBillingRef = input.routeOwnerTrialEndsAt
+    ? {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: input.routeOwnerTrialEndsAt,
+        currentTrialStartedAt: new Date("2001-01-01T00:00:00.000Z"),
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2001-01-01T00:00:00.000Z"),
+        stripeSubscriptionLookupKey: "subscription_lookup_route_owner_trial",
+      }
+    : null;
   const routeParticipantAccessRequiresRosterRefresh =
     input.routeParticipantAccessRequiresRosterRefresh ?? false;
   const routeParticipantActive = input.routeParticipantActive ?? false;
@@ -409,6 +422,7 @@ function createPrisma(input: {
                     },
                   ]
                 : [],
+              billingRef: routeOwnerBillingRef,
               billingStatus: routeOwnerSponsored
                 ? HostedBillingStatus.not_started
                 : routeOwnerActive
@@ -591,6 +605,7 @@ function createPrisma(input: {
                     },
                   ]
                 : [],
+              billingRef: routeOwnerBillingRef,
               billingStatus: routeOwnerSponsored
                 ? HostedBillingStatus.not_started
                 : routeOwnerActive
@@ -622,8 +637,30 @@ function createPrisma(input: {
         ? { participantMemberId: "member_active_participant_123" }
         : null
     ),
-    findMany: vi.fn().mockImplementation(async () =>
-      routeParticipantActive
+    findMany: vi.fn().mockImplementation(async ({ select }: {
+      select?: { participant?: unknown };
+    }) => {
+      if (select?.participant) {
+        const participantLeaseActive =
+          routeParticipantActive
+          && (
+            !routeParticipantAccessRequiresRosterRefresh
+            || routeParticipantLeaseRefreshed
+          )
+          && (!routeParticipantRemoved || routeParticipantLeaseRefreshed);
+        return participantLeaseActive
+          ? [{
+              participant: {
+                accountGroupMemberships: [],
+                billingRef: null,
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+            }]
+          : [];
+      }
+
+      return routeParticipantActive
         && routeParticipantHasProjection
         && !routeParticipantRemoved
         ? [{
@@ -631,8 +668,8 @@ function createPrisma(input: {
               ?? createHostedPhoneLookupKey("+15552223333"),
             participantMemberId: "member_active_participant_123",
           }]
-        : []
-    ),
+        : [];
+    }),
     updateMany: vi.fn().mockImplementation(async ({ where }: {
       where: { participantMemberId?: string };
     }) => {
@@ -1022,6 +1059,22 @@ function createStatefulThreadRoutePrisma() {
   return prisma;
 }
 
+/** Narrows the stateful route fixture at the transaction boundary it models. */
+function assertThreadContainerRouteTransactionClient(
+  value: unknown,
+): asserts value is Parameters<typeof ensureHostedThreadContainerRouteTx>[0]["prisma"] {
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("$queryRaw" in value)
+    || !("hostedMember" in value)
+    || !("hostedThreadContainer" in value)
+    || !("hostedThreadRoute" in value)
+  ) {
+    throw new TypeError("Expected a thread-container route transaction client.");
+  }
+}
+
 function buildHostedMailboxItem(input: {
   id: string;
   userId: string;
@@ -1190,6 +1243,51 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an active-status owner whose trial has expired before creating a thread container", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-14T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-25T12:00:00.000Z"),
+    });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-06-25T12:00:00.000Z"),
+        currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        stripeSubscriptionLookupKey: "subscription_lookup_expired_owner",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    assertThreadContainerRouteTransactionClient(prisma);
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T12:00:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma,
+        threadId: "chat_expired_trial_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
+    });
+
     expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
@@ -2150,6 +2248,27 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
+  it("rejects routed traffic when an active-status owner trial is expired at processing time", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerTrialEndsAt: new Date("2001-01-08T00:00:00.000Z"),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        createdAt: "2001-01-07T12:00:00.000Z",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("routes a bound Linq group thread even when the delivering line differs", async () => {
     const prisma = createPrisma({
       routeAccountPhone: "+15550000000",
@@ -2588,7 +2707,7 @@ describe("Linq explicit external-thread routing", () => {
       reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainerParticipant.findMany).not.toHaveBeenCalled();
   });
 
   it("classifies an echoed own message on an inactive routed thread without side effects", async () => {
@@ -2609,7 +2728,7 @@ describe("Linq explicit external-thread routing", () => {
       reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainerParticipant.findMany).not.toHaveBeenCalled();
   });
 
   it("ignores routed thread traffic when the route owner is inactive", async () => {
@@ -2698,9 +2817,11 @@ describe("Linq explicit external-thread routing", () => {
         removedAt: null,
       },
     });
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+    expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
       select: {
-        participantMemberId: true,
+        participant: {
+          select: expect.any(Object),
+        },
       },
       where: expect.objectContaining({
         containerMemberId: "member_thread_container_123",
@@ -2782,7 +2903,16 @@ describe("Linq explicit external-thread routing", () => {
         reason: "thread-container-inactive",
       });
       expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
-      expect(prisma.hostedThreadContainerParticipant.findMany).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
+        select: {
+          participant: {
+            select: expect.any(Object),
+          },
+        },
+        where: expect.objectContaining({
+          containerMemberId: "member_thread_container_123",
+        }),
+      });
       expect(prisma.hostedThreadContainerParticipant.updateMany).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
     } finally {
@@ -3567,6 +3697,23 @@ describe("Linq group chat auto-provision", () => {
       },
     },
     {
+      kind: "active-trial",
+      senderAccess: {
+        accountGroupMemberships: [],
+        billingRef: {
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          currentTrialEndsAt: new Date("2100-06-24T00:00:00.000Z"),
+          currentTrialStartedAt: new Date("2026-06-24T00:00:00.000Z"),
+          pulseTrialPolicyVersion: "pulse-trial-2026-07-15-v3",
+          pulseTrialRedeemedAt: new Date("2026-06-24T00:00:00.000Z"),
+          stripeSubscriptionLookupKey: "subscription_lookup_active_trial",
+        },
+        billingStatus: HostedBillingStatus.active,
+      },
+    },
+    {
       kind: "family-sponsored",
       senderAccess: {
         accountGroupMemberships: [
@@ -3940,6 +4087,42 @@ describe("Linq group chat auto-provision", () => {
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.paused,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("does not provision a delayed group message sent during a trial that has expired by processing time", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    mockSenderLookup(senderCore);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-06-25T12:00:00.000Z"),
+        currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        stripeSubscriptionLookupKey: "subscription_lookup_expired_trial",
+      },
+      billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
       threadContainer: null,
     });

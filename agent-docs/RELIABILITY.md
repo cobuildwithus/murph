@@ -50,6 +50,26 @@ Last verified: 2026-07-27
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq and Telegram group ingress must use the same canonical current runtime
+  AI-access decision as model execution before provisioning a group or
+  admitting work for an existing thread container. Evaluate that decision at
+  webhook processing time rather than the provider message timestamp, so a
+  delayed event cannot cross a trial-expiry boundary. A recognized inactive
+  Linq sender may receive recovery only when both the persisted route contact
+  and the provider's current direct-chat audience match that authenticated
+  sender before and after access resolution. Otherwise the group receives only
+  account-neutral guidance, and unknown or suspended senders disclose no
+  account state. Telegram may create or renew the exact active linked group
+  sender's existing participant lease without transferring container
+  ownership; delayed observations remain subject to the shared seven-day lease
+  and future timestamps are clamped to server time before the canonical
+  container decision is re-read.
+- Group-origin Telegram recovery retains three outcomes in the existing
+  delivery owner. Explicit Telegram rate limits persist a retry time;
+  provider-confirmed permanent 4xx rejection persists a recognizable definitely
+  unsent result so replay retries only the neutral room response; and ambiguous
+  no-response or non-rate-limit 5xx dispatch remains terminal and at-most-once
+  for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.

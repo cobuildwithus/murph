@@ -66,17 +66,31 @@ async function callHostedTelegramApi(input: {
     }
 
     if (!response.ok) {
+      const retryAfterSeconds = readHostedTelegramRetryAfterSeconds(response);
       throw hostedOnboardingError({
-        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        details: {
+          status: response.status,
+          ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+        },
         httpStatus: 502,
         message: `Telegram ${input.method} failed with HTTP ${response.status}.`,
-        retryable: response.status === 429 || response.status >= 500,
+        retryable: response.status === 429,
       });
     }
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+function readHostedTelegramRetryAfterSeconds(
+  response: Response,
+): number | undefined {
+  const retryAfterSeconds = Number(response.headers.get("retry-after"));
+  return Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds > 0
+    ? retryAfterSeconds
+    : undefined;
 }
 
 export async function sendHostedTelegramTextMessage(input: {
