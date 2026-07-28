@@ -1,0 +1,72 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  fetchHostedWebControlPlaneJson: vi.fn(),
+}));
+
+vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
+  fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
+}));
+
+import {
+  HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+} from "@murphai/hosted-execution/routes";
+import {
+  createHostedRuntimeIMessageContactToolPort,
+} from "../src/runtime-platform/imessage-contact-tool-port.ts";
+
+describe("hosted iMessage contact tool port", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("binds the request to the runtime member and validates the response", async () => {
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+    });
+    const fetchImpl = vi.fn<typeof fetch>();
+    const port = createHostedRuntimeIMessageContactToolPort({
+      boundUserId: "member_bound",
+      fetchImpl,
+      timeoutMs: 2_000,
+      transport: { mode: "proxy" },
+    });
+    const request = {
+      assistantInputId: `ain_${"a".repeat(32)}`,
+    };
+
+    await expect(port.ensure(request)).resolves.toEqual({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+    });
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
+      body: request,
+      boundUserId: "member_bound",
+      description: "Hosted iMessage contact tool",
+      fetchImpl,
+      path: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+      timeoutMs: 2_000,
+      transport: { mode: "proxy" },
+    });
+  });
+
+  it("rejects an invalid control-plane response", async () => {
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
+      phoneNumber: "+15550100001",
+      status: "unavailable",
+    });
+    const port = createHostedRuntimeIMessageContactToolPort({
+      boundUserId: "member_bound",
+      fetchImpl: fetch,
+      timeoutMs: 2_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.ensure({
+      assistantInputId: `ain_${"a".repeat(32)}`,
+    })).rejects.toThrow(
+      "Hosted iMessage contact tool returned invalid JSON.",
+    );
+  });
+});

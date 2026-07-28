@@ -476,6 +476,18 @@ export const MURPH_PLAN_USAGE_TOOL = {
   },
 } as const
 
+export const MURPH_IMESSAGE_CONTACT_TOOL = {
+  namespace: 'murph',
+  name: 'imessage_contact',
+  description:
+    'Get or atomically assign the current member\'s Murph iMessage number. Call only for their explicit current request; repeated requests return the same number.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {},
+  },
+} as const
+
 export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
@@ -1148,6 +1160,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
@@ -1198,6 +1211,7 @@ export interface MurphDynamicToolAvailability {
   familyPlanAvailable?: boolean | null
   labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  imessageContactAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
@@ -1244,6 +1258,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
@@ -1570,6 +1585,7 @@ const sendVaultFileArgumentsSchema = z
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const planUsageArgumentsSchema = z.object({}).strict()
+const imessageContactArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
@@ -2005,6 +2021,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-imessage-contact-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-subscription-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -2030,6 +2050,9 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'plan-usage'
+    }
+  | {
+      kind: 'imessage-contact'
     }
   | {
       kind: 'subscription'
@@ -2295,6 +2318,18 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+      }
+    }
+    case MURPH_IMESSAGE_CONTACT_TOOL.name: {
+      const parsed = parseIMessageContactArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-imessage-contact-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'imessage-contact',
       }
     }
     case MURPH_SUBSCRIPTION_TOOL.name: {
@@ -2618,6 +2653,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid personalization arguments')
     case 'invalid-plan-usage-arguments':
       return toolTextResult(false, 'invalid plan usage arguments')
+    case 'invalid-imessage-contact-arguments':
+      return toolTextResult(false, 'invalid iMessage contact arguments')
     case 'invalid-subscription-arguments':
       return toolTextResult(false, 'invalid subscription arguments')
     case 'invalid-assistant-configuration-arguments':
@@ -2924,6 +2961,10 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
       })
+    case 'imessage-contact':
+      return await executeIMessageContactTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+      })
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: input.hostedToolContext ?? null,
@@ -3218,6 +3259,34 @@ async function executePlanUsageTool(input: {
     return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
+  }
+}
+
+async function executeIMessageContactTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const tool = input.hostedToolContext?.imessageContactTool ?? null
+  const assistantInputId = tool
+    ? input.hostedToolContext?.claimIMessageContactAssistantInputId?.() ?? null
+    : null
+  if (!tool || !assistantInputId) {
+    return toolTextResult(
+      false,
+      'iMessage contact assignment requires one unused current user-sourced input',
+    )
+  }
+
+  try {
+    const result = await tool.ensure({ assistantInputId })
+    if (result.status === 'unavailable') {
+      return toolTextResult(
+        true,
+        'No Murph iMessage number was assigned. The member can continue using Telegram and ask again later. Never guess or invent a phone number, and do not promise when one will become available.',
+      )
+    }
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'iMessage contact could not be assigned')
   }
 }
 
@@ -5150,6 +5219,27 @@ function parsePlanUsageArguments(
         schemaName: 'murph.plan_usage.input',
         schemaRootKeys: [],
         toolName: 'murph.plan_usage',
+      }),
+    }
+  }
+  return { ok: true }
+}
+
+function parseIMessageContactArguments(
+  value: unknown,
+):
+  | { ok: true }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = imessageContactArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.imessage_contact.input',
+        schemaRootKeys: [],
+        toolName: 'murph.imessage_contact',
       }),
     }
   }

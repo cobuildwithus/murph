@@ -75,6 +75,8 @@ import {
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,
+  parseHostedRuntimeIMessageContactToolRequest,
+  parseHostedRuntimeIMessageContactToolResponse,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeLatencyTraceRequest,
@@ -423,6 +425,31 @@ describe("hosted runtime control contracts", () => {
       approval: {},
       reasoningEffort: "medium",
     })).toThrow(/not allowed/u);
+
+    expect(parseHostedRuntimeIMessageContactToolRequest({
+      assistantInputId,
+    })).toEqual({ assistantInputId });
+    expect(() => parseHostedRuntimeIMessageContactToolRequest({
+      assistantInputId: `ain_${"c".repeat(31)}`,
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+    })).toEqual({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+    });
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: null,
+      status: "unavailable",
+    })).toEqual({
+      phoneNumber: null,
+      status: "unavailable",
+    });
+    expect(() => parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "unavailable",
+    })).toThrow(/requires a null phoneNumber/u);
 
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",

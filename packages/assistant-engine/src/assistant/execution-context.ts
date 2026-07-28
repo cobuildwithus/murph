@@ -33,6 +33,8 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupSharedMember,
@@ -241,6 +243,12 @@ export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
 }
 
+export interface AssistantHostedIMessageContactTool {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>
+}
+
 export interface AssistantHostedSubscriptionTool {
   request(
     request: HostedRuntimeSubscriptionControlRequest,
@@ -367,6 +375,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
@@ -441,6 +450,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.generatedImageUploader,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const imessageContactTool = normalizeAssistantIMessageContactTool(
+    hosted?.imessageContactTool,
+  )
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
@@ -485,6 +497,7 @@ export function normalizeAssistantExecutionContext(
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
@@ -672,6 +685,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantIMessageContactTool(
+  input: AssistantHostedExecutionContext['imessageContactTool'] | undefined,
+): AssistantHostedIMessageContactTool | undefined {
+  if (!input || typeof input.ensure !== 'function') {
+    return undefined
+  }
+
+  return {
+    ensure: input.ensure.bind(input),
   }
 }
 

@@ -28,6 +28,7 @@ import type {
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
+  AssistantHostedIMessageContactTool,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
@@ -92,6 +93,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
@@ -107,6 +109,7 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
+  claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
   closeNewsletterCapability?(): void
@@ -207,6 +210,7 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   let subscriptionActionClaimed = false
+  let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
     AssistantHostedClinicalRecordsConnectLinkTool['createConnectLink']
   > | null = null
@@ -232,6 +236,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
@@ -253,6 +258,17 @@ export function createAssistantHostedToolContext(input: {
         return null
       }
       subscriptionActionClaimed = true
+      return assistantInputId
+    },
+    claimIMessageContactAssistantInputId: () => {
+      if (imessageContactActionClaimed) {
+        return null
+      }
+      const assistantInputId = readCurrentUserActionAssistantInputId()
+      if (assistantInputId === null) {
+        return null
+      }
+      imessageContactActionClaimed = true
       return assistantInputId
     },
     currentAssistantTarget: () => {
