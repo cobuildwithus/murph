@@ -1,6 +1,6 @@
 # linq-instant-start-launch-markets
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -70,9 +70,20 @@ Updated: 2026-07-28
 
 ## Verification
 
-- Commands to run: focused hosted-onboarding Vitest, `pnpm test:diff` for all
-  touched files, `pnpm verify:acceptance`, exact-head GitHub checks,
-  preliminary and final ReviewGPT.
-- Expected outcomes: representative international defaults are admitted by the
-  existing prefix owner, explicit overrides still replace the default, invalid
-  prefixes fail closed, and all required gates pass.
+- Focused hosted-onboarding environment, instant-start, and webhook-idempotency
+  suites passed: 53 tests.
+- `pnpm test:diff` passed with 7,171 web tests, lint with zero errors, dev
+  smoke, Prisma generation, TypeScript 7 checking, and the production Next
+  build.
+- A remote `pnpm verify:acceptance` run passed the changed onboarding,
+  group/fallback, typecheck, build, package-coverage, and Cloudflare surfaces.
+  Its overall result contained one unrelated 1 ms handoff test timeout; the
+  unchanged nine-test owner suite passed in isolation.
+- Product-experience review found no conflict with explicit/group routing or
+  family-invite acceptance.
+- Preliminary ReviewGPT passed with no findings after 407 seconds. The run met
+  the repository's four-minute specialist threshold with the exact pushed head,
+  confirmed attachment, requested Pro model, substantive lens coverage, and
+  completion marker.
+- PR #1079 carries the final CI and cross-cutting ReviewGPT gates.
+Completed: 2026-07-28
