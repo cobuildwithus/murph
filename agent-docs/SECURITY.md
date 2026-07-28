@@ -124,9 +124,10 @@ Last verified: 2026-07-26
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
   creative notification prompt profile supplies only the task and bounded
-  committed group history in an isolated thread, then uses the ordinary
-  provider-turn tools and delivery path. Its prompt asks for one short original
-  song through exactly one `generate_song` call, forbids any different tool,
+  committed group history in an isolated thread, then projects only
+  `generate_song` from the ordinary provider-turn tools and uses the ordinary
+  delivery path. Its prompt asks for one short original song through exactly
+  one `generate_song` call,
   and forbids commands, network use, separate contact,
   scheduling, state mutation, or disclosure of private health, account,
   payment, or routing details. Running bits may reach only fresh

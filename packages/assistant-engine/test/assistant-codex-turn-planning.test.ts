@@ -493,13 +493,13 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.resume).toBeNull()
       const dynamicToolNames = plan.dynamicTools.map((tool) => tool.name)
-      expect(dynamicToolNames).toEqual(expect.arrayContaining([
-        'attach_response_media',
-        'generate_image',
-        'generate_song',
-        'generate_voice_memo',
-      ]))
-      expect(dynamicToolNames.length).toBeGreaterThan(2)
+      expect(dynamicToolNames).toEqual(['generate_song'])
+      expect(plan.dynamicTools[0]?.description).not.toContain(
+        'state the requested action',
+      )
+      expect(plan.dynamicTools[0]?.description).not.toContain(
+        'explain its personal benefit',
+      )
       expect(plan.environments).toBeUndefined()
       expect(plan.assistantCliContract).toBeNull()
       expect(plan.sessionContext).toBeUndefined()

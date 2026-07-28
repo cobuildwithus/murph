@@ -139,11 +139,11 @@ fulfilled group purchase, Web idempotently:
 3. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-The creative turn is isolated and uses the ordinary provider-turn tool and
-delivery path. Its prompt tells the model to call `generate_song` exactly once
-for one 5–15-second original sponsor song and to use no other tool. Serious,
-urgent, medical, sensitive, or conflict-heavy recent context makes the song
-gentle and non-comedic. Notification failures follow
+The creative turn is isolated, projects only `generate_song` from the ordinary
+provider-turn tools, and uses the ordinary delivery path. Its prompt tells the
+model to call that tool exactly once for one 5–15-second original sponsor song.
+Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
+song gentle and non-comedic. Notification failures follow
 the ordinary required-notification retry and delivery-deduplication path; there
 is no reservation, attempt counter, post-hoc media-attempt accounting, or
 media-specific retry state. The reconciler wakes newly paid usage work before

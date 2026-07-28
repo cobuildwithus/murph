@@ -814,7 +814,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-  const dynamicTools: readonly MurphDynamicTool[] = availableDynamicTools
+  const dynamicTools: readonly MurphDynamicTool[] =
+    input.profile.promptProfile === 'creative-notification'
+      ? availableDynamicTools.filter(
+          (tool) => tool.namespace === 'murph' && tool.name === 'generate_song',
+        )
+      : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',

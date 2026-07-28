@@ -558,6 +558,63 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   }
 });
 
+test(
+  "keeps participant-only sponsorship fields out of an unauthorized group checkout",
+  async () => {
+    const checkout = deferred<unknown>();
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+    const { GroupSponsorshipDialog } = await import(
+      "@/src/components/hosted-groups/group-sponsorship-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(GroupSponsorshipDialog, {
+        checkoutUrl:
+          "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+        customizationAllowed: false,
+        initialOpen: true,
+        offers: groupSponsorshipOffers(),
+      }),
+      { requireButton: false },
+    );
+
+    try {
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Make it funny/);
+      assert.equal(
+        rendered.container.querySelector("#group-sponsor-alias"),
+        null,
+      );
+      assert.equal(
+        rendered.container.querySelector("#group-sponsor-message"),
+        null,
+      );
+      assert.equal(rendered.container.querySelector("#group-sponsor-bit"), null);
+
+      await clickRadio(rendered.container, rendered.window, "usage_20_usd");
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        "Sponsor ~400 messages · $20",
+      );
+
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        method: "POST",
+        payload: {
+          clientRequestKey: "00000000-0000-4000-8000-000000000001",
+          offerCode: "usage_20_usd",
+        },
+        signal: expect.any(AbortSignal),
+        url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      });
+    } finally {
+      checkout.resolve({
+        purchaseId: "hucp_group_sponsorship_without_customization",
+        status: "payment_pending",
+      });
+      await rendered.cleanup();
+    }
+  },
+);
+
 test("names the exact Family beneficiary in the trigger and dialog", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
