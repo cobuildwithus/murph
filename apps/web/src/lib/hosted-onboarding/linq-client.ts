@@ -3,6 +3,7 @@ import "server-only";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  isHostedRuntimePrivateImageDeliveryUrl,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
@@ -15,6 +16,9 @@ import type {
 } from "@linqapp/sdk/resources/chats";
 
 import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
+import {
+  readHostedExecutionControlOrigin,
+} from "../hosted-execution/environment";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -645,17 +649,14 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
 function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
   const normalized = normalizeRequiredHttpsUrl(value, "group chat icon url");
   if (normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   const parsed = new URL(normalized);
-  const pathSegments = parsed.pathname.split("/").filter(Boolean);
-  if (
-    parsed.hostname !== "imagedelivery.net"
-    || parsed.search
-    || parsed.hash
-    || pathSegments.length < 3
-  ) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    readHostedExecutionControlOrigin() ?? undefined,
+  )) {
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   return normalized;
 }

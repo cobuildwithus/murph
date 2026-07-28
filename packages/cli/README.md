@@ -194,6 +194,13 @@ bash scripts/release.sh 0.1.0-rc.1 --dry-run
 
 The release flow bumps the five public packages in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish the public tarballs in dependency order. Workspace-private runtime packages remain in the monorepo and are bundled into the public tarballs when a public package still depends on them at runtime.
 
+The next publish after private-media hardening is a major release because
+`@murphai/contracts` removes the progress-card URL codec from its released root
+API. The release manifest therefore rejects another 1.2.x patch or 1.x minor
+when an expected version is checked. Run `pnpm release:major`; do not publish
+this removal through `pnpm release:patch`, `pnpm release:minor`, or a manually
+prepared 1.x tag.
+
 npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo still publishes a small set of `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
 
 ```bash

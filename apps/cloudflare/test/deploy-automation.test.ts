@@ -88,6 +88,7 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
 ] as const;
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
@@ -106,6 +107,9 @@ const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
   LINQ_API_TOKEN: "linq-token-test",
+} as const;
+const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
+  HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
 } as const;
 const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
@@ -825,9 +829,15 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
     expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');
+    const workflowSecretName = (name: string): string =>
+      name === "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET"
+        ? "CLOUDFLARE_IMAGES_SIGNING_KEY"
+        : name;
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
-      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(workflow).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const renderWorkerSecretsStep = workflow.slice(
       renderWorkerSecretsStepIndex,
@@ -838,7 +848,9 @@ describe("hosted deploy automation helpers", () => {
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
     );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(deployWorkerStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const validateDeployEnvStep = workflow.slice(
       validateDeployEnvStepIndex,
@@ -848,7 +860,9 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
     );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(validateDeployEnvStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
@@ -1062,6 +1076,7 @@ describe("hosted deploy automation helpers", () => {
     );
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
@@ -1089,6 +1104,7 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
     })).toEqual({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -1110,6 +1126,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("omits legacy direct Garmin env from worker secret payloads", () => {
     const payload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1128,6 +1145,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -1150,6 +1168,7 @@ describe("hosted deploy automation helpers", () => {
     expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     const platformSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1168,6 +1187,7 @@ describe("hosted deploy automation helpers", () => {
     expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",

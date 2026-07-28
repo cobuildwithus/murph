@@ -137,11 +137,10 @@ async function validateRunnerRuntimeWriteFence(
     userId: string;
   },
 ): Promise<boolean> {
-  const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;
-  if (typeof validateRuntimeWriteFence !== "function") {
+  if (typeof stub.validateRuntimeWriteFence !== "function") {
     throw new TypeError("Hosted user runner does not implement validateRuntimeWriteFence.");
   }
-  return await validateRuntimeWriteFence(input);
+  return await stub.validateRuntimeWriteFence(input);
 }
 
 export function requireRunnerRuntimeWriteFenceHeaders(

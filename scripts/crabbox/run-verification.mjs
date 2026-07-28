@@ -9,6 +9,12 @@ const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
 ]);
+const DEFAULT_VERIFICATION_PROFILE = "default";
+export const STATIC_SSH_VERIFICATION_PROFILE = "static-ssh";
+const SUPPORTED_VERIFICATION_PROFILES = new Set([
+  DEFAULT_VERIFICATION_PROFILE,
+  STATIC_SSH_VERIFICATION_PROFILE,
+]);
 const TRUSTED_ENTRYPOINT_ENV = "MURPH_CRABBOX_TRUSTED_ENTRYPOINT";
 
 const SENSITIVE_ENVIRONMENT_NAMES = [
@@ -67,10 +73,16 @@ export function parseRemoteVerificationRequest(argv) {
   return { commandArgs, verificationCommand };
 }
 
-export function buildSanitizedVerificationEnvironment(source = process.env) {
+export function buildSanitizedVerificationEnvironment(
+  source = process.env,
+  options = {},
+) {
   const home = requireEnvironmentValue(source, "HOME");
   const executablePath = requireEnvironmentValue(source, "PATH");
   const user = source.USER?.trim() || "crabbox";
+  const verificationProfile = resolveVerificationProfile(
+    options.verificationProfile,
+  );
 
   const environment = {
     HOME: home,
@@ -83,6 +95,7 @@ export function buildSanitizedVerificationEnvironment(source = process.env) {
     TMPDIR: source.TMPDIR?.trim() || "/tmp",
     USER: user,
     ...SAFE_TEST_ENVIRONMENT,
+    MURPH_VERIFY_PROFILE: verificationProfile,
   };
 
   assertNoSensitiveEnvironment(environment);
@@ -102,12 +115,23 @@ export function assertNoSensitiveEnvironment(environment) {
 
 export async function runRemoteVerification(argv, sourceEnvironment = process.env) {
   assertTrustedEntrypoint(sourceEnvironment);
+  return await runSanitizedVerification(argv, sourceEnvironment);
+}
+
+export async function runSanitizedVerification(
+  argv,
+  sourceEnvironment = process.env,
+  options = {},
+) {
   const request = parseRemoteVerificationRequest(argv);
-  const environment = buildSanitizedVerificationEnvironment(sourceEnvironment);
+  const environment = buildSanitizedVerificationEnvironment(
+    sourceEnvironment,
+    options,
+  );
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
   process.stderr.write(
-    `[crabbox-verification] command=${request.verificationCommand} env=synthetic-no-vercel-development-env\n`,
+    `[crabbox-verification] command=${request.verificationCommand} env=synthetic-no-vercel-development-env profile=${environment.MURPH_VERIFY_PROFILE}\n`,
   );
 
   const installExitCode = await runChild(
@@ -149,6 +173,18 @@ function requireEnvironmentValue(environment, name) {
   return value;
 }
 
+function resolveVerificationProfile(value) {
+  const profile = value ?? DEFAULT_VERIFICATION_PROFILE;
+  if (!SUPPORTED_VERIFICATION_PROFILES.has(profile)) {
+    throw new Error(
+      `Crabbox verification profile must be one of: ${[
+        ...SUPPORTED_VERIFICATION_PROFILES,
+      ].join(", ")}.`,
+    );
+  }
+  return profile;
+}
+
 function runChild(command, args, options) {
   return new Promise((resolve, reject) => {
     const useDetachedProcessGroup = process.platform !== "win32";
@@ -164,12 +200,17 @@ function runChild(command, args, options) {
     const onSigterm = () => {
       signalChild(child, useDetachedProcessGroup, "SIGTERM");
     };
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
+    const onSighup = () => {
+      signalChild(child, useDetachedProcessGroup, "SIGHUP");
+    };
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
+    process.on("SIGHUP", onSighup);
 
     const cleanup = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      process.off("SIGHUP", onSighup);
     };
 
     child.once("error", (error) => {
@@ -177,18 +218,54 @@ function runChild(command, args, options) {
       reject(error);
     });
     child.once("exit", (code, signal) => {
-      cleanup();
-      if (signal === "SIGINT") {
-        resolve(130);
-        return;
-      }
-      if (signal) {
-        resolve(143);
-        return;
-      }
-      resolve(code ?? 1);
+      void waitForProcessGroupExit(child.pid, useDetachedProcessGroup).then(
+        () => {
+          cleanup();
+          if (signal === "SIGINT") {
+            resolve(130);
+            return;
+          }
+          if (signal === "SIGHUP") {
+            resolve(129);
+            return;
+          }
+          if (signal) {
+            resolve(143);
+            return;
+          }
+          resolve(code ?? 1);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
     });
   });
+}
+
+async function waitForProcessGroupExit(processGroupId, enabled) {
+  if (!enabled || !processGroupId) {
+    return;
+  }
+  while (isProcessGroupRunning(processGroupId)) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function isProcessGroupRunning(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ESRCH") {
+      return false;
+    }
+    if (error && typeof error === "object" && error.code === "EPERM") {
+      return true;
+    }
+    throw error;
+  }
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {

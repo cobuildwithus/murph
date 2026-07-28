@@ -20,12 +20,6 @@ import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../runner-egress-intercept.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-} from "../runner-effects-contract.ts";
-import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "../runner-outbound/generated-images.ts";
-import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../runner-outbound/headers.ts";
 import type {
@@ -61,13 +55,6 @@ export class RunnerContainer extends BaseRunnerContainer {
     _input: { userId: string },
   ): Promise<{ ok: true }> {
     releaseGeneratedImageProviderBarrier();
-    return { ok: true };
-  }
-
-  async armGeneratedImageUploadTypeErrorForTest(
-    input: { userId: string },
-  ): Promise<{ ok: true }> {
-    armGeneratedImageUploadTypeError(input.userId);
     return { ok: true };
   }
 
@@ -565,10 +552,7 @@ async function corruptWorkspaceSnapshotCompleteRequest(
   });
 }
 
-const hostedLocalGeneratedImageUrl =
-  "https://imagedelivery.net/hosted-local/generated-image/public";
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
-const generatedImageUploadTypeErrorUsers = new Set<string>();
 let generatedImageProviderBarrier: Promise<void> | null = null;
 let releaseGeneratedImageProvider: (() => void) | null = null;
 
@@ -586,22 +570,6 @@ function releaseGeneratedImageProviderBarrier(): void {
   generatedImageProviderBarrier = null;
   releaseGeneratedImageProvider = null;
   release?.();
-}
-
-export function armGeneratedImageUploadTypeError(userId: string): void {
-  const normalized = userId.trim();
-  if (!normalized) {
-    throw new TypeError("Hosted-local generated image upload TypeError control requires a user id.");
-  }
-  generatedImageUploadTypeErrorUsers.add(normalized);
-}
-
-function consumeGeneratedImageUploadTypeError(userId: string): boolean {
-  if (!generatedImageUploadTypeErrorUsers.has(userId)) {
-    return false;
-  }
-  generatedImageUploadTypeErrorUsers.delete(userId);
-  return true;
 }
 
 const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
@@ -641,25 +609,6 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   });
 };
 
-const hostedLocalCloudflareImagesFetch: typeof fetch = async (input, init) => {
-  const request = new Request(input, init);
-  if (request.method !== "POST" || !new URL(request.url).pathname.endsWith("/images/v1")) {
-    return new Response("Unexpected hosted-local Cloudflare Images request.", { status: 502 });
-  }
-
-  return new Response(JSON.stringify({
-    result: {
-      variants: [hostedLocalGeneratedImageUrl],
-    },
-    success: true,
-  }), {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    status: 200,
-  });
-};
-
 const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, env, ctx) => {
   const pathname = new URL(request.url).pathname;
   if (pathname !== "/v1/images/generations" && pathname !== "/v1/images/edits") {
@@ -673,33 +622,6 @@ const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, 
   );
 };
 
-const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
-  request,
-  env,
-  ctx,
-) => {
-  if (new URL(request.url).pathname !== HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH) {
-    return effectsPortHandler(request, env, ctx);
-  }
-  const userId = request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)?.trim() ?? "";
-  if (!userId) {
-    return Promise.resolve(new Response("Unauthorized", { status: 401 }));
-  }
-  const fetchImpl = consumeGeneratedImageUploadTypeError(userId)
-    ? hostedLocalCloudflareImagesTypeErrorFetch
-    : hostedLocalCloudflareImagesFetch;
-  return handleRunnerGeneratedImageUploadRequest({
-    env,
-    fetchImpl,
-    request,
-    userId,
-  });
-};
-
-const hostedLocalCloudflareImagesTypeErrorFetch: typeof fetch = async () => {
-  throw new TypeError("Hosted-local Cloudflare Images upload TypeError.");
-};
-
 const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandler = async (
   request,
 ) => {
@@ -710,7 +632,13 @@ const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandle
   ) {
     return new Response("Not found", { status: 404 });
   }
-  if (request.headers.get("content-type")?.trim().toLowerCase() !== "application/pdf") {
+  const contentType = request.headers.get("content-type")?.trim().toLowerCase() ?? "";
+  if (
+    contentType !== "application/pdf"
+    && contentType !== "image/jpeg"
+    && contentType !== "image/png"
+    && contentType !== "image/webp"
+  ) {
     return new Response("Unsupported media type", { status: 415 });
   }
   const uploadBytes = (await request.arrayBuffer()).byteLength;
@@ -720,7 +648,7 @@ const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandle
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
-      contentType: "application/pdf",
+      contentType,
       uploadBytes,
     },
     message: "Hosted-local Linq attachment upload accepted.",
@@ -741,7 +669,7 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
     wrapShutdownCheckpointPublicationBarrierForTest(
       wrapSnapshotPublicationCorruptionForTest(workspaceSnapshotStoreHandler),
     ),
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: wrapGeneratedImageUploadForTest,
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: effectsPortHandler,
   [HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]: handleHostedLocalLinqAttachmentUpload,
   "api.openai.com": wrapOpenAiImagesForTest,
 };

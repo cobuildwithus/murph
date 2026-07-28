@@ -55,6 +55,12 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "../src/runner-injected-credential.ts";
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
+} from "../src/internal-hosts.ts";
+import {
+  HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
+} from "../src/runner-effects-contract.ts";
+import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
@@ -326,6 +332,85 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(providerRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
       job.request.userId,
     );
+  });
+
+  it("validates preview private-image publication from the per-job platform origin", async () => {
+    const previewOrigin = "https://preview-worker.example.test";
+    const expiresAt = "2026-07-28T00:00:00.000Z";
+    const capabilityUrl = new URL(
+      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
+      previewOrigin,
+    );
+    capabilityUrl.searchParams.set(
+      "exp",
+      String(Date.parse(expiresAt) / 1_000),
+    );
+    const publicationResults: unknown[] = [];
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
+      async (input: Record<string, unknown>) => {
+        const platform = requireObjectRecord(input.platform, "captured platform");
+        const publisher = requireObjectRecord(
+          platform.privateImageUrlPublisher,
+          "captured privateImageUrlPublisher",
+        );
+        const publishPrivateImageUrl = requireCallable(
+          publisher.publishPrivateImageUrl,
+          "captured publishPrivateImageUrl",
+        );
+        publicationResults.push(await publishPrivateImageUrl({
+          bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+          contentType: "image/png",
+        }));
+        return {
+          nextWakeAt: null,
+          redactedStatus: {
+            importedCount: 0,
+          },
+          status: "idle" as const,
+        };
+      },
+    );
+    const publishUrl = new URL(
+      HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
+      `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+    ).toString();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url !== publishUrl) {
+        throw new Error(`Unexpected direct invocation request: ${request.url}`);
+      }
+      return Response.json({
+        expiresAt,
+        url: capabilityUrl.toString(),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runHostedWorkspaceInvocation(createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      platformEnv: {
+        CF_PUBLIC_BASE_URL: previewOrigin,
+      },
+    }), {
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      waitForBackgroundAssistantWork,
+    })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(publicationResults).toEqual([{
+      expiresAt,
+      url: capabilityUrl.toString(),
+    }]);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("does not mutate warm state when the direct invocation signal is already aborted", async () => {

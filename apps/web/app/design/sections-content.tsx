@@ -27,6 +27,7 @@ import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function StudySection({
   children,
@@ -154,6 +155,12 @@ export function SectionsContent() {
 
       <StudySection title="Overall AI usage and fulfilled top-up">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private experiment results share">
+        <ExperimentResultsShareStudy />
       </StudySection>
 
       <Separator />

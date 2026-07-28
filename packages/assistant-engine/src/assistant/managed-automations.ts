@@ -314,7 +314,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Experiment-integrity gate:',
       '- Before citing zero sessions, a behind status, or any experiment-adherence claim, read `vault-cli experiment progress <slug> --format json` and inspect `progress.adherence.evidence`.',
       '- If the experiment counter conflicts with recent qualifying activity records or the saved plan, treat that as a tracking/classification problem, not user behavior. Use a repaired and recomputed result only when a canonical command proves the repair; otherwise suppress the experiment claim. Never make Murph\'s tracking mismatch the user-facing takeaway.',
-      '- If there is an active experiment with trustworthy movement, attach its progress image with `vault-cli experiment progress-card <slug> --format json` and fold its progress into the digest.',
+      '- If there is an active experiment with trustworthy movement, call `vault-cli experiment progress-card <slug> --format json`, attach only its exact returned `media` with `murph.attach_response_media`, and fold a concise interpretation into the digest. Never construct or attach a progress-card URL.',
       '',
       'Do not overstate certainty. If data is missing, say that plainly.',
     ].join('\n'),

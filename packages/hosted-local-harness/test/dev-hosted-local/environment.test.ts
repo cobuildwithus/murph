@@ -1324,16 +1324,10 @@ describe("buildWranglerVarArgs", () => {
   it("emits hosted provider optional vars inspected by the Worker", () => {
     expect(
       buildWranglerVarArgs({
-        CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
-        CLOUDFLARE_IMAGES_VARIANT: "public",
         MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
         MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
       }),
     ).toEqual([
-      "--var",
-      "CLOUDFLARE_IMAGES_ACCOUNT_ID:images-account",
-      "--var",
-      "CLOUDFLARE_IMAGES_VARIANT:public",
       "--var",
       "MURPH_ELEVENLABS_MODEL_ID:eleven_multilingual_v2",
       "--var",
@@ -1469,9 +1463,6 @@ describe("buildWranglerEnvFileText", () => {
 
   it("includes hosted provider optional env inspected by the Worker", () => {
     const text = buildWranglerEnvFileText({
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
-      CLOUDFLARE_IMAGES_API_KEY: "images-secret",
-      CLOUDFLARE_IMAGES_VARIANT: "public",
       ELEVENLABS_API_KEY: "elevenlabs-secret",
       EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
@@ -1481,9 +1472,6 @@ describe("buildWranglerEnvFileText", () => {
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
     });
 
-    expect(text).toContain('CLOUDFLARE_IMAGES_ACCOUNT_ID="images-account"');
-    expect(text).toContain('CLOUDFLARE_IMAGES_API_KEY="images-secret"');
-    expect(text).toContain('CLOUDFLARE_IMAGES_VARIANT="public"');
     expect(text).toContain('ELEVENLABS_API_KEY="elevenlabs-secret"');
     expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');

@@ -325,7 +325,7 @@ async function stageImageGenerationCompletion(input: {
 function renderImageGenerationCompletion(
   result: AssistantHostedImageGenerationResult,
 ): string {
-  const envelope = result.media?.kind === "image"
+  const envelope = result.media
     ? {
         media: [result.media],
         savedImageRef: result.savedImageRef,

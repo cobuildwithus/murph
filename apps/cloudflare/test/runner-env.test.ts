@@ -13,6 +13,7 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerContainerPlatformEnv,
   buildHostedRunnerChannelPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
@@ -34,6 +35,7 @@ import {
 } from "../src/runner-egress-intercept.ts";
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
@@ -1250,5 +1252,15 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("FFMPEG_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_COMMAND");
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain("WHISPER_MODEL_PATH");
+  });
+});
+
+describe("hosted private-media platform env", () => {
+  it("keeps the deployment Worker origin in the trusted container platform env", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    })).toEqual({
+      CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    });
   });
 });

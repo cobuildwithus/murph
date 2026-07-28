@@ -1,3 +1,6 @@
+import {
+  HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,9 +23,11 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
   return {
     CF_BUNDLES_BUCKET: "bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-    CF_PUBLIC_BASE_URL: "https://worker.example.test",
+    CF_PUBLIC_BASE_URL: HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
     CF_WORKER_NAME: "hosted-runner",
     CLOUDFLARE_ACCOUNT_ID: "r2-account",
+    HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+      "private-media-capability-secret-fixture",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
@@ -107,6 +112,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_R2_PRESIGN_BUCKET_NAME",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_LOG_FINGERPRINT_SECRET",
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
       "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
       "HOSTED_R2_PRESIGN_ACCESS_KEY_ID",
       "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY",
@@ -143,7 +149,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
     );
   });
 
@@ -195,6 +201,14 @@ describe("deploy preflight helpers", () => {
       { deployWorker: true },
     )).toContain(
       "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
+    );
+  });
+
+  it("rejects a weak private-media capability secret", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "too-short",
+    }), { deployWorker: true })).toThrowError(
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET must contain at least 32 characters.",
     );
   });
 
@@ -428,6 +442,14 @@ describe("deploy preflight helpers", () => {
       "CF_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
       "DEVICE_SYNC_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
     ]));
+  });
+
+  it("pins the production Worker origin used by private-media capabilities", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      CF_PUBLIC_BASE_URL: "https://worker.example.test",
+    }), { deployWorker: true })).toThrowError(
+      `CF_PUBLIC_BASE_URL=${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN}`,
+    );
   });
 
   it("keeps non-IP hostnames that start like IPv6 private ranges eligible for production", () => {

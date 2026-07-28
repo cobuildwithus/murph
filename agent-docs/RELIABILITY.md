@@ -8,6 +8,31 @@ Last verified: 2026-07-27
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Explicit remote verification is fail-closed. The dispatcher never retries on
+  another executor or runs local and remote copies together; an operator may
+  retry the same head only after recording a concrete infrastructure failure.
+  Each admitted run uses one logged immutable Git candidate, so later checkout
+  writes cannot change the work in flight. Static SSH gives every invocation a
+  unique remote directory. Missing, malformed, or unresolvable local host, user,
+  or port routing fails before remote execution; no other executor is selected.
+  After the worker lock is acquired, native `tar` plus the production-compatible
+  `zstd` stdin round trip must pass before Git reconstruction, installation, or
+  candidate verification. The entrypoint internally selects `profile=static-ssh`;
+  that profile ignores caller scheduling overrides, cannot enter composed
+  acceptance from CPU count alone, and completes package coverage before app and
+  fixture work. Its readiness line, plus the `resources` line for
+  `verify:acceptance`, are required execution evidence rather than optional
+  diagnostics.
+  Crabbox's nested static lease and repository directories still resolve to one
+  native macOS `lockf` descriptor above the run root, which remains the
+  worker-capacity authority. A busy worker fails closed. The remote verifier
+  inherits that descriptor, retains it while reaping its exact child process
+  groups after `SIGHUP` or transport loss, and holds a native `caffeinate`
+  idle-sleep assertion for the same finite lifetime. It then validates and
+  removes only its exact outer run directory. The local artifact lock protects
+  cooperating local producers and candidate capture; it does not claim remote
+  completion. Availability before admission and shutdown stay outside Murph
+  rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
 ## Runtime Expectations
@@ -385,7 +410,7 @@ Last verified: 2026-07-27
   401/invalid-grant requires
   reauthorization, a 403 degrades only the affected family, and retryable
   transport/429/5xx failures do not silently terminalize useful credentials.
-- Hosted generated-image turns must fail before the provider call if the runtime platform has no generated-image uploader, and must treat Cloudflare Images upload failure as a structured tool failure rather than silently returning inaccessible media.
+- Hosted generated-image turns require a writable canonical vault capture before the model-provider call. A successful generation persists the image under `raw/captures/**` and returns a hash-bound `vault_image` descriptor; delivery reloads and verifies the artifact before provider-entry bookkeeping so a changed, missing, oversized, mislabeled, or invalid image fails before external dispatch. Linq retries reuse the stable delivery identity while uploading through the existing attachment boundary. Telegram rebuilds multipart `FormData` for each attempt, and its image transport remains non-replay-safe unless the provider documents idempotency. The legacy public upload route returns `410 Gone`, so an older warm runner degrades to its existing text fallback instead of creating a new public object.
 - Hosted generated voice memo turns must treat ElevenLabs generation, Linq attachment upload, or Telegram delivery-time generation failures as structured tool or delivery failures. When response media carries a transcript, the existing final channel adapter uses that transcript as the text fallback if audio preparation or delivery fails and reports success only after either audio or fallback text is accepted; it adds no queue or delivery owner. Linq derives the fallback provider-effect identity from the persisted delivery key, or from the attachment identity when no delivery intent exists, so the fallback crosses the existing dispatch fence without reusing the text or native-voice claim. Final Linq and Telegram voice memo sends are not replay-safe unless the provider later documents idempotency for those native voice-message endpoints, so outbox transport idempotency must stay false for voice memo media and retries must follow the confirmation-pending/fail-closed path when the fallback is absent or also fails.
 - Hosted clinical-record retrieval is finite by resource-family, page-count, page-size, total-byte, per-page resource-count, and total resource-count caps. Runtime stops with a fixed terminal result before import when a provider page would cross a raw-manifest resource cap. Its durable work identity is the pointer-only mailbox `{runId, generation}`; exact validated page URLs—not randomized cursor ciphertext—own logical provider-page identity. Web owns run-bound opaque cursors and provider claims, while vault-usecases atomically checkpoints each accepted bounded page under `.runtime/operations/clinical-records/**` before honoring foreground preemption. A retry resumes at the next unfinished cursor without replaying completed pages. Raw pages plus the manifest commit atomically only after semantic validation and a fresh web authority check; canonical mutation receives a second authority check. Byte-identical replays are idempotent, conflicting replay bytes fail closed, and terminal completion or rejection clears the operational checkpoint. `authorization-required` is terminalized by web and must not receive a second runtime outcome.
 - Clinical retrieval plans are frozen per run. Query-aware work is ordered by

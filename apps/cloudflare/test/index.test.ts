@@ -328,6 +328,7 @@ describe("cloudflare worker routes", () => {
 
   it("reassembles the Worker route tables in the stable route order", () => {
     expect(workerPublicRoutes.map(({ name }) => name)).toEqual([
+      "private-media-delivery",
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
@@ -347,7 +348,6 @@ describe("cloudflare worker routes", () => {
       "test-canonical-checkpoint-lost-ack",
       "test-arm-generated-image-provider-barrier",
       "test-release-generated-image-provider-barrier",
-      "test-generated-image-upload-type-error",
       "test-snapshot-publication-corruption",
       "test-shutdown-checkpoint-publication-barrier",
       "test-container-activity-expired",
@@ -3811,6 +3811,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       kind: "runtime_processing_accepted" as const,
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
+    })),
+    publishHostedPrivateMedia: vi.fn(async () => ({
+      ok: false as const,
+      reason: "not-configured" as const,
     })),
     readActiveRuntimeFenceForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
