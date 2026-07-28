@@ -1,0 +1,177 @@
+name: PR 936 Merge Resolution
+
+on:
+  push:
+    branches:
+      - agent/pr936-retention-safety-fix-20260727
+
+concurrency:
+  group: pr936-retention-safety-fix
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  fix:
+    name: Apply, verify, and push retention rollout safety fix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Report verification run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="PR #936 retention-safety verification started: ${RUN_URL} (run ${GITHUB_RUN_ID}, attempt ${GITHUB_RUN_ATTEMPT})."
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/1056/comments" \
+            --data "$(node -e 'process.stdout.write(JSON.stringify({body: process.argv[1]}))' "${body}")" \
+            >/dev/null
+
+      - name: Check out safety-fix helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: agent/pr936-retention-safety-fix-20260727
+          path: helper
+          persist-credentials: false
+
+      - name: Check out PR 936 head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: message-retention-14d
+          fetch-depth: 0
+          path: murph
+
+      - name: Apply audited rollout fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd murph
+          expected_head="8f98e7a667567956156907663cad4d203e91b153"
+          if [[ "$(git rev-parse HEAD)" != "${expected_head}" ]]; then
+            echo "PR #936 moved; refusing to apply a stale safety patch." >&2
+            exit 1
+          fi
+          cat ../helper/.github/pr936-retention-safety-fix/part-*.pyfrag > "${RUNNER_TEMP}/pr936-retention-safety-fix.py"
+          python "${RUNNER_TEMP}/pr936-retention-safety-fix.py"
+          git diff --check
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: murph/.nvmrc
+          cache: pnpm
+          cache-dependency-path: murph/pnpm-lock.yaml
+
+      - name: Install exact dependencies
+        working-directory: murph
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare Web generated state
+        working-directory: murph
+        run: pnpm --dir apps/web prisma:generate
+
+      - name: Run Postgres migration and rearm proofs
+        working-directory: murph
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+          MURPH_TEST_POSTGRES_CONCURRENCY: "1"
+        run: >-
+          pnpm exec vitest run
+          --config apps/web/vitest.workspace.ts
+          --no-coverage
+          apps/web/test/hosted-mailbox-content-retention-migration-postgres.test.ts
+          apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts
+          apps/web/test/hosted-retention-cleanup.test.ts
+          apps/web/test/hosted-orchestration-signal-runtime.test.ts
+
+      - name: Run deploy workflow guard
+        working-directory: murph
+        run: >-
+          pnpm exec vitest run
+          --config apps/cloudflare/vitest.node.workspace.ts
+          --no-coverage
+          apps/cloudflare/test/deploy-automation.test.ts
+
+      - name: Typecheck affected apps
+        working-directory: murph
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web typecheck
+          pnpm --dir apps/cloudflare typecheck
+
+      - name: Commit and push verified safety fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd murph
+          expected_head="8f98e7a667567956156907663cad4d203e91b153"
+          expected_main="9ec9db90390e8dd2f7968905e9fcf97e1eeb11a2"
+          git fetch origin main message-retention-14d
+          if [[ "$(git rev-parse origin/message-retention-14d)" != "${expected_head}" ]]; then
+            echo "PR #936 advanced during verification; refusing to overwrite it." >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse origin/main)" != "${expected_main}" ]]; then
+            echo "main advanced during verification; refusing to push against a stale base." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/deploy-cloudflare-hosted.yml \
+            apps/cloudflare/DEPLOY.md \
+            apps/cloudflare/test/deploy-automation.test.ts \
+            apps/web/prisma/migrations/20260725190000_hosted_mailbox_content_retention/migration.sql \
+            apps/web/scripts/rearm-inbound-message-content-retention.ts \
+            apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts \
+            apps/web/test/hosted-mailbox-content-retention-migration-postgres.test.ts
+          git diff --cached --check
+          git commit -m "Make retention rollout fail closed"
+          git push origin HEAD:message-retention-14d
+
+      - name: Report verification result
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="PR #936 retention-safety verification finished with ${JOB_STATUS}: ${RUN_URL} (run ${GITHUB_RUN_ID}, attempt ${GITHUB_RUN_ATTEMPT})."
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/1056/comments" \
+            --data "$(node -e 'process.stdout.write(JSON.stringify({body: process.argv[1]}))' "${body}")" \
+            >/dev/null
