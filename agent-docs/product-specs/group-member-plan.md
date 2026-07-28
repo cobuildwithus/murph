@@ -154,6 +154,49 @@ global prompt. It must not infer Group eligibility from conversation history,
 describe the member as inactive or low-value, claim syncing stopped because AI
 usage was exhausted, or disclose billing in a group.
 
+## Implementation Shape Decision
+
+The first final-review baseline contains 3,011 authored-source additions and
+516 deletions. The source churn is distributed across the complete gated
+member journey:
+
+| Surface | Added | Deleted |
+| --- | ---: | ---: |
+| Billing catalog, eligibility, Stripe transitions, and trial event adapter | 1,295 | 254 |
+| Authenticated Web presentation and client actions | 699 | 135 |
+| Usage, subscription-action, mailbox, and message projections | 561 | 58 |
+| Shared hosted/assistant/Cloudflare contracts | 242 | 37 |
+| Assistant skill | 50 | 32 |
+| Design catalog | 157 | 0 |
+| Local Stripe harness | 7 | 0 |
+
+This is intrinsic feature scope, not review-driven growth. The implementation
+continues as one rollout-gated PR for these reasons:
+
+- A selectable Group SKU is incomplete without its eligibility recheck,
+  transition policy, exhausted-usage behavior, and private action contract.
+  Shipping those separately can expose a paid plan before every consumer can
+  explain or safely mutate it.
+- Trial-end selection, explicit immediate conversion, and the private
+  `trial_will_end` reminder are the same continuation journey. They share one
+  server-owned offer, quote, eligibility, and Stripe mutation authority rather
+  than introducing independently deployable billing systems.
+- Web, Cloudflare, and assistant changes are consumers of one strict target-plan
+  contract. Splitting that contract across more stacked PRs would add temporary
+  compatibility states and deployment orderings; it would not reduce runtime
+  architecture.
+- The frontend and design-catalog lines present and prove the same server-owned
+  states. They add no policy or persistence owner.
+
+The only new policy owners are the confirmed-membership eligibility module and
+the signed quote codec. The quote is stateless and derives from existing
+billing truth. The trial-ending adapter reuses the existing Stripe event,
+mailbox, dedupe, route, and wake owners; it is not a scheduler or notification
+state machine. Existing catalog, transition, reconciliation, usage projection,
+and Stripe mutation owners are generalized rather than duplicated. No concept
+can be deleted without removing an explicit launch requirement, and splitting
+the PR would add rollout seams without deleting production code or state.
+
 ## Deployment
 
 No application database migration is required. Configure the unique Group
