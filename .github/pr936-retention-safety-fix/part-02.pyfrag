@@ -1,0 +1,110 @@
+          "Another inbound message-content retention rearm already owns the database lock.",
+        );
+      }
+
+      const result = await applyHostedInboundMessageContentRetentionRearm(
+        client,
+        maxSnapshots,
+      );
+      await client.query("COMMIT");
+      console.log(
+        `Rearmed ${result.rearmedCount} persisted workspace snapshot(s) for inbound message-content retention at ${result.rearmedAt}.`,
+      );
+      return result;
+    } catch (error) {
+      await rollbackAfterRearmFailure(client);
+      throw error;
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+function createRearmClient(
+  connectionString: string,
+): HostedInboundMessageContentRetentionRearmClient {
+  return new Client({ connectionString });
+}
+
+function parseCount(value: string, label: string): number {
+  if (!/^\\d+$/u.test(value)) {
+    throw new Error(`Inbound message-content retention ${label} is invalid.`);
+  }
+  const count = Number(value);
+  if (!Number.isSafeInteger(count)) {
+    throw new Error(`Inbound message-content retention ${label} exceeds the safe integer range.`);
+  }
+  return count;
+}
+
+async function rollbackAfterRearmFailure(
+  database: HostedInboundMessageContentRetentionRearmDatabase,
+): Promise<void> {
+  try {
+    await database.query("ROLLBACK");
+  } catch (rollbackError) {
+    console.error(
+      rollbackError instanceof Error
+        ? rollbackError.message
+        : String(rollbackError),
+    );
+  }
+}
+
+function loadHostedWebEnvFiles(): void {
+  for (const envPath of [".env.local", ".env"]) {
+    const absoluteEnvPath = path.join(CONFIG_DIR, envPath);
+    if (existsSync(absoluteEnvPath)) {
+      process.loadEnvFile(absoluteEnvPath);
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  loadHostedWebEnvFiles();
+  await runHostedInboundMessageContentRetentionRearmIfNeeded();
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
+''',
+)
+
+write(
+    "apps/web/test/hosted-mailbox-content-retention-migration-postgres.test.ts",
+    '''import { readFile } from "node:fs/promises";
+
+import pg from "pg";
+import { describe, expect, it } from "vitest";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresMigrationProof =
+  process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+const migrationUrl = new URL(
+  "../prisma/migrations/20260725190000_hosted_mailbox_content_retention/migration.sql",
+  import.meta.url,
+);
+
+if (
+  runPostgresMigrationProof
+  && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))
+) {
+  throw new Error(
+    "The hosted mailbox content-retention migration proof requires a local DATABASE_URL.",
+  );
+}
+
+describe.skipIf(!runPostgresMigrationProof)(
+  "hosted mailbox content-retention migration",
+  () => {
+    it("adds nullable mailbox markers without rearming workspace snapshots", async () => {
+      const migrationSql = await readFile(migrationUrl, "utf8");
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+
+      try {
