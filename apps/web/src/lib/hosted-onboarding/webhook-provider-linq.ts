@@ -25,7 +25,7 @@ import {
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
-  ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx,
 } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import {
@@ -1244,28 +1244,45 @@ export async function planHostedOnboardingLinqWebhook(input: {
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
     });
+  const phoneMemberResolution =
+    existingMember === null && participantContact.kind === "phone"
+      ? await ensureHostedMemberForPhoneResolutionTx({
+          phoneNumber: participantContact.value,
+          ...(currentEventInstantStartEligible
+            ? { phoneNumberVerifiedAt: new Date(occurredAt) }
+            : {}),
+          prisma: input.prisma,
+        })
+      : null;
+  const member = existingMember
+    ?? phoneMemberResolution?.member
+    ?? await ensureHostedMemberForPendingLinqParticipantContactTx({
+      contact: participantContact,
+      observedAt: new Date(occurredAt),
+      prisma: input.prisma,
+    });
+  // The earlier identity lookup is not creation authority: a concurrent
+  // signup can commit while this transaction waits on the unique phone insert.
+  // Retry that loser before it can attach this event to the winner's invite.
+  if (
+    currentEventInstantStartEligible
+    && phoneMemberResolution?.created === false
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
+      httpStatus: 503,
+      message: "Murph is resolving another message from this phone. Try again.",
+      retryable: true,
+    });
+  }
   const instantStartAdmissionEventId =
-    existingMember === null && currentEventInstantStartEligible
+    phoneMemberResolution?.created === true && currentEventInstantStartEligible
     ? input.event.event_id
     : pendingInstantStartAdmissionEventId;
   const instantStartEligible = instantStartCandidate
     && assignedPhone !== null
     && assignedPhone === incomingLinePhone
     && instantStartAdmissionEventId !== null;
-  const member = existingMember
-    ?? (participantContact.kind === "phone"
-      ? await ensureHostedMemberForPhoneTx({
-          phoneNumber: participantContact.value,
-          ...(instantStartEligible
-            ? { phoneNumberVerifiedAt: new Date(occurredAt) }
-            : {}),
-          prisma: input.prisma,
-        })
-      : await ensureHostedMemberForPendingLinqParticipantContactTx({
-          contact: participantContact,
-          observedAt: new Date(occurredAt),
-          prisma: input.prisma,
-        }));
 
   if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
     const memberPhone = normalizePhoneNumber(participantPhoneNumber);

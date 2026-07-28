@@ -36,6 +36,17 @@ import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/web
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { createPrismaClient } from "@/src/lib/prisma";
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly:
+      vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -184,7 +195,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("keeps the signup owner when it commits during the first event's classifier wait", async () => {
+    it("keeps the uncommitted signup identity authoritative when the admitted create loses", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
         "https://join.example.test",
@@ -193,7 +204,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES",
         "+1",
       );
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const admitted = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const signup = createPrismaClient({ databaseUrl, poolMax: 1 });
       const uniqueDigits = randomUUID().replaceAll("-", "").slice(0, 7);
       const numericSuffix = String(
         Number.parseInt(uniqueDigits, 16) % 10_000_000,
@@ -208,6 +221,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         `linq-classifier-window-admission-${randomUUID()}`;
       const fallbackEventId =
         `linq-classifier-window-fallback-${randomUUID()}`;
+      const memberId = `hbm_classifier_window_${randomUUID()}`;
       const buildInboundEvent = (input: {
         eventId: string;
         service: "iMessage" | "sms";
@@ -251,15 +265,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         service: "sms",
         text: "Following up",
       });
+      const signupIdentityCreated = createDeferred();
+      const releaseSignup = createDeferred();
+      const admittedPid = createDeferred<number>();
       let lineCreated = false;
-      let memberId: string | null = null;
+      let admittedTransaction:
+        Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>>
+        | null = null;
+      let signupTransaction:
+        Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>>
+        | null = null;
 
       if (!memberPhoneLookupKey || !recipientPhoneLookupKey) {
         throw new Error("Expected valid classifier-window phone inputs.");
       }
 
       try {
-        await prisma.hostedLinqLine.create({
+        await observer.hostedLinqLine.create({
           data: {
             configuredAt: new Date("2026-07-28T11:00:00.000Z"),
             egressPolicy: "enabled",
@@ -273,7 +295,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         lineCreated = true;
 
-        const waitingPlan = await prisma.$transaction(
+        const waitingPlan = await admitted.$transaction(
           (tx) => planHostedOnboardingLinqWebhook({
             event: admissionEvent,
             prisma: tx,
@@ -282,21 +304,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           transactionOptions,
         );
         expect(waitingPlan.firstContactAdmissionRequest).not.toBeNull();
-        await expect(prisma.hostedMemberIdentity.count({
+        await expect(observer.hostedMemberIdentity.count({
           where: { phoneLookupKey: memberPhoneLookupKey },
         })).resolves.toBe(0);
 
-        memberId = `hbm_classifier_window_${randomUUID()}`;
-        await prisma.$transaction(async (tx) => {
+        signupTransaction = signup.$transaction(async (tx) => {
           await tx.hostedMember.create({
             data: {
               billingStatus: HostedBillingStatus.not_started,
-              id: requireString(memberId),
+              id: memberId,
             },
           });
           const identityPrivate =
             await buildHostedMemberIdentityPrivateColumns({
-              memberId: requireString(memberId),
+              memberId,
               phoneNumber: memberPhone,
               prisma: tx,
               privyUserId: null,
@@ -309,25 +330,49 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             data: {
               ...identityPrivate,
               maskedPhoneNumberHint: "*** test",
-              memberId: requireString(memberId),
+              memberId,
               phoneLookupKey: memberPhoneLookupKey,
               phoneNumberVerifiedAt:
                 new Date("2026-07-28T12:00:00.000Z"),
             },
           });
-        }, transactionOptions);
-
-        const fallbackPlan = await prisma.$transaction(
-          (tx) => planHostedOnboardingLinqWebhook({
+          signupIdentityCreated.resolve();
+          await releaseSignup.promise;
+          return planHostedOnboardingLinqWebhook({
             event: fallbackEvent,
             prisma: tx,
-          }),
-          transactionOptions,
-        );
+          });
+        }, transactionOptions);
+        await signupIdentityCreated.promise;
+
+        admittedTransaction = admitted.$transaction(async (tx) => {
+          admittedPid.resolve(await readBackendPid(tx));
+          return planHostedOnboardingLinqWebhook({
+            event: admissionEvent,
+            firstContactAdmissionDecision: {
+              confidence: 0.99,
+              kind: "allow",
+              source: "model",
+            },
+            instantStartAllowed: true,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await admittedPid.promise,
+        });
+        releaseSignup.resolve();
+
+        const fallbackPlan = await signupTransaction;
         expect(fallbackPlan.response.reason).toBe("sent-signup-link");
         expect(fallbackPlan.instantStartEnrollment).toBeUndefined();
+        await expect(admittedTransaction).rejects.toMatchObject({
+          code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
+          retryable: true,
+        });
 
-        const resolvedAdmissionPlan = await prisma.$transaction(
+        const retryPlan = await admitted.$transaction(
           (tx) => planHostedOnboardingLinqWebhook({
             event: admissionEvent,
             firstContactAdmissionDecision: {
@@ -340,14 +385,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }),
           transactionOptions,
         );
-
-        expect(resolvedAdmissionPlan.response.reason).toBe("sent-signup-link");
-        expect(resolvedAdmissionPlan.instantStartEnrollment).toBeUndefined();
-        expect(resolvedAdmissionPlan.desiredSideEffects).toHaveLength(1);
-        expect(resolvedAdmissionPlan.desiredSideEffects[0]?.effectId).toBe(
+        expect(retryPlan.response.reason).toBe("sent-signup-link");
+        expect(retryPlan.instantStartEnrollment).toBeUndefined();
+        expect(retryPlan.desiredSideEffects).toHaveLength(1);
+        expect(retryPlan.desiredSideEffects[0]?.effectId).toBe(
           fallbackPlan.desiredSideEffects[0]?.effectId,
         );
-        await expect(prisma.hostedInvite.findFirst({
+        await expect(observer.hostedInvite.findFirst({
           select: {
             instantStartAdmissionEventId: true,
             sentAt: true,
@@ -357,24 +401,30 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           instantStartAdmissionEventId: null,
           sentAt: null,
         });
-        await expect(prisma.hostedLinqDailyState.findMany({
+        await expect(observer.hostedLinqDailyState.findMany({
           select: { inboundCount: true },
           where: { memberId },
         })).resolves.toEqual([{ inboundCount: 2 }]);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { phoneLookupKey: memberPhoneLookupKey },
+        })).resolves.toBe(1);
       } finally {
-        if (memberId) {
-          await prisma.hostedMember.deleteMany({
-            where: { id: memberId },
-          });
-        }
+        releaseSignup.resolve();
+        await Promise.allSettled([
+          ...(admittedTransaction ? [admittedTransaction] : []),
+          ...(signupTransaction ? [signupTransaction] : []),
+        ]);
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
         if (lineCreated) {
-          await prisma.hostedLinqLine.deleteMany({
+          await observer.hostedLinqLine.deleteMany({
             where: {
               phoneNumberLookupKey: recipientPhoneLookupKey,
             },
           });
         }
-        await disconnectClients([prisma]);
+        await disconnectClients([observer, admitted, signup]);
         vi.unstubAllEnvs();
       }
     });

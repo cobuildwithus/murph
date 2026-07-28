@@ -1271,10 +1271,12 @@ creates the canonical member, verified phone identity, pending route, and invite
 That invite carries only the event id of the persisted model-source allow and is
 the single-owner token for that exact original inbound. Only the transaction
 creating a genuinely new member may mint that token; an existing inactive
-member without the exact same-event token remains on the signup path. While the
-token remains pending, a different inbound for the inactive member exits
-retryably before counting or creating an effect; it cannot continue or cancel
-the admitted start.
+member without the exact same-event token remains on the signup path. The phone
+identity owner reports whether its unique insert actually won; a stale outer
+lookup that loses that insert exits retryably before invite or accounting work.
+While the token remains pending, a different inbound for the inactive member
+exits retryably before counting or creating an effect; it cannot continue or
+cancel the admitted start.
 The existing Stripe/activation owner locks the member, revalidates the exact
 invite and event before any Stripe mutation, then clears the token atomically
 with activation. A second ordinary planner pass counts and appends the original
