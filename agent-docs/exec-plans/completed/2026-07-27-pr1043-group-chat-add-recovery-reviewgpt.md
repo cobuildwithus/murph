@@ -1,6 +1,6 @@
 # PR 1043 Group-Chat Recovery Completion
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -76,19 +76,21 @@ exact final PR head is merge-ready.
 
 1. [x] Inspect the full PR diff, adjacent admission/runtime call paths, prior
    review evidence, current CI failure, and latest `main`.
-2. [ ] Reproduce and correct only proven edge cases; run focused proof and the
-   canonical coverage-bearing verification. Focused proof is green; canonical
-   verification remains.
+2. [x] Reproduce and correct only proven edge cases; run focused proof and the
+   canonical coverage-bearing verification. Focused and canonical proof are
+   green.
 3. [x] Run the required local product-experience review and the one preliminary
    `completion-specialists` ReviewGPT pass; triage and resolve every finding.
    Product-experience review passed. Preliminary ReviewGPT returned three
    accepted test-only coverage findings; all three are resolved and focused
    proof is green.
-4. [ ] Run the parent final review, close this plan with the scoped commit path,
-   and push the exact candidate.
-5. [ ] Run the final ReviewGPT loop concurrently with CI until
-   `ROUND_OUTCOME: PASS`, zero accepted findings, green required checks, and
-   clean mergeability.
+4. [x] Run the parent final review and prepare this plan for the scoped close
+   path. The final review found one newly added prohibited double cast;
+   ReviewGPT supplied the exact remediation patch, and focused plus canonical
+   proof passed after applying it.
+5. [x] Prepare the clean exact candidate and PR intent contract for the final
+   ReviewGPT/CI loop. Per the completion workflow, the final gate runs after
+   this plan is closed and the resulting head is pushed.
 
 ## Evidence
 
@@ -117,10 +119,13 @@ exact final PR head is merge-ready.
   the delayed Linq event.
 - The specialist remediation passes 91 focused tests, scoped ESLint,
   `typecheck:prepared`, and `git diff --check`.
-- Canonical diff verification is still pending. Two bounded local admissions
-  exhausted the shared-slot limit behind unrelated verifier owners; the
-  canonical Crabbox fallback failed before Testbox creation because the
-  installed Blacksmith delegate rejects the dispatcher's `--stop-after` flag.
+- Parent final review found one PR-added `as unknown as` cast in a transaction
+  fixture. ReviewGPT returned a one-file remediation artifact that replaces it
+  with a focused runtime type assertion. The resulting test passes 67 focused
+  cases, scoped ESLint, Web typecheck, and the added-cast scan.
+- Final canonical `pnpm test:diff` verification passed after the ReviewGPT
+  remediation: repository guards, Web typecheck, 6,977 tests across 543 files,
+  lint with zero errors, dev smoke, and the production build.
 
 ## Verification plan
 
@@ -135,3 +140,4 @@ exact final PR head is merge-ready.
   PR; otherwise document the unrelated failure proof and rely on rerun CI.
 - Preliminary specialist and final PR ReviewGPT packets on clean exact pushed
   heads, plus final required GitHub CI and mergeability checks.
+Completed: 2026-07-27
