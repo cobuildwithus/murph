@@ -12,10 +12,19 @@ describe("assistant plan usage call contracts", () => {
 
     expect(contract.length).toBeLessThanOrEqual(380);
     expect(contract).toContain("current private hosted plan");
-    expect(contract).toContain("Call only for an explicit plan, usage, or billing request");
+    expect(contract).toContain("overall AI-usage projection");
+    expect(contract).toContain(
+      "Call only for an explicit plan, usage, billing request",
+    );
     expect(contract).toContain("trusted low-usage context");
     expect(contract).toContain("This is read-only");
+    expect(contract).toContain(
+      "percentages and forecasts cover all available usage",
+    );
+    expect(contract).toContain("expose no allowance/credit-source split");
+    expect(contract).not.toContain("included/purchased");
     expect(contract).toContain("a recommendation or quote is not consent");
+    expect(contract).not.toContain("included-usage projection");
   });
 
   it("keeps subscription authorization and retry semantics in the call contract", () => {

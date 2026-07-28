@@ -79,8 +79,10 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
           createdAt: nowIso,
           eventId: buildHostedDeviceSyncScheduledReconcileWakeEventId({
             connectionId: dueConnection.connectionId,
+            expectedConnectedAt: dueConnection.connectedAt,
             nextReconcileAt: dueConnection.nextReconcileAt,
           }),
+          expectedConnectedAt: dueConnection.connectedAt,
           nextReconcileAt: dueConnection.nextReconcileAt,
           provider: dueConnection.provider,
           traceId: null,

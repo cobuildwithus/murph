@@ -785,6 +785,7 @@ export function createRuntimeTimerSyntheticWake(input: {
 export function buildHostedExecutionDeviceSyncWake(input: {
   connectionId?: string | null;
   eventId: string;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider?: string | null;
@@ -794,6 +795,9 @@ export function buildHostedExecutionDeviceSyncWake(input: {
   return {
     ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
     eventId: input.eventId,
+    ...(input.expectedConnectedAt === undefined
+      ? {}
+      : { expectedConnectedAt: input.expectedConnectedAt }),
     ...(input.hint === undefined ? {} : { hint: input.hint }),
     kind: "device-sync.wake",
     occurredAt: input.occurredAt,

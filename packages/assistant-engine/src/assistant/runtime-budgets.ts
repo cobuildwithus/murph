@@ -122,6 +122,7 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
   let staleQuarantinePruned = 0
   let transcriptRetention = {
     entriesTrimmed: 0,
+    nextEligibleAt: null as string | null,
     transcriptsTrimmed: 0,
   }
   let terminalOutboxPruned = 0
@@ -151,7 +152,9 @@ async function runAssistantRuntimeMaintenanceAtPaths(input: {
       }
     },
     async () => {
-      transcriptRetention = await pruneAssistantTranscriptRetention(input.paths)
+      transcriptRetention = await pruneAssistantTranscriptRetention(input.paths, {
+        now: input.now,
+      })
       if (transcriptRetention.entriesTrimmed > 0) {
         notes.push(
           `${transcriptRetention.entriesTrimmed} transcript entr${transcriptRetention.entriesTrimmed === 1 ? 'y was' : 'ies were'} trimmed across ${transcriptRetention.transcriptsTrimmed} session transcript(s).`,

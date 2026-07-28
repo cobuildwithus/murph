@@ -27,6 +27,7 @@ export {
   hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {
@@ -39,6 +40,7 @@ export {
   listAssistantInputEvents,
   readLatestAssistantInputCursor,
   readAssistantInputEvent,
+  retireAssistantInputEventContent,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,

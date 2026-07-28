@@ -250,6 +250,22 @@ export async function signalHostedRuntimeRecheckRuntime(
   });
 }
 
+export async function signalHostedRetentionRuntimeRecheck(
+  input: SignalHostedRuntimeRecheckInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    prisma: input.prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_recheck_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
 export async function signalHostedDeviceSyncMailboxRuntime(
   input: SignalHostedDeviceSyncMailboxInput,
 ): Promise<HostedRuntimeSignalResult> {

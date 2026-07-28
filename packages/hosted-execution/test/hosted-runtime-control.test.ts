@@ -906,6 +906,8 @@ describe("hosted runtime control contracts", () => {
 
   it("delegates device-sync bridge envelopes to the device-sync runtime owner", () => {
     expect(parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: {
         jobs: [
           {
@@ -920,6 +922,8 @@ describe("hosted runtime control contracts", () => {
       provider: "oura",
       requestId: "device-sync-wake-1",
     })).toEqual({
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: {
         jobs: [
           {

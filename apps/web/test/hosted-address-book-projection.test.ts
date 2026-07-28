@@ -223,6 +223,36 @@ describe("hosted address-book projection lifecycle", () => {
     expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
   });
 
+  it("continues to require active member access for replacement", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    accessMocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(
+      new Error("inactive personal or sponsored billing"),
+    );
+
+    await expect(replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    })).rejects.toThrow("inactive personal or sponsored billing");
+    expect(accessMocks.assertActiveHostedMemberAccessAllowed)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "owner-member",
+        prisma: store,
+      });
+    expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
+      .not.toHaveBeenCalled();
+    expect(store.projection).toBeNull();
+    expect(store.contacts).toEqual([]);
+  });
+
   it("stores only member-scoped phone tokens and resolves owner-only advisory names", async () => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();
@@ -307,7 +337,8 @@ describe("hosted address-book projection lifecycle", () => {
 
   it.each([
     ["advisory gate is disabled", "gate"],
-    ["owner access is inactive", "access"],
+    ["the owner route no longer exists", "missing"],
+    ["the owner is suspended", "suspended"],
     ["owner consent is missing", "consent"],
   ] as const)("omits labels before token lookup when %s", async (_label, condition) => {
     const store = new AddressBookPrismaStub("owner-member");
@@ -326,14 +357,17 @@ describe("hosted address-book projection lifecycle", () => {
       source: SOURCE,
     });
     vi.mocked(crypto.kms.macSign).mockClear();
+    accessMocks.assertActiveHostedMemberAccessAllowed.mockClear();
+    accessMocks.assertHostedLaunchRequiredConsentGranted.mockClear();
 
     const source = condition === "gate"
       ? { ...SOURCE, HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED: "0" }
       : SOURCE;
-    if (condition === "access") {
-      accessMocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(
-        new Error("inactive access"),
-      );
+    if (condition === "missing") {
+      store.threadContainerExists = false;
+    }
+    if (condition === "suspended") {
+      store.ownerSuspendedAt = new Date("2026-07-26T12:01:00.000Z");
     }
     if (condition === "consent") {
       accessMocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(
@@ -347,7 +381,45 @@ describe("hosted address-book projection lifecycle", () => {
       prisma: store as never,
       source,
     })).resolves.toEqual(new Map());
+    expect(accessMocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
+  });
+
+  it("uses a consented unsuspended owner projection without current billing access", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    await replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    });
+    accessMocks.assertActiveHostedMemberAccessAllowed.mockClear();
+    accessMocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(
+      new Error("inactive personal or sponsored billing"),
+    );
+    accessMocks.assertHostedLaunchRequiredConsentGranted.mockClear();
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+12125550100"],
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toEqual(new Map([["+12125550100", "Alex R."]]));
+    expect(accessMocks.assertActiveHostedMemberAccessAllowed)
+      .not.toHaveBeenCalled();
+    expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "owner-member",
+        prisma: store,
+      });
   });
 
   it("omits ambiguous duplicate advisory names", async () => {
@@ -636,8 +708,13 @@ type ContactRow = {
 class AddressBookPrismaStub {
   projection: ProjectionRow | null = null;
   contacts: ContactRow[] = [];
+  ownerSuspendedAt: Date | null = null;
+  threadContainerExists = true;
   readonly hostedThreadContainer: {
-    findUnique: () => Promise<{ ownerMemberId: string }>;
+    findUnique: () => Promise<{
+      owner: { suspendedAt: Date | null };
+      ownerMemberId: string;
+    } | null>;
   };
   readonly hostedAddressBookProjection = {
     findUnique: async () => this.projection
@@ -683,7 +760,12 @@ class AddressBookPrismaStub {
 
   constructor(ownerMemberId: string) {
     this.hostedThreadContainer = {
-      findUnique: async () => ({ ownerMemberId }),
+      findUnique: async () => this.threadContainerExists
+        ? {
+            owner: { suspendedAt: this.ownerSuspendedAt },
+            ownerMemberId,
+          }
+        : null,
     };
   }
 
