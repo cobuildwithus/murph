@@ -83,10 +83,13 @@ describe('assistant group-chat style guidance', () => {
       "An immediate same-purpose same-sender elaboration, statistic, or caption inherits the setup's audience",
     )
     expect(normalized).toContain(
-      'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, do not compose or react yet.',
+      'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, call `finish_without_reply` immediately and do not react.',
     )
     expect(normalized).toContain(
-      'The watch must happen before any assistant output because a later `finish_without_reply` cannot retract a completed reply.',
+      "Do not sleep or watch for a follow-up: native replies and other participants' responses belong to later causal turns",
+    )
+    expect(normalized).toContain(
+      'A later same-purpose caption stays human-owned; a later clear factual or task request or direct Murph address is a new decision unit.',
     )
     expect(normalized).toContain(
       'A new factual or task request or a direct Murph address is evaluated under rule 4 or rule 3',
@@ -98,7 +101,10 @@ describe('assistant group-chat style guidance', () => {
       '"Does anyone know whether that gym still does day passes?" remains eligible under rule 4',
     )
     expect(normalized).toContain(
-      'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat.',
+      'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat, and an audience-unclear unaddressed personal artifact is not genuinely unowned.',
+    )
+    expect(normalized).not.toContain(
+      'Use the existing short foreground watch',
     )
   })
 
