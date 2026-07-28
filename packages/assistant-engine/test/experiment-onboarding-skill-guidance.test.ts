@@ -444,7 +444,7 @@ describe('experiment onboarding skill guidance', () => {
       'Do not silently narrow a multi-modality plan to the machine or activity the user expects to use most often.',
     )
     expect(raw).toContain(
-      'Cycling can be your usual setup, but qualifying walks, rowing, and elliptical sessions count too.',
+      'Cycling can be your usual setup, but walks, rowing, and elliptical sessions of at least 35 minutes count too.',
     )
     expect(raw).toContain('do not create the activity nudge automation')
     expect(raw).toContain('`progress.dataCoverage.activityProviders` is that evidence')

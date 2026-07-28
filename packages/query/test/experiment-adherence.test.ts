@@ -546,6 +546,7 @@ test("repairs a legacy Zone 2 cycling target without snapshot evidence", () => {
         activityKind: "cycling",
         missing: "missed_after_grace",
       },
+      grace: { hours: 24 },
       rollup: {
         targetCompletions: 12,
         minimumUsefulCompletions: 9,
@@ -555,6 +556,52 @@ test("repairs a legacy Zone 2 cycling target without snapshot evidence", () => {
       "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
     runPlan: {
       modality: "Cycling",
+      targetSessions: 12,
+      minimumUsefulSessions: 9,
+    },
+  });
+
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    minimumDurationMinutes: 35,
+    missing: "missed_after_grace",
+  });
+});
+
+test("repairs the historical default Zone 2 target with no modality override", () => {
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: [{
+      targetId: "sustainable-easy-aerobic-volume",
+      label: "sustainable easy aerobic volume",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+        localTime: "07:00",
+        targetCountPerDay: 1,
+      },
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "intervention_session",
+        missing: "assumed_after_grace",
+      },
+      grace: { hours: 24 },
+      rollup: {
+        targetCompletions: 12,
+        minimumUsefulCompletions: 9,
+      },
+    }],
+    protocolKey:
+      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+    runPlan: {
+      modality: "sustainable easy aerobic volume",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "07:00",
+        timeZone: "America/New_York",
+      },
       targetSessions: 12,
       minimumUsefulSessions: 9,
     },
@@ -677,6 +724,50 @@ test("preserves a custom single-mode policy even when its id matches legacy synt
     },
     runPlan: {
       modality: "Cycling",
+    },
+  });
+
+  assert.deepEqual(targets, [explicitTarget]);
+});
+
+test("preserves a custom target whose grace differs from legacy synthesis", () => {
+  const explicitTarget: ExperimentAdherenceTarget = {
+    targetId: "cycling",
+    label: "Cycling",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+      localTime: "07:00",
+      targetCountPerDay: 1,
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cycling",
+      missing: "missed_after_grace",
+    },
+    grace: { hours: 12 },
+    rollup: {
+      targetCompletions: 12,
+      minimumUsefulCompletions: 9,
+    },
+  };
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: [explicitTarget],
+    protocolActivitySessionEvidence: {
+      activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+      minimumDurationMinutes: 35,
+    },
+    runPlan: {
+      modality: "Cycling",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "07:00",
+        timeZone: "America/New_York",
+      },
+      targetSessions: 12,
+      minimumUsefulSessions: 9,
     },
   });
 

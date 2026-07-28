@@ -450,7 +450,7 @@ function truncateBoundedText(
   return value.slice(0, maxLength - 3).trimEnd() + '...'
 }
 
-function buildEffectiveSnapshotFromCommonsProtocol(
+export function buildEffectiveSnapshotFromCommonsProtocol(
   entity: ProtocolVariantEntity,
 ) {
   if (!entity.protocol) {

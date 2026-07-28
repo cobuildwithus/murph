@@ -110,6 +110,12 @@ Updated: 2026-07-28
 - Treat protocol-declared `activitySessionEvidence` and its immutable snapshot
   as the source of truth; retain the Zone 2 key lookup only for saved runs that
   predate that snapshot field.
+- Bound legacy repair by exact equality with the complete historical generated
+  target. Any difference in label, phase, calendar, evidence, grace, or rollup
+  keeps the saved explicit target authoritative.
+- Test the public and private snapshot builders at their owning module
+  boundaries. The public start integration additionally proves that an
+  alternate accepted activity counts while a known short session does not.
 - The coordination ledger referenced by older task instructions is absent from
   current main and was intentionally removed; this active plan is the current
   durable coordination record.
@@ -117,10 +123,12 @@ Updated: 2026-07-28
 ## Verification
 
 - Completed focused proof:
-  - Query adherence and browser/server experiment projections: 189 tests
+  - Query adherence and browser/server experiment projections: 191 tests
     passed.
-  - Managed automations, cron runtime, and onboarding guidance: 236 tests
+  - Managed automations, cron runtime, and onboarding guidance: 238 tests
     passed.
+  - Public/private experiment snapshot and start-boundary proof: 10
+    vault-usecases tests and 39 CLI/hash tests passed.
   - Contracts: 221 tests passed; contract generation and generated-schema
     consistency passed.
   - Health Commons: 92 tests passed; catalog generation consistency passed.
@@ -129,11 +137,14 @@ Updated: 2026-07-28
   - Contracts, query, core, vault-usecases, assistant-engine, Health Commons,
     and CLI package typechecks passed.
   - `git diff --check` and the confidential-evidence/privacy scan passed.
+  - Preliminary ReviewGPT completed on `665da38b3f5b7fcbb715a89a48f016cedb092ff3`;
+    its four findings were resolved through exact legacy matching,
+    production-boundary proof, a self-contained duration example, and exact
+    weekly-to-monthly reconciliation/current-tag coverage.
 - Remaining commands:
   - Prepared runtime build and full CLI generated-artifact confirmation.
   - `pnpm test:diff <final changed paths>`
   - `pnpm verify:acceptance`
-  - Preliminary ReviewGPT specialist review.
   - Final ReviewGPT round(s), `gh pr checks 1055`, and non-mutating merge-tree
     proof against current `origin/main`.
 - Expected outcomes:

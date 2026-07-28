@@ -1,5 +1,6 @@
 import {
   activityTextMatchesKind,
+  experimentAdherenceTargetSchema,
   normalizeActivityKindToken,
   type ExperimentAdherenceEvidenceRule,
   type ExperimentAdherenceTarget,
@@ -199,10 +200,9 @@ export function resolveExperimentAdherenceTargets(input: {
     const explicitTargets = input.explicitTargets.slice();
     if (
       !protocolEvidence ||
-      !explicitTargetsLookLikeLegacySingleModalityTargets(
+      !explicitTargetsMatchLegacyGeneratedTarget(
         explicitTargets,
         input.runPlan,
-        protocolEvidence,
       )
     ) {
       return explicitTargets;
@@ -243,40 +243,25 @@ function resolveProtocolActivitySessionEvidence(input: {
     : null;
 }
 
-function explicitTargetsLookLikeLegacySingleModalityTargets(
+function explicitTargetsMatchLegacyGeneratedTarget(
   targets: readonly ExperimentAdherenceTarget[],
   runPlan: LegacyExperimentRunPlan | null | undefined,
-  protocolEvidence: ResolvedExperimentProtocolActivitySessionEvidence,
 ): boolean {
   if (targets.length !== 1) {
     return false;
   }
   const target = targets[0];
   const synthesized = synthesizeLegacySessionAdherenceTargets({ runPlan })[0];
-  if (
-    !target ||
-    !synthesized ||
-    target.evidence.kind !== "linkedEventCount" ||
-    synthesized.evidence.kind !== "linkedEventCount" ||
-    target.evidence.eventKind !== "activity_session" ||
-    target.evidence.eventKind !== synthesized.evidence.eventKind ||
-    target.evidence.activityKind === undefined ||
-    target.evidence.activityKinds !== undefined ||
-    target.evidence.minimumDurationMinutes !== undefined ||
-    target.evidence.missing !== synthesized.evidence.missing ||
-    target.evidence.partialCredit !== synthesized.evidence.partialCredit
-  ) {
+  if (!target || !synthesized) {
     return false;
   }
 
-  const legacyActivityKind = target.evidence.activityKind;
-  return (
-    target.targetId === synthesized.targetId &&
-    legacyActivityKind === synthesized.evidence.activityKind &&
-    protocolEvidence.activityKinds.some((activityKind) =>
-      activityTextMatchesKind(legacyActivityKind, activityKind)
-    )
-  );
+  // Zod emits both strict targets in the same schema-owned key order. Comparing
+  // those parsed values makes the compatibility repair exact across the full
+  // historical generated shape: label, phase, calendar, evidence, grace, and
+  // rollup. Any custom material difference remains authoritative.
+  return JSON.stringify(experimentAdherenceTargetSchema.parse(target)) ===
+    JSON.stringify(experimentAdherenceTargetSchema.parse(synthesized));
 }
 
 function applyProtocolActivitySessionEvidence(

@@ -1385,6 +1385,77 @@ describe('applyMurphManagedAutomations core integration', () => {
     )
   })
 
+  it('migrates the deployed weekly improvement coach in place to monthly', async () => {
+    const vaultRoot = await createVaultRoot()
+    const existingRoute = {
+      channel: 'telegram' as const,
+      deliveryTarget: 'existing-improvement-thread',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+
+    await upsertAutomation({
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'Run the deployed weekly improvement coach.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 17 * * 2',
+      },
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      summary: 'A weekly check for one clearly actionable health improvement worth working on.',
+      tags: ['murph-managed:weekly-improvement-coach'],
+      title: 'Weekly improvement coach',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const migrated = await showAutomation({
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(migrated).toMatchObject({
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 17 1 * *',
+      },
+      slug: 'weekly-improvement-coach',
+      status: 'active',
+      summary: 'A monthly check for one user-relevant health friction worth offering help with.',
+      title: 'Monthly improvement coach',
+    })
+    expect(migrated?.tags).toContain('murph-managed:monthly-improvement-coach')
+    expect(migrated?.tags).not.toContain('murph-managed:weekly-improvement-coach')
+    expect(migrated?.instructions).toContain('On this scheduled monthly run')
+    await expect(showAutomation({
+      slug: 'weekly-improvement-coach',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      route: existingRoute,
+    })
+    await expect(showAutomation({
+      slug: 'monthly-improvement-coach',
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
   it('preserves a device-activity trigger on an existing weekly health insight', async () => {
     const vaultRoot = await createVaultRoot()
     const existingRoute = {

@@ -852,7 +852,7 @@ function privateProtocolFrontmatterTitle(
   return typeof title === 'string' && title.trim().length > 0 ? title.trim() : undefined
 }
 
-function buildEffectiveProtocolSnapshotFromPrivateProtocol(
+export function buildEffectiveProtocolSnapshotFromPrivateProtocol(
   profile: Awaited<ReturnType<ExperimentJournalVaultCoreRuntime['upsertProtocol']>>['record']['entity'],
 ): z.infer<typeof effectiveProtocolSnapshotSchema> {
   return effectiveProtocolSnapshotSchema.parse(compactObject({
