@@ -253,7 +253,7 @@ their current account links; they are not authority to invoke
 `murph.subscription`.
 
 When discussing a usage-saving model, call it “a less capable model that uses
-less of your included usage.” Do not assume the member knows Luna, Terra, or
+less AI usage.” Do not assume the member knows Luna, Terra, or
 Sol; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
@@ -263,8 +263,9 @@ combines current included capacity with the compact purchased-credit
 projection. When both reach zero, subsequent assistant or eligible system work
 is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
 expired trial entitlement, and existing abuse controls remain separate
-fail-closed reasons. The read-only plan-usage projection remains an
-included-period view and must not be treated as the gate result.
+fail-closed reasons. The read-only plan-usage projection presents that combined
+capacity as one overall available-usage view; it remains a projection and must
+not be treated as the gate result.
 
 Usage accounting may create a period-scoped notice candidate when remaining
 effective capacity reaches zero. Low capacity does not send a standalone
@@ -352,7 +353,7 @@ plan recommendation.
 
 `murph.plan_usage` accepts no arguments. Member identity comes from the signed
 runtime callback, not from the model. Murph may call it only when a member asks
-about their current plan or included usage, explicitly asks to manage billing
+about their current plan or AI usage, explicitly asks to manage billing
 or an unsupported Family account change, or when a trusted runtime instruction
 requests one manual private check. A trusted check authorizes the read only; it
 does not authorize a billing action or a proactive payment link.

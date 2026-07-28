@@ -16,13 +16,19 @@ describe("assistant plan usage tool", () => {
       "current private hosted plan",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "explicit plan, usage, or billing request",
+      "explicit plan, usage, billing request",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
       "trusted low-usage context",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
       "This is read-only",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "overall AI-usage projection",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "not an included/purchased split",
     );
   });
 
@@ -33,7 +39,7 @@ describe("assistant plan usage tool", () => {
       .not.toContain(MURPH_PLAN_USAGE_TOOL);
   });
 
-  it("accepts only empty arguments and reads the bound member status", async () => {
+  it("accepts empty arguments and returns the bound member's overall projection", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -66,9 +72,9 @@ describe("assistant plan usage tool", () => {
           action: "upgrade_edge" as const,
           label: "Upgrade to Edge ($20/month)",
         },
-        remainingPercent: 20,
+        remainingPercent: 24,
         status: "active" as const,
-        usedPercent: 80,
+        usedPercent: 76,
       })),
     };
     const result = await executeMurphDynamicToolRequest({
@@ -82,9 +88,13 @@ describe("assistant plan usage tool", () => {
 
     expect(planUsageTool.read).toHaveBeenCalledOnce();
     expect(result.rpcResult.success).toBe(true);
-    expect(result.rpcResult.contentItems[0]?.text).toContain('"usedPercent":80');
-    expect(result.rpcResult.contentItems[0]?.text).toContain("upgrade_edge");
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
+    const resultText = result.rpcResult.contentItems[0]?.text;
+    expect(resultText).toContain('"usedPercent":76');
+    expect(resultText).toContain('"remainingPercent":24');
+    expect(resultText).not.toContain('"included');
+    expect(resultText).not.toContain('"purchased');
+    expect(resultText).toContain("upgrade_edge");
+    expect(resultText).toContain(
       '"label":"Upgrade to Edge ($20/month)"',
     );
   });
