@@ -181,32 +181,31 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     );
   const shouldResolvePersonalUsageCreditOffers =
     shouldRecommendAction && accessKind === "paid";
-  const [availableSubscriptionAction, personalUsageCreditOfferCodes] =
-    await Promise.all([
-      shouldResolveSubscriptionAction
-        ? resolveAvailableSubscriptionAction({
-            accessKind,
-            memberId: input.memberId,
+  // Referral snapshots also project this status inside an interactive
+  // transaction, whose adapter permits one query at a time.
+  const availableSubscriptionAction = shouldResolveSubscriptionAction
+    ? await resolveAvailableSubscriptionAction({
+        accessKind,
+        memberId: input.memberId,
+        planCode: decision.billingPlanCode,
+        prisma,
+      })
+    : null;
+  const personalUsageCreditOfferCodes = shouldResolvePersonalUsageCreditOffers
+    ? await readHostedPersonalUsageCreditOfferCodes({
+        memberId: input.memberId,
+        prisma,
+      }).catch((error: unknown) => {
+        console.warn(
+          "Hosted personal usage-credit eligibility resolution failed.",
+          sanitizeHostedOnboardingStructuredLogDetails({
+            errorName: error instanceof Error ? error.name : "UnknownError",
             planCode: decision.billingPlanCode,
-            prisma,
-          })
-        : Promise.resolve(null),
-      shouldResolvePersonalUsageCreditOffers
-        ? readHostedPersonalUsageCreditOfferCodes({
-            memberId: input.memberId,
-            prisma,
-          }).catch((error: unknown) => {
-            console.warn(
-              "Hosted personal usage-credit eligibility resolution failed.",
-              sanitizeHostedOnboardingStructuredLogDetails({
-                errorName: error instanceof Error ? error.name : "UnknownError",
-                planCode: decision.billingPlanCode,
-              }),
-            );
-            return [];
-          })
-        : Promise.resolve([]),
-    ]);
+          }),
+        );
+        return [];
+      })
+    : [];
 
   return {
     accessKind,
@@ -328,16 +327,18 @@ async function resolveAvailableSubscriptionAction(input: {
     return null;
   }
 
-  const actionState = await Promise.all([
-    readHostedMemberCoreState({
+  let actionState;
+  try {
+    const member = await readHostedMemberCoreState({
       memberId: input.memberId,
       prisma: input.prisma,
-    }),
-    readHostedMemberBillingEligibilityState({
+    });
+    const billingState = await readHostedMemberBillingEligibilityState({
       memberId: input.memberId,
       prisma: input.prisma,
-    }),
-  ]).catch((error: unknown) => {
+    });
+    actionState = [member, billingState] as const;
+  } catch (error) {
     console.warn(
       "Hosted plan usage action resolution failed.",
       sanitizeHostedOnboardingStructuredLogDetails({
@@ -346,9 +347,6 @@ async function resolveAvailableSubscriptionAction(input: {
         planCode: input.planCode,
       }),
     );
-    return null;
-  });
-  if (!actionState) {
     return null;
   }
 

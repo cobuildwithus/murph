@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
+  requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -136,6 +137,11 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
+  requestHostedGroupCurrentSenderAssistantAsk:
+    mocks.requestHostedGroupCurrentSenderAssistantAsk,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
   admitHostedGroupDisclosurePermissionAppendTx:
     mocks.admitHostedGroupDisclosurePermissionAppendTx,
@@ -154,6 +160,12 @@ vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  buildHostedGroupUsageFundingLocatorForRuntimeMember: (memberId: string) =>
+    `gf1.${memberId}.signature`,
+  buildHostedGroupUsageFundingUrl: (input: {
+    joinCode: string;
+    publicBaseUrl: string;
+  }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -265,6 +277,19 @@ const NEWSLETTER_DEFAULT_SCOPES = [
 ] as const;
 const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
 
+function addressBookLookupResult(
+  names: ReadonlyMap<string, string> = new Map(),
+  outcome = names.size === 0 ? "no_contact_match" : "matched",
+) {
+  return {
+    canonicalHandleCount: 2,
+    contactMatchCount: names.size,
+    names,
+    outcome,
+    requestedHandleCount: 2,
+  };
+}
+
 function groupSummaryWithOwnerEmailGrant() {
   return {
     ...GROUP_SUMMARY,
@@ -282,7 +307,9 @@ describe("handleHostedRuntimeGroupTool", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
     );
@@ -300,7 +327,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -317,6 +346,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           { projectionKind: "hrv-days.v0" },
         ],
         role: "member",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -375,6 +405,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -384,6 +418,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
+      ask_current_sender: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -463,6 +498,42 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
       mailboxItemId: "aask_req_one",
+    });
+  });
+
+  it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "aask_req_current_sender",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "ask_current_sender", origin },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+
+    expect(
+      mocks.requestHostedGroupCurrentSenderAssistantAsk,
+    ).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "aask_req_current_sender",
     });
   });
 
@@ -583,6 +654,9 @@ describe("handleHostedRuntimeGroupTool", () => {
             { projectionKind: "hrv-days.v0" },
           ],
           role: "member",
+          sponsorshipUrl: expect.stringMatching(
+            /^https:\/\/www\.withmurph\.ai\/groups\/fund\/gf1\./u,
+          ),
         }],
         status: "ok",
         truncated: false,
@@ -609,6 +683,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         ownerJoinCode: "join_runners",
         requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
         role: "owner",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -1329,6 +1404,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,
@@ -1351,6 +1427,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,
@@ -1644,7 +1721,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
@@ -2665,10 +2744,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("adds owner-only advisory names independently of Murph activation", async () => {
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map([
-      ["+15550000001", "Registered R."],
-      ["+15550000002", "Alex R."],
-    ]));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map([
+        ["+15550000001", "Registered R."],
+        ["+15550000002", "Alex R."],
+      ])),
+    );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
@@ -2706,11 +2788,27 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       phoneHandles: ["+15550000001", "+15550000002"],
       prisma: expect.anything(),
     });
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 2,
+        contactMatchCount: 2,
+        labelMatchCount: 2,
+        outcome: "matched",
+        requestedHandleCount: 2,
+      },
+    );
+    const diagnostic = JSON.stringify(info.mock.calls);
+    expect(diagnostic).not.toContain("+15550000001");
+    expect(diagnostic).not.toContain("Registered R.");
+    expect(diagnostic).not.toContain("member_container");
+    info.mockRestore();
   });
 
   it("keeps the truthful roster available when advisory lookup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
-      new Error("advisory lookup unavailable"),
+      new Error("sensitive provider detail"),
     );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
@@ -2736,46 +2834,84 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "ok",
       },
     });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup unavailable.",
+      {
+        errorName: "Error",
+        outcome: "lookup_failed",
+      },
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "sensitive provider detail",
+    );
+    warn.mockRestore();
   });
 
-  it("returns the truthful roster when advisory lookup never settles", async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
-        new Promise(() => {}),
-      );
-      mocks.getHostedLinqChatHandles.mockResolvedValue([
-        { handle: "+15557770000", isMe: true, status: "active" },
-        { handle: "+15550000001", isMe: false, status: "active" },
-        { handle: "+15550000002", isMe: false, status: "active" },
-      ]);
-      mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
-        async ({ phoneNumber }) => phoneNumber === "+15550000001"
-          ? { core: { id: "member_participant", suspendedAt: null } }
-          : null,
-      );
+  it.each(["success", "failure"] as const)(
+    "records the deadline once when advisory lookup settles late with %s",
+    async (lateOutcome) => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.useFakeTimers();
+      try {
+        let resolveLookup:
+          ((value: ReturnType<typeof addressBookLookupResult>) => void) | undefined;
+        let rejectLookup: ((reason: Error) => void) | undefined;
+        mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
+          new Promise((resolve, reject) => {
+            resolveLookup = resolve;
+            rejectLookup = reject;
+          }),
+        );
+        mocks.getHostedLinqChatHandles.mockResolvedValue([
+          { handle: "+15557770000", isMe: true, status: "active" },
+          { handle: "+15550000001", isMe: false, status: "active" },
+          { handle: "+15550000002", isMe: false, status: "active" },
+        ]);
+        mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+          async ({ phoneNumber }) => phoneNumber === "+15550000001"
+            ? { core: { id: "member_participant", suspendedAt: null } }
+            : null,
+        );
 
-      const response = handleHostedRuntimeGroupTool({
-        memberId: "member_container",
-        request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
-      });
-      await vi.advanceTimersByTimeAsync(
-        HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
-      );
-      await expect(response).resolves.toEqual({
-        action: "read_chat_participants",
-        result: {
-          participants: [
-            { handle: "+15550000001", hasOwnMurph: true },
-            { handle: "+15550000002", hasOwnMurph: false },
-          ],
-          status: "ok",
-        },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        const response = handleHostedRuntimeGroupTool({
+          memberId: "member_container",
+          request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+        });
+        await vi.advanceTimersByTimeAsync(
+          HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+        );
+        await expect(response).resolves.toEqual({
+          action: "read_chat_participants",
+          result: {
+            participants: [
+              { handle: "+15550000001", hasOwnMurph: true },
+              { handle: "+15550000002", hasOwnMurph: false },
+            ],
+            status: "ok",
+          },
+        });
+        expect(info).toHaveBeenCalledExactlyOnceWith(
+          "Hosted address-book advisory lookup unavailable.",
+          { outcome: "deadline_exceeded" },
+        );
+        if (lateOutcome === "success") {
+          resolveLookup?.(addressBookLookupResult(new Map([
+            ["+15550000001", "Late R."],
+          ])));
+        } else {
+          rejectLookup?.(new Error("sensitive late provider detail"));
+        }
+        await Promise.resolve();
+        expect(info).toHaveBeenCalledTimes(1);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 
   it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

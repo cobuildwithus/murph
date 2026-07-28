@@ -92,6 +92,7 @@ describe("murph.group dynamic tool", () => {
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
+      "ask_current_sender",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",
@@ -1961,6 +1962,7 @@ describe("murph.group dynamic tool", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok" as const,
         truncated: false,

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
@@ -237,9 +237,9 @@ async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRec
   return runtimeSignalModule.signalHostedRetentionRuntimeRecheck;
 }
 
-async function retireExpiredMailboxContent(input: {
+export async function retireExpiredMailboxContent(input: {
   now: Date;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<{
   policyNonReplies: number;
   retired: number;
@@ -253,9 +253,12 @@ async function retireExpiredMailboxContent(input: {
   // An unhandled conversation row becomes an explicit policy non-reply in the
   // same owner row, and its lane watermark advances in the same transaction.
   // That keeps accepted-work terminality durable while both inline and sidecar
-  // ciphertext disappear at the privacy deadline. Both content retirement and
-  // later structural pruning are bounded so an hourly cleanup cannot monopolize
-  // the production pool while a backlog drains.
+  // ciphertext disappear at the privacy deadline. A consumed preference row
+  // from before causal sequencing cannot be updated after the current check
+  // constraint was installed, so retention deletes that already-handled legacy
+  // tombstone directly instead of inventing a causal sequence. Both content
+  // retirement and later structural pruning are bounded so an hourly cleanup
+  // cannot monopolize the production pool while a backlog drains.
   return await runMailboxRetentionBatches(async () => {
     const rows = await input.prisma.$queryRaw<
       Array<{
@@ -271,6 +274,7 @@ async function retireExpiredMailboxContent(input: {
           "lane",
           "lane_seq",
           "kind",
+          "causal_seq",
           "consumed_at"
         FROM "hosted_mailbox_item"
         WHERE "content_retired_at" IS NULL
@@ -282,11 +286,32 @@ async function retireExpiredMailboxContent(input: {
         LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
         FOR UPDATE
       ),
+      legacy_consumed_preferences AS MATERIALIZED (
+        SELECT eligible."id"
+        FROM eligible
+        LEFT JOIN "hosted_mailbox_lane_counter" AS counter
+          ON counter."user_id" = eligible."user_id"
+          AND counter."lane" = eligible."lane"
+        WHERE eligible."kind" = 'member.preferences.updated'
+          AND eligible."causal_seq" IS NULL
+          AND eligible."lane_seq" <= COALESCE(counter."consumed_seq", 0)
+      ),
       removed_sidecars AS (
         DELETE FROM "hosted_mailbox_payload" AS payload
         USING eligible
         WHERE payload."mailbox_item_id" = eligible."id"
+          AND NOT EXISTS (
+            SELECT 1
+            FROM legacy_consumed_preferences AS legacy
+            WHERE legacy."id" = eligible."id"
+          )
         RETURNING payload."mailbox_item_id"
+      ),
+      retired_legacy_preferences AS (
+        DELETE FROM "hosted_mailbox_item" AS item
+        USING legacy_consumed_preferences AS legacy
+        WHERE item."id" = legacy."id"
+        RETURNING item."id"
       ),
       retired AS (
         UPDATE "hosted_mailbox_item" AS item
@@ -311,6 +336,11 @@ async function retireExpiredMailboxContent(input: {
           "updated_at" = ${input.now}
         FROM eligible
         WHERE item."id" = eligible."id"
+          AND NOT EXISTS (
+            SELECT 1
+            FROM legacy_consumed_preferences AS legacy
+            WHERE legacy."id" = eligible."id"
+          )
         RETURNING
           item."id",
           item."user_id",
@@ -380,7 +410,10 @@ async function retireExpiredMailboxContent(input: {
         RETURNING item."id"
       )
       SELECT
-        (SELECT COUNT(*) FROM retired)::bigint AS "retired",
+        (
+          (SELECT COUNT(*) FROM retired)
+          + (SELECT COUNT(*) FROM retired_legacy_preferences)
+        )::bigint AS "retired",
         (
           SELECT COUNT(*)
           FROM retired

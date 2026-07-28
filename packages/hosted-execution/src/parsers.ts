@@ -17,6 +17,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -34,6 +35,7 @@ import type {
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
+  HostedExecutionAssistantNotificationPromptProfile,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -1360,6 +1362,16 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     instructions: requireString(record.instructions, `${label}.instructions`),
+    ...(record.notificationPromptProfile === undefined
+      ? {}
+      : {
+          notificationPromptProfile: record.notificationPromptProfile === null
+            ? null
+            : parseHostedExecutionAssistantNotificationPromptProfile(
+                record.notificationPromptProfile,
+                `${label}.notificationPromptProfile`,
+              ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1372,6 +1384,23 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
   };
+}
+
+function parseHostedExecutionAssistantNotificationPromptProfile(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationPromptProfile {
+  const profile = requireString(value, label);
+  if (
+    HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.includes(
+      profile as HostedExecutionAssistantNotificationPromptProfile,
+    )
+  ) {
+    return profile as HostedExecutionAssistantNotificationPromptProfile;
+  }
+  throw new TypeError(
+    `${label} must be one of ${HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.join(", ")}.`,
+  );
 }
 
 function parseHostedExecutionMemberActivationSignupWelcome(

@@ -10,6 +10,9 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  readHostedActiveGroupRunningBit,
+} from "@/src/lib/hosted-groups/group-sponsorship-store";
+import {
   requireHostedRuntimeMailboxActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
@@ -23,6 +26,7 @@ import {
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -40,6 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
+  const prisma = getPrisma();
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
@@ -57,9 +62,16 @@ export const POST = withJsonError(async (request: Request) => {
     lanes: body.lanes,
     userId,
   });
+  // Sponsorship color is optional; it must never block ordinary mailbox work.
+  const groupRunningBit = await readHostedActiveGroupRunningBit({
+    now: fetchedAt,
+    prisma,
+    runtimeMemberId: userId,
+  }).catch(() => null);
 
   return jsonOk(parseHostedMailboxFetchResponse({
     ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),
+    ...(groupRunningBit ? { groupRunningBit } : {}),
     consumedSeqByLane: projection.consumedSeqByLane,
     fetchedAt: fetchedAt.toISOString(),
     items: projection.items,

@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedActiveGroupRunningBit: vi.fn(),
   readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
@@ -66,6 +67,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
+  readHostedActiveGroupRunningBit: mocks.readHostedActiveGroupRunningBit,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
@@ -223,6 +228,7 @@ describe("hosted runtime internal web routes", () => {
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
+    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
@@ -440,6 +446,69 @@ describe("hosted runtime internal web routes", () => {
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
+  });
+
+  it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-1",
+          expiresAt: null,
+          id: "mailbox_item_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_1",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
+    mocks.readHostedActiveGroupRunningBit.mockRejectedValueOnce(
+      new Error("Optional sponsorship storage unavailable"),
+    );
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        cursorMode: "imported_seq",
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_without_bit",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.groupRunningBit).toBeUndefined();
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      id: "mailbox_item_1",
+      lane: "conversation",
+      laneSeq: "12",
+    });
   });
 
   it("fetches after the local imported watermark while returning the consumed floor", async () => {
@@ -2159,6 +2228,28 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
   });
 
+  it("reports zero persisted logs when deletion wins the diagnostic race", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(0);
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [{
+          at: FIXED_NOW,
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        }],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 0,
+    });
+  });
+
   it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
 
@@ -2397,6 +2488,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "first_codex_output_observed",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2425,6 +2517,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "mailbox_import_done",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2444,6 +2537,25 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(mismatchedAttemptResponse.status).toBe(401);
+
+    const incompleteFenceResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          assistantInputIds: ["input_1"],
+          at: FIXED_NOW,
+          milestone: "first_codex_output_observed",
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "assistant_milestone",
+        },
+      },
+      {
+        "x-hosted-runtime-attempt-id": "attempt_routes_1",
+      },
+    ));
+
+    expect(incompleteFenceResponse.status).toBe(401);
 
     const unsafeResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",

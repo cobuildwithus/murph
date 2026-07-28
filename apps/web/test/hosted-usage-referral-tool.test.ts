@@ -2,17 +2,33 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
+  useRealUsageStatus: false,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
-  readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
+
+vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/src/lib/hosted-execution/usage-status")>();
+  return {
+    ...actual,
+    readHostedPersonalAiUsageStatus: (
+      input: Parameters<typeof actual.readHostedPersonalAiUsageStatus>[0],
+    ) =>
+      mocks.useRealUsageStatus
+        ? actual.readHostedPersonalAiUsageStatus(input)
+        : mocks.readHostedPersonalAiUsageStatus(input),
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
   readHostedMemberAssistantModelPreference:
@@ -37,7 +53,7 @@ type ReferralState = {
     threadId: string;
     threadIsDirect: boolean;
   };
-  status: "armed" | "superseded";
+  status: "armed" | "canceled" | "superseded";
 };
 
 const PERSONAL_SOURCE = {
@@ -49,7 +65,21 @@ const PERSONAL_SOURCE = {
 describe("hosted usage referral tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.useRealUsageStatus = false;
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowed: true,
+      allowanceSource: "direct_trial",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      memberId: "member_personal",
+      periodEnd: new Date("2026-08-04T00:00:00.000Z"),
+      periodStart: new Date("2026-07-28T00:00:00.000Z"),
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 9_000_000n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
       model: "gpt-5.6-terra",
     });
@@ -245,13 +275,78 @@ describe("hosted usage referral tool", () => {
       status: "armed",
     });
   });
+
+  it("serializes every database query inside the arm transaction", async () => {
+    const { prisma } = buildPrisma({ guardTransactionQueries: true });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      action: "arm_usage_referral",
+      result: {
+        outcome: "armed",
+        status: "ok",
+      },
+    });
+  });
+
+  it("commits personal arm and cancel snapshots through the real usage-status graph", async () => {
+    mocks.useRealUsageStatus = true;
+    const { peakTransactionQueries, prisma, referrals } = buildPrisma({
+      guardTransactionQueries: true,
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "armed",
+        status: "ok",
+      },
+    });
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "cancel_usage_referral",
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "canceled",
+        status: "ok",
+      },
+    });
+
+    expect(referrals).toHaveLength(1);
+    expect(referrals[0]?.status).toBe("canceled");
+    expect(peakTransactionQueries()).toBe(1);
+  });
 });
 
-function buildPrisma(): {
+function buildPrisma(input: {
+  guardTransactionQueries?: boolean;
+} = {}): {
+  peakTransactionQueries: () => number;
   prisma: Record<string, unknown>;
   referrals: ReferralState[];
 } {
   const referrals: ReferralState[] = [];
+  const transactionQueryTracker = { active: 0, peak: 0 };
   const referralDelegate = {
     aggregate: vi.fn(async () => ({ _sum: { rewardUsdMicros: null } })),
     count: vi.fn(async () => 0),
@@ -267,7 +362,25 @@ function buildPrisma(): {
         .find((referral) => referral.status === "armed")
         ?? null
     ),
-    updateMany: vi.fn(async () => {
+    update: vi.fn(async (input: {
+      data: Partial<ReferralState>;
+      where: { id: string };
+    }) => {
+      const referral = referrals.find((candidate) =>
+        candidate.id === input.where.id
+      );
+      if (!referral) {
+        throw new Error("Referral was not found.");
+      }
+      Object.assign(referral, input.data);
+      return referral;
+    }),
+    updateMany: vi.fn(async (input: {
+      data?: { status?: ReferralState["status"] | "expired" };
+    }) => {
+      if (input.data?.status !== "superseded") {
+        return { count: 0 };
+      }
       let count = 0;
       for (const referral of referrals) {
         if (referral.status === "armed") {
@@ -287,11 +400,93 @@ function buildPrisma(): {
     }]),
     $transaction: vi.fn(async (
       callback: (tx: Record<string, unknown>) => Promise<unknown>,
-    ) => callback(prisma)),
+    ) => callback(
+      input.guardTransactionQueries
+        ? createSingleQueryTransactionClient(prisma, transactionQueryTracker)
+        : prisma,
+    )),
+    hostedAiUsage: {
+      findFirst: vi.fn(async () => null),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        billingStatus: "active",
+        createdAt: new Date("2026-07-28T00:00:00.000Z"),
+        id: "member_personal",
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-28T12:00:00.000Z"),
+      })),
+    },
+    hostedMemberBillingRef: {
+      findUnique: vi.fn(async () => ({
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        stripeCustomerLookupKey: "customer_lookup",
+        stripeSubscriptionLookupKey: "subscription_lookup",
+      })),
+    },
     hostedThreadContainer: {
       findUnique: vi.fn(async () => null),
     },
     hostedUsageReferral: referralDelegate,
   };
-  return { prisma, referrals };
+  return {
+    peakTransactionQueries: () => transactionQueryTracker.peak,
+    prisma,
+    referrals,
+  };
+}
+
+function createSingleQueryTransactionClient(
+  prisma: Record<string, unknown>,
+  tracker: { active: number; peak: number },
+): Record<string, unknown> {
+  const guard = async <Result>(
+    operation: () => Promise<Result>,
+  ): Promise<Result> => {
+    if (tracker.active !== 0) {
+      throw new Error("Concurrent transaction query started.");
+    }
+    tracker.active += 1;
+    tracker.peak = Math.max(tracker.peak, tracker.active);
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      return await operation();
+    } finally {
+      tracker.active -= 1;
+    }
+  };
+
+  return {
+    $executeRaw: (...args: never[]) =>
+      guard(() =>
+        (prisma.$executeRaw as (...args: never[]) => Promise<unknown>)(...args)
+      ),
+    $queryRaw: (...args: never[]) =>
+      guard(() =>
+        (prisma.$queryRaw as (...args: never[]) => Promise<unknown>)(...args)
+      ),
+    ...Object.fromEntries([
+      "hostedAiUsage",
+      "hostedMember",
+      "hostedMemberBillingRef",
+      "hostedThreadContainer",
+      "hostedUsageReferral",
+    ].map((delegateName) => {
+      const delegate = prisma[delegateName] as Record<
+        string,
+        (...args: never[]) => Promise<unknown>
+      >;
+      return [
+        delegateName,
+        Object.fromEntries(
+          Object.entries(delegate).map(([key, operation]) => [
+            key,
+            (...args: never[]) => guard(() => operation(...args)),
+          ]),
+        ),
+      ];
+    })),
+  };
 }

@@ -17,10 +17,17 @@ export type HostedOnboardingLinqGroupRosterReconcile = {
   containerMemberId: string;
 };
 
+export type HostedLinqInstantStartEnrollment = {
+  admissionEventId: string;
+  inviteCode: string;
+  memberId: string;
+};
+
 export type HostedOnboardingLinqDirectPlan =
   HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>
   & {
     firstContactAdmissionParticipantContact?: HostedLinqParticipantContact;
     firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest;
+    instantStartEnrollment?: HostedLinqInstantStartEnrollment;
     postCommitGroupRosterReconciles?: readonly HostedOnboardingLinqGroupRosterReconcile[];
   };
