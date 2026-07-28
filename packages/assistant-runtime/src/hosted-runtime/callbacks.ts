@@ -2290,8 +2290,19 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
 
+  const reviewedCompletion = input.intent
+    && isHostedReviewedAssistantAskCompletionIntent(input.intent)
+    ? input.intent
+    : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
   if (!authority && !input.intent?.automationAuthority) {
+    if (reviewedCompletion) {
+      throw new VaultCliError(
+        "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
+        "Reviewed Assistant Ask completion requires its original Telegram route authority.",
+        { retryable: false },
+      );
+    }
     return null;
   }
   if (!authority) {
@@ -2322,10 +2333,6 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
       { retryable: true },
     );
   }
-  const reviewedCompletion = input.intent
-    && isHostedReviewedAssistantAskCompletionIntent(input.intent)
-    ? input.intent
-    : null;
   if (
     reviewedCompletion
     && (

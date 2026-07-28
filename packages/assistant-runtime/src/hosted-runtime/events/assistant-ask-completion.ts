@@ -16,6 +16,7 @@ import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   type HostedExecutionAssistantAskCompletedWake,
+  type HostedExecutionTelegramExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 
 import {
@@ -106,6 +107,25 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   ) {
     return createOutcome();
   }
+  const reviewedTelegramRouteAuthority:
+    HostedExecutionTelegramExternalThreadRouteAuthority | null =
+      reviewedExact
+      && route.channel === "telegram"
+      && origin.sourceMetadata?.kind === "telegram"
+      && origin.sourceMetadata.externalThreadRouteAuthorityPresent === true
+        ? {
+            channel: "telegram",
+            containerMemberId: input.wake.userId,
+            threadId: route.deliveryTarget,
+          }
+        : null;
+  if (
+    reviewedExact
+    && route.channel === "telegram"
+    && !reviewedTelegramRouteAuthority
+  ) {
+    return createOutcome();
+  }
   if (!canCommit()) {
     return createOutcome();
   }
@@ -175,6 +195,12 @@ export async function executeHostedAssistantAskCompletedWake(input: {
           ? {
               reviewedAssistantAskCompletionExpiresAt:
                 input.wake.ask.expiresAt,
+            }
+          : {}),
+        ...(reviewedTelegramRouteAuthority
+          ? {
+              outboxExternalThreadRouteAuthority:
+                reviewedTelegramRouteAuthority,
             }
           : {}),
         sandbox: "read-only",

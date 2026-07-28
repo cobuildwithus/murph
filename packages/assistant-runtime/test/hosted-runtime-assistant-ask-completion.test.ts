@@ -413,6 +413,129 @@ describe("hosted assistant ask completion", () => {
     }
   });
 
+  it("binds a reviewed Telegram completion to the exact authenticated group route", async () => {
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), "hosted-assistant-ask-reviewed-telegram-"),
+    );
+
+    try {
+      const { origin, session } = await createCompletionOriginSession({
+        channel: "telegram",
+        externalThreadRouteAuthorityPresent: true,
+        suffix: "reviewed-telegram",
+        threadIsDirect: false,
+        vault,
+      });
+      const eventId = "aask_done_reviewed_telegram";
+      const answer = "Reviewed Telegram answer.";
+      const wake = buildHostedExecutionAssistantAskCompletedWake({
+        ask: {
+          expiresAt: "2099-07-15T12:10:00.000Z",
+          origin: {
+            assistantInputId: origin.inputId,
+            kind: "accepted_input",
+            sessionId: session.sessionId,
+          },
+          question: "What information is available to this group?",
+          requestId: "aask_req_reviewed_telegram",
+          result: {
+            answer,
+            outcome: "answered",
+          },
+          targetLabel: null,
+        },
+        eventId,
+        memberId: "member-telegram-group-runtime",
+        occurredAt: "2026-07-15T12:05:00.000Z",
+      });
+      completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
+      completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
+      completionMocks.sendAssistantNotification.mockImplementation(async (input) => {
+        await input.beforeCommit?.({
+          decision: {
+            kind: "send_message",
+            privateSummary: "Sent required exact notification text.",
+            text: answer,
+          },
+          deliveryOutcome: null,
+          response: answer,
+        });
+      });
+
+      await executeHostedAssistantAskCompletedWake({
+        executionContext: { hosted: null },
+        sourceMailboxItemId: eventId,
+        vaultRoot: vault,
+        wake,
+      });
+
+      expect(completionMocks.sendAssistantNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bindingDeliveryTarget: "conversation-reviewed-telegram",
+          channel: "telegram",
+          outboxExternalThreadRouteAuthority: {
+            channel: "telegram",
+            containerMemberId: "member-telegram-group-runtime",
+            threadId: "conversation-reviewed-telegram",
+          },
+          threadId: "conversation-reviewed-telegram",
+          threadIsDirect: false,
+        }),
+      );
+    } finally {
+      await rm(vault, { force: true, recursive: true });
+    }
+  });
+
+  it("does not queue a reviewed Telegram completion without authenticated group-route evidence", async () => {
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), "hosted-assistant-ask-unscoped-telegram-"),
+    );
+
+    try {
+      const { origin, session } = await createCompletionOriginSession({
+        channel: "telegram",
+        suffix: "unscoped-telegram",
+        threadIsDirect: false,
+        vault,
+      });
+      const wake = buildHostedExecutionAssistantAskCompletedWake({
+        ask: {
+          expiresAt: "2099-07-15T12:10:00.000Z",
+          origin: {
+            assistantInputId: origin.inputId,
+            kind: "accepted_input",
+            sessionId: session.sessionId,
+          },
+          question: "What information is available to this group?",
+          requestId: "aask_req_unscoped_telegram",
+          result: {
+            answer: "This must not be queued.",
+            outcome: "answered",
+          },
+          targetLabel: null,
+        },
+        eventId: "aask_done_unscoped_telegram",
+        memberId: "member-telegram-group-runtime",
+        occurredAt: "2026-07-15T12:05:00.000Z",
+      });
+      completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
+      completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
+
+      await expect(executeHostedAssistantAskCompletedWake({
+        executionContext: { hosted: null },
+        vaultRoot: vault,
+        wake,
+      })).resolves.toMatchObject({
+        mailboxLane: "assistant-ask-completion",
+      });
+
+      expect(completionMocks.sendAssistantNotification).not.toHaveBeenCalled();
+    } finally {
+      await rm(vault, { force: true, recursive: true });
+    }
+  });
+
   it("settles reviewed exact delivery when the grant expires before commit", async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), "hosted-assistant-ask-reviewed-expiry-"),
@@ -520,6 +643,7 @@ describe("hosted assistant ask completion", () => {
 
 async function createCompletionOriginSession(input: {
   channel?: "linq" | "telegram";
+  externalThreadRouteAuthorityPresent?: boolean;
   suffix: string;
   threadIsDirect: boolean;
   vault: string;
@@ -545,6 +669,25 @@ async function createCompletionOriginSession(input: {
         messageId: `message-${input.suffix}`,
         threadId,
       },
+      ...(input.externalThreadRouteAuthorityPresent
+        ? {
+            sourceMetadata: channel === "telegram"
+              ? {
+                  externalThreadRouteAuthorityPresent: true,
+                  kind: "telegram" as const,
+                  mediaGroupId: null,
+                  replyContext: null,
+                }
+              : {
+                  externalThreadRouteAuthorityPresent: true,
+                  kind: "linq" as const,
+                  partCount: 1,
+                  reactionEligible: false,
+                  replyToMessageId: null,
+                  service: "imessage",
+                },
+          }
+        : {}),
       sourceRef: {
         causalSeq: null,
         dedupeKey: `dedupe-${input.suffix}`,

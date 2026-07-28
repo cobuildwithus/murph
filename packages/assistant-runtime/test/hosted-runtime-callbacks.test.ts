@@ -7961,6 +7961,73 @@ describe("hosted runtime callbacks", () => {
     ).toBeLessThan(mocks.sendTelegramMessage.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it("blocks a reviewed Telegram completion whose persisted route authority is missing", async () => {
+    const completionId = "aask_done_telegram_missing_authority";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const reviewedAnswer = "Reviewed private answer that must not be sent.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "telegram_group_123",
+      idempotencyKey,
+      message: reviewedAnswer,
+      threadId: "telegram_group_123",
+      threadIsDirect: false,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      bindingDelivery: {
+        kind: "thread",
+        target: "telegram_group_123",
+      },
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      externalThreadRouteAuthority: null,
+      intentId: effect.effectId,
+      media: [],
+      message: reviewedAnswer,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendTelegram({
+          idempotencyKey,
+          message: reviewedAnswer,
+          replyToMessageId: null,
+          target: "telegram_group_123",
+        });
+        throw new Error("unreachable without reviewed completion authority");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_ASK_COMPLETION_ROUTE_UNAVAILABLE",
+      context: expect.objectContaining({ retryable: false }),
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
   it("retries a stale reviewed Telegram answer with the durable fixed fallback", async () => {
     const completionId = "aask_done_telegram_stale_authority";
     const expiresAt = "2099-04-08T00:15:00.000Z";
