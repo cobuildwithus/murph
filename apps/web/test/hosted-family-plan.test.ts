@@ -3911,6 +3911,62 @@ describe("hosted Family plan", () => {
     expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
+  it.each(["canceled", "incomplete_expired"] as const)(
+    "releases the bound Family subscription after %s",
+    async (terminalStatus) => {
+      const tx = createTxMock();
+
+      await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        },
+        subscription: makeFamilyStripeSubscription({
+          status: terminalStatus,
+        }),
+        tx,
+      })).resolves.toEqual({
+        activations: [],
+        groupId: "hbag_family",
+      });
+
+      expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            billedSeatCount: null,
+            currentBillingPhase: null,
+            currentPeriodEnd: null,
+            currentPeriodStart: null,
+            stripeSubscriptionIdEncrypted: null,
+            stripeSubscriptionItemIdEncrypted: null,
+            stripeSubscriptionItemLookupKey: null,
+            stripeSubscriptionLookupKey: null,
+          }),
+          update: expect.objectContaining({
+            billedSeatCount: null,
+            currentBillingPhase: null,
+            currentPeriodEnd: null,
+            currentPeriodStart: null,
+            stripeSubscriptionIdEncrypted: null,
+            stripeSubscriptionItemIdEncrypted: null,
+            stripeSubscriptionItemLookupKey: null,
+            stripeSubscriptionLookupKey: null,
+          }),
+        }),
+      );
+      expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+        data: {
+          billingStatus: HostedBillingStatus.canceled,
+        },
+        where: {
+          id: "hbag_family",
+        },
+      });
+      expect(tx.hostedAccountGroupPlanCapacity.deleteMany).toHaveBeenCalledWith({
+        where: { groupId: "hbag_family" },
+      });
+    },
+  );
+
   it("releases direct and Family retry after incomplete_expired without allowing an older reclaim", async () => {
     const terminalEventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
     const group = {
@@ -4764,7 +4820,14 @@ describe("hosted Family plan", () => {
       }),
     );
     webhookTx.hostedMemberBillingRef.findUnique.mockResolvedValue(
-      createMemberBillingRefMock({ stripeSubscriptionIdEncrypted: "encrypted:sub_direct" }),
+      createMemberBillingRefMock({
+        checkoutAttemptId: "attempt_A",
+        checkoutCreatedAt: new Date("2026-07-14T11:55:00.000Z"),
+        checkoutIntentHash: "intent_A",
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_S",
+        stripeCheckoutSessionLookupKey: "hbidx:stripe-checkout-session:v1:S",
+        stripeSubscriptionIdEncrypted: "encrypted:sub_direct",
+      }),
     );
     const eventCreatedAt = new Date("2026-07-14T12:00:00.000Z");
 
@@ -4798,8 +4861,13 @@ describe("hosted Family plan", () => {
     });
     expect(webhookTx.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutIntentHash: null,
         currentBillingPhase: null,
         currentBillingPlanCode: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
         stripeCustomerLookupKey: null,
         stripeSubscriptionLookupKey: null,
       }),
@@ -5720,12 +5788,20 @@ function createBillingRefMock(overrides: Partial<{
 }
 
 function createMemberBillingRefMock(overrides: Partial<{
+  checkoutAttemptId: string | null;
+  checkoutCreatedAt: Date | null;
+  checkoutIntentHash: string | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
+  stripeCheckoutSessionIdEncrypted: string | null;
+  stripeCheckoutSessionLookupKey: string | null;
   stripeCustomerIdEncrypted: string | null;
   stripeSubscriptionIdEncrypted: string | null;
 }> = {}) {
   return {
+    checkoutAttemptId: overrides.checkoutAttemptId ?? null,
+    checkoutCreatedAt: overrides.checkoutCreatedAt ?? null,
+    checkoutIntentHash: overrides.checkoutIntentHash ?? null,
     currentBillingPhase: overrides.currentBillingPhase ?? "paid",
     currentBillingPlanCode: overrides.currentBillingPlanCode ?? "launch_monthly",
     currentCheckoutOffer: "standard",
@@ -5739,6 +5815,10 @@ function createMemberBillingRefMock(overrides: Partial<{
     pulseTrialRedeemedAt: null,
     scheduledBillingEffectiveAt: null,
     scheduledBillingPlanCode: null,
+    stripeCheckoutSessionIdEncrypted:
+      overrides.stripeCheckoutSessionIdEncrypted ?? null,
+    stripeCheckoutSessionLookupKey:
+      overrides.stripeCheckoutSessionLookupKey ?? null,
     stripeCustomerIdEncrypted: overrides.stripeCustomerIdEncrypted ?? "encrypted:cus_direct",
     stripeCustomerLookupKey: "hbidx:stripe-customer:v1:direct",
     stripeSubscriptionIdEncrypted: overrides.stripeSubscriptionIdEncrypted ?? "encrypted:sub_direct",

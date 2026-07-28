@@ -2443,6 +2443,9 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
   });
   await input.tx.hostedMemberBillingRef.updateMany({
     data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
       currentBillingPhase: null,
       currentBillingPlanCode: null,
       currentCheckoutOffer: null,
@@ -2452,6 +2455,8 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
       currentTrialStartedAt: null,
       scheduledBillingEffectiveAt: null,
       scheduledBillingPlanCode: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
       stripeCustomerIdEncrypted: null,
       stripeCustomerLookupKey: null,
       stripeSubscriptionIdEncrypted: null,

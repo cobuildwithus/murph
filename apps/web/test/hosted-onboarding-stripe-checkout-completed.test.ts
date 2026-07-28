@@ -413,11 +413,13 @@ describe("applyStripeCheckoutCompleted", () => {
     async (terminalStatus) => {
       const clearedDirectProjection = makeMemberSnapshot({
         billingRef: {
-          checkoutAttemptId: "attempt_new_retry",
+          checkoutAttemptId: null,
+          checkoutCreatedAt: null,
+          checkoutIntentHash: null,
           currentCheckoutOffer: null,
           lastStripeEventCreatedAt: new Date("2025-04-12T00:30:00.000Z"),
           memberId: "member_123",
-          stripeCheckoutSessionId: "cs_new_retry",
+          stripeCheckoutSessionId: null,
           stripeCustomerId: null,
           stripeSubscriptionId: null,
         },
@@ -471,7 +473,7 @@ describe("applyStripeCheckoutCompleted", () => {
             source === "browser" ? canonicalFamilySubscription : "sub_123",
         };
 
-        await expect(applyStripeCheckoutCompleted(
+        const outcome = await applyStripeCheckoutCompleted(
           session as never,
           tx as never,
           {
@@ -484,12 +486,18 @@ describe("applyStripeCheckoutCompleted", () => {
             sourceType: "stripe.checkout.session.completed",
           },
           undefined,
-        )).resolves.toEqual({
+        );
+        expect(outcome).toEqual({
           activatedMemberId: null,
           activatedMembers: [],
           hostedExecutionEventId: null,
           welcomeEmailMemberId: null,
         });
+        // The reconciliation owner only starts loser cancel/refund cleanup when
+        // this identifier is returned.
+        expect(outcome).not.toHaveProperty(
+          "cleanupStandardCheckoutStripeSubscriptionId",
+        );
       }
 
       expect(tx.hostedAccountGroup.findUnique).toHaveBeenCalledTimes(2);
@@ -500,7 +508,11 @@ describe("applyStripeCheckoutCompleted", () => {
         .toHaveBeenCalledTimes(2);
       expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
       expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+      expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
       expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+      expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx)
+        .not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     },
   );
 

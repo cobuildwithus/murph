@@ -328,6 +328,72 @@ describe("createHostedBillingCheckout", () => {
     );
   });
 
+  it("creates a fresh direct Checkout after terminal Family release clears the old handoff", async () => {
+    const checkoutStartedAt = new Date("2026-07-27T12:40:00.000Z");
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      billingRef: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutIntentHash: null,
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        lastStripeEventCreatedAt: new Date("2026-07-27T12:30:00.000Z"),
+        memberId: "member_123",
+        ...(await buildHostedMemberBillingPrivateColumns({
+          memberId: "member_123",
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+        })),
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripeCustomerLookupKey: null,
+        stripeSubscriptionLookupKey: null,
+      },
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: checkoutStartedAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          checkoutAttemptId: expect.any(String),
+          checkoutIntentHash: expect.stringMatching(/^[a-f0-9]{32}$/),
+          memberId: "member_123",
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith({
+      create: expect.objectContaining({
+        checkoutAttemptId: expect.any(String),
+        checkoutCreatedAt: checkoutStartedAt,
+        checkoutIntentHash: expect.stringMatching(/^[a-f0-9]{32}$/),
+        memberId: "member_123",
+      }),
+      update: {
+        checkoutAttemptId: expect.any(String),
+        checkoutCreatedAt: checkoutStartedAt,
+        checkoutIntentHash: expect.stringMatching(/^[a-f0-9]{32}$/),
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+  });
+
   it("creates checkout for the selected Edge monthly plan", async () => {
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_edge_monthly",
