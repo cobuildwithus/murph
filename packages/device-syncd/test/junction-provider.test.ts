@@ -11476,6 +11476,70 @@ test("Junction queued large direct resource payloads import inline without REST 
   assert.deepEqual(snapshot.timeseries, {});
 });
 
+test("Junction accepted inline summaries import before runner resource configuration fallback", async () => {
+  for (const testCase of [
+    {
+      eventType: "daily.data.meal.created",
+      label: "no configured event fallback",
+    },
+    {
+      eventType: "daily.data.sleep.created",
+      label: "different configured event fallback",
+    },
+  ]) {
+    const requests: string[] = [];
+    const importedSnapshots: unknown[] = [];
+    // Model independent Web/runner configuration authorities: Web already
+    // admitted a meal carrier, while this runner enables only sleep.
+    const provider = createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+    });
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        eventType: testCase.eventType,
+        objectId: `meal-${testCase.label}`,
+        occurredAt: "2026-04-02T12:00:00.000Z",
+        resource: "meal",
+        resourceCategory: "summary",
+        sourceProviderSlug: "garmin",
+        webhookDataJson: JSON.stringify({
+          calories: 640,
+          date: "2026-04-02",
+          id: `meal-inline-${testCase.label}`,
+          sourceProviderSlug: "garmin",
+        }),
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(requests, [], testCase.label);
+    assert.equal(importedSnapshots.length, 1, testCase.label);
+    const snapshot = importedSnapshots[0] as {
+      summaries?: Record<string, Array<Record<string, unknown>>>;
+    };
+    assert.equal(
+      snapshot.summaries?.meal?.[0]?.id,
+      `meal-inline-${testCase.label}`,
+      testCase.label,
+    );
+    assert.equal(snapshot.summaries?.sleep, undefined, testCase.label);
+  }
+});
+
 test("Junction companion health metadata jobs import one closed unverified HealthKit observation batch", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];

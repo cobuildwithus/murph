@@ -83,6 +83,11 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import {
+  pruneAssistantTranscriptRetention,
+  replaceTranscriptEntries,
+} from '../src/assistant/store/persistence.js'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../src/assistant/turn-finalizer.js'
@@ -3158,6 +3163,112 @@ describe('assistant Codex turn planning', () => {
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
       ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('keeps recent legacy user and assistant history paired for fresh and stale-resume fallback', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-legacy-transcript-'))
+    const sessionId = 'session-test'
+    const history = [
+      {
+        createdAt: '2026-07-24T00:00:00.000Z',
+        kind: 'user' as const,
+        schema: 'murph.assistant-transcript-entry.v1' as const,
+        text: 'Recent legacy member context.',
+      },
+      {
+        createdAt: '2026-07-24T00:01:00.000Z',
+        kind: 'assistant' as const,
+        schema: 'murph.assistant-transcript-entry.v1' as const,
+        text: 'Recent paired assistant context.',
+      },
+    ]
+    const expectedHistory = [
+      {
+        content: 'Recent legacy member context.',
+        role: 'user' as const,
+      },
+      {
+        content: 'Recent paired assistant context.',
+        role: 'assistant' as const,
+      },
+    ]
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    try {
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        sessionId,
+        history,
+      )
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-07-25T00:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 0,
+        transcriptsTrimmed: 0,
+      })
+
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const freshPlan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-07-25',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: createSession({
+          turnCount: 1,
+        }),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(freshPlan.resume).toBeNull()
+      expect(freshPlan.conversationHistoryMessages).toEqual(expectedHistory)
+
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: true,
+      })
+      const staleResumePlan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-07-25',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: createSession({
+          resumeState: {
+            assistantContractFingerprint: '0'.repeat(64),
+            routeFingerprint: 'stale-route',
+            threadId: 'thread-stale-legacy-context',
+          },
+          turnCount: 1,
+        }),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(staleResumePlan.resume).toBeNull()
+      expect(staleResumePlan.conversationHistoryMessages).toEqual(expectedHistory)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

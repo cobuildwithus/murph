@@ -208,8 +208,23 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `updatedAt` epoch. Seeded connection flows carry that same revision in their
    one-time state and recheck it inside the existing upsert transaction, so an
    old callback cannot adopt, replace, or fail a newer reconnect. Stale work
-   therefore cannot clear a newer local connection or token. Recovery does not
-   use an automatic export endpoint, operator action, or vendor support.
+   therefore cannot clear a newer local connection or token. A replacement
+   `connectedAt` epoch also supersedes every connection-epoch-scoped durable
+   effect: Web revalidates webhook admission and clears old fetch/control dirty
+   work under the connection lock and dirty-marker row lock, while runtime
+   hydration retires matching queued, retryable, and leased jobs inside the
+   credential-replacement transaction. Already accepted import carriers that
+   do not consume the replaced connection credentials remain pending:
+   Oura/WHOOP/Strava tombstones, companion HRV and health metadata, and Junction
+   summary payloads whose inline source provenance is sufficient for direct
+   import. Inline-looking Junction jobs that must fall back to a provider fetch
+   remain connection-epoch scoped. Junction owns that exact inline predicate
+   beside its importer-backed executor. Web dynamically invokes the same public
+   predicate during reconnect cleanup; hosted runtime hydration loads it per
+   turn and passes it into the existing SQLite credential-replacement
+   transaction. Both paths keep provider/importer modules out of their static
+   boot closures. Recovery does not use an automatic export endpoint, operator
+   action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub
    therefore updates the same local account instead of leaving the old account

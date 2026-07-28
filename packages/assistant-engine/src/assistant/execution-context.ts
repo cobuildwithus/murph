@@ -28,6 +28,7 @@ import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
+import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
@@ -344,6 +345,23 @@ export interface AssistantHostedGeneratedImageUploader {
   ): Promise<AssistantResponseMedia>
 }
 
+export interface AssistantHostedImageGenerationResult {
+  media: AssistantResponseMedia | null
+  runtimeIssue: AssistantRuntimeIssueInput | null
+  savedImageRef: string | null
+}
+
+export interface AssistantHostedImageGenerationLauncher {
+  launch(input: {
+    operationId: string
+    originAssistantInputId: string
+    run(
+      signal: AbortSignal,
+      persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
+    ): Promise<AssistantHostedImageGenerationResult>
+  }): 'already-started' | 'started'
+}
+
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -391,6 +409,7 @@ export interface AssistantHostedExecutionContext {
   dynamicContextPrompts?: readonly string[] | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   generatedImageUploaderRequired?: boolean | null
+  imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
@@ -501,6 +520,9 @@ export function normalizeAssistantExecutionContext(
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(hosted?.imageGenerationLauncher
+        ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
+        : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupParticipantDisplayNameReader

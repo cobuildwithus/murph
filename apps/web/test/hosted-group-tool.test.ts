@@ -399,6 +399,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
       ask_member: "participant_aware",
+      arm_usage_referral: "participant_aware",
+      cancel_usage_referral: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
@@ -410,6 +412,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_participant_display_names: "participant_aware",
       revoke_disclosure_grant: "personal_active",
       read_usage: "participant_aware",
+      read_usage_referral: "participant_aware",
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
@@ -2694,7 +2697,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("classifies chat participants by durable Murph activation and skips the line and departed handles", async () => {
+  it("reconciles the SMS-admitted participant read before denying its effectful follow-up", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -2750,9 +2753,23 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         removedAt: null,
       },
     });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card" },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledTimes(1);
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
-  it("adds owner-only advisory names only to unregistered phone participants", async () => {
+  it("adds owner-only advisory names independently of Murph activation", async () => {
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map([
       ["+15550000001", "Registered R."],
       ["+15550000002", "Alex R."],
@@ -2775,7 +2792,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       action: "read_chat_participants",
       result: {
         participants: [
-          { handle: "+15550000001", hasOwnMurph: true },
+          {
+            handle: "+15550000001",
+            hasOwnMurph: true,
+            ownerAdvisoryName: "Registered R.",
+          },
           {
             handle: "+15550000002",
             hasOwnMurph: false,
@@ -2787,7 +2808,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     expect(mocks.readHostedOwnerAddressBookAdvisoryNames).toHaveBeenCalledWith({
       containerMemberId: "member_container",
-      phoneHandles: ["+15550000002"],
+      phoneHandles: ["+15550000001", "+15550000002"],
       prisma: expect.anything(),
     });
   });

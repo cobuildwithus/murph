@@ -142,6 +142,7 @@ export interface PreparedRuntimeInvocation {
   job: HostedExecutionWorkspaceInvocationJobInput;
   runnerContainerName: string;
   token: RunnerWriteFenceToken;
+  workspaceCheckpointedAt: string | null;
   workspaceVersion: string;
 }
 
@@ -223,6 +224,8 @@ export class RuntimeInvocationService {
       },
       ...workspaceRunnerInvocation,
       token,
+      workspaceCheckpointedAt:
+        workspaceRead.workspace?.checkpointedAt ?? null,
       workspaceVersion,
     };
   }
@@ -275,6 +278,8 @@ export class RuntimeInvocationService {
   }): Promise<HostedWorkspaceInvocationResult> {
     const executionInput = input.prepared.input;
     const token = input.prepared.token;
+    const workspaceCheckpointedAt =
+      input.prepared.workspaceCheckpointedAt;
     const workspaceVersion = input.prepared.workspaceVersion;
     let result: HostedWorkspaceInvocationResult;
     try {
@@ -323,6 +328,7 @@ export class RuntimeInvocationService {
             executionInput,
             transportError: error,
             token,
+            workspaceCheckpointedAt,
             workspaceVersion,
           });
         if (committedResult.kind === "completed") {
@@ -430,6 +436,7 @@ export class RuntimeInvocationService {
     executionInput: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     transportError?: unknown;
+    workspaceCheckpointedAt: string | null;
     workspaceVersion: string | null;
   }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     if (input.workspaceVersion === null) {
@@ -439,6 +446,7 @@ export class RuntimeInvocationService {
       await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
         commandBudget: input.commandBudget ?? null,
         executionInput: input.executionInput,
+        workspaceCheckpointedAt: input.workspaceCheckpointedAt,
         workspaceVersion: input.workspaceVersion,
       });
     if (committedResult.kind !== "completed") {
@@ -477,6 +485,7 @@ export class RuntimeInvocationService {
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
     commandBudget: RuntimeProcessingCommandBudget | null;
     executionInput: RuntimeInvocationInput;
+    workspaceCheckpointedAt: string | null;
     workspaceVersion: string;
   }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     let status: HostedRuntimeWebStatusResponse;
@@ -511,14 +520,21 @@ export class RuntimeInvocationService {
       return { kind: "unknown" };
     }
 
-    // A newer workspace version is the durable commit proof. Newer mailbox
-    // input may intentionally remain ahead of that committed prefix.
+    // A real runtime commit advances both the workspace CAS version and its
+    // checkpoint timestamp. Administrative metadata transitions may advance
+    // the version alone to invalidate stale writers, so version-only movement
+    // cannot prove an accepted invocation completed.
     if (
       !status.workspace
       || !isHostedRuntimeWorkspaceVersionAfter(
         status.workspace.version,
         input.workspaceVersion,
       )
+      || !didHostedRuntimeCheckpointAdvance({
+        currentCheckpointedAt:
+          status.workspace.checkpointedAt ?? null,
+        previousCheckpointedAt: input.workspaceCheckpointedAt,
+      })
     ) {
       return { kind: "not_completed" };
     }
@@ -1108,4 +1124,12 @@ export function isHostedRuntimeWorkspaceVersionAfter(
   } catch {
     return false;
   }
+}
+
+function didHostedRuntimeCheckpointAdvance(input: {
+  currentCheckpointedAt: string | null;
+  previousCheckpointedAt: string | null;
+}): boolean {
+  return input.currentCheckpointedAt !== null
+    && input.currentCheckpointedAt !== input.previousCheckpointedAt;
 }

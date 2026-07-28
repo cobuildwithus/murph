@@ -50,6 +50,20 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
+  async armGeneratedImageProviderBarrierForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armGeneratedImageProviderBarrier();
+    return { ok: true };
+  }
+
+  async releaseGeneratedImageProviderBarrierForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true }> {
+    releaseGeneratedImageProviderBarrier();
+    return { ok: true };
+  }
+
   async armGeneratedImageUploadTypeErrorForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -555,6 +569,24 @@ const hostedLocalGeneratedImageUrl =
   "https://imagedelivery.net/hosted-local/generated-image/public";
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
 const generatedImageUploadTypeErrorUsers = new Set<string>();
+let generatedImageProviderBarrier: Promise<void> | null = null;
+let releaseGeneratedImageProvider: (() => void) | null = null;
+
+function armGeneratedImageProviderBarrier(): void {
+  if (generatedImageProviderBarrier) {
+    throw new Error("Hosted-local generated image provider barrier is already armed.");
+  }
+  generatedImageProviderBarrier = new Promise<void>((resolve) => {
+    releaseGeneratedImageProvider = resolve;
+  });
+}
+
+function releaseGeneratedImageProviderBarrier(): void {
+  const release = releaseGeneratedImageProvider;
+  generatedImageProviderBarrier = null;
+  releaseGeneratedImageProvider = null;
+  release?.();
+}
 
 export function armGeneratedImageUploadTypeError(userId: string): void {
   const normalized = userId.trim();
@@ -582,6 +614,7 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
     return new Response("Unexpected hosted-local OpenAI Images request.", { status: 502 });
   }
 
+  await generatedImageProviderBarrier;
   return new Response(JSON.stringify({
     data: [{ b64_json: "UklGRgAAAABXRUJQ" }],
     usage: {

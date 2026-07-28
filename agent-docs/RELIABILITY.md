@@ -15,8 +15,60 @@ Last verified: 2026-07-27
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Account deletion must not discard its only external-cleanup owner. The
+  canonical account transaction persists the KMS-encrypted, foreign-key-free
+  receipt before deleting the member. The existing hourly retention sweep
+  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  confirmed absence is idempotent success, completed targets are skipped, and
+  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
+  request returns `cleanupPending` immediately after the canonical transaction
+  instead of waiting on those providers. Each retention attempt has a bounded
+  target deadline, and the bounded batch runs receipts concurrently so one
+  stalled vendor does not block unrelated retention work. Because every
+  provider delete is idempotent and progress is monotonic, concurrent attempts
+  may duplicate a provider request but cannot erase completed progress or
+  report convergence before the receipt itself is deleted.
+- Every direct subscription Checkout attempt is an encrypted member-owned row;
+  Family retains its single encrypted session in the existing billing attempt
+  owner. After Stripe creates a session, Checkout creation re-locks the owner
+  and returns the URL only after binding that reference; if suspension or
+  deletion won, it expires the session instead. Account deletion suspends
+  first, re-reads all direct attempts and Family billing owners, expires every
+  open session, absorbs an expiry/completion race by canceling the resulting
+  subscription, and only then prepares the final customer-cleanup receipt.
+- Participant-derived hosted-group access is bounded by the shared seven-day
+  observation lease. Provider rosters larger than the reconciliation cap cannot
+  leave a participant authoritative forever: stale relationships age out.
+  Authenticated Linq inbound can renew only an existing non-removed relationship
+  for the currently resolved identity, and future provider timestamps are
+  clamped to server time. Before denying a quiet route, Web makes one bounded
+  provider read and scans the full returned roster. It may create or reinstate
+  exactly the authenticated current sender after the roster handle re-resolves
+  to the same active hosted identity; otherwise it may renew only an existing
+  active participant whose current identity still matches the stored
+  relationship. Provider order and the assistant participant projection cap do
+  not decide access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- The hosted reply-latency operator alert remains one singleton incident owner.
+  Outbound paging requires both an opaque dedicated chat and a valid IANA
+  operator timezone, suppresses sends from 11 PM through 7 AM local time, and
+  applies stable bounded jitter after quiet hours and after every provider
+  attempt. No retry or post-healthy recurrence may call the provider less than
+  ten minutes after the prior attempt or accepted-send boundary. A retry that
+  may already have succeeded preserves the exact body and idempotency key;
+  distinct incidents vary through current aggregate evidence and checked-at
+  time, never random padding or synonym churn. Fresh health and operator-time
+  rechecks precede the one exact row-version compare-and-swap that admits
+  provider entry, increments attempt count, and advances the provider-attempt
+  timestamp. The same version fence makes a stale recovery coalesce rather than
+  report healthy after a concurrent incident cycles back to the same status.
+  Recovery or quiet hours before admission leave attempt state untouched: a
+  known-unsent first alert later builds current evidence, while an ambiguous
+  prior attempt retains its exact body, key, and pacing boundary. After provider
+  entry, healthy scans coalesce against the bounded four-minute send lease until
+  the attempt settles or expires; only then may the persisted incident become
+  healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
@@ -29,6 +81,38 @@ Last verified: 2026-07-27
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Current-policy group funding may create one unconfirmed saved-card
+  PaymentIntent with a purchase-derived idempotency key. The producer must bind
+  its encrypted exact reference under the payer lock before confirmation. The
+  locked bind must re-read both payer suspension and purchase status; a
+  suspension, deletion, or terminal transition that wins first leaves the
+  intent unbound, canceled, and never confirmed. A succeeded or processing
+  event for an unbound intent remains in the existing Stripe receipt retry lane
+  instead of being acknowledged without a grant.
+  Confirmation and cancellation use separate stable keys. An ambiguous
+  confirmation keeps the purchase `payment_pending`; exact request replay
+  retrieves and continues only that intent. A fresh request for the same
+  target may recover a nonterminal purchase only when its offer matches the
+  frozen offer; a different amount fails closed, and the client keeps the
+  original amount and request key locked while the outcome is uncertain.
+  Authentication or card failure
+  may fall back to Checkout only after the exact intent is verified canceled
+  and its binding is cleared under the same reconciliation fence. Direct
+  PaymentIntent events reuse the existing Stripe receipt and financial
+  reconciliation owner rather than adding a retry queue.
+- The Vercel predeploy migration replaces the detached-payer checks before the
+  saved-card producer can serve traffic. That replacement is backward
+  compatible with the old application, retains the PaymentIntent/Charge and
+  ciphertext-clearing invariants, and removes only the impossible
+  Checkout-Session requirement for fulfilled direct payments. The superseded
+  postdeploy constraint installer stays out of the contract-migration run so a
+  later workflow cannot re-tighten the schema after promotion.
+- The payer-owned cancel endpoint also owns a sessionless direct
+  `payment_pending` purchase. It retrieves and cancels only the exact bound
+  intent, preserves succeeded or processing state for webhook settlement, and
+  terminalizes only provider-proven cancellation. Cancellation is payer
+  authority and remains available from Settings or another target's conflict
+  state; retry and confirmation remain exact-target capabilities.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
   replay keeps the already-frozen purchase identity but rechecks mutable Family
@@ -54,11 +138,41 @@ Last verified: 2026-07-27
   becoming debt. A committed grant clears the current usage block when capacity
   becomes positive and makes the normal runtime recheck a retry-owned
   post-commit obligation, so accepted blocked input remains pending and can
-  resume. Duplicate Checkout and webhook delivery must converge on the same
-  purchase, grant, and recheck outcome. Provider/KMS preparation and the full
+  resume. Duplicate Checkout, PaymentIntent, and webhook delivery must converge
+  on the same purchase, grant, and recheck outcome. Provider/KMS preparation and the full
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.
+- Purchase and referral credit share one immutable credit-entry ledger. Each
+  positive entry owns one entry-keyed remaining-capacity projection; settlement
+  consumes those grants FIFO under the beneficiary member lock. The purchase
+  remaining field is only a synchronized expand-phase projection. Refund and
+  dispute reconciliation requires a purchase-backed entry and cannot touch a
+  referral-backed entry. Referral observation stays inside the canonical
+  provider-ingress transaction without acquiring the beneficiary lock.
+  Arming reserves both rolling caps under referrer plus stable-order
+  beneficiary locks, counting recent rewards, nonexpired armed commitments,
+  and bound commitments through a 25-hour late-evidence grace. Qualification
+  records a pre-expiry durable fence with its evidence; post-commit
+  reconciliation rechecks the frozen policy but cannot reject that qualified
+  commitment because processing ran after expiry or another mission armed. A
+  post-expiry event does not terminate the row during that grace, so pre-expiry
+  provider evidence delivered later can still qualify; the first
+  referrer-serialized expiry boundary after the grace is authoritative
+  finality. The immediate ingress handoff and a bounded
+  Vercel-authenticated minute recovery pass both retry idempotent reward
+  reconciliation. The source mailbox append and its completion fence commit
+  atomically after reward commit. Group appends carry live thread authority;
+  personal appends revalidate the frozen blinded source conversation and never
+  drift to another preferred channel. Personal Linq appends use an explicit
+  fixed target, so provider entry rejects source-route loss instead of applying
+  current-home fallback. Durable mailbox reconciliation owns a missed wake, so
+  stale route, append, or signal failure cannot reverse or duplicate earned
+  credit. Referral production is disabled through the expand
+  deployment and prior-function drain. The
+  post-drain contract migration resynchronizes purchase projections before it
+  widens and validates the ledger checks; only then may Web enable referral
+  arming, binding, and observation.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or
@@ -94,10 +208,24 @@ Last verified: 2026-07-27
   reviewed shapes remain checkpoint-gated. Completion ordering uses the
   existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- The same dirty-runtime prefix admits only two server-identified,
+  replay-safe external-completion notification families:
+  `assistant.notification.requested:phone-call-result:*` and
+  `assistant.notification.requested:usage-referral-reward:*`. Their stable
+  mailbox identity and idempotent delivery let them interrupt the idle floor;
+  the foreground-causal selector rechecks those exact dedupe-key families,
+  carries only the just-created causal outbox intent into the existing
+  write-ahead provider drain, and leaves generic notifications or unrelated
+  pending outbox work checkpoint-gated. Fresh conversation input retains
+  priority. Referral recovery also re-signals bounded oldest unconsumed
+  celebration items, so a post-commit signal failure remains recoverable from
+  the existing mailbox without another queue or state machine.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution
   failure.
+- The inbound message-content deadline does not cancel accepted work invisibly. Before local content retirement, the pending-input owner writes the existing terminal suppression evidence for any still-nonterminal input; the next successful idle checkpoint carries that exact mailbox item id until Web stamps the row and advances only the contiguous conversation floor. An unimported expired conversation row is terminalized in place by Web as `policy_non_reply.content_expired`, with payload ciphertext cleared in the same retention statement. Content retirement and checkpoint retries are idempotent, future deadlines share the existing `inbox_media_retention` wake, interrupted bounded passes retry, and an exact preselection sweep prevents a restored overdue input from starting a reply.
+- Transcript rollout is two-phase because ordinary snapshot cleanup deletes settled accepted-turn journals before content retention runs. Phase one deploys the stamping-capable runner with immediate rollout, proves fleet convergence, and then re-arms every persisted snapshot once. That rearm advances the existing workspace CAS version while leaving checkpoint time unchanged: pre-rearm runtime checkpoints conflict instead of clearing the new wake, and ambiguous runtime recovery accepts progress only when both version and checkpoint time advanced. The existing hourly cron signals five snapshots per successful run, and each restored runtime scrubs every receipt-backed carrier while preserving legacy unstamped transcript entries. Before migration, compare the aggregate persisted-snapshot count and failure allowance with that capacity; if the queue cannot drain safely, stop rather than inventing a second dispatcher during the retention release. Record the convergence instant, and do not declare phase one complete until the due queue reaches zero. Phase two may begin only after 14 complete days and phase-one drain completion: a separate migration re-arms the snapshots again, and the runtime may then retire every remaining unstamped user entry without reconstructing receipt state. Do not collapse the interval, infer a receipt from projection time, or add a second receipt index.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The

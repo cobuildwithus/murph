@@ -1239,6 +1239,46 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
 }
 
+export async function runHostedWorkspaceCanonicalWriteAtBoundary(input: {
+  previousRedactedStatus: HostedRuntimeRedactedJson | null;
+  runnerInput: HostedWorkspaceRunnerInput;
+  write(): Promise<void>;
+}): Promise<{
+  redactedStatus: HostedRuntimeRedactedJson | null;
+  workspace: HostedWorkspaceState | null;
+}> {
+  const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
+    input.runnerInput.checkpointRequestBuilder,
+    {
+      assistantInputBatchLimit: input.runnerInput.limitPerLane,
+    },
+  );
+  let writeStatus: HostedRuntimeRedactedJson | null = null;
+  const readCurrentStatus = (): HostedRuntimeRedactedJson | null =>
+    mergeHostedRuntimeRedactedStatusValues(
+      mergeHostedRuntimeRedactedStatusValues(
+        input.previousRedactedStatus,
+        checkpointRequestSession.latestWorkspace()?.redactedStatus ?? null,
+      ),
+      writeStatus,
+    );
+  const port = createHostedWorkspaceCanonicalWritePort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    input: input.runnerInput,
+    readPreviousRedactedStatus: readCurrentStatus,
+    recordRedactedStatus(status) {
+      writeStatus = mergeHostedRuntimeRedactedStatusValues(writeStatus, status);
+    },
+  });
+
+  await withHostedCanonicalWritePort(port, input.write);
+  return {
+    redactedStatus: readCurrentStatus(),
+    workspace:
+      checkpointRequestSession.latestWorkspace() ?? input.runnerInput.workspace,
+  };
+}
+
 export async function finishHostedMailboxImportPostCheckpointEffects(input: {
   importResult: HostedMailboxImportCheckpointResult;
   runnerInput: HostedWorkspaceRunnerInput;

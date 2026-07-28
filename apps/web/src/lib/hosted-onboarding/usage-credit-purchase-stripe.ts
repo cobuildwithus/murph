@@ -15,8 +15,14 @@ import {
 } from "./stripe-error-log";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
+  type HostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
+import { normalizeHostedGroupUsageFundingLocator } from
+  "../hosted-groups/group-usage-funding";
 import {
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
@@ -38,11 +44,22 @@ export type HostedUsageCreditPurchaseStripePrivateField =
 
 export function buildHostedUsageCreditCheckoutMetadata(
   purchaseId: string,
+  policyVersion: HostedUsageCreditCheckoutRequestPolicyVersion,
+): Record<string, string> {
+  return {
+    policyVersion,
+    purchaseId,
+    purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+  };
+}
+
+export function buildHostedUsageCreditSavedCardMetadata(
+  purchaseId: string,
 ): Record<string, string> {
   return {
     policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
     purchaseId,
-    purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+    purpose: HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
   };
 }
 
@@ -151,10 +168,10 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
   prisma: HostedOnboardingReadClient;
   purchase: HostedUsageCreditPurchase;
 }): Promise<Stripe.Checkout.SessionCreateParams> {
-  if (
-    input.purchase.checkoutRequestPolicyVersion !==
-      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
-  ) {
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    input.purchase.checkoutRequestPolicyVersion,
+  );
+  if (!policyVersion) {
     throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
   }
 
@@ -188,8 +205,15 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
   return buildHostedUsageCreditStripeCheckoutRequest({
     checkoutCancelUrl: input.purchase.checkoutCancelUrl,
     checkoutExpiresAt: input.purchase.checkoutExpiresAt,
-    checkoutMetadata: buildHostedUsageCreditCheckoutMetadata(input.purchase.id),
+    checkoutMetadata: buildHostedUsageCreditCheckoutMetadata(
+      input.purchase.id,
+      policyVersion,
+    ),
     checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+    saveGroupPaymentMethod:
+      policyVersion !== HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 &&
+      isHostedUsageCreditGroupReturnUrl(input.purchase.checkoutCancelUrl) &&
+      isHostedUsageCreditGroupReturnUrl(input.purchase.checkoutSuccessUrl),
     priceId,
     purchaseId: input.purchase.id,
     stripeCustomerId,
@@ -212,6 +236,7 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
   checkoutSuccessUrl: string;
   priceId: string;
   purchaseId: string;
+  saveGroupPaymentMethod: boolean;
   stripeCustomerId: string;
 }): Stripe.Checkout.SessionCreateParams {
   return {
@@ -225,6 +250,9 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
     mode: "payment",
     payment_intent_data: {
       metadata: input.checkoutMetadata,
+      ...(input.saveGroupPaymentMethod
+        ? { setup_future_usage: "off_session" as const }
+        : {}),
     },
     success_url: input.checkoutSuccessUrl,
   };
@@ -306,7 +334,16 @@ export function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
   purchase: HostedUsageCreditPurchase;
   session: Stripe.Checkout.Session;
 }): void {
-  const expectedMetadata = buildHostedUsageCreditCheckoutMetadata(input.purchase.id);
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    input.purchase.checkoutRequestPolicyVersion,
+  );
+  if (!policyVersion) {
+    throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
+  }
+  const expectedMetadata = buildHostedUsageCreditCheckoutMetadata(
+    input.purchase.id,
+    policyVersion,
+  );
   const sessionCustomerId = coerceStripeObjectId(input.session.customer);
   if (
     input.session.adaptive_pricing?.enabled !== false ||
@@ -320,6 +357,18 @@ export function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
     !hostedUsageCreditMetadataEqual(input.session.metadata, expectedMetadata)
   ) {
     throw buildHostedUsageCreditInvariantError("stripe_session_mismatch");
+  }
+}
+
+function isHostedUsageCreditGroupReturnUrl(value: string): boolean {
+  try {
+    const pathSegments = new URL(value).pathname.split("/").filter(Boolean);
+    return pathSegments.length === 3 &&
+      pathSegments[0] === "groups" &&
+      pathSegments[1] === "fund" &&
+      normalizeHostedGroupUsageFundingLocator(pathSegments[2] ?? "") !== null;
+  } catch {
+    return false;
   }
 }
 

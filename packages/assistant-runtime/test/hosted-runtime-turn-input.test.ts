@@ -13,6 +13,9 @@ import {
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+} from "@murphai/assistant-engine/assistant-automation";
 
 import {
   enqueueHostedPendingAssistantInputId,
@@ -29,6 +32,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
@@ -532,6 +536,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const source = createHostedAssistantInputSource({
@@ -635,6 +641,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("discovers input queued after an empty background selection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const selection = await selectHostedAssistantInputIds({
@@ -1383,7 +1391,67 @@ describe("selectHostedAssistantInputIds", () => {
       .resolves.toHaveLength(52);
   });
 
+  it("retires overdue pending input before background selection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-30T00:00:02.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const overdue = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_overdue_background",
+        eventId: "evt_overdue_background",
+        itemId: "item_overdue_background",
+        laneSeq: "9",
+        messageId: "msg_overdue_background",
+        occurredAt: "2026-04-16T00:00:01.000Z",
+        receivedAt: "2026-04-16T00:00:02.000Z",
+        text: "private overdue background input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: overdue.inputId,
+      vaultRoot,
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+
+    expect(selection).toEqual({
+      inputIds: [],
+      mode: "background",
+      pendingInputIds: [],
+    });
+    await expect(assistantEngine.readAssistantInputEvent({
+      inputId: overdue.inputId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      content: {
+        text: null,
+      },
+      contentRetiredAt: "2026-04-30T00:00:02.000Z",
+    });
+    await expect(readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+      vaultRoot,
+      overdue.inputId,
+    )).resolves.toMatchObject({
+      terminal: {
+        kind: "suppressed",
+      },
+    });
+    // Terminal conversation IDs remain in the checkpoint until the server
+    // acknowledgement floor proves their mailbox row committed. The selector's
+    // pendingInputIds above are the runnable compaction result, which must be
+    // empty after suppression.
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([overdue.inputId]);
+  });
+
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const oldest = await upsertAssistantInputEvent({

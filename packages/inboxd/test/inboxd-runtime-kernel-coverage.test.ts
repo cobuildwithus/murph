@@ -626,6 +626,9 @@ function createStubInboxPipeline(): InboxPipeline {
       searchCaptures() {
         return [];
       },
+      redactCaptureText() {
+        return false;
+      },
       getCapture() {
         return null;
       },

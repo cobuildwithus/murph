@@ -14,7 +14,10 @@ import {
   stringifyJson,
   toIsoTimestamp,
 } from "../shared.ts";
-
+import {
+  isDeviceSyncCredentialIndependentImportJob,
+  type DeviceSyncCredentialIndependentImportJobClassifier,
+} from "../hosted-runtime.ts";
 import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
@@ -665,6 +668,65 @@ export function markPendingDeviceSyncJobsDeadForAccount(
   ) as { changes: number };
 
   return result.changes ?? 0;
+}
+
+export function markCredentialScopedPendingDeviceSyncJobsDeadForAccount(
+  database: DatabaseSync,
+  input: {
+    accountId: string;
+    classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier;
+    code: string;
+    message: string;
+    now: string;
+  },
+): number {
+  const pending = database.prepare(`
+    select id, provider, kind, payload_json
+    from device_job
+    where account_id = ?
+      and status in ('queued', 'running')
+  `).all(input.accountId) as Array<{
+    id: string;
+    kind: string;
+    payload_json: string | null;
+    provider: string;
+  }>;
+  const markDead = database.prepare(`
+    update device_job
+    set status = 'dead',
+        lease_owner = null,
+        lease_expires_at = null,
+        last_error_code = ?,
+        last_error_message = ?,
+        finished_at = ?,
+        updated_at = ?
+    where id = ?
+      and account_id = ?
+      and status in ('queued', 'running')
+  `);
+  let marked = 0;
+
+  for (const job of pending) {
+    if (isDeviceSyncCredentialIndependentImportJob({
+      kind: job.kind,
+      payload: maybeParseJsonObject(job.payload_json),
+      provider: job.provider,
+    }, input.classifyProviderJob)) {
+      continue;
+    }
+
+    const result = markDead.run(
+      input.code,
+      input.message,
+      input.now,
+      input.now,
+      job.id,
+      input.accountId,
+    ) as { changes: number };
+    marked += result.changes ?? 0;
+  }
+
+  return marked;
 }
 
 export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(

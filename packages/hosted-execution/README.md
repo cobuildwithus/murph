@@ -54,6 +54,10 @@ mention the deleted generic state.
 
 - signed callback canonicalization stays timestamped and request-bound across app-local signers and verifiers
 - the shared control/status path layout stays stable between callers and the worker
+- non-direct route-authorized Linq and Telegram conversation wakes may carry an
+  optional normalized `senderMemberId` that Web already authenticated at
+  admission; direct wakes reject the field, and consumers must not treat it as
+  runtime authority or expose it to models, logs, telemetry, or UI
 - vendor-neutral env naming stays canonical so hosted web and Cloudflare do not drift
 - this package owns only the shared hosted-execution transport seam: mailbox,
   workspace checkpoint, runtime log/status codecs, hosted usage record codecs,

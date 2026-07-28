@@ -46,6 +46,7 @@ export interface HostedAssistantNotificationDestination {
 }
 
 export async function resolveHostedAssistantNotificationDestination(input: {
+  directChannel?: "linq" | "telegram";
   memberId: string;
   prisma?: HostedOnboardingReadClient;
   signal?: AbortSignal;
@@ -84,6 +85,7 @@ export async function resolveHostedAssistantNotificationDestination(input: {
     routing: member.routing,
   });
   const route = resolveHostedMemberAssistantNotificationRoute({
+    ...(input.directChannel ? { channel: input.directChannel } : {}),
     linqChatId: member.routing?.linqChatId ?? member.routing?.pendingLinqChatId ?? null,
     linqContactLookupKey: member.routing?.pendingLinqParticipantContact?.lookupKey ?? null,
     linqRecipientPhone:
@@ -118,6 +120,57 @@ export async function requireHostedAssistantNotificationDestination(input: {
     httpStatus: 409,
     message: "Hosted assistant delivery requires a durable notification route.",
     retryable: true,
+  });
+}
+
+export async function assertHostedAssistantNotificationRouteAuthority(input: {
+  authority: HostedExecutionExternalThreadRouteAuthority;
+  prisma?: HostedOnboardingReadClient;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+  const container = await prisma.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: input.authority.containerMemberId },
+  });
+  if (container) {
+    await assertHostedThreadRouteEgressAuthority({
+      authority: input.authority,
+      prisma,
+    });
+    return;
+  }
+  if (
+    input.authority.channel !== "linq"
+    && input.authority.channel !== "telegram"
+  ) {
+    throw hostedNotificationRouteAuthorityError();
+  }
+
+  const destination = await resolveHostedAssistantNotificationDestination({
+    directChannel: input.authority.channel,
+    memberId: input.authority.containerMemberId,
+    prisma,
+    signal: input.signal,
+  });
+  if (
+    destination?.conversationShape === "direct-member"
+    && destination.externalThreadRouteAuthority === null
+    && destination.route.channel === input.authority.channel
+    && destination.route.threadIsDirect === true
+    && destination.route.delivery.target === input.authority.threadId
+  ) {
+    return;
+  }
+  throw hostedNotificationRouteAuthorityError();
+}
+
+function hostedNotificationRouteAuthorityError() {
+  return hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "Hosted notification route is no longer authorized.",
+    retryable: false,
   });
 }
 

@@ -13,7 +13,7 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   type JunctionSummaryNormalizationEvidence,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -32,6 +32,10 @@ import {
   isHostedRuntimeIdShapedDiagnosticToken,
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
+import {
+  isJunctionCredentialIndependentInlineImportJob,
+  resolveDeviceSyncJunctionInlineSourceProviderSlug,
+} from "../junction-inline-authority.ts";
 import {
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -1083,45 +1087,47 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
+    const webhookDataJson = normalizeString(job.payload.webhookDataJson);
+    if (!webhookDataJson) {
+      return null;
+    }
+    if (!isJunctionCredentialIndependentInlineImportJob({
+      kind: job.kind,
+      payload: job.payload,
+    })) {
+      return null;
+    }
+
     const resource = normalizeJunctionResourceName(job.payload.resource);
     if (!resource) {
-      return null;
+      throw invalidJunctionDirectResourceClassification();
     }
 
     const resourceCategory = inferJunctionResourceJobCategory(
       normalizeString(job.payload.resourceCategory),
       resource,
     );
-    if (!isConfiguredJunctionResource(resourceCategory, resource)) {
-      return null;
-    }
-
     if (resourceCategory !== "summary") {
-      return null;
-    }
-
-    const webhookDataJson = normalizeString(job.payload.webhookDataJson);
-    if (!webhookDataJson) {
-      return null;
+      throw invalidJunctionDirectResourceClassification();
     }
     const record = parseJunctionWebhookDataJobRecord(webhookDataJson);
     if (!record) {
-      return null;
+      throw invalidJunctionDirectResourceClassification();
     }
 
     // Provenance check only: a configured summary resource with a parseable
     // inline payload and a single, consistent source provider imports inline.
     // The downstream normalizer decides meaning (as it already does for
     // fetched records); there is no usefulness gate here.
-    const sourceProviderSlug = resolveJunctionWebhookDataRecordSourceProviderSlug(record);
+    const sourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
     if (!sourceProviderSlug) {
-      return null;
+      throw invalidJunctionDirectResourceClassification();
     }
     if (
       resource === "sleep_cycle"
       && !canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug)
     ) {
-      return null;
+      throw invalidJunctionDirectResourceClassification();
     }
 
     return {
@@ -1134,9 +1140,17 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  function invalidJunctionDirectResourceClassification(): DeviceSyncError {
+    return deviceSyncError({
+      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+      message: "Junction direct resource authority classification was inconsistent.",
+      retryable: false,
+    });
+  }
+
   function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
-    return (input.resource === "sleep_cycle" || input.resource === "sleep") &&
-      hasJunctionSourceReferenceIdentity(input.record);
+    return (input.resource === "sleep_cycle" || input.resource === "sleep")
+      && hasJunctionSourceReferenceIdentity(input.record);
   }
 
   async function diagnoseBackfill(
@@ -1535,6 +1549,49 @@ export function createJunctionDeviceSyncProvider(
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
+      const directInput = readJunctionDirectResourceJobInput(job, window);
+      if (directInput) {
+        // This lookup uses the stable provider-config authority, not the
+        // replaceable per-connection credential epoch. It resolves source
+        // provenance only; the accepted inline payload remains the data
+        // carrier and the floor remains the sole projection owner.
+        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
+          ? await loadSourceProviders()
+          : [];
+        const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+          context.account,
+          summaryBackfillDays,
+        );
+        const importResult = await importJunctionDirectResourceSnapshot(
+          context,
+          sourceProviders,
+          directInput.windowStart,
+          directInput.windowEnd,
+          directInput.resource,
+          [directInput.record],
+          connectHistoricalWindow,
+        );
+        const directHistoricalWindow = readJunctionDirectHistoricalEvidenceWindow(
+          directInput,
+          connectHistoricalWindow,
+          importResult.normalizationEvidence,
+          providerFilter,
+        );
+        return withJunctionHistoricalCoverageVerification(
+          context,
+          job,
+          directHistoricalWindow,
+          withJunctionDirectHistoricalBackfillEvidence(
+            context,
+            job,
+            directInput,
+            directHistoricalWindow,
+            importResult,
+            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+          ),
+        );
+      }
+
       let effectiveResource = resource;
       let inferredCategory = inferJunctionResourceJobCategory(resourceCategory, resource);
       if (!isConfiguredJunctionResource(inferredCategory, resource)) {
@@ -1588,45 +1645,6 @@ export function createJunctionDeviceSyncProvider(
         });
         effectiveResource = fallback.name;
         inferredCategory = fallback.category;
-      }
-
-      const directInput = readJunctionDirectResourceJobInput(job, window);
-      if (directInput) {
-        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
-          ? await loadSourceProviders()
-          : [];
-        const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
-          context.account,
-          summaryBackfillDays,
-        );
-        const importResult = await importJunctionDirectResourceSnapshot(
-          context,
-          sourceProviders,
-          directInput.windowStart,
-          directInput.windowEnd,
-          directInput.resource,
-          [directInput.record],
-          connectHistoricalWindow,
-        );
-        const directHistoricalWindow = readJunctionDirectHistoricalEvidenceWindow(
-          directInput,
-          connectHistoricalWindow,
-          importResult.normalizationEvidence,
-          providerFilter,
-        );
-        return withJunctionHistoricalCoverageVerification(
-          context,
-          job,
-          directHistoricalWindow,
-          withJunctionDirectHistoricalBackfillEvidence(
-            context,
-            job,
-            directInput,
-            directHistoricalWindow,
-            importResult,
-            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-          ),
-        );
       }
 
       if (inferredCategory === "timeseries") {
@@ -5277,46 +5295,6 @@ function toJunctionCompanionHealthMetadataIsoTimestamp(value: unknown): string |
 
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
-}
-
-function resolveJunctionWebhookDataRecordSourceProviderSlug(
-  record: Record<string, unknown>,
-): string | null {
-  const slugs = new Set<string>();
-  const addSlug = (value: unknown): void => {
-    const slug = normalizeProviderSlug(value);
-    if (slug) {
-      slugs.add(slug);
-    }
-  };
-  const addRecordSlug = (entry: Record<string, unknown>): void => {
-    addSlug(resolveJunctionOrigin(entry).sourceProviderSlug);
-  };
-
-  addRecordSlug(record);
-  for (const entryRecord of readJunctionWebhookNestedRecordEntries(record)) {
-    addRecordSlug(entryRecord);
-  }
-
-  const groups = readPlainObject(record.groups);
-  if (groups) {
-    for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
-      addSlug(sourceSlug);
-      for (const rawGroup of readJunctionRecordArray(rawGroups)) {
-        const group = readPlainObject(rawGroup);
-        if (!group) {
-          continue;
-        }
-
-        addRecordSlug(group);
-        for (const entryRecord of readJunctionWebhookNestedRecordEntries(group)) {
-          addRecordSlug(entryRecord);
-        }
-      }
-    }
-  }
-
-  return slugs.size === 1 ? [...slugs][0] ?? null : null;
 }
 
 function expandJunctionWebhookTimeseriesDataRecords(

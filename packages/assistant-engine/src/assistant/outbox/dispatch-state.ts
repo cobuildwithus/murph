@@ -1303,7 +1303,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
       !assistantOutboxIntentMatchesDispatchOwner(
         current,
         input.intent,
-        ['pending', 'sending', 'retryable', 'failed'],
+        ['awaiting_approval', 'pending', 'sending', 'retryable', 'failed'],
       )
     ) {
       await repairAssistantOutboxReceiptForIntent({

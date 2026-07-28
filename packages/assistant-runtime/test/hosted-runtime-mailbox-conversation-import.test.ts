@@ -1781,6 +1781,7 @@ describe("hosted mailbox conversation import adapter", () => {
           containerMemberId: TEST_USER_ID,
           threadId: "chat_group_telegram",
         },
+        senderMemberId: "member_sender_private_123",
         telegramMessage: {
           from: "1234567890",
           messageId: "tg_group_identity",
@@ -1847,6 +1848,10 @@ describe("hosted mailbox conversation import adapter", () => {
         ? event.sourceMetadata.senderUsername
         : null,
       "alice_example",
+    );
+    assert.equal(
+      JSON.stringify(event).includes("member_sender_private_123"),
+      false,
     );
   });
 

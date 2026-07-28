@@ -39,8 +39,14 @@ describe("assistant plan usage call contracts", () => {
       "start_checkout",
       "create_invite",
     ]);
-    expect(contract).toContain("current member's explicit Family account request");
-    expect(contract).toContain("Treat returned URLs and invite records as the exact result");
-    expect(contract).toContain("beyond the returned status");
+    expect(contract).toContain(
+      "Allow `read_status` for an explicit Family request",
+    );
+    expect(contract).toContain("trusted private low-usage Family context");
+    expect(contract).toContain(
+      "Checkout and invite actions require the current member's explicit request",
+    );
+    expect(contract).toContain("Treat results as exact");
+    expect(contract).toContain("never claim activation, invitation, payment");
   });
 });
