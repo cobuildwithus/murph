@@ -6,15 +6,20 @@ type HostedUsageTopUpStoredRequestIdentity =
   | { available: true; requestKey: string | null }
   | { available: false; requestKey: null };
 
+interface HostedUsageTopUpRequestIdentityScope {
+  checkoutUrl: string;
+  payerMemberId: string;
+}
+
 function readHostedUsageTopUpRequestIdentity(
-  checkoutUrl: string,
+  scope: HostedUsageTopUpRequestIdentityScope,
 ): HostedUsageTopUpStoredRequestIdentity {
   const storage = readSessionStorage();
   if (!storage) {
     return { available: false, requestKey: null };
   }
 
-  const storageKey = requestIdentityStorageKey(checkoutUrl);
+  const storageKey = requestIdentityStorageKey(scope);
   try {
     const requestKey = storage.getItem(storageKey);
     if (requestKey === null) {
@@ -33,7 +38,7 @@ function readHostedUsageTopUpRequestIdentity(
 }
 
 function writeHostedUsageTopUpRequestIdentity(
-  checkoutUrl: string,
+  scope: HostedUsageTopUpRequestIdentityScope,
   requestKey: string,
 ): boolean {
   const storage = readSessionStorage();
@@ -44,7 +49,7 @@ function writeHostedUsageTopUpRequestIdentity(
     return false;
   }
 
-  const storageKey = requestIdentityStorageKey(checkoutUrl);
+  const storageKey = requestIdentityStorageKey(scope);
   try {
     storage.setItem(storageKey, requestKey);
     return storage.getItem(storageKey) === requestKey;
@@ -53,13 +58,15 @@ function writeHostedUsageTopUpRequestIdentity(
   }
 }
 
-function clearHostedUsageTopUpRequestIdentity(checkoutUrl: string): boolean {
+function clearHostedUsageTopUpRequestIdentity(
+  scope: HostedUsageTopUpRequestIdentityScope,
+): boolean {
   const storage = readSessionStorage();
   if (!storage) {
     return false;
   }
 
-  const storageKey = requestIdentityStorageKey(checkoutUrl);
+  const storageKey = requestIdentityStorageKey(scope);
   try {
     storage.removeItem(storageKey);
     return storage.getItem(storageKey) === null;
@@ -68,8 +75,15 @@ function clearHostedUsageTopUpRequestIdentity(checkoutUrl: string): boolean {
   }
 }
 
-function requestIdentityStorageKey(checkoutUrl: string): string {
-  return `${HOSTED_USAGE_TOP_UP_REQUEST_STORAGE_PREFIX}${encodeURIComponent(checkoutUrl)}`;
+function requestIdentityStorageKey(
+  scope: HostedUsageTopUpRequestIdentityScope,
+): string {
+  return [
+    HOSTED_USAGE_TOP_UP_REQUEST_STORAGE_PREFIX,
+    encodeURIComponent(scope.payerMemberId),
+    ":",
+    encodeURIComponent(scope.checkoutUrl),
+  ].join("");
 }
 
 function readSessionStorage(): Storage | null {

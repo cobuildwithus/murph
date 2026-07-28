@@ -13,6 +13,7 @@ export function HostedFamilySelfUsageTopUpHost(props: {
   contactOptions?: readonly MurphContactOption[];
   memberId: string;
   offers: readonly HostedUsageTopUpOffer[];
+  payerMemberId: string;
   targetLabel: string;
 }) {
   return (
@@ -24,6 +25,7 @@ export function HostedFamilySelfUsageTopUpHost(props: {
         deferTerminalRefreshUntilClose
         initialOpen
         offers={props.offers}
+        payerMemberId={props.payerMemberId}
         scope="family"
         targetLabel={props.targetLabel}
       />

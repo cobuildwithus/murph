@@ -43,6 +43,7 @@ interface HostedUsageTopUpDialogProps {
   deferTerminalRefreshUntilClose?: boolean;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
+  payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
   scope?: "family" | "group" | "personal";
   targetLabel?: string;

@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   routerRefresh: vi.fn(),
 }));
 
+const TEST_PAYER_MEMBER_ID = "hbm_usage_top_up_payer";
+
 const USAGE_TOP_UP_TARGET_CASES = [
   {
     addLabel: "Add usage · $5",
@@ -251,6 +253,7 @@ test("requires an explicit amount choice after opening from the settings deep li
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -389,6 +392,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       checkoutUrl:
         "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
       initialOpen: true,
@@ -463,6 +467,7 @@ test("names the exact Family beneficiary in the trigger and dialog", async () =>
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       scope: "family",
       targetLabel: "Family member",
@@ -505,6 +510,7 @@ test("composes the Family owner-self deep link through the real usage dialog", a
     createElement(HostedFamilySelfUsageTopUpHost, {
       memberId: "member/owner?primary",
       offers: usageCreditOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       targetLabel: "Morgan",
     }),
     {
@@ -576,6 +582,7 @@ test("opens an honest unavailable state when a deep link has no current offers",
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: [],
     }),
@@ -615,6 +622,7 @@ test("keeps a frozen open Checkout resumable and cancelable without current offe
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_frozen_open",
@@ -652,6 +660,7 @@ test("withholds Resume but keeps Cancel for a suspended payer's open Checkout", 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_suspended_open",
@@ -697,6 +706,7 @@ test("keeps a server-projected cross-target Checkout status-only before interact
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_other_target",
@@ -752,6 +762,7 @@ test("keeps payer-owned cancellation available for a cross-target direct payment
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         cancelAllowed: true,
         offerCode: "usage_10_usd",
@@ -808,6 +819,7 @@ test("does not advertise Retry for a suspended reconciling purchase", async () =
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_suspended_reconciling",
@@ -856,6 +868,7 @@ test("refreshes an open recovery dialog at the exact frozen expiry", async () =>
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_expiring_recovery",
@@ -912,6 +925,7 @@ test("rejects a malformed recovery restart timestamp", async () => {
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -964,6 +978,7 @@ test("retries a frozen reconciling purchase through the existing checkout route"
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_frozen_retry",
@@ -1018,6 +1033,7 @@ test("retries the exact pending saved-card payment from the group dialog", async
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_saved_card_pending",
@@ -1094,6 +1110,7 @@ test("restarts polling when a frozen retry advances the same purchase", async ()
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_frozen_pending",
@@ -1140,6 +1157,7 @@ test("preserves a frozen retry key across status-only recovery", async () => {
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_frozen_retry_failure",
@@ -1191,6 +1209,7 @@ test("keeps an uncertain group payment locked to the original amount and request
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       checkoutUrl:
         "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
       initialOpen: true,
@@ -1261,6 +1280,7 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1365,6 +1385,7 @@ test("asks before resuming a recovered Checkout from a fresh browser request", a
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1450,6 +1471,7 @@ test.each([
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
         contactOptions: [textMurphContactOption()],
         initialOpen: true,
@@ -1616,6 +1638,7 @@ test("cancels a recovered open Checkout through the existing expire route", asyn
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1686,6 +1709,7 @@ test("uses cancel-specific copy when the expire response is malformed", async ()
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       activePurchase: {
         offerCode: "usage_10_usd",
         purchaseId: "hucp_malformed_cancel",
@@ -1729,6 +1753,7 @@ test("shows recovered reconciliation without offering an unsafe early cancel", a
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1776,6 +1801,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       checkoutUrl,
       initialOpen: true,
       offers: usageCreditOffers(),
@@ -1829,6 +1855,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       checkoutUrl,
       initialOpen: true,
       offers: usageCreditOffers(),
@@ -1890,6 +1917,7 @@ test("restores controls when the browser cannot create a request key", async () 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1932,6 +1960,7 @@ test("retries a failed checkout with the same client request key", async () => {
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -1995,6 +2024,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
         initialOpen: true,
         offers: usageCreditOffers(),
@@ -2024,6 +2054,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
 
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "after-recovery-miss",
@@ -2059,6 +2090,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
 
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "after-durable-response",
@@ -2089,6 +2121,153 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
 );
 
 test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "keeps an unresolved $scope identity isolated across same-tab payer switches",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    const payerA = "hbm_shared_tab_payer_a";
+    const payerB = "hbm_shared_tab_payer_b";
+    const payerARequestKey = "00000000-0000-4000-8000-000000000231";
+    const payerBRequestKey = "00000000-0000-4000-8000-000000000232";
+    const sessionStorage = createMemoryStorage();
+    mocks.randomUUID
+      .mockImplementationOnce(() => payerARequestKey)
+      .mockImplementationOnce(() => payerBRequestKey);
+    mocks.requestHostedOnboardingJson
+      // Payer A's provider operation reaches a terminal result, but its browser
+      // loses the response and must retain the original request identity.
+      .mockRejectedValueOnce(new Error("Response was lost."))
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_payer_b_fulfilled",
+        requestKeyMatched: true,
+        status: "fulfilled",
+      })
+      // Payer A later recovers that terminal purchase instead of creating a
+      // second provider lifecycle.
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_payer_a_fulfilled",
+        recovered: true,
+        requestKeyMatched: true,
+        status: "fulfilled",
+      });
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+
+    const payerARender = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        payerMemberId: payerA,
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+    try {
+      await clickRadio(payerARender.container, payerARender.window, "usage_500");
+      await clickButton(payerARender.container, payerARender.window, addLabel);
+      assert.equal(
+        sessionStorage.getItem(
+          usageTopUpRequestStorageKey(checkoutUrl, payerA),
+        ),
+        payerARequestKey,
+      );
+      assert.equal(
+        sessionStorage.getItem(
+          usageTopUpRequestStorageKey(checkoutUrl, payerB),
+        ),
+        null,
+      );
+    } finally {
+      await payerARender.cleanup();
+    }
+
+    const payerBRender = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        payerMemberId: payerB,
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+    try {
+      await clickRadio(payerBRender.container, payerBRender.window, "usage_500");
+      await clickButton(payerBRender.container, payerBRender.window, addLabel);
+      assert.equal(
+        sessionStorage.getItem(
+          usageTopUpRequestStorageKey(checkoutUrl, payerB),
+        ),
+        null,
+      );
+      assert.equal(
+        sessionStorage.getItem(
+          usageTopUpRequestStorageKey(checkoutUrl, payerA),
+        ),
+        payerARequestKey,
+      );
+    } finally {
+      await payerBRender.cleanup();
+    }
+
+    const payerAReturn = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        payerMemberId: payerA,
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+    try {
+      await clickRadio(payerAReturn.container, payerAReturn.window, "usage_500");
+      await clickButton(payerAReturn.container, payerAReturn.window, addLabel);
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [
+        {
+          clientRequestKey: payerARequestKey,
+          offerCode: "usage_500",
+        },
+        {
+          clientRequestKey: payerBRequestKey,
+          offerCode: "usage_500",
+        },
+        {
+          clientRequestKey: payerARequestKey,
+          offerCode: "usage_500",
+        },
+      ]);
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(2);
+      assert.equal(
+        sessionStorage.getItem(
+          usageTopUpRequestStorageKey(checkoutUrl, payerA),
+        ),
+        null,
+      );
+    } finally {
+      await payerAReturn.cleanup();
+    }
+  },
+);
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
   "keeps the unresolved $scope identity when the next authorization changes amount",
   async ({ addLabel, checkoutUrl, scope }) => {
     mocks.randomUUID
@@ -2107,6 +2286,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
         initialOpen: true,
         offers: usageCreditOffers(),
@@ -2124,6 +2304,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       await clickButton(rendered.container, rendered.window, "Check payment · $5");
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "changed-offer-after-recovery-miss",
@@ -2196,6 +2377,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         activePurchase: {
           offerCode: "usage_10_usd",
           purchaseId: "hucp_other_target_projection",
@@ -2217,6 +2399,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     try {
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "selection-after-cross-target-projection",
@@ -2268,6 +2451,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
         offers: usageCreditOffers(),
         purchaseReturn: {
@@ -2288,6 +2472,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     try {
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "selection-after-return-projection",
@@ -2353,6 +2538,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         activePurchase: {
           offerCode: "usage_10_usd",
           purchaseId: "hucp_projected_retry",
@@ -2379,6 +2565,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       );
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "selection-after-projected-retry",
@@ -2438,6 +2625,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     );
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
         initialOpen: true,
         offers: usageCreditOffers(),
@@ -2455,6 +2643,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       await clickButton(rendered.container, rendered.window, addLabel);
       await rendered.rerender(
         createElement(HostedUsageTopUpDialog, {
+          payerMemberId: TEST_PAYER_MEMBER_ID,
           checkoutUrl,
           initialOpen: true,
           key: "selection-after-other-request-recovery",
@@ -2507,6 +2696,7 @@ test("fails closed when the stored ambiguous request identity cannot be verified
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -2561,6 +2751,7 @@ test("keeps the exact amount and request key after an ambiguous payment failure"
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       initialOpen: true,
       offers: usageCreditOffers(),
     }),
@@ -2649,6 +2840,7 @@ test("keeps a conflicting Family checkout nonpayable and refreshes on close", as
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       checkoutUrl:
         "/api/settings/billing/family/members/member_b/usage-credit/checkout",
       initialOpen: true,
@@ -2729,6 +2921,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "success",
@@ -2795,6 +2988,7 @@ test("keeps a recovery-only terminal return visible until the owner closes it", 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       deferTerminalRefreshUntilClose: true,
       offers: [],
       purchaseReturn: {
@@ -2854,6 +3048,7 @@ test("removes a recovery-only canceled return after its confirmation closes", as
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       deferTerminalRefreshUntilClose: true,
       offers: [],
       purchaseReturn: {
@@ -2901,6 +3096,7 @@ test("expires a canceled Stripe return through the authenticated mutation", asyn
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "cancel",
@@ -2960,6 +3156,7 @@ test("keeps polling when cancel reconciliation reports payment pending", async (
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "cancel",
@@ -3014,6 +3211,7 @@ test("bounds status polling and leaves an honest delayed confirmation message", 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "success",
@@ -3067,6 +3265,7 @@ test("distinguishes a failed status lookup and lets the member check again", asy
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "success",
@@ -3135,6 +3334,7 @@ test("times out a stalled status lookup and lets the member check again", async 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "success",
@@ -3177,6 +3377,7 @@ test("offers Text Murph once a successful return is confirmed fulfilled", async 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
@@ -3229,6 +3430,7 @@ test("keeps the fulfilled confirmation unchanged when no contact channel resolve
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [],
       offers: [],
       purchaseReturn: {
@@ -3275,6 +3477,7 @@ test("withholds Text Murph until the returned payment is confirmed fulfilled", a
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
@@ -3333,6 +3536,7 @@ test("keeps confirming on a success return that still reads checkout_open", asyn
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: [],
       purchaseReturn: {
         kind: "success",
@@ -3387,6 +3591,7 @@ test("never offers Text Murph on a canceled checkout confirmation", async () => 
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
@@ -3429,6 +3634,7 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
@@ -3477,6 +3683,7 @@ test("offers the payer Text Murph on a fulfilled Family top-up return", async ()
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
@@ -3525,6 +3732,7 @@ test("offers the payer Text Murph on a fulfilled Family top-up return", async ()
   });
   const renderedWithoutContact = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       offers: [],
       purchaseReturn: {
         kind: "success",
@@ -3571,6 +3779,7 @@ test("renders inline channel rows in the one dialog when several channels resolv
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       contactOptions: [
         textMurphContactOption(),
         {
@@ -3657,8 +3866,16 @@ function usageCreditOffers() {
   ] as const;
 }
 
-function usageTopUpRequestStorageKey(checkoutUrl: string): string {
-  return `murph:usage-top-up:unresolved:v1:${encodeURIComponent(checkoutUrl)}`;
+function usageTopUpRequestStorageKey(
+  checkoutUrl: string,
+  payerMemberId = TEST_PAYER_MEMBER_ID,
+): string {
+  return [
+    "murph:usage-top-up:unresolved:v1:",
+    encodeURIComponent(payerMemberId),
+    ":",
+    encodeURIComponent(checkoutUrl),
+  ].join("");
 }
 
 async function clickRadio(

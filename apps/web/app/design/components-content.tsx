@@ -836,6 +836,7 @@ export function ComponentsContent() {
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="personal"
                 />
               </div>
@@ -849,6 +850,7 @@ export function ComponentsContent() {
                   <HostedUsageTopUpDialog
                     checkoutUrl="/api/design/usage-credit-preview"
                     offers={DESIGN_USAGE_OFFERS}
+                    payerMemberId="design_usage_top_up_payer"
                     scope="group"
                   />
                 }
@@ -874,6 +876,7 @@ export function ComponentsContent() {
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -887,6 +890,7 @@ export function ComponentsContent() {
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={[]}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -1010,6 +1014,7 @@ export function ComponentsContent() {
           >
             <HostedFamilyManager
               billingActive
+              payerMemberId="design_usage_top_up_payer"
               invites={[
                 {
                   acceptUrl: "/family/accept/design-preview",

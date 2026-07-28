@@ -128,6 +128,7 @@ describe("hosted group funding page", () => {
     });
     expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
       expect.objectContaining({
+        payerMemberId: "member_payer",
         purchaseReturn: { kind: "success", purchaseId: PURCHASE_ID },
         scope: "group",
       }),

@@ -339,6 +339,7 @@ export default async function SettingsPage({
           currentCheckoutOffer={billingRef?.currentCheckoutOffer}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
           currentPeriodEnd={billingRef?.currentPeriodEnd}
+          payerMemberId={authenticatedMember?.id}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
           usageStatus={usageStatus}
@@ -365,13 +366,14 @@ export default async function SettingsPage({
         />
       </section>
 
-      {familyOwner ? (
+      {familyOwner && authenticatedMember ? (
         <section id="family" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Family
           </div>
           <HostedFamilySettings
             ownerSnapshot={familyOwner}
+            payerMemberId={authenticatedMember.id}
             usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
             usageTopUpContactOptions={usageTopUpContactOptions}
@@ -385,6 +387,7 @@ export default async function SettingsPage({
               contactOptions={usageTopUpContactOptions}
               memberId={familyOwnerUsageTopUpMember.memberId}
               offers={familyUsageTopUpOffers}
+              payerMemberId={authenticatedMember.id}
               targetLabel={familyOwnerUsageTopUpMember.label ?? "you"}
             />
           ) : null}

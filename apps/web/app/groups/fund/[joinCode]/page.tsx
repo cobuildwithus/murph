@@ -138,6 +138,7 @@ export default async function GroupFundingPage({
                 activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 offers={offers}
+                payerMemberId={member.id}
                 purchaseReturn={purchaseReturn}
                 scope="group"
               />

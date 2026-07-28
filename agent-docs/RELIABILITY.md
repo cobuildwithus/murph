@@ -101,16 +101,19 @@ Last verified: 2026-07-27
   purchase or the current matching nonterminal purchase, but it cannot create a
   purchase. When neither exists, it returns a miss before Stripe I/O and clears
   the visible selection to an unselected picker while retaining the unresolved
-  request key in target-scoped browser session storage. Web stores and verifies
+  request key in payer-and-target-scoped browser session storage. Web derives
+  the payer scope from the authenticated server session, stores and verifies
   that key before the first create-capable request, hydrates it before enabling
-  a remounted picker, and keeps it through timeout, dismissal, reload, and
-  recovery miss. The next explicit Add action reuses that key in normal
-  create-capable mode. The payer lock and request-key uniqueness then serialize
-  it with any delayed original request: one purchase wins, and a changed offer
-  receives only that winning purchase's status/cancel-only projection. Only a
-  durable purchase response that proves the submitted selection key matched
-  clears the stored key; mounting an active or return projection, retrying a
-  projected purchase, or recovering another request cannot release it.
+  a remounted picker, and keeps it through timeout, dismissal, reload, account
+  switching, and recovery miss. The next explicit Add action by that payer
+  reuses that key in normal create-capable mode. Another payer in the same tab
+  receives an independent slot and cannot read or clear it. The payer lock and
+  request-key uniqueness then serialize the key with any delayed original
+  request: one purchase wins, and a changed offer receives only that winning
+  purchase's status/cancel-only projection. Only a durable purchase response
+  that proves the submitted selection key matched for that payer clears the
+  stored key; mounting an active or return projection, retrying a projected
+  purchase, or recovering another request cannot release it.
   Unavailable storage fails closed before request entry; the winning purchase
   remains the only payable path.
   Authentication or card failure

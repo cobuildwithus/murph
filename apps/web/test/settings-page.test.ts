@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => ({
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    payerMemberId?: string | null;
     pulseTrialBillingContinuationPending?: boolean;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
@@ -674,6 +675,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentBillingPhase: "paid",
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
+      payerMemberId: "member_123",
       usageStatus,
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
@@ -911,6 +913,7 @@ test("SettingsPage opens only the authenticated active Family owner's own usage 
         offerCode: "usage_25_usd",
       },
     ],
+    payerMemberId: "member_123",
     targetLabel: "you",
   }, undefined);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
@@ -1182,6 +1185,7 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
   );
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith({
     ownerSnapshot: familyOwner,
+    payerMemberId: "member_123",
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
     usageTopUpContactOptions: [{

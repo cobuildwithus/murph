@@ -44,6 +44,7 @@ interface OwnedCheckoutRequest {
 interface HostedUsageTopUpRequestIdentitySnapshot {
   available: boolean;
   checkoutUrl: string | null;
+  payerMemberId: string | null;
   requestKey: string | null;
 }
 
@@ -53,6 +54,7 @@ function useHostedUsageTopUpDialog({
   deferTerminalRefreshUntilClose = false,
   initialOpen = false,
   offers,
+  payerMemberId,
   purchaseReturn = null,
 }: HostedUsageTopUpDialogProps) {
   const { refresh } = useRouter();
@@ -74,6 +76,7 @@ function useHostedUsageTopUpDialog({
     useState<HostedUsageTopUpRequestIdentitySnapshot>({
       available: false,
       checkoutUrl: null,
+      payerMemberId: null,
       requestKey: null,
     });
   const returnKey = readReturnKey(purchaseReturn);
@@ -93,10 +96,12 @@ function useHostedUsageTopUpDialog({
       : state.screen.operation !== "idle";
   const requestIdentityReady =
     requestIdentity.available &&
-    requestIdentity.checkoutUrl === checkoutUrl;
+    requestIdentity.checkoutUrl === checkoutUrl &&
+    requestIdentity.payerMemberId === payerMemberId;
   const requestIdentityError =
     state.screen.kind === "selection" &&
     requestIdentity.checkoutUrl === checkoutUrl &&
+    requestIdentity.payerMemberId === payerMemberId &&
     !requestIdentity.available
       ? "This browser tab can’t safely start a payment. Open this page in a regular tab and try again."
       : null;
@@ -178,16 +183,17 @@ function useHostedUsageTopUpDialog({
         return;
       }
       const storedIdentity =
-        readHostedUsageTopUpRequestIdentity(checkoutUrl);
+        readHostedUsageTopUpRequestIdentity({ checkoutUrl, payerMemberId });
       setRequestIdentity({
         ...storedIdentity,
         checkoutUrl,
+        payerMemberId,
       });
     });
     return () => {
       canceled = true;
     };
-  }, [checkoutUrl]);
+  }, [checkoutUrl, payerMemberId]);
 
   useEffect(() => {
     if (!purchaseReturn) {
@@ -418,7 +424,8 @@ function useHostedUsageTopUpDialog({
         : null;
     const storedRequestKey =
       sourceScreen.kind === "selection" &&
-      requestIdentity.checkoutUrl === checkoutUrl
+      requestIdentity.checkoutUrl === checkoutUrl &&
+      requestIdentity.payerMemberId === payerMemberId
         ? requestIdentity.requestKey
         : null;
 
@@ -450,11 +457,15 @@ function useHostedUsageTopUpDialog({
 
     if (
       sourceScreen.kind === "selection" &&
-      !writeHostedUsageTopUpRequestIdentity(checkoutUrl, requestKey)
+      !writeHostedUsageTopUpRequestIdentity(
+        { checkoutUrl, payerMemberId },
+        requestKey,
+      )
     ) {
       setRequestIdentity({
         available: false,
         checkoutUrl,
+        payerMemberId,
         requestKey: null,
       });
       dispatch({
@@ -470,6 +481,7 @@ function useHostedUsageTopUpDialog({
       setRequestIdentity({
         available: true,
         checkoutUrl,
+        payerMemberId,
         requestKey,
       });
     }
@@ -543,10 +555,14 @@ function useHostedUsageTopUpDialog({
           response.requestKeyMatched
         ) {
           const identityCleared =
-            clearHostedUsageTopUpRequestIdentity(checkoutUrl);
+            clearHostedUsageTopUpRequestIdentity({
+              checkoutUrl,
+              payerMemberId,
+            });
           setRequestIdentity({
             available: identityCleared,
             checkoutUrl,
+            payerMemberId,
             requestKey: null,
           });
         }

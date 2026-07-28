@@ -568,12 +568,15 @@ funding route share this sequence:
    one payer at a time. If recovery-only finds neither an exact-key purchase nor
    a current nonterminal payer purchase, return a typed miss without resolving
    a Customer, inserting a purchase, or entering Stripe. The browser retains
-   that key in target-scoped session storage for the next explicit normal
-   authorization, including after remount, which serializes with any delayed
-   original request under the same payer lock. Only a durable response carrying
-   server-owned proof that the submitted selection key matched clears it;
-   mounted active or return projections, projected-purchase retries, and
-   different-key recovery do not.
+   that key in payer-and-target-scoped session storage for the next explicit
+   normal authorization, including after remount or a same-tab account switch,
+   which serializes with any delayed original request under the same payer lock.
+   The authenticated server-rendered member ID scopes the browser slot; another
+   payer using the same target in that tab receives an independent key and
+   cannot clear the first payer's unresolved identity. Only a durable response
+   carrying server-owned proof that the submitted selection key matched for
+   that payer clears it; mounted active or return projections,
+   projected-purchase retries, and different-key recovery do not.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
    funding also requires the direct-paid eligibility projection. Family
    funding requires the current active owner, active group and billing, and an
@@ -979,9 +982,10 @@ Current focused unit and component coverage exercises:
   one-time-versus-subscription dispatch cases;
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and
-- the Settings dialog's no-default selection, exact offer post, session-stable
-  key retry across remount, group payment-ambiguity copy and amount lock,
-  redirect, read-only return polling, cancel expiry, and delayed state;
+- the Settings dialog's no-default selection, exact offer post, payer-and-target
+  session-stable key retry across remount and same-tab account switching, group
+  payment-ambiguity copy and amount lock, redirect, read-only return polling,
+  cancel expiry, and delayed state;
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;
