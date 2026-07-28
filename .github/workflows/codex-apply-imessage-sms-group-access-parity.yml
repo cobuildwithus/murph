@@ -63,21 +63,55 @@ jobs:
           corepack pnpm install --frozen-lockfile
 
       - name: Verify changed packages and focused behavior
+        id: verify
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          corepack pnpm --filter @murphai/assistant-engine typecheck
-          corepack pnpm --filter @murphai/assistant-runtime typecheck
-          corepack pnpm --filter @murphai/assistant-engine test -- \
-            assistant-codex-group-tool.test.ts \
-            assistant-group-challenge-diagnostics-skill.test.ts \
-            assistant-skill-assets.test.ts \
-            assistant-capability-offers-prompt.test.ts
-          corepack pnpm --filter @murphai/assistant-runtime test -- \
-            hosted-runtime-group-tool-linq-context.test.ts
-          corepack pnpm docs:drift
+          set -uo pipefail
+          exec > >(tee /tmp/group-access-parity-verify.log) 2>&1
+          status=0
+          run_check() {
+            echo "::group::$1"
+            shift
+            "$@"
+            result=$?
+            echo "::endgroup::"
+            if [ "$result" -ne 0 ]; then
+              status=$result
+            fi
+          }
+          run_check 'assistant-engine typecheck' \
+            corepack pnpm --filter @murphai/assistant-engine typecheck
+          run_check 'assistant-runtime typecheck' \
+            corepack pnpm --filter @murphai/assistant-runtime typecheck
+          run_check 'assistant-engine focused tests' \
+            corepack pnpm --filter @murphai/assistant-engine test -- \
+              assistant-codex-group-tool.test.ts \
+              assistant-group-challenge-diagnostics-skill.test.ts \
+              assistant-skill-assets.test.ts \
+              assistant-capability-offers-prompt.test.ts
+          run_check 'assistant-runtime focused tests' \
+            corepack pnpm --filter @murphai/assistant-runtime test -- \
+              hosted-runtime-group-tool-linq-context.test.ts
+          run_check 'agent docs drift' corepack pnpm docs:drift
+          exit "$status"
+
+      - name: Upload verification diagnostics
+        if: steps.verify.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: group-access-parity-verification
+          path: /tmp/group-access-parity-verify.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after verification failure
+        if: steps.verify.outcome == 'failure'
+        shell: bash
+        run: exit 1
 
       - name: Commit and publish final branch
+        if: steps.verify.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
