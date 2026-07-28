@@ -151,6 +151,7 @@ import {
   buildHostedAutoPulseTrialCustomerIdempotencyKey,
   buildHostedAutoPulseTrialSubscriptionIdempotencyKey,
   ensureHostedAutoPulseTrialEnrollment,
+  ensureHostedLinqInstantStartPulseTrialEnrollment,
   inspectHostedAutoPulseTrialCampaignDisposition,
   runHostedAutoPulseTrialCampaignPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
@@ -2800,6 +2801,207 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it("reuses the ordinary Pulse trial for trusted Linq instant start without a canned welcome", async () => {
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home?initialVisit=true",
+      status: "enrolled",
+    });
+
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        suppressSignupWelcome: true,
+      }),
+    );
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps instant-start Stripe provisioning and activation under one member lock", async () => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.list.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(true);
+      return { data: [] };
+    });
+    mocks.stripe.subscriptions.create.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(true);
+      return makeTrialSubscription();
+    });
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home?initialVisit=true",
+      status: "enrolled",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
+      customer: "cus_auto_trial_123",
+      limit: 100,
+      status: "all",
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    });
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      }),
+    );
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+    const transactionClient = prisma.transactionClients[0];
+    expect(transactionClient?.hostedInvite.findUnique).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        expiresAt: {
+          gt: new Date("2026-06-14T12:00:05.000Z"),
+        },
+        instantStartAdmissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        sentAt: null,
+      },
+    });
+    expect(transactionClient?.hostedInvite.updateMany).toHaveBeenCalledWith({
+      data: {
+        instantStartAdmissionEventId: null,
+      },
+      where: {
+        id: "invite_instant_start_123",
+        instantStartAdmissionEventId: "evt_instant_start_123",
+      },
+    });
+  });
+
+  it("stops before Stripe when the admitted invite marker was revoked under the member lock", async () => {
+    const prisma = makePrisma({ instantStartInvite: null });
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_revoked",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_ADMISSION_REVOKED",
+      retryable: false,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("falls back before Stripe when instant start finds an existing billing customer", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeBillingSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        lastStripeEventCreatedAt: null,
+        memberId: "member_123",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_existing_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_EXISTING_STRIPE_CUSTOMER",
+      httpStatus: 409,
+    });
+
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the no-existing-customer policy after acquiring the member lock", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: {
+          currentBillingPhase: null,
+          currentBillingPlanCode: null,
+          currentCheckoutOffer: null,
+          currentPeriodEnd: null,
+          currentPeriodStart: null,
+          currentTrialEndsAt: null,
+          currentTrialStartedAt: null,
+          lastStripeEventCreatedAt: null,
+          memberId: "member_123",
+          pulseTrialPolicyVersion: null,
+          pulseTrialRedeemedAt: null,
+          stripeCustomerId: "cus_bound_during_lock_wait",
+          stripeSubscriptionId: null,
+        },
+      }));
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        admissionEventId: "evt_instant_start_123",
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_EXISTING_STRIPE_CUSTOMER",
+      httpStatus: 409,
+    });
+
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
   it("rejects members without a messaging channel before Stripe or billing writes", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValueOnce(makeInvite({
       member: {
@@ -2959,14 +3161,37 @@ function makeTrialSubscriptionMetadata(
   };
 }
 
-function makePrisma() {
+type AutoTrialPrismaTransactionClient = {
+  hostedInvite: {
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
+  tx: boolean;
+};
+
+function makePrisma(input: {
+  instantStartInvite?: { id: string } | null;
+} = {}) {
   let transactionActive = false;
-  let activeTransactionClient: { tx: boolean } | null = null;
-  const transactionClients: Array<{ tx: boolean }> = [];
+  let activeTransactionClient: AutoTrialPrismaTransactionClient | null = null;
+  const transactionClients: AutoTrialPrismaTransactionClient[] = [];
 
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
-      const tx = { tx: true };
+      const tx = {
+        tx: true,
+      } as AutoTrialPrismaTransactionClient;
+      Object.defineProperty(tx, "hostedInvite", {
+        enumerable: false,
+        value: {
+          findUnique: vi.fn().mockResolvedValue(
+            input.instantStartInvite === undefined
+              ? { id: "invite_instant_start_123" }
+              : input.instantStartInvite,
+          ),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      });
       Object.defineProperty(tx, "$queryRaw", {
         enumerable: false,
         value: vi.fn().mockResolvedValue([]),

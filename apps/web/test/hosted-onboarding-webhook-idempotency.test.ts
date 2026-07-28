@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
-  ensureHostedMemberForPhoneTx: vi.fn(),
+  ensureHostedMemberForPhoneResolutionTx: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getPrisma: vi.fn(),
   handleHostedGroupJoinOfferReaction: vi.fn(),
@@ -95,7 +95,8 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  ensureHostedMemberForPhoneTx: mocks.ensureHostedMemberForPhoneTx,
+  ensureHostedMemberForPhoneResolutionTx:
+    mocks.ensureHostedMemberForPhoneResolutionTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -513,7 +514,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneResolutionTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
@@ -1000,16 +1001,19 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("sends the signup link directly for an inactive member and finalizes without receipt state", async () => {
+  it("sends the signup link directly for an unsupported-prefix inactive member", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: null,
     });
-    mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-      billingStatus: HostedBillingStatus.not_started,
-      id: "member_123",
-      suspendedAt: null,
+    mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+      created: true,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.issueHostedInviteTx.mockResolvedValue({
       id: "invite_123",
@@ -1019,6 +1023,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     await expect(
       handleHostedOnboardingLinqWebhook({
         rawBody: buildLinqMessageWebhookBody({
+          from: "+447911123456",
           service: "iMessage",
         }),
         signature: null,
@@ -1031,8 +1036,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "sent-signup-link",
     });
 
-    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-      phoneNumber: "+15551234567",
+    expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
+      phoneNumber: "+447911123456",
       prisma,
     });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith(
@@ -1041,7 +1046,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         memberId: "member_123",
         participantContact: expect.objectContaining({
           kind: "phone",
-          value: "+15551234567",
+          value: "+447911123456",
         }),
       }),
     );
@@ -1080,16 +1085,19 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("uses member/day delivery admission for overlapping first-contact signup link sends", async () => {
+  it("deduplicates overlapping unsupported-prefix signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: null,
     });
-    mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-      billingStatus: HostedBillingStatus.not_started,
-      id: "member_123",
-      suspendedAt: null,
+    mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+      created: true,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.issueHostedInviteTx.mockResolvedValue({
       id: "invite_123",
@@ -1108,6 +1116,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_one",
+        from: "+447911123456",
         messageId: "msg_first_contact_one",
         service: "iMessage",
       }),
@@ -1117,6 +1126,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_two",
+        from: "+447911123456",
         messageId: "msg_first_contact_two",
         service: "iMessage",
       }),
@@ -1170,10 +1180,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(
         new Error("Hosted domain root envelope authority signature verification failed."),
       );
-      mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
-        billingStatus: HostedBillingStatus.not_started,
-        id: "member_123",
-        suspendedAt: null,
+      mocks.ensureHostedMemberForPhoneResolutionTx.mockResolvedValue({
+        created: true,
+        member: {
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          suspendedAt: null,
+        },
       });
       mocks.issueHostedInviteTx.mockResolvedValue({
         id: "invite_123",
@@ -1183,6 +1196,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       await expect(
         handleHostedOnboardingLinqWebhook({
           rawBody: buildLinqMessageWebhookBody({
+            from: "+447911123456",
             service: "iMessage",
           }),
           signature: null,
@@ -1194,8 +1208,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         reason: "sent-signup-link",
       });
 
-      expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-        phoneNumber: "+15551234567",
+      expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
+        phoneNumber: "+447911123456",
         prisma,
       });
     } finally {
@@ -1730,6 +1744,9 @@ function createPrismaStub() {
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
+    },
+    hostedLinqFirstContactAdmissionDecision: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedLinqLine: {
       findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
