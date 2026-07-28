@@ -4534,6 +4534,106 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("resumes a stored model allow for the same inactive instant-start member", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const memberId = "member_instant_start_retry";
+    const eventId = "evt_instant_start_retry";
+    const invite = {
+      channel: "linq",
+      id: "invite_instant_start_retry",
+      inviteCode: "code_instant_start_retry",
+      memberId,
+      sentAt: null,
+      status: "pending",
+    };
+    let trialActive = false;
+    const hostedMemberFindUnique = vi.fn(async () => ({
+      accountGroupMemberships: [],
+      billingStatus: trialActive
+        ? HostedBillingStatus.active
+        : HostedBillingStatus.not_started,
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      id: memberId,
+      invites: [],
+      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      suspendedAt: null,
+      threadContainer: null,
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    }));
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          confidence: 0.99,
+          decision: "allow",
+          eventId,
+          source: "model",
+        }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: hostedMemberFindUnique,
+        update: vi.fn(),
+      },
+    });
+    mocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
+      id: "mailbox_item_123",
+      userId: memberId,
+    });
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+      async () => {
+        trialActive = true;
+        return {
+          redirectPath: "/home?initialVisit=true",
+          status: "enrolled",
+        };
+      },
+    );
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .toHaveBeenCalledOnce();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("starts the full Pulse trial and answers the original model-approved direct iMessage", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     let createdMemberId: string | null = null;

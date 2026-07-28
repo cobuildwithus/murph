@@ -10,6 +10,7 @@ import type {
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
 import {
   isHostedLinqInstantStartEligible,
+  isHostedLinqInstantStartEventCandidate,
   resolveHostedLinqInstantStartPhonePrefix,
 } from "@/src/lib/hosted-onboarding/linq-instant-start";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
@@ -34,6 +35,17 @@ describe("Linq instant start", () => {
       phoneNumber: "+447700900123",
       prefixes: ["+1"],
     })).toBeNull();
+  });
+
+  it("recognizes a structurally eligible event before member lookup", () => {
+    expect(isHostedLinqInstantStartEventCandidate({
+      event: buildMessageEvent(),
+      phonePrefixes: ["+1"],
+    })).toBe(true);
+    expect(isHostedLinqInstantStartEventCandidate({
+      event: buildMessageEvent({ service: "SMS" }),
+      phonePrefixes: ["+1"],
+    })).toBe(false);
   });
 
   it("admits only a model-approved direct iMessage from an allowed phone prefix", () => {

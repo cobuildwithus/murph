@@ -13,6 +13,7 @@ import {
   getHostedLinqChatSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { getHostedOnboardingEnvironment } from "./runtime";
 import {
   planHostedLinqPermanentHomeRouteRecovery,
 } from "./linq-home-route-recovery";
@@ -75,6 +76,9 @@ import {
 import {
   ensureHostedLinqInstantStartPulseTrialEnrollment,
 } from "./auto-trial-enrollment-service";
+import {
+  isHostedLinqInstantStartEventCandidate,
+} from "./linq-instant-start";
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
@@ -327,8 +331,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
     try {
+      const shouldReuseRecordedFirstContactAdmission =
+        planningEvent.event_type === "message.received"
+        && (
+          requireFirstContactAdmission
+          || isHostedLinqInstantStartEventCandidate({
+            event: requireHostedLinqMessageReceivedEvent(planningEvent),
+            phonePrefixes:
+              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+          })
+        );
       let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null =
-        requireFirstContactAdmission && planningEvent.event_type === "message.received"
+        shouldReuseRecordedFirstContactAdmission
           ? await readRecordedHostedLinqFirstContactAdmissionDecision({
               eventId: event.event_id,
               prisma,

@@ -1,4 +1,7 @@
-import type { HostedLinqMessageReceivedEvent } from "./linq";
+import {
+  resolveHostedLinqParticipantContact,
+  type HostedLinqMessageReceivedEvent,
+} from "./linq";
 import type {
   HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
@@ -26,6 +29,19 @@ export function resolveHostedLinqInstantStartPhonePrefix(input: {
   }
 
   return matchedPrefix;
+}
+
+export function isHostedLinqInstantStartEventCandidate(input: {
+  event: HostedLinqMessageReceivedEvent;
+  phonePrefixes: readonly string[];
+}): boolean {
+  const participantContact = resolveHostedLinqParticipantContact(input.event);
+  return participantContact !== null
+    && isHostedLinqInstantStartCandidate({
+      event: input.event,
+      participantContact,
+      phonePrefixes: input.phonePrefixes,
+    });
 }
 
 export function isHostedLinqInstantStartCandidate(input: {
