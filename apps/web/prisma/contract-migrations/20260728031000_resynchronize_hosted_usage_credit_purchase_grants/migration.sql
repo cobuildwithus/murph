@@ -2,16 +2,19 @@
 -- member before changing purchase/grant projections. Acquire the same locks in
 -- deterministic order as a separate statement so the following statement gets
 -- a fresh READ COMMITTED snapshot after any in-flight writer commits.
-SELECT member."id"
-FROM "hosted_member" AS member
-WHERE EXISTS (
-  SELECT 1
-  FROM "hosted_usage_credit_entry" AS entry
-  WHERE entry."beneficiary_member_id" = member."id"
-    AND entry."kind" = 'purchase_grant'
-)
-ORDER BY member."id"
-FOR UPDATE;
+SELECT COUNT(*) AS "lockedBeneficiaryCount"
+FROM (
+  SELECT member."id"
+  FROM "hosted_member" AS member
+  WHERE EXISTS (
+    SELECT 1
+    FROM "hosted_usage_credit_entry" AS entry
+    WHERE entry."beneficiary_member_id" = member."id"
+      AND entry."kind" = 'purchase_grant'
+  )
+  ORDER BY member."id"
+  FOR UPDATE
+) AS locked_beneficiary;
 
 INSERT INTO "hosted_usage_credit_grant" (
   "entry_id",

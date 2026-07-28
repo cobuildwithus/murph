@@ -154,13 +154,16 @@ describe("hosted usage-credit entry constraint migrations", () => {
       '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
     );
     expect(referralProjectionContractMigration).toContain(
-      'ORDER BY member."id"\nFOR UPDATE;',
+      'SELECT COUNT(*) AS "lockedBeneficiaryCount"',
+    );
+    expect(referralProjectionContractMigration).toContain(
+      'ORDER BY member."id"\n  FOR UPDATE',
     );
     expect(referralProjectionContractMigration).toContain(
       'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
     );
     expect(referralProjectionContractMigration.indexOf(
-      'ORDER BY member."id"\nFOR UPDATE;',
+      'ORDER BY member."id"\n  FOR UPDATE',
     )).toBeLessThan(referralProjectionContractMigration.indexOf(
       'INSERT INTO "hosted_usage_credit_grant"',
     ));
