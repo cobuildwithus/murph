@@ -827,6 +827,29 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedUsageReferralCreditEntryConstraintMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260728030000_hosted_usage_referral_credit_entry_constraints/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralProjectionContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralProductSpec = readFileSync(
+      new URL(
+        "../../../agent-docs/product-specs/hosted-usage-referrals.md",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const normalizedHostedUsageReferralProductSpec =
+      hostedUsageReferralProductSpec.replace(/\s+/gu, " ");
     const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
@@ -972,6 +995,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260727120000_hosted_member_checkout_session",
       "20260727190000_hosted_group_sponsorship_moment",
       "20260728030000_hosted_invite_instant_start_admission",
+      "20260728030000_hosted_usage_referral_credit_entry_constraints",
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "migration_lock.toml",
     ]);
@@ -995,7 +1019,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralRewardsMigrationSql).toContain(
       'ADD COLUMN "referral_id" TEXT',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       '("purchase_id" IS NOT NULL) <> ("referral_id" IS NOT NULL)',
     );
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
@@ -1004,16 +1028,16 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
       'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
-      'DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       ') NOT VALID',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       'VALIDATE CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"',
     );
     expect(hostedUsageReferralRewardsMigrationSql).toContain(
@@ -1041,12 +1065,45 @@ describe("hosted Prisma baseline migration", () => {
         "WHERE entry.\"kind\" = 'purchase_grant';",
       ].join("\n"),
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
       'ON CONFLICT ("entry_id") DO UPDATE',
     );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
       '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
     );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'SELECT COUNT(*) AS "lockedBeneficiaryCount"',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'ORDER BY member."id"\n  FOR UPDATE',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
+      'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
+    );
+    expect(hostedUsageReferralProjectionContractMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_usage_credit_entry"',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'ALTER TABLE "hosted_usage_credit_entry"',
+    );
+    expect(hostedUsageReferralProductSpec).not.toContain(
+      "20260726123000_allow_hosted_usage_referral_credit_entries",
+    );
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728030000_hosted_usage_referral_credit_entry_constraints",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`",
+    ));
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
       "hosted_usage_credit_allocation",
     );

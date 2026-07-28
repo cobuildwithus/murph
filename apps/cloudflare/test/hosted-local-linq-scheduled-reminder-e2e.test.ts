@@ -408,7 +408,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("keeps enough scheduling runway in the pull-request gate", () => {
+  it("keeps the production-like checkpoint and enough setup runway in both gates", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
     const fullTiming = resolveScheduledReminderTiming({});
     const fastTiming = resolveScheduledReminderTiming({
@@ -417,8 +417,8 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
 
     expect(fullTiming).toEqual({
       idleCheckpointDelayMs: 10_000,
-      leadMs: 60_000,
-      setupLeadText: "about one minute",
+      leadMs: 90_000,
+      setupLeadText: "about ninety seconds",
     });
     expect(fastTiming).toEqual({
       idleCheckpointDelayMs: 1,
@@ -426,7 +426,7 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
       setupLeadText: "about ninety seconds",
     });
     expect(resolveScheduledReminderTimes(now, fullTiming.leadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:01:00.000Z",
+      dueAtIso: "2026-06-18T12:01:30.000Z",
     });
     expect(resolveScheduledReminderTimes(now, fastTiming.leadMs)).toEqual({
       dueAtIso: "2026-06-18T12:01:30.000Z",
@@ -943,17 +943,11 @@ function resolveScheduledReminderTiming(
   leadMs: number;
   setupLeadText: string;
 } {
-  if (env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1") {
-    return {
-      idleCheckpointDelayMs: 1,
-      leadMs: 90_000,
-      setupLeadText: "about ninety seconds",
-    };
-  }
   return {
-    idleCheckpointDelayMs: 10_000,
-    leadMs: 60_000,
-    setupLeadText: "about one minute",
+    idleCheckpointDelayMs:
+      env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
+    leadMs: 90_000,
+    setupLeadText: "about ninety seconds",
   };
 }
 
