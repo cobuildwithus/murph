@@ -23,6 +23,7 @@ import type {
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
+  AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderRequestStartTiming,
   AssistantProviderRequestOutcome,
@@ -139,6 +140,26 @@ function resolveAssistantCodexConfigOverrides(input: {
     ...(input.requested ?? []),
     ...ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES,
   ]
+}
+
+function resolveAssistantProviderConversationHistoryMessages(input: {
+  contentAuthorityExpiresAt: string | null | undefined
+  messages:
+    | readonly AssistantProviderConversationMessage[]
+    | null
+    | undefined
+  onboardingGoalCheckinTurn: boolean
+}): readonly AssistantProviderConversationMessage[] | undefined {
+  if (!input.onboardingGoalCheckinTurn) {
+    return input.messages ?? undefined
+  }
+  const contentAuthorityExpiresAtMs = Date.parse(
+    input.contentAuthorityExpiresAt ?? '',
+  )
+  return Number.isFinite(contentAuthorityExpiresAtMs) &&
+    Date.now() < contentAuthorityExpiresAtMs
+    ? input.messages ?? undefined
+    : []
 }
 
 export {
@@ -474,6 +495,14 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const conversationHistoryMessages =
+      resolveAssistantProviderConversationHistoryMessages({
+        contentAuthorityExpiresAt:
+          attemptPlan.routePlan
+            .conversationHistoryContentAuthorityExpiresAt,
+        messages: attemptPlan.routePlan.conversationHistoryMessages,
+        onboardingGoalCheckinTurn,
+      })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: nativeCapabilitiesRestrictedTurn
@@ -509,8 +538,7 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
-        conversationHistoryMessages:
-          attemptPlan.routePlan.conversationHistoryMessages,
+        conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: outputOnlyTurn
           ? []

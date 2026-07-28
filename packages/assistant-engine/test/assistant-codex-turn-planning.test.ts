@@ -86,6 +86,7 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import {
+  ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
   pruneAssistantTranscriptRetention,
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
@@ -101,6 +102,7 @@ import type { AssistantSession } from '@murphai/operator-config/assistant-cli-co
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 afterEach(() => {
+  vi.useRealTimers()
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
   planningMocks.readAssistantGroupRoomModelPrompt.mockReset()
@@ -297,6 +299,8 @@ describe('assistant Codex turn planning', () => {
   })
 
   it('plans onboarding goal check-ins with bounded history and no tool or broad-context prompt', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T17:30:00.000Z'))
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'READ_ONLY_CLI_CONTRACT',
     )
@@ -400,6 +404,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.environments).toEqual([])
       expect(plan.assistantCliContract).toBeNull()
       expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryContentAuthorityExpiresAt).toBe(
+        '2026-07-29T15:00:00.000Z',
+      )
       expect(plan.conversationHistoryMessages).toEqual([
         { content: 'I may want to leave this open for now.', role: 'user' },
         { content: 'That is completely fine.', role: 'assistant' },
@@ -430,6 +437,167 @@ describe('assistant Codex turn planning', () => {
       expect(
         planningMocks.readAssistantCliSurfaceBootstrapContext,
       ).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it.each([
+    {
+      executionAt: '2026-07-20T17:30:00.000Z',
+      label: 'the beginning',
+    },
+    {
+      executionAt: '2026-07-23T17:30:00.000Z',
+      label: 'the middle',
+    },
+    {
+      executionAt: '2026-07-27T17:29:00.000Z',
+      label: 'the end',
+    },
+  ])('admits only coherent receipt-authorized history at $label of the delivery window', async ({
+    executionAt,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(executionAt))
+    const executionAtMs = Date.parse(executionAt)
+    const cutoffMs =
+      executionAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-onboarding-current-evidence-plan-'),
+    )
+    const session = createSession({ turnCount: 2 })
+    const resolvePlan = () =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: 'Offer one low-pressure health direction choice.',
+          scheduledOccurrenceAt: '2026-07-20T17:30:00.000Z',
+          turnTrigger: 'automation-cron',
+          vault,
+        },
+        profile: {
+          promptProfile: 'onboarding-goal-checkin' as const,
+          threadScope: 'isolated-thread' as const,
+          toolProfile: 'output-only-turn' as const,
+        },
+        promptTimeContext: {
+          currentLocalDate: executionAt.slice(0, 10),
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        [
+          {
+            createdAt: new Date(cutoffMs - 60_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'Would you like to choose a direction?',
+          },
+          {
+            contentReceivedAt: new Date(cutoffMs).toISOString(),
+            createdAt: new Date(cutoffMs).toISOString(),
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'This text is at its inclusive retention deadline.',
+          },
+          {
+            createdAt: new Date(cutoffMs + 60_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'This reply depends on expired member text.',
+          },
+          {
+            createdAt: new Date(executionAtMs - 7_200_000).toISOString(),
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'This legacy entry has no receipt authority.',
+          },
+          {
+            createdAt: new Date(executionAtMs - 7_140_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'This reply depends on unstamped member text.',
+          },
+          {
+            contentReceivedAt: new Date(
+              executionAtMs - 3_600_000,
+            ).toISOString(),
+            createdAt: new Date(executionAtMs - 3_600_000).toISOString(),
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'A current coherent direction still feels useful.',
+          },
+          {
+            createdAt: new Date(executionAtMs - 1_800_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'We can keep that direction easy.',
+          },
+        ],
+      )
+
+      await expect(resolvePlan()).resolves.toMatchObject({
+        conversationHistoryContentAuthorityExpiresAt: new Date(
+          executionAtMs -
+            3_600_000 +
+            ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+        ).toISOString(),
+        conversationHistoryMessages: [
+          {
+            content: 'A current coherent direction still feels useful.',
+            role: 'user',
+          },
+          {
+            content: 'We can keep that direction easy.',
+            role: 'assistant',
+          },
+        ],
+      })
+
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        [
+          {
+            createdAt: new Date(cutoffMs - 60_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'Would you like to choose a direction?',
+          },
+          {
+            contentReceivedAt: new Date(cutoffMs).toISOString(),
+            createdAt: new Date(cutoffMs).toISOString(),
+            kind: 'user',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'Expired member text remains before idle retention.',
+          },
+          {
+            createdAt: new Date(cutoffMs + 60_000).toISOString(),
+            kind: 'assistant',
+            schema: 'murph.assistant-transcript-entry.v1',
+            text: 'A one-sided exchange must not survive reconstruction.',
+          },
+        ],
+      )
+
+      const reconstructedPlan = await resolvePlan()
+      expect(
+        reconstructedPlan.conversationHistoryContentAuthorityExpiresAt,
+      ).toBeNull()
+      expect(reconstructedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(reconstructedPlan.systemPrompt).toContain(
+        'goals were unclear, unshared, deliberately open, or exploratory',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

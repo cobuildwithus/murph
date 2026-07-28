@@ -130,6 +130,7 @@ export interface AssistantRouteTurnPlan {
   developerInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[]
+  conversationHistoryContentAuthorityExpiresAt?: string | null
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
@@ -486,22 +487,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     onboardingGoalCheckinTurn ||
     input.profile.promptProfile === 'creative-notification'
-  const resolveCommittedTranscriptHistoryMessages = async () =>
+  const resolveCommittedTranscriptHistory = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           currentUserPrompt: input.input.prompt,
           ...(onboardingGoalCheckinTurn
             ? {
-                historyNotBeforeMs:
-                  resolveOnboardingGoalCheckinTranscriptHistoryNotBeforeMs(
-                    input.input.scheduledOccurrenceAt,
-                  ),
+                requireCurrentUserContentAuthority: true,
               }
             : {}),
           sessionId: input.session.sessionId,
           vault: input.input.vault,
         })
-      : []
+      : {
+          contentAuthorityExpiresAt: null,
+          messages: [],
+        }
   const assistantStyleSettingsAvailable =
     (
       (
@@ -935,9 +936,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const resumeCodexThreadId = candidateResumeCodexThreadId
-  const conversationHistoryMessages = resumeCodexThreadId === null
-    ? await resolveCommittedTranscriptHistoryMessages()
-    : []
+  const conversationHistory = resumeCodexThreadId === null
+    ? await resolveCommittedTranscriptHistory()
+    : {
+        contentAuthorityExpiresAt: null,
+        messages: [],
+      }
   const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
   const actualAssistantCliContract = shouldPrepareBootstrapContext
@@ -982,9 +986,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     environments: outputOnlyTurn ? [] : undefined,
+    ...(onboardingGoalCheckinTurn
+      ? {
+          conversationHistoryContentAuthorityExpiresAt:
+            conversationHistory.contentAuthorityExpiresAt,
+        }
+      : {}),
     conversationHistoryMessages:
-      conversationHistoryMessages.length > 0
-        ? conversationHistoryMessages
+      conversationHistory.messages.length > 0
+        ? conversationHistory.messages
         : undefined,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
@@ -1035,19 +1045,30 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
-  historyNotBeforeMs?: number | null
+  requireCurrentUserContentAuthority?: boolean
   sessionId: string
   vault: string
-}): Promise<readonly AssistantProviderConversationMessage[]> {
-  const historyNotBeforeMs = input.historyNotBeforeMs
-  if (historyNotBeforeMs === null) {
-    return []
-  }
+}): Promise<{
+  contentAuthorityExpiresAt: string | null
+  messages: readonly AssistantProviderConversationMessage[]
+}> {
   let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
   } catch {
-    return []
+    return {
+      contentAuthorityExpiresAt: null,
+      messages: [],
+    }
+  }
+  let contentAuthorityExpiresAt: string | null = null
+  if (input.requireCurrentUserContentAuthority === true) {
+    const selection = selectCurrentAssistantTranscriptEvidenceSuffix(
+      entries,
+      Date.now(),
+    )
+    entries = selection.entries
+    contentAuthorityExpiresAt = selection.contentAuthorityExpiresAt
   }
 
   type TranscriptHistoryCandidate = {
@@ -1056,13 +1077,6 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
-    if (
-      historyNotBeforeMs !== undefined &&
-      resolveAssistantTranscriptEntryEvidenceTimeMs(entry) <
-        historyNotBeforeMs
-    ) {
-      return []
-    }
     if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
@@ -1120,29 +1134,62 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     break
   }
 
-  return limitAssistantConversationHistoryMessages(
-    messages.map(({ message }) => message),
-  )
+  return {
+    contentAuthorityExpiresAt,
+    messages: limitAssistantConversationHistoryMessages(
+      messages.map(({ message }) => message),
+    ),
+  }
 }
 
-function resolveOnboardingGoalCheckinTranscriptHistoryNotBeforeMs(
-  scheduledOccurrenceAt: string | null | undefined,
-): number | null {
-  const occurrenceAtMs = Date.parse(scheduledOccurrenceAt ?? '')
-  return Number.isFinite(occurrenceAtMs)
-    ? occurrenceAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
-    : null
-}
+function selectCurrentAssistantTranscriptEvidenceSuffix(
+  entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>,
+  evidenceAdmissionAtMs: number,
+): {
+  contentAuthorityExpiresAt: string | null
+  entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+} {
+  const cutoffMs =
+    evidenceAdmissionAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+  let contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
+  let evidenceStartIndex = -1
 
-function resolveAssistantTranscriptEntryEvidenceTimeMs(
-  entry: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>[number],
-): number {
-  const timestamp =
-    entry.kind === 'user'
-      ? entry.contentReceivedAt ?? entry.createdAt
-      : entry.createdAt
-  const timestampMs = Date.parse(timestamp)
-  return Number.isFinite(timestampMs) ? timestampMs : Number.NEGATIVE_INFINITY
+  for (const [index, entry] of entries.entries()) {
+    if (entry.kind !== 'user') {
+      continue
+    }
+    const contentReceivedAtMs = Date.parse(entry.contentReceivedAt ?? '')
+    const hasCurrentContentAuthority =
+      entry.textRetiredAt === undefined &&
+      normalizeNullableString(entry.text) !== null &&
+      Number.isFinite(contentReceivedAtMs) &&
+      contentReceivedAtMs > cutoffMs &&
+      contentReceivedAtMs <= evidenceAdmissionAtMs
+    if (!hasCurrentContentAuthority) {
+      contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
+      evidenceStartIndex = -1
+      continue
+    }
+    if (evidenceStartIndex === -1) {
+      evidenceStartIndex = index
+    }
+    contentAuthorityExpiresAtMs = Math.min(
+      contentAuthorityExpiresAtMs,
+      contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+    )
+  }
+
+  return {
+    contentAuthorityExpiresAt:
+      evidenceStartIndex !== -1 &&
+      Number.isFinite(contentAuthorityExpiresAtMs)
+        ? new Date(contentAuthorityExpiresAtMs).toISOString()
+        : null,
+    entries:
+      evidenceStartIndex === -1
+        ? []
+        : entries.slice(evidenceStartIndex),
+  }
 }
 
 function normalizeAssistantConversationHistoryText(value: string): string | null {

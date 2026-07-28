@@ -583,13 +583,18 @@ boundary with a fresh output-only turn: bounded committed conversation history
 and an engine-projected list of bounded active-goal titles remain available,
 while the memory document, generic CLI contract, shell, hosted dynamic tools,
 broad health-context injection, network fetches, and writable filesystem access
-do not. Conversation evidence is limited to entries inside the existing
-14-day inbound-content retention horizon measured from the scheduled
-occurrence, so a retained assistant question cannot outlive its retired answer
-and look unanswered. An invalid or missing occurrence supplies no transcript
-evidence. The isolated turn preserves the member's live conversation resume
-state whether it sends or skips. The dedicated system prompt owns the evidence
-and no-mutation contract above untrusted conversation, goal, and task text.
+do not. At actual evidence admission, conversation history requires a valid,
+unexpired `contentReceivedAt` for every included member entry and keeps only
+the coherent suffix beginning with an admissible member entry after the latest
+inadmissible one. It never derives missing receipt authority from transcript
+creation time, so delayed execution, interrupted retention, and retained
+assistant text cannot expose expired member content or create a misleading
+one-sided exchange. The route plan carries only the earliest included receipt
+deadline; if that deadline passes before provider entry, the runner drops the
+whole bounded history and leaves the prompt to the truthful generic branch.
+The isolated turn preserves the member's live conversation resume state
+whether it sends or skips. The dedicated system prompt owns the evidence and
+no-mutation contract above untrusted conversation, goal, and task text.
 
 Canonical onboarding remains the execution authority. Cron rechecks that the
 state is still completed with `user_answered` and old enough for the claimed

@@ -108,10 +108,13 @@ Last verified: 2026-07-27
   bounded transcript and engine-projected active-goal titles but no memory
   document, generic CLI contract, shell, hosted dynamic tools, network fetch,
   writable filesystem, or product-state mutation surface. That isolated turn
-  preserves live conversation resume state, and transcript evidence stops at
-  the existing 14-day content-retention horizon from the scheduled occurrence
-  so retained assistant text cannot outlive a retired answer. The final outbox
-  provider-entry gate repeats the onboarding precondition after deferred
+  preserves live conversation resume state. At actual evidence admission,
+  transcript history requires unexpired receipt authority for member text and
+  keeps only the coherent suffix beginning with an admissible member entry
+  after the latest inadmissible one. It never derives a missing receipt from
+  transcript creation time, and the provider boundary drops the whole bounded
+  history if its earliest included receipt expires after planning. The final
+  outbox provider-entry gate repeats the onboarding precondition after deferred
   delivery or restart even when the automation revision itself is unchanged.
   A skip consumes the one-shot normally and creates no retrying outreach loop.
   Engine and runtime support ship in one runner bundle. Once that bundle writes

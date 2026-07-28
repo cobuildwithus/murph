@@ -25,8 +25,14 @@ Last verified: 2026-07-26
   engine-projected list of bounded active-goal titles, but no memory document,
   generic CLI contract, shell, hosted dynamic tools, broad health-context
   snapshot, network fetch, writable filesystem, or mutation-capable product
-  surface. The dedicated system prompt owns the evidence and no-mutation
-  contract above untrusted conversation, goal, and task text. `member`
+  surface. At actual evidence admission, included member transcript text
+  requires a valid unexpired receipt timestamp; the planner admits only the
+  coherent suffix after the latest inadmissible member entry and never infers a
+  missing receipt from transcript creation time. The ephemeral route plan
+  carries the earliest included receipt deadline, and the provider boundary
+  drops all bounded history if that deadline has passed. The dedicated system
+  prompt owns the evidence and no-mutation contract above untrusted
+  conversation, goal, and task text. `member`
   identities require a personal/direct route;
   `authenticated-group` identities require a live exact non-direct
   Linq/iMessage or Telegram route, and group email is excluded. The runtime

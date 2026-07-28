@@ -73,7 +73,11 @@ generic CLI contract, shell, hosted dynamic tools, broad context, network
 fetches, writable filesystem access, generated artifacts, progress hooks, and
 mutation-capable configuration overrides. Notification tests prove send and
 skip preserve the live direct-session resume owner; planning tests prove
-retention-retired answers cannot leave older assistant questions in evidence;
+beginning, middle, and end-of-window execution admits only a coherent suffix
+with current receipt authority whether retention has already run or not,
+including cold reconstruction and unstamped legacy entries.
+Provider-execution tests advance the clock between planning and provider entry
+and prove the whole bounded history is dropped at the inclusive deadline;
 outbox tests prove a deferred send revalidates answered onboarding at final
 provider entry.
 
