@@ -190,11 +190,18 @@ async function transitionHostedPulseTrialPaidPlan(
   });
 
   assertHostedPulseTrialStartPaidRecoverableSourceState({ billingRef });
-  const canStart =
-    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "trial";
+  const currentBillingPhase =
+    parseHostedBillingPhase(billingRef?.currentBillingPhase);
+  const canStart = currentBillingPhase === "trial";
 
   if (input.timing === "at_trial_end" && !canStart) {
-    throw buildHostedPulseTrialStartPaidUnsupportedError();
+    if (currentBillingPhase === "paid") {
+      return {
+        billingPlanCode: START_PAID_PULSE_PLAN,
+        status: "started",
+      };
+    }
+    throw buildHostedPulseTrialContinueRequiresStartError();
   }
 
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
@@ -233,6 +240,10 @@ async function transitionHostedPulseTrialPaidPlan(
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
     });
+
+  if (input.timing === "at_trial_end" && canResumePausedAutoTrial) {
+    throw buildHostedPulseTrialContinueRequiresStartError();
+  }
 
   const resolveExistingInvoiceResult = () => maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
     invoice: readExpandedLatestInvoice(subscription),
@@ -381,6 +392,15 @@ function buildHostedPulseTrialStartPaidUnsupportedError(): Error {
     code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
     httpStatus: 409,
     message: "This Pulse update is only available while your Pulse trial is active.",
+  });
+}
+
+function buildHostedPulseTrialContinueRequiresStartError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+    httpStatus: 409,
+    message:
+      "Your Pulse trial has ended. Review the plan before starting paid Pulse.",
   });
 }
 

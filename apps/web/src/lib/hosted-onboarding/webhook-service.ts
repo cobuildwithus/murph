@@ -19,6 +19,7 @@ import {
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -88,6 +89,12 @@ import type {
 import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
+import {
+  reconcileHostedUsageReferralRewardAfterCommit,
+} from "../hosted-growth/usage-referral";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
@@ -292,6 +299,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signal: input.signal,
     });
     const planningEvent = planningResolution.event;
+    const warmPlanningMailboxPayloadRoot = () =>
+      warmHostedLinqMailboxPayloadRoot({
+        event: planningEvent,
+        prisma,
+        threadRoute: planningResolution.threadRoute,
+      });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -330,10 +343,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          () => warmHostedLinqMailboxPayloadRoot({
-            prisma,
-            threadRoute: planningResolution.threadRoute,
-          }),
+          warmPlanningMailboxPayloadRoot,
         );
       }
 
@@ -363,6 +373,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                   requireFirstContactAdmission,
                   prisma: transaction,
                 }),
+              warmPlanningMailboxPayloadRoot,
             );
         } else {
           const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
@@ -417,6 +428,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     requireFirstContactAdmission,
                     prisma: transaction,
                   }),
+                warmPlanningMailboxPayloadRoot,
               );
             }
           }
@@ -454,6 +466,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
@@ -550,7 +567,16 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    return { event: messageEvent, threadRoute: null };
+    return {
+      event: messageEvent,
+      threadRoute: messageEvent.data.is_from_me
+        ? null
+        : await readHostedThreadRouteByThreadIdentity({
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: messageEvent.data.chat_id,
+          }),
+    };
   }
 
   if (messageEvent.data.is_from_me) {
@@ -1009,8 +1035,62 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.scheduleAfterResponse ? undefined : input.signal,
     });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
   }
   return plan.response;
+}
+
+async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
+  prisma: PrismaClient;
+  referralIds: readonly string[];
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  const referralIds = [...new Set(input.referralIds)];
+  if (referralIds.length === 0) {
+    return;
+  }
+  const reconcile = async () => {
+    for (const referralId of referralIds) {
+      try {
+        const wake = await reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: input.prisma,
+          referralId,
+        });
+        if (!wake) {
+          continue;
+        }
+        await signalHostedMailboxAppendRuntime({
+          expectedUserId: wake.userId,
+          ...(wake.wakeMailboxCheckpoint
+            ? {
+                knownCheckpoint: {
+                  ...wake.wakeMailboxCheckpoint,
+                  userId: wake.userId,
+                },
+              }
+            : {}),
+          mailboxItemId: wake.mailboxItemId,
+          prisma: input.prisma,
+        });
+      } catch (error) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.usage-referral-reconcile-failed",
+          {
+            errorName: deriveHostedOnboardingTimingErrorName(error),
+          },
+        );
+      }
+    }
+  };
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(reconcile);
+    return;
+  }
+  await reconcile();
 }
 
 /**
@@ -1021,18 +1101,24 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
  * scoped around this transaction, so unwrapping beforehand leaves the
  * in-transaction encrypt as local AES work against the cached root.
  *
- * The route is the one the planning-event resolver already read, so warming
- * costs no additional query. `laneSeq` is authenticated metadata allocated
- * inside the transaction, so only the root is warmed; the payload is still
- * encrypted in place.
+ * An established group reuses the planning-event route. A direct message uses
+ * a narrow blind-index/member-id preflight that mirrors planner precedence
+ * without decrypting private identity or routing fields. Both remain hints:
+ * the planner repeats every authority check inside the transaction.
+ * `laneSeq` is authenticated metadata allocated inside the transaction, so
+ * only the root is warmed; the payload is still encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
 }): Promise<void> {
-  if (!input.threadRoute) {
-    // No established route yet, so there is no known member whose root could be
-    // warmed; the planner unwraps as before.
+  const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: input.threadRoute,
+  });
+  if (!memberId) {
     return;
   }
 
@@ -1040,7 +1126,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
     retainFailureInScopedCache: true,
-    userId: input.threadRoute.containerMemberId,
+    userId: memberId,
   });
   // The scoped cache hands every caller its own copy and expects that copy to
   // be wiped; the cached master is zeroized separately when the scope closes.

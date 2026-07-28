@@ -181,6 +181,7 @@ const mocks = vi.hoisted(() => {
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(async () => null),
   };
 
   return state;
@@ -211,6 +212,17 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq")
+  >();
+  return {
+    ...actual,
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
+      mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   };
 });
 
@@ -543,6 +555,9 @@ type PrismaFixtureBase = {
     findFirst?: MockedFunction;
     findMany?: MockedFunction;
     updateMany?: MockedFunction;
+  };
+  hostedUsageReferral?: {
+    findUnique?: MockedFunction;
   };
   hostedWebhookReceipt?: HostedWebhookReceiptFixture;
   hostedWebhookReceiptSideEffect?: HostedWebhookReceiptSideEffectFixture;
@@ -2378,6 +2393,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedThreadContainerParticipant: {
         findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -9652,6 +9668,14 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   } else {
     prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
     prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
+  }
+  if (!prisma.hostedUsageReferral?.findUnique) {
+    Object.defineProperty(prisma, "hostedUsageReferral", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

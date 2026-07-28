@@ -87,17 +87,32 @@ vi.mock("@/src/components/ui/dialog", async () => {
         { value: { onOpenChange, open } },
         children,
       ),
-    DialogContent: ({
-      children,
-      className,
-      showCloseButton: _showCloseButton,
-    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) => {
+    DialogContent: React.forwardRef<
+      HTMLDivElement,
+      HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }
+    >(function DialogContent(
+      {
+        children,
+        className,
+        showCloseButton: _showCloseButton,
+      },
+      ref,
+    ) {
       void _showCloseButton;
       const context = React.useContext(DialogContext);
       return context.open
-        ? createElement("div", { className, role: "dialog" }, children)
+        ? createElement(
+            "div",
+            {
+              className,
+              "data-slot": "dialog-content",
+              ref,
+              role: "dialog",
+            },
+            children,
+          )
         : null;
-    },
+    }),
     DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
       createElement("p", props),
     DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
@@ -340,11 +355,8 @@ test("opens from the settings deep link on the default amount without starting c
 });
 
 test("reuses the dialog state machine for a server-scoped group checkout", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_group_checkout",
-    status: "checkout_open",
-    url: "https://checkout.stripe.test/group-session",
-  });
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -372,11 +384,25 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       rendered.container.textContent ?? "",
       /Shared with everyone in the chat\./,
     );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /saved card when available/,
+    );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
       rendered.container,
       rendered.window,
-      "Continue to checkout · $5",
+      "Add messages · $5",
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Adding messages…").getAttribute(
+        "aria-busy",
+      ),
+      "true",
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Adding messages…").disabled,
+      true,
     );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
@@ -387,6 +413,18 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
     });
+
+    await act(async () => {
+      checkout.resolve({
+        purchaseId: "hucp_group_checkout",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/group-session",
+      });
+      await Promise.resolve();
+    });
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "https://checkout.stripe.test/group-session",
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -586,6 +624,70 @@ test("keeps a server-projected cross-target Checkout status-only before interact
         url: "/api/settings/billing/usage-credit/purchases/hucp_other_target",
       }),
     );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps payer-owned cancellation available for a cross-target direct payment", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => request.method === "POST"
+    ? {
+        purchaseId: "hucp_other_direct_target",
+        status: "expired",
+      }
+    : {
+        cancelAllowed: true,
+        purchaseId: "hucp_other_direct_target",
+        status: "payment_pending",
+      });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        cancelAllowed: true,
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_other_direct_target",
+        retryAllowed: false,
+        status: "payment_pending",
+        targetConflict: true,
+      },
+      offers: [],
+      scope: "group",
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.equal(
+      buttonByText(rendered.container, "Cancel payment").disabled,
+      false,
+    );
+    assert.equal(hasButton(rendered.container, "Retry payment"), false);
+
+    await clickButton(rendered.container, rendered.window, "Cancel payment");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+      method: "POST",
+      signal: expect.any(AbortSignal),
+      url:
+        "/api/settings/billing/usage-credit/purchases/hucp_other_direct_target/expire",
+    });
+    assert.match(rendered.container.textContent ?? "", /Other checkout canceled/);
   } finally {
     await rendered.cleanup();
   }
@@ -791,6 +893,71 @@ test("retries a frozen reconciling purchase through the existing checkout route"
   }
 });
 
+test("retries the exact pending saved-card payment from the group dialog", async () => {
+  vi.useFakeTimers();
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => ({
+    purchaseId: "hucp_saved_card_pending",
+    recovered: request.method === "POST",
+    status: "payment_pending",
+  }));
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_saved_card_pending",
+        retryAllowed: true,
+        status: "payment_pending",
+      },
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      offers: [],
+      scope: "group",
+    }),
+    {
+      location: {
+        href: "https://example.test/groups/fund/group_join_code_1234",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    for (let readIndex = 1; readIndex < 10; readIndex += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(1_250);
+        await Promise.resolve();
+      });
+    }
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(10);
+    await clickButton(rendered.container, rendered.window, "Retry payment");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_10_usd",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+    assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+  } finally {
+    await rendered.cleanup();
+    vi.useRealTimers();
+  }
+});
+
 test("restarts polling when a frozen retry advances the same purchase", async () => {
   let statusReadCount = 0;
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
@@ -894,6 +1061,79 @@ test("preserves a frozen retry key across status-only recovery", async () => {
     assert.deepEqual(postPayloads, [firstPayload, firstPayload]);
     expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps an uncertain group payment locked to the original amount and request key", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("Stripe is unavailable."))
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_group_retry",
+      recovered: true,
+      status: "payment_pending",
+    });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      initialOpen: true,
+      offers: usageCreditOffers(),
+      scope: "group",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const dialog = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="dialog-content"]',
+    );
+    const title = rendered.container.querySelector("h2");
+    assert.ok(dialog);
+    assert.ok(title);
+    dialog.scrollTop = 240;
+    const focus = vi.spyOn(title, "focus");
+
+    await clickRadio(rendered.container, rendered.window, "usage_2500");
+    await clickButton(rendered.container, rendered.window, "Add messages · $25");
+
+    assert.equal(dialog.scrollTop, 0);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    assert.match(
+      rendered.container.textContent ?? "",
+      /We couldn’t confirm this payment yet/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Retry the same amount to check or continue it\./,
+    );
+    assert.equal(hasButton(rendered.container, "Change amount"), false);
+
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Retry payment · $25",
+    );
+
+    const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.method === "POST")
+      .map((request) => request.payload);
+    assert.deepEqual(postPayloads, [
+      {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_2500",
+      },
+      {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_2500",
+      },
+    ]);
+    expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }

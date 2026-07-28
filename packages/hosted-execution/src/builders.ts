@@ -206,6 +206,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   occurredAt: string;
   phoneLookupKey?: string | null;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
@@ -219,6 +220,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   assertHostedExecutionLinqConversationMessageWorkspaceTarget({
     linqMessage: input.linqMessage,
     routeAuthority: input.routeAuthority,
+    senderMemberId: input.senderMemberId,
     userId: input.userId,
   });
 
@@ -253,6 +255,9 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
               ? null
               : cloneExternalThreadRouteAuthority(input.routeAuthority),
           }),
+      ...(input.senderMemberId === undefined
+        ? {}
+        : { senderMemberId: input.senderMemberId }),
     },
     occurredAt: input.occurredAt,
     userId: input.userId,
@@ -267,11 +272,13 @@ function assertHostedExecutionConversationMessageWorkspaceTarget(input: {
     assertHostedExecutionLinqConversationMessageWorkspaceTarget({
       linqMessage: input.message.linqMessage,
       routeAuthority: input.message.routeAuthority,
+      senderMemberId: input.message.senderMemberId,
       userId: input.userId,
     });
   } else if (input.message.channel === "telegram") {
     assertHostedExecutionTelegramConversationMessageWorkspaceTarget({
       routeAuthority: input.message.routeAuthority,
+      senderMemberId: input.message.senderMemberId,
       telegramMessage: input.message.telegramMessage,
       userId: input.userId,
     });
@@ -281,9 +288,16 @@ function assertHostedExecutionConversationMessageWorkspaceTarget(input: {
 function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
   linqMessage: HostedExecutionLinqConversationMessage;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
   userId: string;
 }): void {
+  assertHostedExecutionGroupSenderMemberId(input.senderMemberId);
   if (input.linqMessage.threadIsDirect !== false) {
+    if (input.senderMemberId !== undefined) {
+      throw new TypeError(
+        "Hosted direct Linq conversation wake must not carry a group sender member.",
+      );
+    }
     return;
   }
 
@@ -313,6 +327,7 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
   eventId: string;
   occurredAt: string;
   routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
   telegramMessage: HostedExecutionTelegramMessage;
   userId: string;
 }): HostedExecutionConversationMessageWake & {
@@ -320,6 +335,7 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
 } {
   assertHostedExecutionTelegramConversationMessageWorkspaceTarget({
     routeAuthority: input.routeAuthority,
+    senderMemberId: input.senderMemberId,
     telegramMessage: input.telegramMessage,
     userId: input.userId,
   });
@@ -335,6 +351,9 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
               ? null
               : cloneExternalThreadRouteAuthority(input.routeAuthority),
           }),
+      ...(input.senderMemberId === undefined
+        ? {}
+        : { senderMemberId: input.senderMemberId }),
       telegramMessage: cloneTelegramMessage(input.telegramMessage),
     },
     occurredAt: input.occurredAt,
@@ -344,13 +363,19 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
 
 function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: {
   routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
   telegramMessage: HostedExecutionTelegramMessage;
   userId: string;
 }): void {
+  assertHostedExecutionGroupSenderMemberId(input.senderMemberId);
   if (input.telegramMessage.threadIsDirect !== false) {
     // Direct threads have a single known sender, so group attribution fields
     // carry no meaning and must never reach the runtime from a 1:1 route.
-    if (input.telegramMessage.from || input.telegramMessage.senderUsername) {
+    if (
+      input.senderMemberId !== undefined
+      || input.telegramMessage.from
+      || input.telegramMessage.senderUsername
+    ) {
       throw new TypeError(
         "Hosted direct Telegram conversation wake must not carry group sender identity.",
       );
@@ -375,6 +400,17 @@ function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: 
   if (input.routeAuthority.threadId !== input.telegramMessage.threadId) {
     throw new TypeError(
       "Hosted non-direct Telegram conversation wake route authority must match its chat.",
+    );
+  }
+}
+
+function assertHostedExecutionGroupSenderMemberId(value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+  if (value.trim().length === 0 || value.trim() !== value) {
+    throw new TypeError(
+      "Hosted group sender member id must be a non-empty normalized string.",
     );
   }
 }
@@ -749,6 +785,7 @@ export function createRuntimeTimerSyntheticWake(input: {
 export function buildHostedExecutionDeviceSyncWake(input: {
   connectionId?: string | null;
   eventId: string;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider?: string | null;
@@ -758,6 +795,9 @@ export function buildHostedExecutionDeviceSyncWake(input: {
   return {
     ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
     eventId: input.eventId,
+    ...(input.expectedConnectedAt === undefined
+      ? {}
+      : { expectedConnectedAt: input.expectedConnectedAt }),
     ...(input.hint === undefined ? {} : { hint: input.hint }),
     kind: "device-sync.wake",
     occurredAt: input.occurredAt,

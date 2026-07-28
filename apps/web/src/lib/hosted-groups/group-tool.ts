@@ -51,9 +51,14 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+  readHostedOwnerAddressBookAdvisoryNames,
+} from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
@@ -134,6 +139,8 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_member: "participant_aware",
+  arm_usage_referral: "participant_aware",
+  cancel_usage_referral: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "personal_active",
@@ -144,6 +151,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_current: "participant_aware",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
+  read_usage_referral: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
@@ -311,6 +319,17 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: null,
           },
     };
+  }
+
+  if (
+    input.request.action === "arm_usage_referral"
+    || input.request.action === "cancel_usage_referral"
+    || input.request.action === "read_usage_referral"
+  ) {
+    return handleHostedUsageReferralGroupTool({
+      memberId: input.memberId,
+      request: input.request,
+    });
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
@@ -1383,10 +1402,56 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     resolvedParticipants,
   });
 
+  try {
+    const ownerAdvisoryNames =
+      await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+        containerMemberId: input.memberId,
+        phoneHandles: participants.map((participant) => participant.handle),
+        prisma,
+      });
+    for (const participant of participants) {
+      const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+      if (ownerAdvisoryName) {
+        participant.ownerAdvisoryName = ownerAdvisoryName;
+      }
+    }
+  } catch {
+    // Address-book labels are optional presentation hints. Any KMS, storage,
+    // consent, or decryption failure omits the entire overlay without changing
+    // the truthful live roster or its activation proof.
+  }
+
   return {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
+}
+
+async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
+  input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
+): Promise<ReadonlyMap<string, string>> {
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input);
+  // Prisma operations do not consume AbortSignal. Bound the entire optional
+  // overlay at its caller so a stuck read can never delay the truthful roster.
+  // The underlying lookup still receives its own KMS abort signal, and this
+  // handler makes a rejection after the deadline explicitly harmless.
+  void lookup.catch(() => undefined);
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
+    timeout = setTimeout(
+      () => resolve(new Map()),
+      HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    return await Promise.race([lookup, deadline]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export type HostedThreadContainerResolvedParticipant = {

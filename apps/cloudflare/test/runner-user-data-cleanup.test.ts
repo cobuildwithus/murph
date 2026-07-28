@@ -74,6 +74,57 @@ describe("hosted runner user data cleanup", () => {
     expect(bucket.objects.has(stagedPhotoKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
     expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+  });
+
+  it("reports cleanup incomplete when full Durable Object deletion is unavailable", async () => {
+    const durable = createDurableObjectHarness();
+    durable.state.storage.deleteAll = undefined;
+    const stateStore = createDeletionStateStore();
+
+    await expect(deleteHostedRunnerUserData({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        deleteAllCompleted: false,
+        stateDeleted: false,
+      },
+    });
+    expect(stateStore.deleteStateCallCount).toBe(1);
+  });
+
+  it("retries after Durable Object deleteAll fails without reporting completion", async () => {
+    const deleteAllError = new Error("Durable Object deleteAll failed");
+    const durable = createDurableObjectHarness({ deleteAllError });
+    const stateStore = createDeletionStateStore();
+    const request = {
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    };
+
+    await expect(deleteHostedRunnerUserData(request)).rejects.toBe(deleteAllError);
+    expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+
+    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        deleteAllCompleted: true,
+        stateDeleted: true,
+      },
+    });
+    expect(stateStore.deleteStateCallCount).toBe(2);
+    expect(durable.deleteAllCount).toBe(2);
   });
 
   it("does not delete Durable Object state or alarms when R2 cleanup fails", async () => {
@@ -97,6 +148,7 @@ describe("hosted runner user data cleanup", () => {
 
     expect(stateStore.deleteStateCallCount).toBe(0);
     expect(durable.alarmDeleteCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
     expect(bucket.deleted).toEqual([deletedBeforeFailureKey]);
     expect(bucket.objects.has(failedKey)).toBe(true);
     const serializedLogs = JSON.stringify(
@@ -123,6 +175,7 @@ describe("hosted runner user data cleanup", () => {
 
     expect(stateStore.deleteStateCallCount).toBe(0);
     expect(durable.alarmDeleteCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
     const serializedLogs = JSON.stringify(
       hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
     );
@@ -383,13 +436,16 @@ class FailingListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
 }
 
 function createDurableObjectHarness(input: {
+  deleteAllError?: Error;
   deleteFailures?: ReadonlyMap<string, Error>;
 } = {}): {
   alarmDeleteCount: number;
+  deleteAllCount: number;
   state: DurableObjectStateLike;
   storageValues: Map<string, unknown>;
 } {
   let alarmDeleteCount = 0;
+  let deleteAllCount = 0;
   const storageValues = new Map<string, unknown>();
   const storage: DurableObjectStorageLike = {
     delete: async (key) => {
@@ -398,6 +454,13 @@ function createDurableObjectHarness(input: {
         throw failure;
       }
       return storageValues.delete(key);
+    },
+    deleteAll: async () => {
+      deleteAllCount += 1;
+      if (input.deleteAllError && deleteAllCount === 1) {
+        throw input.deleteAllError;
+      }
+      storageValues.clear();
     },
     deleteAlarm: async () => {
       alarmDeleteCount += 1;
@@ -425,6 +488,9 @@ function createDurableObjectHarness(input: {
   return {
     get alarmDeleteCount() {
       return alarmDeleteCount;
+    },
+    get deleteAllCount() {
+      return deleteAllCount;
     },
     state: {
       storage,

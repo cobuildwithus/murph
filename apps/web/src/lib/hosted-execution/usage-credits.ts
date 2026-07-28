@@ -6,6 +6,11 @@ export type {
   HostedUsageCreditProjection,
   LockedHostedUsageCreditBeneficiary,
 } from "./usage-credit-ledger";
+export { appendHostedUsageCreditGrantTx } from "./usage-credit-grant";
+export type {
+  HostedUsageCreditGrantAppendResult,
+  HostedUsageCreditGrantSource,
+} from "./usage-credit-grant";
 export { reconcileHostedUsageCreditDisputeNetReversalTx } from "./usage-credit-net-reversal";
 export { reconcileHostedUsageCreditRefundNetReversalTx } from "./usage-credit-net-reversal";
 export type { HostedUsageCreditNetReversalResult } from "./usage-credit-net-reversal";

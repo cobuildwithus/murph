@@ -40,6 +40,10 @@ export interface HostedGcpKmsClient {
   }>;
   decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }>;
   encrypt(input: GcpKmsEncryptInput): Promise<{ ciphertext: string; keyName: string }>;
+  macSign(input: GcpKmsMacSignInput): Promise<{
+    keyVersionName: string;
+    mac: Uint8Array;
+  }>;
 }
 
 export interface GcpKmsEncryptInput {
@@ -59,6 +63,12 @@ export interface GcpKmsDecryptInput {
 export interface GcpKmsAsymmetricSignInput {
   keyVersionName: string;
   message: Uint8Array;
+  signal?: AbortSignal;
+}
+
+export interface GcpKmsMacSignInput {
+  data: Uint8Array;
+  keyVersionName: string;
   signal?: AbortSignal;
 }
 
@@ -83,6 +93,11 @@ interface GcpDecryptResponse {
 interface GcpAsymmetricSignResponse {
   name?: string;
   signature?: string;
+}
+
+interface GcpMacSignResponse {
+  mac?: string;
+  name?: string;
 }
 
 interface StsTokenExchangeResponse {
@@ -247,6 +262,34 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
     };
   }
 
+  async macSign(
+    input: GcpKmsMacSignInput,
+  ): Promise<{ keyVersionName: string; mac: Uint8Array }> {
+    input.signal?.throwIfAborted();
+    const keyVersionName = requireKmsResourceName(
+      input.keyVersionName,
+      "Local KMS MAC keyVersionName",
+    );
+    const key = await crypto.subtle.importKey(
+      "raw",
+      toArrayBuffer(this.config.wrapKey),
+      { hash: "SHA-256", name: "HMAC" },
+      false,
+      ["sign"],
+    );
+    const mac = new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        toArrayBuffer(localKmsMacInput({
+          data: input.data,
+          keyVersionName,
+        })),
+      ),
+    );
+    return { keyVersionName, mac };
+  }
+
   private importWrapKey(keyUsages: KeyUsage[]): Promise<CryptoKey> {
     return crypto.subtle.importKey(
       "raw",
@@ -324,6 +367,32 @@ class HostedGcpKmsJsonClient implements HostedGcpKmsClient {
     };
   }
 
+  async macSign(
+    input: GcpKmsMacSignInput,
+  ): Promise<{ keyVersionName: string; mac: Uint8Array }> {
+    const keyVersionName = requireKmsResourceName(
+      input.keyVersionName,
+      "GCP KMS MAC keyVersionName",
+    );
+    const response = await this.call<GcpMacSignResponse>({
+      body: {
+        data: encodeBase64(input.data),
+      },
+      operation: "cloudkms/macSign",
+      resource: `${keyVersionName}:macSign`,
+      signal: input.signal,
+    });
+    const responseName = requireNonEmptyString(response.name, "GCP KMS MAC name");
+    if (responseName !== keyVersionName) {
+      throw new Error("GCP KMS MAC response key version did not match the request.");
+    }
+    const mac = decodeBase64(requireNonEmptyString(response.mac, "GCP KMS MAC value"));
+    if (mac.byteLength !== 32) {
+      throw new Error("GCP KMS MAC value must be exactly 32 bytes.");
+    }
+    return { keyVersionName, mac };
+  }
+
   private async call<TResponse>(input: {
     body: Record<string, unknown>;
     operation: string;
@@ -357,6 +426,16 @@ function localKmsAad(input: {
       keyName: input.keyName,
       schema: "murph.hosted-local-kms.v1",
     }),
+  );
+}
+
+function localKmsMacInput(input: {
+  data: Uint8Array;
+  keyVersionName: string;
+}): Uint8Array {
+  return concatBytes(
+    utf8(`${input.keyVersionName}\u0000murph.hosted-local-kms.mac.v1\u0000`),
+    input.data,
   );
 }
 

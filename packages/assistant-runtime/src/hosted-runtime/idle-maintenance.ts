@@ -39,12 +39,13 @@ import {
   runHostedPendingAssistantInputContentRetention,
 } from "./pending-input-index.ts";
 
-// Compact only when the saving clears the measured post-compaction floor
-// (~40k tokens); below this the compact call costs more than it recovers. Keep
-// this below the hosted Codex auto-compact ceiling because idle shutdown runs
-// off the reply path and can compact large-but-below-ceiling threads before the
-// next wake pays the full resend cost.
+// Personal threads keep the measured post-compaction floor (~40k tokens).
+// Group threads can accumulate many messages between turns and amortize a
+// lower threshold. Keep both below the hosted Codex auto-compact ceiling so
+// idle shutdown can compact large-but-below-ceiling threads before the next
+// wake pays the full resend cost.
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
+export const HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS = 60_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
 export const HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS = 30_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
@@ -283,6 +284,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         canAccountForModel: (model) =>
           model !== null &&
           normalizeHostedAiUsageAllowancePricedModelId(model) !== null,
+        groupMinThreadTokens: HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
         minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
         signal: abortController.signal,
         timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,

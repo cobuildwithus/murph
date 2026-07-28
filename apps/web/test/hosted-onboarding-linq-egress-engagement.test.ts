@@ -344,6 +344,28 @@ describe("hosted Linq egress authority", () => {
     expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
   });
 
+  it("does not replace a fixed referral source with the current Linq home route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "linq_current_home_b",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false,
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: "usage-referral-reward:referral_1",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "linq_source_chat_a",
+      targetKind: "explicit",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
   it("keeps stale reply targets strict instead of returning a home-route override", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",

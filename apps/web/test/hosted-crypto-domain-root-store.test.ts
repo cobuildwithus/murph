@@ -6,7 +6,6 @@ import {
   Prisma,
   type HostedMember,
   type HostedMemberIdentity,
-  type PrismaClient,
 } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
@@ -22,7 +21,11 @@ import {
   encryptHostedWebNullableString,
 } from "../src/lib/hosted-web/encryption";
 import { readHostedMemberVerifiedEmailSnapshots } from "../src/lib/hosted-onboarding/hosted-member-store";
-import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
+import {
+  openHostedUserSecureBoxStrings,
+  sealHostedUserSecureBoxStrings,
+  setHostedSecureBoxStringTestCodecForTests,
+} from "../src/lib/hosted-crypto/secure-box";
 import type {
   GcpKmsAsymmetricSignInput,
   GcpKmsDecryptInput,
@@ -36,6 +39,9 @@ const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKe
 
 const gcpKmsMock = vi.hoisted(() => ({
   client: null as HostedGcpKmsClient | null,
+}));
+const privyUserMock = vi.hoisted(() => ({
+  readHostedPrivyUserById: vi.fn(async (userId: string) => ({ id: userId })),
 }));
 
 vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
@@ -51,8 +57,17 @@ vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
   };
 });
 
+vi.mock("../src/lib/hosted-onboarding/privy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/hosted-onboarding/privy")>();
+  return {
+    ...actual,
+    readHostedPrivyUserById: privyUserMock.readHostedPrivyUserById,
+  };
+});
+
 afterEach(() => {
   gcpKmsMock.client = null;
+  privyUserMock.readHostedPrivyUserById.mockClear();
   restoreHostedSecureBoxTestCodec();
   vi.unstubAllEnvs();
 });
@@ -965,13 +980,18 @@ test("webhook preflight retains a failed unwrap through the following transactio
     runHostedOnboardingWebhookTransaction,
     warmHostedLinqMailboxPayloadRoot,
   } = await import("../src/lib/hosted-onboarding/webhook-service");
+  const { parseHostedLinqWebhookEvent } = await import(
+    "../src/lib/hosted-onboarding/linq"
+  );
 
-  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-    domain: "ingress",
-    prisma: tx.prisma,
-    reason: "test.provision",
-    userId: "member-test-webhook-preflight",
-  });
+  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain,
+      prisma: tx.prisma,
+      reason: "test.provision",
+      userId: "member-test-webhook-preflight",
+    });
+  }
 
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   let transactionStarted = false;
@@ -985,9 +1005,49 @@ test("webhook preflight retains a failed unwrap through the following transactio
       expect(decryptMetrics.calls).toHaveLength(1);
       return callback(tx.prisma);
     },
-  }) as PrismaClient;
+    hostedMember: {
+      findUnique: async () => ({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      }),
+    },
+  });
+  const event = parseHostedLinqWebhookEvent(JSON.stringify({
+    api_version: "v3",
+    created_at: "2026-07-26T12:00:00.000Z",
+    data: {
+      chat: {
+        id: "chat-webhook-preflight",
+        is_group: true,
+        owner_handle: {
+          handle: "+15550000000",
+          id: "owner-webhook-preflight",
+          is_me: true,
+          service: "sms",
+        },
+      },
+      direction: "inbound",
+      id: "message-webhook-preflight",
+      is_from_me: false,
+      parts: [{ type: "text", value: "hello" }],
+      sender_handle: {
+        handle: "+15555550123",
+        id: "sender-webhook-preflight",
+        service: "sms",
+      },
+      sent_at: "2026-07-26T12:00:00.000Z",
+      service: "sms",
+    },
+    event_id: "event-webhook-preflight",
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+  }));
 
   await expect(runHostedOnboardingWebhookTransaction(
+    // @ts-expect-error - this integration fixture implements the exact Prisma
+    // transaction and delegates exercised by the composition under test.
     prisma,
     async (transaction) => {
       await unwrapHostedDomainRootForWeb({
@@ -998,6 +1058,7 @@ test("webhook preflight retains a failed unwrap through the following transactio
       return "unexpected";
     },
     () => warmHostedLinqMailboxPayloadRoot({
+      event,
       prisma,
       threadRoute: {
         containerMemberId: "member-test-webhook-preflight",
@@ -1011,9 +1072,12 @@ test("webhook preflight retains a failed unwrap through the following transactio
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   transactionStarted = false;
   await expect(runHostedOnboardingWebhookTransaction(
+    // @ts-expect-error - this integration fixture implements the exact Prisma
+    // transaction and delegates exercised by the composition under test.
     prisma,
     async () => "branch-without-root",
     () => warmHostedLinqMailboxPayloadRoot({
+      event,
       prisma,
       threadRoute: {
         containerMemberId: "member-test-webhook-preflight",
@@ -1076,6 +1140,90 @@ test("webhook-style multi-field crypto reuses one unwrap per domain inside the s
     // reuse the same unwrap without weakening per-call key copies.
     assert.equal(counting.readCount(), readsAfterSeals);
   });
+});
+
+test("batch private-field sealing unwraps once and preserves member-bound AAD", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberId = "member-test-address-book-batch";
+  const scope = "hosted-address-book-advisory-name:v1";
+  const entries = [
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:phone-token-a",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Alex R.",
+    },
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:phone-token-b",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Sam K.",
+    },
+  ] as const;
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.address-book-batch",
+    userId: memberId,
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  const prisma = Object.assign(counting.client, {
+    hostedUserCryptoEnvelope: {
+      findMany: createBatchEnvelopeFindMany(tx),
+    },
+  });
+
+  const sealed = await sealHostedUserSecureBoxStrings({
+    entries,
+    lane: "hosted-member-private-field",
+    prisma,
+    userId: memberId,
+  });
+
+  assert.equal(sealed.length, 2);
+  assert.equal(counting.readCount(), 1);
+  await expect(openHostedUserSecureBoxStrings({
+    entries: entries.map((entry, index) => ({
+      aad: entry.aad,
+      scope: entry.scope,
+      userId: memberId,
+      value: sealed[index],
+    })),
+    lane: "hosted-member-private-field",
+    prisma,
+  })).resolves.toEqual(["Alex R.", "Sam K."]);
+
+  await expect(openHostedUserSecureBoxStrings({
+    entries: [{
+      aad: { ...entries[0].aad, rowId: "1:different-phone-token" },
+      scope,
+      userId: memberId,
+      value: sealed[0],
+    }],
+    lane: "hosted-member-private-field",
+    prisma,
+  })).rejects.toThrow();
+  await expect(openHostedUserSecureBoxStrings({
+    entries: [{
+      aad: entries[0].aad,
+      scope,
+      userId: "different-member",
+      value: sealed[0],
+    }],
+    lane: "hosted-member-private-field",
+    prisma,
+  })).rejects.toThrow();
 });
 
 function createEnvelopeReadCountingClient(
@@ -1165,6 +1313,13 @@ test("hosted Privy member creation provisions the control root before private id
   assert.equal(tx.persistedEnvelopes[0]?.userId, member.id);
   assert.equal(encryptCalls.length, 1);
   assert.equal(signCalls.length, 1);
+  expect(privyUserMock.readHostedPrivyUserById).toHaveBeenCalledWith(
+    "did:privy:user_test_control_root",
+    {
+      maxRetries: 0,
+      timeout: 5_000,
+    },
+  );
 });
 
 async function createHostedWebCryptoTransactionFixture(
@@ -1394,6 +1549,10 @@ function createStepRecordingKmsClient(input: {
       input.steps.push("kms.decrypt");
       return input.client.decrypt(decryptInput);
     },
+    async macSign(macInput) {
+      input.steps.push("kms.mac-sign");
+      return input.client.macSign(macInput);
+    },
     async encrypt(encryptInput) {
       input.steps.push("kms.encrypt");
       return input.client.encrypt(encryptInput);
@@ -1471,6 +1630,9 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   return {
     ...tx,
     prisma: Object.assign(tx.prisma, {
+      hostedAccountDeletionCleanup: {
+        findFirst: async () => null,
+      },
       hostedMemberIdentity,
     }),
   };
@@ -1654,6 +1816,12 @@ function createLocalKmsClient(input: {
           metrics.activeCount -= 1;
         }
       }
+    },
+    async macSign(macInput) {
+      return {
+        keyVersionName: macInput.keyVersionName,
+        mac: new Uint8Array(32),
+      };
     },
     async encrypt(encryptInput) {
       input.encryptCalls.push(encryptInput);

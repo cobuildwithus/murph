@@ -7,6 +7,10 @@ import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import {
+  drainHostedAccountDeletionCleanupBatch,
+  type HostedAccountDeletionCleanupBatchResult,
+} from "../hosted-privacy/account-deletion-cleanup";
 
 const DAY_MS = 86_400_000;
 
@@ -34,6 +38,7 @@ type HostedRuntimeRecheckSignal = (input: {
 }) => Promise<unknown>;
 
 export interface HostedRetentionCleanupResult {
+  accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredComputerRunsCleanedUp: number;
@@ -55,6 +60,10 @@ export async function runHostedRetentionCleanup(input: {
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeRetentionDate(input.now ?? new Date());
+  const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
+    now,
+    prisma,
+  });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -96,6 +105,7 @@ export async function runHostedRetentionCleanup(input: {
   });
 
   return {
+    accountDeletionCleanup,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredComputerRunsCleanedUp,

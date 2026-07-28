@@ -12,13 +12,17 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { Separator } from "@/src/components/ui/separator";
+import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
+import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
+import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -82,6 +86,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Changelog archive edition">
+        <ChangelogArchiveStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
       </StudySection>
@@ -102,6 +112,24 @@ export function SectionsContent() {
 
       <StudySection title="Account deletion exit reason">
         <AccountExitReasonStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings sign-in required">
+        <SettingsAuthRequiredStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Pulse billing return confirmation">
+        <PulseTrialBillingContinuationStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Account deletion during migration maintenance">
+        <AccountDeletionMaintenanceStudy />
       </StudySection>
 
       <Separator />
@@ -130,7 +158,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass">
+      <StudySection title="Ops weekly growth compass with sender WAU and MAU">
         <GrowthScorecardStudy />
       </StudySection>
 

@@ -31,15 +31,8 @@ Narrow user-supplied patch landings may skip a dedicated plan when all of the fo
 - the task is primarily integrating an externally prepared patch or diff intent
 - the scope stays bounded and does not introduce new architecture or process design
 - the work is expected to finish in one turn
-- a coordination-ledger row still captures the active scope
 
 If the patch starts drifting into broader design, refactor, or multi-turn work, open a plan before continuing.
-
-## Coordination Ledger Link
-
-- Plan-bearing work must keep exactly one matching row in `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`.
-- That row must set the `Plan` column to the exact active plan path, for example `agent-docs/exec-plans/active/2026-04-13-example.md`.
-- Ledger-only tasks should leave the `Plan` column empty.
 
 ## Local Working Tree Note
 
@@ -50,5 +43,5 @@ Plain local working-tree verification is intentionally looser: if other agents h
 ## Completion Rule
 
 If a task used an execution plan and the task is done or abandoned, close that plan before handoff. Prefer `bash scripts/finish-task ...` when the task is also ready to commit.
-`scripts/finish-task` removes the one matching coordination-ledger row by exact `Plan` value before it closes the plan, and it fails closed if the match is missing or ambiguous. Its scoped commit includes the closed plan, the resolved task paths, and only this task's ledger-row removal when that row exists in `HEAD`; unrelated dirty ledger rows stay in the working tree.
-If overlapping dirty-tree work makes an exact scoped commit unsafe, remove the matching ledger row and run `bash scripts/close-exec-plan.sh <active-plan-path>` anyway; do not leave closed work stranded under `active/`.
+`scripts/finish-task` closes the plan and creates a scoped commit containing the closed plan plus the resolved task paths.
+If overlapping dirty-tree work makes an exact scoped commit unsafe, run `bash scripts/close-exec-plan.sh <active-plan-path>` anyway; do not leave closed work stranded under `active/`.

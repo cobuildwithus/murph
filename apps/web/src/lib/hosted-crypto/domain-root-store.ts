@@ -199,14 +199,16 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
 }
 
 /**
- * Legacy transaction-owned bridge for owners that cannot know every member id
- * before `BEGIN`: thread-container creation, inbound Family member activation,
- * signup/Privy identity creation, and active Family Stripe group activation.
- * It keeps KMS outside each advisory-lock section, but callers retain their
- * outer connection while candidates are prepared. Family activation is capped
- * at six sequential members; a fully rootless member costs three encryptions
- * plus four signatures, for at most 42 KMS calls and four concurrent calls.
- * New transaction code must use the prepared-only commit API above.
+ * Legacy all-domain bridge for the two owners that still discover or create a
+ * member id after `BEGIN`: thread-container creation and inbound Family member
+ * activation. Candidate signing happens before the first per-domain lock, but
+ * the caller retains its outer connection and every `pg_advisory_xact_lock`
+ * remains held until that outer transaction ends. New transaction code must
+ * use the prepared-only commit API above.
+ *
+ * Signup/Privy identity reconciliation uses the separate single-domain legacy
+ * surface below. Active Family Stripe reconciliation prepares every bounded
+ * member candidate before opening its owner transaction.
  */
 export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   reason?: string;
@@ -245,6 +247,11 @@ export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
   return (rows[0]?.domainCount ?? 0) >= ALL_DOMAINS.length;
 }
 
+/**
+ * Provider-capable single-domain legacy surface for identity owners that can
+ * create the durable member id only inside their transaction. Callers that
+ * know the member id before `BEGIN` must prepare and use the commit-only API.
+ */
 export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
@@ -465,10 +472,11 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
     throw new Error("Prepared hosted domain root candidate does not match the requested user/domain.");
   }
 
-  // There is no partial unique index on (user_id, domain) for active
-  // envelopes, so this advisory lock plus the re-read below is the only race
-  // boundary. A prepared candidate is inserted here or discarded here; it is
-  // never a reason to skip either step.
+  // The advisory lock orders contenders before the re-read, while the partial
+  // unique active-envelope index is the database backstop. Because this is a
+  // transaction-scoped lock, it remains held until the caller's outer
+  // transaction ends. A prepared candidate is inserted here or discarded
+  // here; it is never a reason to skip either boundary.
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
   `;

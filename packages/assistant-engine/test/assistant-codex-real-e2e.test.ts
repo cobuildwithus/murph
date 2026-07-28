@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -10,7 +10,35 @@ import {
   resolveMurphDynamicTools,
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import {
+  MURPH_AUTOMATION_TOOL,
+  MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_FAMILY_PLAN_TOOL,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_CONNECTED_APPS_SEARCH_TOOL,
+} from '../src/assistant-codex/dynamic-tools/connected-apps.ts'
+import {
+  MURPH_CREATE_PHONE_CALL_TOOL,
+} from '../src/assistant-codex/dynamic-tools/phone-calls.ts'
+import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  resolveAssistantSkillsRoot,
+  type AssistantSkillSlug,
+} from '../src/assistant-skill-assets.ts'
+import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../src/assistant/codex-base-instructions.ts'
+import type {
+  AssistantHostedAutomationToolRequest,
+} from '../src/assistant/execution-context.ts'
+import {
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.ts'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
+import type {
+  AssistantProviderDynamicTool,
+} from '../src/assistant/providers/types.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
@@ -32,6 +60,7 @@ const REAL_CODEX_E2E_ENV_ALLOWLIST = [
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 ] as const
 
 interface RealCodexE2eConfig {
@@ -53,6 +82,15 @@ interface CodexUsageSnapshot {
 interface CodexTokenUsageEvent {
   last: CodexUsageSnapshot
   total: CodexUsageSnapshot
+}
+
+interface CapabilityRoutingProbe {
+  assertArguments(argumentsValue: Record<string, unknown>): void
+  expectedSkillHeading: string
+  expectedTool: string
+  prompt: string
+  skillSlug: 'computer-use' | 'connected-apps' | 'phone-calls' | 'murph-family'
+  tool: AssistantProviderDynamicTool
 }
 
 interface CacheProbeSummary {
@@ -93,7 +131,238 @@ interface ResumeCacheProbeSummary {
   }
 }
 
+describeRealCodex('real Codex group-chat behavior e2e', () => {
+  it(
+    'prefers grounded group-chat point-of-view candidates without forcing play',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-point-of-view-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all(
+          (['group-chat', 'groupchat-comedy'] as const).map(async (slug) => {
+            await materializeAssistantSkill({
+              skillsRoot,
+              slug,
+            })
+          }),
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: buildGroupPointOfViewCandidateProbe(),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+        expect(result.finalMessage.trim()).toBe('14:B 15:A 18:B 19:A')
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('group-chat/SKILL.md')
+            && action.output.includes('# Group Chat')
+          ),
+          'group-chat skill read',
+        ).toBe(true)
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('groupchat-comedy/SKILL.md')
+            && action.output.includes('# Group-Chat Comedy & Refereeing')
+          ),
+          'groupchat-comedy skill read',
+        ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
+  it(
+    'loads each moved capability owner before its representative tool call',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        for (const probe of CAPABILITY_ROUTING_PROBES) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-capability-${probe.skillSlug}-e2e-`),
+          )
+
+          try {
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await materializeAssistantSkill({
+              skillsRoot,
+              slug: probe.skillSlug,
+            })
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildCapabilityRoutingDeveloperInstructions(),
+              dynamicTools: [probe.tool],
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+              },
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const skillRead = actions.find((action) =>
+              action.kind === 'command'
+              && action.command.includes(`${probe.skillSlug}/SKILL.md`)
+              && action.output.includes(probe.expectedSkillHeading)
+            )
+            const toolCall = actions.find((action) =>
+              action.kind === 'dynamic'
+              && action.tool === probe.expectedTool
+            )
+
+            expect(skillRead, `${probe.skillSlug} skill read`).toBeDefined()
+            expect(toolCall, `${probe.skillSlug} dynamic tool call`).toBeDefined()
+            expect(toolCall?.eventIndex).toBeGreaterThan(
+              skillRead?.eventIndex ?? Number.POSITIVE_INFINITY,
+            )
+            if (toolCall?.kind === 'dynamic') {
+              probe.assertArguments(toolCall.argumentsValue)
+            }
+          } finally {
+            await removeRealCodexTemporaryPaths([workingDirectory])
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'saves an explicit midnight Linq reminder without off-hours confirmation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-midnight-linq-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-midnight-watch',
+                  created: true,
+                  lookupId: 'midnight-watch-reminder',
+                  routeBinding: 'current_conversation',
+                  status: 'active',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Remind me here every day at midnight through July 31, 2026',
+            'to plug in my watch. Save it now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const automationCall = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(automationCall).toBeDefined()
+        if (automationCall?.kind !== 'dynamic') {
+          throw new Error('Expected a real murph.automation tool call.')
+        }
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          activeUntil: expect.any(String),
+          continuityPolicy: 'preserve',
+          instructions: expect.stringMatching(
+            /plug in.*watch|watch.*plug in/iu,
+          ),
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '00:00',
+          },
+        })
+        expect(result.finalMessage).toMatch(
+          /midnight|00:00|12(?::00)?\s*a\.?m\.?/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /off[- ]hours|spam(?:my)?|safer (?:nearby )?time|waking[- ]time/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'returns the resumed turn id in the real turn/start result contract',
     async () => {
@@ -396,6 +665,59 @@ describe('real Codex app-server cache usage e2e harness', () => {
   })
 })
 
+const CAPABILITY_ROUTING_PROBES: readonly CapabilityRoutingProbe[] = [
+  {
+    assertArguments: (argumentsValue) => {
+      expect(argumentsValue).toEqual({})
+    },
+    expectedSkillHeading: '# Computer Use',
+    expectedTool: MURPH_COMPUTER_OPEN_TOOL.name,
+    prompt:
+      'Open the current browser and inspect whether the portal is already signed in. Do not click, type, log in, or ask me for credentials.',
+    skillSlug: 'computer-use',
+    tool: MURPH_COMPUTER_OPEN_TOOL,
+  },
+  {
+    assertArguments: (argumentsValue) => {
+      expect(argumentsValue.toolkits).toEqual(
+        expect.arrayContaining(['instacart']),
+      )
+    },
+    expectedSkillHeading: '# Connected Apps',
+    expectedTool: MURPH_CONNECTED_APPS_SEARCH_TOOL.name,
+    prompt:
+      'Find the exact connected-app tool for an Instacart grocery handoff for oats and blueberries. This is a handoff only; do not place or pay for an order.',
+    skillSlug: 'connected-apps',
+    tool: MURPH_CONNECTED_APPS_SEARCH_TOOL,
+  },
+  {
+    assertArguments: (argumentsValue) => {
+      expect(argumentsValue.allowTransferToUser).toBe(false)
+      expect(argumentsValue.callerName).toBe('Sam')
+      expect(argumentsValue.goal).toEqual(
+        expect.stringMatching(/office hours/iu),
+      )
+    },
+    expectedSkillHeading: '# Phone Calls',
+    expectedTool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    prompt:
+      'Call +12025550123 for me to ask only for the clinic office hours today. Use caller name Sam. This is information-only, and I do not want a transfer.',
+    skillSlug: 'phone-calls',
+    tool: MURPH_CREATE_PHONE_CALL_TOOL,
+  },
+  {
+    assertArguments: (argumentsValue) => {
+      expect(argumentsValue).toEqual({ action: 'read_status' })
+    },
+    expectedSkillHeading: '# Murph Family',
+    expectedTool: MURPH_FAMILY_PLAN_TOOL.name,
+    prompt:
+      'I want to add usage for my sponsored Murph Family member Alex. Check my Family status first; do not start checkout or create an invite.',
+    skillSlug: 'murph-family',
+    tool: MURPH_FAMILY_PLAN_TOOL,
+  },
+]
+
 async function runCacheProbeAttempt(input: {
   attempt: number
   config: RealCodexE2eConfig
@@ -558,6 +880,187 @@ async function executeRealCodexAppServerTurn(
     })
   } catch (error) {
     throw new Error(buildRealCodexE2eFailureMessage(error))
+  }
+}
+
+async function materializeAssistantSkill(input: {
+  skillsRoot: string
+  slug: AssistantSkillSlug
+}): Promise<void> {
+  const targetDirectory = path.join(input.skillsRoot, input.slug)
+  await mkdir(targetDirectory, { recursive: true })
+  await writeFile(
+    path.join(targetDirectory, 'SKILL.md'),
+    await readFile(
+      path.join(resolveAssistantSkillsRoot(), input.slug, 'SKILL.md'),
+      'utf8',
+    ),
+    'utf8',
+  )
+}
+
+function buildGroupPointOfViewDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-07-27',
+    currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildGroupPointOfViewCandidateProbe(): string {
+  return [
+    'This is a playful group-chat candidate-choice evaluation.',
+    'For each numbered transcript, choose the reply Murph should send.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B>` with no explanation.',
+    '',
+    '14. Nate: "Correct, the lid-free society has begun."',
+    'A: "Correct, the lid-free society has begun."',
+    'B: "Nate has been demoted from cook to steam-release valve."',
+    '',
+    '15. Sam: "Murph, who chooses the movie? Priya rejected six already."',
+    'A: "Priya is now festival director. The seventh rejection comes with a counterproposal."',
+    'B: "Everyone should take turns choosing movies."',
+    '',
+    '18. Elena: "I packed three backup batteries for the day hike."',
+    'A: "The moon has appointed a new sandwich mayor."',
+    'B: "Elena is no longer attending the hike; she is the regional power grid."',
+    '',
+    '19. Lee: "What is the boiling point of water at sea level?"',
+    'A: "100°C (212°F). It changes with altitude."',
+    'B: "The kettle has entered its villain era."',
+  ].join('\n')
+}
+
+function buildMidnightLinqReminderDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedAutomationAvailable: true,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-27',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildCapabilityRoutingDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'local',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-26',
+    currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+type CapabilityRoutingAction =
+  | {
+      command: string
+      eventIndex: number
+      kind: 'command'
+      output: string
+    }
+  | {
+      argumentsValue: Record<string, unknown>
+      eventIndex: number
+      kind: 'dynamic'
+      tool: string
+    }
+
+function readCapabilityRoutingActions(
+  events: readonly unknown[],
+): CapabilityRoutingAction[] {
+  return events.flatMap<CapabilityRoutingAction>((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/completed') {
+      return []
+    }
+    const item = readRecord(readRecord(record?.params)?.item)
+    const itemType = readString(item?.type)
+    if (itemType === 'commandExecution' || itemType === 'command_execution') {
+      return [{
+        command: readCommandText(item?.command),
+        eventIndex,
+        kind: 'command' as const,
+        output: readString(
+          item?.aggregatedOutput,
+          item?.aggregated_output,
+          item?.output,
+        ) ?? '',
+      }]
+    }
+    if (itemType === 'dynamicToolCall' || itemType === 'dynamic_tool_call') {
+      const tool = readString(item?.tool, item?.name)
+      if (!tool) {
+        return []
+      }
+      return [{
+        argumentsValue: readArgumentsRecord(item?.arguments),
+        eventIndex,
+        kind: 'dynamic' as const,
+        tool,
+      }]
+    }
+    return []
+  })
+}
+
+function readCommandText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  return Array.isArray(value)
+    ? value.filter((part): part is string => typeof part === 'string').join(' ')
+    : ''
+}
+
+function readArgumentsRecord(value: unknown): Record<string, unknown> {
+  const record = readRecord(value)
+  if (record) {
+    return record
+  }
+  if (typeof value !== 'string') {
+    return {}
+  }
+  try {
+    return readRecord(JSON.parse(value)) ?? {}
+  } catch {
+    return {}
   }
 }
 

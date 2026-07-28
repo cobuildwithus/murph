@@ -58,13 +58,6 @@ export function buildHostedPulseTrialContinuationCookie(input: {
   });
 }
 
-export function buildHostedPulseTrialContinuationClearCookie(): string {
-  return buildContinuationCookie({
-    maxAgeSeconds: 0,
-    value: "",
-  });
-}
-
 export async function readHostedPulseTrialContinuationCookie(input: {
   memberId: string;
   now?: Date;

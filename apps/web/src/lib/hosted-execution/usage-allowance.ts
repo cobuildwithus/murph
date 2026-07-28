@@ -390,6 +390,7 @@ interface HostedAiUsageAllowanceThreadContainerRef {
 async function hasHostedAiUsageThreadContainerAccess(input: {
   container: { suspendedAt: Date | null };
   containerMemberId: string;
+  now: Date;
   threadContainer: HostedAiUsageAllowanceThreadContainerRef | null;
   tx: Prisma.TransactionClient;
 }): Promise<boolean | null> {
@@ -399,6 +400,7 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 
   return await readActiveHostedMemberAccess({
     memberId: input.containerMemberId,
+    now: input.now,
     prisma: input.tx,
   });
 }
@@ -897,6 +899,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
     container: memberState,
     containerMemberId: input.memberId,
+    now,
     threadContainer: memberState.threadContainer,
     tx: input.tx,
   });
@@ -1151,6 +1154,7 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
     const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
       container: memberState,
       containerMemberId: input.memberId,
+      now,
       threadContainer: memberState.threadContainer,
       tx,
     });
@@ -1268,6 +1272,7 @@ export async function readHostedAiUsageGate(input: {
     const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
       container: memberState,
       containerMemberId: input.memberId,
+      now,
       threadContainer: memberState.threadContainer,
       tx,
     });

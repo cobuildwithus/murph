@@ -199,6 +199,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -2457,6 +2458,11 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-group-runtime',
+          resolveScheduledExternalThreadRoute: vi.fn(async () => ({
+            channel: 'telegram' as const,
+            containerMemberId: 'member-group-runtime',
+            threadId: 'retained-group-room',
+          })),
           userEnvKeys: [],
         },
       },
@@ -6423,6 +6429,346 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: false,
       }),
     )
+  })
+
+  it('skips a static member managed automation on a group route before lifecycle or model work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-member-owner-group-rejection-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Send product notes.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'wrong-member-group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'wrong-member-group-room',
+        threadIsDirect: false,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'member-owner-group-rejection', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['group from an unspecified route', undefined, 'mismatch'],
+    ['group from a direct route', true, 'mismatch'],
+    ['direct chat from an unspecified route', undefined, 'direct'],
+  ] as const)(
+    'enforces a static member managed automation when live Linq authority resolves a %s',
+    async (_label, savedThreadIsDirect, liveAuthority) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-member-owner-live-group-rejection-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        continuityPolicy: 'fresh',
+        createdAt: '2026-04-12T16:00:00.000Z',
+        instructions: 'Send product notes.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'saved-member-chat',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          ...(savedThreadIsDirect === undefined
+            ? {}
+            : { threadIsDirect: savedThreadIsDirect }),
+        },
+        schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+        slug: 'weekly-product-updates',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled', 'murph-managed'],
+        title: 'Murph product notes',
+        updatedAt: '2026-04-12T16:00:00.000Z',
+      })
+      const resolveScheduledLinqRoute = liveAuthority === 'mismatch'
+        ? vi.fn().mockRejectedValue(new VaultCliError(
+            'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+            'Linq egress target does not match the runtime user route.',
+            { retryable: false },
+          ))
+        : vi.fn().mockResolvedValue({
+            target: 'live-member-chat',
+            threadIsDirect: true,
+          })
+      const createScheduledGroupTools = vi.fn()
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+      const result = await executeClaimedAssistantCronJob({
+        executionContext: {
+          hosted: {
+            createScheduledGroupTools,
+            memberId: 'member-owner-live-group-rejection',
+            resolveScheduledLinqRoute,
+            userEnvKeys: [],
+          },
+        },
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          homeRouteFallbackAllowed: true,
+          target: 'saved-member-chat',
+          targetKind: 'explicit',
+        }),
+      )
+      expect(createScheduledGroupTools).not.toHaveBeenCalled()
+      if (liveAuthority === 'direct') {
+        expect(result.run).toMatchObject({
+          outcome: 'no_op',
+          reason: 'no_delivery',
+          status: 'succeeded',
+        })
+        expect(cronMocks.runExperimentLifecycleOutcomePrecondition).toHaveBeenCalled()
+        expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+          expect.objectContaining({
+            bindingDeliveryTarget: 'live-member-chat',
+            deliveryTarget: 'live-member-chat',
+            threadIsDirect: true,
+          }),
+        )
+      } else {
+        expect(result.run).toMatchObject({
+          outcome: 'skipped_gate',
+          reason: 'managed_owner_scope_mismatch',
+          status: 'skipped',
+        })
+        expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+        expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+        const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+        const runtimeRecord = runtimeStore.jobs.find(
+          (record) =>
+            record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        )
+        expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
+        expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
+      }
+    },
+  )
+
+  it('reuses the admitted static member route and rejects a live-route change before provider work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-member-owner-live-route-change-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Send product notes.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'saved-member-chat',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn()
+      .mockResolvedValueOnce({
+        target: 'admitted-member-chat',
+        threadIsDirect: true,
+      })
+      .mockRejectedValueOnce(new VaultCliError(
+        'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        'Linq egress target does not match the runtime user route.',
+        { retryable: false },
+      ))
+    const createScheduledGroupTools = vi.fn()
+    let providerInputsAccepted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeProviderAcceptedInputs?: () => Promise<void>
+      bindingDeliveryTarget?: string
+      deliveryTarget?: string | null
+      threadIsDirect?: boolean | null
+    }) => {
+      expect(input).toMatchObject({
+        bindingDeliveryTarget: 'admitted-member-chat',
+        deliveryTarget: 'admitted-member-chat',
+        threadIsDirect: true,
+      })
+      await input.beforeProviderAcceptedInputs?.()
+      providerInputsAccepted = true
+      return {
+        response: 'Completed scheduled check-in.',
+        session: { sessionId: 'session-default' },
+      }
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          memberId: 'member-owner-live-route-change',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(2)
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(providerInputsAccepted).toBe(false)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find(
+      (record) =>
+        record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
+  })
+
+  it('skips a static group managed automation on a direct route before lifecycle or model work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-group-owner-direct-rejection-',
+    )
+    addGroupRoomModelConsolidationAutomation(vaultRoot)
+    const automation = getVaultAutomationStore(vaultRoot)[0]
+    if (!automation) {
+      throw new Error('Expected the group room-model automation.')
+    }
+    automation.route = {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'direct-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'direct-room',
+      threadIsDirect: true,
+    }
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'group-owner-direct-rejection',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('skips a persisted Sunday superlatives occurrence after the seed is retired', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-retired-sunday-superlatives-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Legacy Sunday group recap.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'legacy-group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'legacy-group-room',
+        threadIsDirect: false,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'group-sunday-superlatives',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'retired-group-runtime', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_automation_retired',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
   it.each([

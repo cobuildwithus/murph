@@ -735,6 +735,7 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItemsForProviderRequest,
                 ),
               messageInput: input,
+              route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
                     sendVaultFile: async (

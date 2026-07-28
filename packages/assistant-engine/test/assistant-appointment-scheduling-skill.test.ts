@@ -43,6 +43,15 @@ describe('appointment scheduling skill', () => {
     expect(computerUseRaw).toContain(
       'non-mutating inspection of public requirements or availability',
     )
+    expect(computerUseRaw).toContain(
+      'This section applies only outside appointment work.',
+    )
+    expect(computerUseRaw).toContain(
+      'browser completion\ngrants no additional write authority',
+    )
+    expect(computerUseRaw).toContain(
+      'only when the user clearly intends it to apply beyond the current appointment',
+    )
   })
 
   it('requires an evidence-first, finite appointment brief', async () => {

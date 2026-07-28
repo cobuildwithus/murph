@@ -31,6 +31,7 @@ export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
   durableObject: {
     alarmCleared: boolean;
+    deleteAllCompleted: boolean;
     stateDeleted: boolean;
   };
   ok: true;
@@ -73,10 +74,18 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
   const r2 = await deleteHostedUserR2DataBeforeStateDeletion(input);
   const stateDeletion = await input.stateStore.deleteStateForUser(input.userId);
   const deleteAlarm = input.state.storage.deleteAlarm;
-  const alarmCleared = typeof deleteAlarm === "function";
-  if (alarmCleared) {
+  if (typeof deleteAlarm === "function") {
     await deleteAlarm.call(input.state.storage);
   }
+  const deleteAll = input.state.storage.deleteAll;
+  const deleteAllCompleted = typeof deleteAll === "function";
+  const stateDeleted = stateDeletion.deleted && deleteAllCompleted;
+  if (typeof deleteAll === "function") {
+    await deleteAll.call(input.state.storage);
+  }
+  // With this Worker's compatibility date, deleteAll also removes alarms.
+  const alarmCleared =
+    typeof deleteAlarm === "function" || typeof deleteAll === "function";
 
   emitHostedExecutionStructuredLog({
     component: "hosted.runner",
@@ -86,7 +95,7 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
       r2Supported: r2.supported,
       runnerContainerDestroyAttempted: runnerCleanup.runnerContainerDestroyAttempted,
       runnerContainerDestroyOk: runnerCleanup.runnerContainerDestroyOk,
-      runnerStateDeleted: stateDeletion.deleted,
+      runnerStateDeleted: stateDeleted,
     },
     message: "Hosted runner user data deletion completed.",
     phase: "wake.running",
@@ -97,7 +106,8 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
     deletedAt: new Date().toISOString(),
     durableObject: {
       alarmCleared,
-      stateDeleted: stateDeletion.deleted,
+      deleteAllCompleted,
+      stateDeleted,
     },
     ok: true,
     r2,

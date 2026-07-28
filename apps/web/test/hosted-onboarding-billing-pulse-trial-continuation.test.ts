@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie,
   buildHostedPulseTrialPaymentReturnUrl,
   readHostedPulseTrialContinuationRequest,
@@ -167,11 +166,6 @@ describe("Pulse trial continuation claim", () => {
     })).toBeNull();
   });
 
-  test("builds a matching clear cookie", () => {
-    expect(buildHostedPulseTrialContinuationClearCookie()).toContain(
-      "murph-start-pulse=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-    );
-  });
 });
 
 function readCookieValue(cookie: string): string {

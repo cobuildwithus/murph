@@ -657,6 +657,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 lastSyncCompletedAt: "2026-04-06T10:05:00.000Z",
               },
               observedTokenVersion: 2,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T09:59:00.000Z",
               credential: {
                 kind: "oauth_tokens",
@@ -698,6 +699,116 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
+  it("rejects a destructive apply when OAuth replacement changes connectedAt after snapshot hydration", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        connectedAt: "2026-04-06T10:30:00.000Z",
+        updatedAt: "2026-04-06T10:31:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connection: {
+                status: "disconnected",
+              },
+              connectionId: "conn_123",
+              credential: {
+                clearTokens: true,
+                kind: "oauth_tokens",
+              },
+              localState: {
+                nextReconcileAt: null,
+              },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
+              observedTokenVersion: 3,
+              observedUpdatedAt: "2026-04-06T10:31:00.000Z",
+              sources: [
+                {
+                  displayName: "Stale source",
+                  firstSeenAt: "2026-04-06T09:00:00.000Z",
+                  lastDataAt: "2026-04-06T10:29:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:30:00.000Z",
+                  observedLastSeenAt: null,
+                  resourceAvailabilitySummary: { sleep: true },
+                  sourceInstanceKey: "oura_primary",
+                  sourceProviderSlug: "oura",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connection: expect.objectContaining({
+        connectedAt: "2026-04-06T10:30:00.000Z",
+        status: "active",
+      }),
+      connectionId: "conn_123",
+      tokenUpdate: "skipped_version_mismatch",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(harness.record.status).toBe("active");
+    expect(harness.storedAccount?.credential).toMatchObject({
+      kind: "oauth_tokens",
+      tokens: {
+        accessToken: "stored-access-token",
+      },
+    });
+    expect(harness.storedAccount?.tokenVersion).toBe(3);
+  });
+
+  it("treats a deploy-skewed apply without observedConnectedAt as superseded", async () => {
+    const harness = createAuthorityHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              localState: {
+                nextReconcileAt: null,
+              },
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "unchanged",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+  });
+
   it("preserves the web-owned disconnect sentinel against an exact-revision local-state callback", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
@@ -716,6 +827,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             {
               connectionId: "conn_123",
               localState: { clearError: true },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
             },
           ],
@@ -768,6 +880,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             updates: [
               {
                 connectionId: "conn_123",
+                observedConnectedAt: "2026-04-06T09:00:00.000Z",
                 sources: [
                   {
                     displayName: null,
@@ -842,6 +955,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               sources: [
                 {
                   // Every field matches the current row except the arrival, which
@@ -887,6 +1001,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               sources: [
                 {
                   displayName: null,
@@ -987,6 +1102,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-05-26T17:35:33.451Z",
               sources: [
                 {
@@ -1106,6 +1222,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 },
               },
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
               sources: [
                 {
@@ -1195,6 +1312,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 },
               },
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
             },
           ],
@@ -1264,6 +1382,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             metadata: progress("retrying", "2026-04-06T10:05:00.000Z"),
           },
           connectionId: hostedConnectionId,
+          observedConnectedAt: "2026-04-06T09:00:00.000Z",
           observedUpdatedAt: "2026-04-06T10:00:00.000Z",
           sources: [{
             ...source(true, "2026-04-06T10:05:00.000Z"),
@@ -1286,6 +1405,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             metadata: progress("retrying", "2026-04-06T10:05:00.000Z"),
           },
           connectionId: hostedConnectionId,
+          observedConnectedAt: "2026-04-06T09:00:00.000Z",
           observedUpdatedAt: "2026-04-06T10:00:00.000Z",
           sources: [{
             ...source(false, "2026-04-06T10:05:00.000Z"),
@@ -1303,6 +1423,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         update: {
           connection: { metadata: progress("complete") },
           connectionId: hostedConnectionId,
+          observedConnectedAt: "2026-04-06T09:00:00.000Z",
           observedUpdatedAt: "2026-04-06T10:00:00.000Z",
         },
       },
@@ -1318,6 +1439,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         update: {
           connection: { metadata: progress("complete") },
           connectionId: hostedConnectionId,
+          observedConnectedAt: "2026-04-06T09:00:00.000Z",
           observedUpdatedAt: "2026-04-06T10:00:00.000Z",
           sources: [{
             ...source(false, "2026-04-06T10:05:00.000Z"),
@@ -1394,6 +1516,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 },
               },
               connectionId: "conn_junction_evidence_union",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
             },
           ],
@@ -1482,6 +1605,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
               sources: [
                 {
@@ -1553,6 +1677,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
               sources: [
                 {
@@ -1641,6 +1766,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 },
               },
               connectionId: hostedConnectionId,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
               sources: [
                 {
@@ -1701,6 +1827,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               sources: [
                 {
                   displayName: null,
@@ -1754,6 +1881,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             {
               connectionId: "conn_123",
               observedTokenVersion: 3,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
               credential: {
                 kind: "oauth_tokens",
@@ -1868,6 +1996,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
                 nextReconcileAt: "2026-05-20T04:03:27.376Z",
               },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-05-19T22:00:44.000Z",
             },
           ],
@@ -1963,6 +2092,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 status: "disconnected",
               },
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
             },
           ],
@@ -2014,6 +2144,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
               credential: {
                 clearTokens: true,
@@ -2053,6 +2184,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
               credential: {
                 kind: "oauth_tokens",
@@ -2494,6 +2626,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 setupPhase: "source_confirmed",
               },
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-04-06T10:00:00.000Z",
             },
           ],
@@ -2553,6 +2686,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                   region: "us",
                 },
               },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
             },
           ],
@@ -2604,6 +2738,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 kind: "provider_config",
                 providerConfigKey: "junction",
               },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
             },
           ],
@@ -2649,6 +2784,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                   user: "raw-user",
                 },
               },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
             },
           ],
@@ -2699,6 +2835,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           updates: [
             {
               connectionId: "conn_123",
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedTokenVersion: null,
               credential: {
                 clearTokens: true,
@@ -2738,6 +2875,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
                 lastSyncStartedAt: "2026-04-06T10:05:00.000Z",
               },
               observedTokenVersion: null,
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: null,
               credential: {
                 kind: "oauth_tokens",

@@ -126,7 +126,10 @@ vi.mock("@/src/components/ui/label", () => ({
   Label: createPassthrough("label"),
 }));
 
-import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  hasIncompleteHostedAccountDeletionCleanup,
+  HostedDataPrivacySettings,
+} from "@/src/components/settings/hosted-data-privacy-settings";
 
 const requireFromHostedDataPrivacySettingsTest = createRequire(import.meta.url);
 
@@ -153,6 +156,7 @@ beforeEach(() => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     ok: true,
     result: {
+      cleanupPending: false,
       cloudflare: {
         configured: true,
         deleted: true,
@@ -177,6 +181,28 @@ afterEach(async () => {
 });
 
 describe("HostedDataPrivacySettings", () => {
+  test("treats every nonconfirmed Cloudflare result as pending for legacy servers", () => {
+    expect(hasIncompleteHostedAccountDeletionCleanup({
+      cloudflare: { configured: false, deleted: false },
+      deletedAt: "2026-07-26T12:00:00.000Z",
+      vendorAccounts: {
+        privyUser: { errorCode: null, status: "completed" },
+        stripeCustomer: { errorCode: null, status: "completed" },
+        stripeSubscription: { errorCode: null, status: "completed" },
+      },
+    })).toBe(true);
+    expect(hasIncompleteHostedAccountDeletionCleanup({
+      cleanupPending: false,
+      cloudflare: { configured: false, deleted: false },
+      deletedAt: "2026-07-26T12:00:00.000Z",
+      vendorAccounts: {
+        privyUser: { errorCode: null, status: "completed" },
+        stripeCustomer: { errorCode: null, status: "completed" },
+        stripeSubscription: { errorCode: null, status: "completed" },
+      },
+    })).toBe(false);
+  });
+
   test("does not export the browser vault without the sensitive-data acknowledgement", async () => {
     mockHostedVaultExportFlowState({
       acknowledgedSensitiveDownload: false,
@@ -469,6 +495,7 @@ describe("HostedDataPrivacySettings", () => {
       return {
         ok: true,
         result: {
+          cleanupPending: false,
           cloudflare: { configured: true, deleted: true },
           deletedAt: "2026-04-29T01:02:03.000Z",
           vendorAccounts: {
@@ -618,6 +645,78 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
+  test("declines deletion at initiation, before approval or vault teardown", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    // Asserted verbatim: this is the exact sentence the member reads, and it
+    // arrives from the challenge request, not the deletion request.
+    const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
+      + "account right now. Nothing has changed and your request was not started. Please try "
+      + "again after maintenance.";
+    mocks.authorize.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "account_deletion_maintenance",
+        message: maintenanceMessage,
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    // Nothing was started: no deletion request, no vault teardown, no reload.
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionEnding).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("keeps the maintenance reason readable in the open dialog", async () => {
+    const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
+      + "account right now. Nothing has changed and your request was not started. Please try "
+      + "again after maintenance.";
+    mockHostedDataPrivacyDeleteFlowState({ dialogError: maintenanceMessage });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    expect(container.textContent).toContain(maintenanceMessage);
+    expect(container.textContent).not.toContain("Could not delete your account right now.");
+  });
+
   test("an authorization failure does not invalidate an unchanged session", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
@@ -702,7 +801,40 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    assert.ok(container.textContent?.includes("Your account and all your data have been deleted"));
+    assert.ok(
+      container.textContent?.includes(
+        "Your account and live Murph data have been deleted",
+      ),
+    );
+    assert.equal([...container.querySelectorAll("button")].length, 0);
+  });
+
+  test("reports durable external cleanup as pending after account deletion", async () => {
+    mockHostedDataPrivacyDeletedState({ cleanupPending: true });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    assert.ok(
+      container.textContent?.includes(
+        "Your account was deleted. We're finishing some cleanup on our side",
+      ),
+    );
     assert.equal([...container.querySelectorAll("button")].length, 0);
   });
 });
@@ -735,6 +867,7 @@ function mockHostedVaultExportFlowState(input: {
 
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
+  dialogError?: string | null;
   exitNote?: string;
   exitReason?: string | null;
 } = {}) {
@@ -752,14 +885,16 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.exitReason ?? null,
     input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
-    null,
+    input.dialogError ?? null,
     false,
     false,
     false,
   ];
 }
 
-function mockHostedDataPrivacyDeletedState() {
+function mockHostedDataPrivacyDeletedState(input: {
+  cleanupPending?: boolean;
+} = {}) {
   mocks.useStateValues = [
     false,
     false,
@@ -774,7 +909,7 @@ function mockHostedDataPrivacyDeletedState() {
     "",
     null,
     true,
-    false,
+    input.cleanupPending ?? false,
     false,
   ];
 }
