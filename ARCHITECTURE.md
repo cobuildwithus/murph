@@ -1428,4 +1428,42 @@ subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## Current Verification Posture
 
-The repository uses the current verification commands described in `agent-docs/operations/verification-and-runtime.md`, with ordinary Vitest output contained beneath one marked process-owned temp root that is removed at teardown and recovered conservatively after an abrupt stop. It also has a cross-platform repo-local host setup path (`pnpm onboard` / `scripts/setup-host.sh`) for macOS and Linux, a fixed-version release manifest that publishes five public packages while bundling private workspace owners into the relevant tarballs, a local device-sync runtime with service/http tests, and inbox/parser package tests that exercise runtime rebuild, audio/video parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.
+The repository uses the current verification commands described in
+`agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
+by default and exposes two explicit, fail-closed, secret-free remote executors:
+Crabbox's first-party static SSH provider for a dedicated macOS worker account,
+and its direct Blacksmith Testbox provider for the bounded paid fallback. The
+static lane validates explicit operator-local host, user, and port routing,
+passes those facts only as Crabbox CLI arguments, derives one opaque lease id
+per initiating worktree, and creates a unique remote directory for every
+invocation. After admission, the dispatcher
+materializes one process-owned immutable Git candidate over its original base
+as detached `HEAD`, verifies and logs its tree id, and performs a full sync
+from that candidate without requiring a source branch. Because Crabbox excludes
+the local `.git` directory, the dispatcher also transports a bounded generated
+object pack for the base objects absent from the candidate. The remote
+entrypoint first proves native `tar` plus the production-compatible `zstd`
+stdin compression/decompression contract, then rebuilds the detached base plus
+staged candidate and verifies both tree ids before installing dependencies.
+That entrypoint internally selects the `static-ssh` verification profile; the
+root verifier disables CPU-count-only composed admission and completes package
+coverage before app and fixture work for that profile. Later checkout writes
+cannot change the run, while the dirty candidate preserves implicit diff
+scope. A native macOS `lockf` descriptor inherited by the verifier is the single
+remote-capacity owner until its exact child groups exit. For that same finite
+lifetime, native `caffeinate` prevents idle system sleep without changing a
+persistent power setting. The verifier then removes only that run directory.
+The local artifact lock protects cooperating local producers and candidate
+capture, not remote completion. The lane reuses the same synthetic verification
+core and adds no daemon, coordinator, queue, scheduler, shared checkout, or
+product state.
+
+Ordinary Vitest output is contained beneath one marked process-owned temp root
+that is removed at teardown and recovered conservatively after an abrupt stop.
+The repository also has a cross-platform repo-local host setup path
+(`pnpm onboard` / `scripts/setup-host.sh`) for macOS and Linux, a fixed-version
+release manifest that publishes five public packages while bundling private
+workspace owners into the relevant tarballs, a local device-sync runtime with
+service/http tests, and inbox/parser package tests that exercise runtime rebuild,
+audio/video parser workers, parser-toolchain discovery, and parsed-pipeline
+flows inside the local TypeScript workspace.

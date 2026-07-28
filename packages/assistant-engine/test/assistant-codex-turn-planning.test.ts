@@ -3662,6 +3662,65 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('keeps image presence inside bounded fresh-thread history', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-image-history-'),
+    )
+    const session = createSession({
+      turnCount: 1,
+    })
+    const imagePresence = '[This response included an image attachment.]'
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'assistant',
+          text: `${imagePresence}\n\n${'x'.repeat(6_000)}`,
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: expect.stringMatching(
+            /^\[This response included an image attachment\.\]/u,
+          ),
+          role: 'assistant',
+        },
+      ])
+      const content = plan.conversationHistoryMessages?.[0]?.content
+      const contentBytes =
+        typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
+      expect(contentBytes).toBeLessThanOrEqual(4_000)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('does not replay an oversized committed current user prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

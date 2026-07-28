@@ -1102,7 +1102,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     await expect(
       handleHostedOnboardingLinqWebhook({
         rawBody: buildLinqMessageWebhookBody({
-          from: "+447911123456",
+          from: "+919876543210",
           service: "iMessage",
         }),
         signature: null,
@@ -1116,7 +1116,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
-      phoneNumber: "+447911123456",
+      phoneNumber: "+919876543210",
       prisma,
     });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith(
@@ -1125,7 +1125,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         memberId: "member_123",
         participantContact: expect.objectContaining({
           kind: "phone",
-          value: "+447911123456",
+          value: "+919876543210",
         }),
       }),
     );
@@ -1352,7 +1352,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     const firstInboundResponse = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_one",
-        from: "+447911123456",
+        from: "+919876543210",
         messageId: "msg_first_contact_one",
         service: "iMessage",
       }),
@@ -1362,7 +1362,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     const laterInboundResponse = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_two",
-        from: "+447911123456",
+        from: "+919876543210",
         messageId: "msg_first_contact_two",
         service: "iMessage",
       }),
@@ -1429,7 +1429,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       await expect(
         handleHostedOnboardingLinqWebhook({
           rawBody: buildLinqMessageWebhookBody({
-            from: "+447911123456",
+            from: "+919876543210",
             service: "iMessage",
           }),
           signature: null,
@@ -1442,7 +1442,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       });
 
       expect(mocks.ensureHostedMemberForPhoneResolutionTx).toHaveBeenCalledWith({
-        phoneNumber: "+447911123456",
+        phoneNumber: "+919876543210",
         prisma,
       });
     } finally {

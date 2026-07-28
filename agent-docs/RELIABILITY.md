@@ -8,6 +8,31 @@ Last verified: 2026-07-27
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Explicit remote verification is fail-closed. The dispatcher never retries on
+  another executor or runs local and remote copies together; an operator may
+  retry the same head only after recording a concrete infrastructure failure.
+  Each admitted run uses one logged immutable Git candidate, so later checkout
+  writes cannot change the work in flight. Static SSH gives every invocation a
+  unique remote directory. Missing, malformed, or unresolvable local host, user,
+  or port routing fails before remote execution; no other executor is selected.
+  After the worker lock is acquired, native `tar` plus the production-compatible
+  `zstd` stdin round trip must pass before Git reconstruction, installation, or
+  candidate verification. The entrypoint internally selects `profile=static-ssh`;
+  that profile ignores caller scheduling overrides, cannot enter composed
+  acceptance from CPU count alone, and completes package coverage before app and
+  fixture work. Its readiness line, plus the `resources` line for
+  `verify:acceptance`, are required execution evidence rather than optional
+  diagnostics.
+  Crabbox's nested static lease and repository directories still resolve to one
+  native macOS `lockf` descriptor above the run root, which remains the
+  worker-capacity authority. A busy worker fails closed. The remote verifier
+  inherits that descriptor, retains it while reaping its exact child process
+  groups after `SIGHUP` or transport loss, and holds a native `caffeinate`
+  idle-sleep assertion for the same finite lifetime. It then validates and
+  removes only its exact outer run directory. The local artifact lock protects
+  cooperating local producers and candidate capture; it does not claim remote
+  completion. Availability before admission and shutdown stay outside Murph
+  rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
 ## Runtime Expectations

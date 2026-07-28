@@ -24,6 +24,17 @@ fi
 readonly shared_host_mode
 export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
 readonly verification_command="${1:-}"
+verification_profile="${MURPH_VERIFY_PROFILE:-default}"
+case "$verification_profile" in
+  "default" | "static-ssh")
+    ;;
+  *)
+    printf '[workspace-verify] ERROR: MURPH_VERIFY_PROFILE must be default or static-ssh.\n' >&2
+    exit 1
+    ;;
+esac
+readonly verification_profile
+export MURPH_VERIFY_PROFILE="$verification_profile"
 
 command_requires_workspace_artifact_lock() {
   case "${1:-}" in
@@ -198,6 +209,11 @@ local_worker_budget_default() {
 resolve_composed_acceptance_parallel_default() {
   local cpu_count
 
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '0\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" || "$verification_command" != "verify:acceptance" ]]; then
     printf '0\n'
     return
@@ -215,6 +231,11 @@ resolve_composed_acceptance_parallel_default() {
 readonly composed_acceptance_parallel="$(resolve_composed_acceptance_parallel_default)"
 
 resolve_package_coverage_concurrency_default() {
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '2\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" ]]; then
     printf '1\n'
     return
@@ -270,6 +291,11 @@ resolve_package_coverage_vitest_max_workers_default() {
   local cpu_count
   local worker_budget
 
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '2\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" ]]; then
     printf '50%%\n'
     return
@@ -311,12 +337,22 @@ resolve_acceptance_app_vitest_max_workers_default() {
   local cpu_count
   local worker_budget
 
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '2\n'
+    return
+  fi
+
   cpu_count="$(detect_logical_cpu_count)"
   worker_budget=$((cpu_count / 8))
   normalize_positive_integer "$worker_budget" "1"
 }
 
 resolve_local_parallel_default() {
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '0\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" ]]; then
     printf '0\n'
     return
@@ -331,6 +367,11 @@ resolve_local_parallel_default() {
 }
 
 resolve_acceptance_app_verify_delay_default() {
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '0\n'
+    return
+  fi
+
   if [[ "$composed_acceptance_parallel" == "1" || -n "${CI:-}" || "$shared_host_mode" == "1" ]]; then
     printf '0\n'
     return
@@ -340,6 +381,11 @@ resolve_acceptance_app_verify_delay_default() {
 }
 
 resolve_package_coverage_cli_active_concurrency_default() {
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '1\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" ]]; then
     printf '1\n'
     return
@@ -358,26 +404,38 @@ resolve_package_coverage_cli_active_concurrency_default() {
   printf '4\n'
 }
 
+resolve_profile_controlled_value() {
+  local requested_value="$1"
+  local profile_value="$2"
+
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    printf '%s\n' "$profile_value"
+    return
+  fi
+
+  printf '%s\n' "$requested_value"
+}
+
 readonly app_verify_parallel_default="$(resolve_local_parallel_default)"
-readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
+readonly app_verify_parallel="$(resolve_profile_controlled_value "${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}" "$app_verify_parallel_default")"
 readonly acceptance_app_verify_with_coverage_default="$(resolve_local_parallel_default)"
-readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
+readonly acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value "${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}" "$acceptance_app_verify_with_coverage_default")"
 readonly acceptance_app_verify_delay_seconds_default="$(resolve_acceptance_app_verify_delay_default)"
-readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
+readonly acceptance_app_verify_delay_seconds="$(resolve_profile_controlled_value "$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is
 # disabled.
-readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
+readonly acceptance_early_cloudflare_verify="$(resolve_profile_controlled_value "${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}" "0")"
 readonly test_lane_parallel_default="$(resolve_local_parallel_default)"
-readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
+readonly test_lane_parallel="$(resolve_profile_controlled_value "${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}" "$test_lane_parallel_default")"
 readonly package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
-readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
+readonly package_coverage_concurrency_limit="$(resolve_profile_controlled_value "$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")" "$package_coverage_concurrency_default")"
 readonly package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
-readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
+readonly package_coverage_cli_active_concurrency_limit="$(resolve_profile_controlled_value "$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")" "$package_coverage_cli_active_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$(resolve_package_coverage_vitest_max_workers_default)"
-readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
+readonly package_coverage_vitest_max_workers="$(resolve_profile_controlled_value "${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}" "$package_coverage_vitest_max_workers_default")"
 readonly package_coverage_cli_vitest_max_workers_default="$(resolve_package_coverage_cli_vitest_max_workers_default)"
-readonly package_coverage_cli_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS:-$package_coverage_cli_vitest_max_workers_default}"
+readonly package_coverage_cli_vitest_max_workers="$(resolve_profile_controlled_value "${MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS:-$package_coverage_cli_vitest_max_workers_default}" "$package_coverage_cli_vitest_max_workers_default")"
 readonly acceptance_app_vitest_max_workers="$(resolve_acceptance_app_vitest_max_workers_default)"
 readonly typecheck_workspace_concurrency_default="$(resolve_typecheck_workspace_concurrency_default)"
 readonly typecheck_preflight_parallel_default="$([[ "$shared_host_mode" == "1" && "$composed_acceptance_parallel" != "1" ]] && echo 0 || echo 1)"
@@ -682,7 +740,9 @@ run_app_verify_command_with_retry() {
   if [[ "$hosted_web_prisma_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1)
   fi
-  if [[ "$composed_acceptance_parallel" == "1" && -z "${MURPH_APP_VITEST_MAX_WORKERS:-}" ]]; then
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    env_args+=(MURPH_APP_VITEST_MAX_WORKERS="$acceptance_app_vitest_max_workers")
+  elif [[ "$composed_acceptance_parallel" == "1" && -z "${MURPH_APP_VITEST_MAX_WORKERS:-}" ]]; then
     env_args+=(MURPH_APP_VITEST_MAX_WORKERS="$acceptance_app_vitest_max_workers")
   fi
   if [[ "$composed_acceptance_parallel" == "1" && -z "${MURPH_VERIFY_STEP_PARALLEL:-}" ]]; then
@@ -1673,11 +1733,15 @@ run_verify_cli_with_workspace_artifact_lock() {
   bash "$repo_root/scripts/workspace-verify.sh" verify:cli
 }
 
+log_acceptance_resource_plan() {
+  verify_log "resources cpus=$(detect_logical_cpu_count) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
+}
+
 main() {
   local command="${1:-}"
 
   if [[ "$command" == "verify:acceptance" ]]; then
-    verify_log "resources cpus=$(detect_logical_cpu_count) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage}"
+    log_acceptance_resource_plan
   fi
 
   case "$command" in
