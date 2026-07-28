@@ -1,6 +1,6 @@
 # group-chat-artifact-silence
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -101,14 +101,31 @@ Updated: 2026-07-28
 
 ## Verification
 
-- Commands to run: focused assistant-engine Vitest suites, `pnpm test:diff` for
-  touched files, `pnpm verify:acceptance`, exact-head GitHub checks, preliminary
-  and final ReviewGPT.
-- Expected outcomes: focused suites and required CI pass; any unrelated local
-  verification blocker is reproduced or clearly isolated; ReviewGPT returns
-  `ROUND_OUTCOME: PASS` for the correction head.
-- Current evidence: focused assistant files passed; the canonical diff run
-  passed all touched owners and affected typechecks before unrelated CLI tests
-  timed out behind a contended prepared-runtime lock. The opt-in real-model
-  command remains credential-bound because neither supported provider key is
-  available in the current process environment.
+- Focused assistant-engine verification passed twice on the reconciled head:
+  93 tests passed and 6 credential-gated real-model tests skipped.
+- Canonical `pnpm test:diff` passed repository guards, all affected typechecks,
+  and every touched owner. The reverse CLI lane reproduced unrelated
+  prepared-runtime lock timeouts and pre-existing experiment journal/vault
+  failures; no task-path test failed.
+- Assistant-engine owner coverage passed with 2,778 tests and the repository's
+  documented single-worker heap settings. After reconciliation, remote
+  acceptance passed with 2,799 assistant-engine tests and coverage above all
+  thresholds.
+- Canonical `pnpm verify:acceptance` passed on the exact pushed head through the
+  documented Crabbox-backed Blacksmith lane, including full workspace package
+  coverage, app verification and builds, and Cloudflare worker tests.
+- Preliminary ReviewGPT identified one coverage gap: distinguish text, reaction,
+  short watch, and immediate silence in the real-model candidate matrix, with an
+  explicitly open artifact control. The correction is present in this head; no
+  specialist patch artifact was supplied.
+- Product-experience review returned no findings and confirmed that immediate
+  silence preserves the human-owned floor while direct or genuinely open asks
+  retain the shortest truthful answer path.
+- Parent final review found no conflict between human-owned private/social
+  questions, directly addressed uncertainty, and genuinely authorized open
+  requests; safety precedence and causal-turn boundaries remain unchanged.
+- The opt-in live real-model probe remains credential-bound because neither
+  supported provider key is available in the current process environment.
+- Remaining landing gates: exact-head final ReviewGPT pass, required GitHub
+  checks, merge, and worktree retirement.
+Completed: 2026-07-28
