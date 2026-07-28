@@ -1,6 +1,6 @@
 # Web consent refresh label
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -51,4 +51,8 @@ Updated: 2026-07-28
   `aria-busy="true"` without overflow.
 - Product-experience review: no findings and no evidence gaps.
 - Claude Fable UI review: blocked by explicit usage-credit exhaustion.
-- Preliminary ReviewGPT specialist pass: pending on the pushed PR head.
+- Preliminary ReviewGPT specialist pass: one PR-metadata finding, accepted and
+  resolved by using the design-proof labels required by the repository guard;
+  the implementation and coverage lenses had no finding, no patch artifact was
+  returned, and the actual frontend design-proof guard then passed.
+Completed: 2026-07-28
