@@ -1754,12 +1754,23 @@ async function updateHostedIngressAssistantMilestoneLocked(
           input.phaseBreakdown,
           ["assistant"],
         );
-    if (Object.keys(phaseBreakdownUpdate).length === 0) {
+    const shouldTransferRuntimeAttempt =
+      input.terminalNonReplyProjection
+      && trace.runtimeAttemptId !== input.runtimeAttemptId;
+    if (
+      !shouldTransferRuntimeAttempt
+      && Object.keys(phaseBreakdownUpdate).length === 0
+    ) {
       return true;
     }
 
     await tx.hostedIngressLatencyTrace.update({
-      data: phaseBreakdownUpdate,
+      data: {
+        ...phaseBreakdownUpdate,
+        ...(shouldTransferRuntimeAttempt
+          ? { runtimeAttemptId: input.runtimeAttemptId }
+          : {}),
+      },
       where: {
         id: trace.id,
       },

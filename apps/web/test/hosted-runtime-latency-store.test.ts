@@ -1021,7 +1021,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.providerRequestOrdinal).toBeNull();
   });
 
-  it("keeps in-flight milestones attempt-scoped while terminal evidence converges by input", async () => {
+  it("transfers terminal refresh ownership to the recovery attempt", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
     });
@@ -1034,6 +1034,19 @@ describe("hosted runtime latency dashboard store", () => {
       prisma,
       runtimeAttemptId: "attempt_assistant_milestone_1",
       source: "linq",
+    });
+    await expect(recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_assistant_milestone_1",
+      at: instant("2026-06-02T19:12:21.125Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: false,
+      unmatchedCount: 0,
     });
     await expect(recordHostedIngressAssistantMilestone({
       assistantInputIds: ["input_assistant_milestone_1"],
@@ -1055,7 +1068,7 @@ describe("hosted runtime latency dashboard store", () => {
       checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
-      runtimeAttemptId: "attempt_terminal_replay_2",
+      runtimeAttemptId: "attempt_terminal_recovery_2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1069,7 +1082,7 @@ describe("hosted runtime latency dashboard store", () => {
       checkpointPublicationExpectedBy: instant("2026-06-02T19:30:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
-      runtimeAttemptId: "attempt_terminal_recovery_3",
+      runtimeAttemptId: "attempt_terminal_recovery_2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1083,7 +1096,7 @@ describe("hosted runtime latency dashboard store", () => {
       checkpointPublicationExpectedBy: instant("2026-06-02T19:25:00.000Z"),
       milestone: "terminal_non_reply_committed",
       prisma,
-      runtimeAttemptId: "attempt_terminal_stale_replay_4",
+      runtimeAttemptId: "attempt_terminal_recovery_2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1091,11 +1104,23 @@ describe("hosted runtime latency dashboard store", () => {
       unmatchedCount: 0,
     });
     await expect(recordHostedIngressRuntimeMilestone({
-      at: instant("2026-06-02T19:40:00.000Z"),
+      at: instant("2026-06-02T19:50:00.000Z"),
       authenticatedUserId: "member_latency_1",
       milestone: "checkpoint_publication_expected_by",
       prisma,
       runtimeAttemptId: "attempt_assistant_milestone_1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:40:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1107,7 +1132,7 @@ describe("hosted runtime latency dashboard store", () => {
       authenticatedUserId: "member_latency_1",
       milestone: "checkpoint_publication_expected_by",
       prisma,
-      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeAttemptId: "attempt_terminal_recovery_2",
       source: "linq",
     })).resolves.toEqual({
       matchedCount: 1,
@@ -1138,6 +1163,9 @@ describe("hosted runtime latency dashboard store", () => {
       },
       schemaVersion: 1,
     });
+    expect(prisma.readTrace()?.runtimeAttemptId).toBe(
+      "attempt_terminal_recovery_2",
+    );
   });
 
   it("ignores legacy Linq egress guard-only provider events", async () => {
