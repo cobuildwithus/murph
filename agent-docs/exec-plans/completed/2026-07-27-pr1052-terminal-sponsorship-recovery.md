@@ -1,8 +1,8 @@
 # PR 1052 terminal sponsorship recovery
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -38,3 +38,18 @@ loop, so the browser cannot clear the durably matched request identity.
    recovery behavior.
 4. Run focused and canonical verification, push the remediation, and obtain a
    ReviewGPT correction-round pass with exact-head CI green.
+
+## Completion
+
+- Exact-key group replay now keeps strict sponsorship equality while payment
+  can continue and returns terminal draft mismatches as a nonpayable selection
+  conflict with durable key-match proof.
+- Effectively expired `created` purchases close through the existing expiry
+  owner before projection.
+- Focused service, sponsorship-store, and real-dialog regressions pass.
+- Canonical Web verification and full `pnpm verify:acceptance` pass.
+- ReviewGPT round 9 returned `ROUND_OUTCOME: PASS` with no findings, and every
+  named GitHub check completed without failure.
+
+Completed: 2026-07-27
+Completed: 2026-07-28
