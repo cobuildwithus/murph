@@ -1,0 +1,110 @@
+} from "../scripts/rearm-inbound-message-content-retention";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))) {
+  throw new Error(
+    "The inbound message-content retention rearm proof requires a local DATABASE_URL.",
+  );
+}
+
+describe("inbound message-content retention rearm", () => {
+  it("requires an explicit positive capacity ceiling", () => {
+    expect(() =>
+      readHostedInboundMessageContentRetentionRearmMaxSnapshots({})
+    ).toThrow(/positive integer capacity ceiling/u);
+    expect(() =>
+      readHostedInboundMessageContentRetentionRearmMaxSnapshots({
+        MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS: "0",
+      })
+    ).toThrow(/positive integer capacity ceiling/u);
+    expect(
+      readHostedInboundMessageContentRetentionRearmMaxSnapshots({
+        MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS: "25",
+      }),
+    ).toBe(25);
+  });
+});
+
+describe.skipIf(!runPostgresProof)(
+  "inbound message-content retention rearm postgres proof",
+  () => {
+    it("fails closed over capacity, then rearms persisted snapshots with CAS visibility", async () => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+
+      try {
+        await client.query("BEGIN");
+        const timestamp = await client.query<{ transactionTimestamp: string }>(`
+          SELECT to_char(
+            (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3),
+            'YYYY-MM-DD"T"HH24:MI:SS.MS'
+          ) AS "transactionTimestamp"
+        `);
+        const transactionTimestamp = timestamp.rows[0]?.transactionTimestamp;
+        expect(transactionTimestamp).toBeTruthy();
+
+        await client.query(`
+          CREATE TEMP TABLE "hosted_workspace" (
+            "user_id" TEXT PRIMARY KEY,
+            "version" BIGINT NOT NULL,
+            "snapshot_ref" TEXT,
+            "inbox_media_retention_wake_at" TIMESTAMP(3),
+            "inbox_media_retention_signal_attempted_at" TIMESTAMP(3),
+            "checkpointed_at" TIMESTAMP(3)
+          );
+
+          INSERT INTO "hosted_workspace" (
+            "user_id",
+            "version",
+            "snapshot_ref",
+            "inbox_media_retention_wake_at",
+            "inbox_media_retention_signal_attempted_at",
+            "checkpointed_at"
+          )
+          VALUES
+            (
+              'snapshot-existing-wake',
+              4,
+              'snapshot://existing',
+              '2099-01-01T00:00:00.000Z',
+              '2026-07-25T18:00:00.000Z',
+              '2026-07-25T17:00:00.000Z'
+            ),
+            (
+              'snapshot-missing-wake',
+              9,
+              'snapshot://missing-wake',
+              NULL,
+              '2026-07-25T18:00:00.000Z',
+              '2026-07-25T17:00:00.000Z'
+            ),
+            (
+              'no-snapshot',
+              2,
+              NULL,
+              '2099-01-01T00:00:00.000Z',
+              '2026-07-25T18:00:00.000Z',
+              '2026-07-25T17:00:00.000Z'
+            );
+        `);
+
+        await expect(
+          applyHostedInboundMessageContentRetentionRearm(client, 1),
+        ).rejects.toThrow(/refused 2 persisted snapshots/u);
+
+        const unchanged = await readWorkspaceRows(client);
+        expect(unchanged.map(({ version }) => version)).toEqual(["2", "4", "9"]);
+
+        const result = await applyHostedInboundMessageContentRetentionRearm(
+          client,
+          2,
+        );
+        expect(result).toEqual({
+          rearmedAt: `${transactionTimestamp}Z`,
+          rearmedCount: 2,
+          snapshotCount: 2,
+        });
+
+        const staleCheckpoint = await client.query(`
