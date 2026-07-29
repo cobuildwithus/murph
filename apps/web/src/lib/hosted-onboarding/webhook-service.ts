@@ -469,6 +469,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               instantStartAllowed,
               pendingGroupParticipantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? null,
+              pendingGroupRosterUnavailable:
+                planningResolution.pendingGroupRosterUnavailable ?? false,
               requireFirstContactAdmission,
               prisma: transaction,
             }),
@@ -763,6 +765,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   pendingGroupParticipantMemberIds?: readonly string[];
+  pendingGroupRosterUnavailable?: boolean;
   /** The route the resolver already read, reused so warming costs no query. */
   threadRoute: HostedThreadRouteSnapshot | null;
 }
@@ -787,7 +790,7 @@ async function resolveHostedLinqPlanningEvent(input: {
           prisma: input.prisma,
           threadId: messageEvent.data.chat_id,
         });
-    const participantMemberIds =
+    const pendingGroupRoster =
       !messageEvent.data.is_from_me && !threadRoute
         ? await resolveHostedLinqPendingGroupParticipantMemberIds({
             chatId: messageEvent.data.chat_id,
@@ -797,9 +800,15 @@ async function resolveHostedLinqPlanningEvent(input: {
         : null;
     return {
       event: messageEvent,
-      ...(participantMemberIds === null
+      ...(pendingGroupRoster?.participantMemberIds == null
         ? {}
-        : { pendingGroupParticipantMemberIds: participantMemberIds }),
+        : {
+            pendingGroupParticipantMemberIds:
+              pendingGroupRoster.participantMemberIds,
+          }),
+      ...(pendingGroupRoster?.unavailable === true
+        ? { pendingGroupRosterUnavailable: true }
+        : {}),
       threadRoute,
     };
   }
@@ -859,7 +868,7 @@ async function resolveHostedLinqPlanningEvent(input: {
     resolvedIsGroup = canonicalIsGroup;
   }
 
-  const participantMemberIds =
+  const pendingGroupRoster =
     resolvedIsGroup && !threadRoute
       ? await resolveHostedLinqPendingGroupParticipantMemberIds({
           chatId: messageEvent.data.chat_id,
@@ -880,9 +889,15 @@ async function resolveHostedLinqPlanningEvent(input: {
         },
       },
     },
-    ...(participantMemberIds === null
+    ...(pendingGroupRoster?.participantMemberIds == null
       ? {}
-      : { pendingGroupParticipantMemberIds: participantMemberIds }),
+      : {
+          pendingGroupParticipantMemberIds:
+            pendingGroupRoster.participantMemberIds,
+        }),
+    ...(pendingGroupRoster?.unavailable === true
+      ? { pendingGroupRosterUnavailable: true }
+      : {}),
     threadRoute,
   };
 }
@@ -892,7 +907,10 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   handles?: readonly HostedLinqChatHandleSummary[] | null;
   prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<string[] | null> {
+}): Promise<{
+  participantMemberIds: string[] | null;
+  unavailable: boolean;
+}> {
   try {
     const summary = input.handles
       ? null
@@ -903,12 +921,12 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
         });
     if (summary?.isGroup === false) {
       logHostedLinqPendingGroupRoster("provider_not_group");
-      return null;
+      return { participantMemberIds: null, unavailable: false };
     }
     const handles = input.handles ?? summary?.handles ?? [];
     if (handles.length === 0) {
       logHostedLinqPendingGroupRoster("empty_roster");
-      return null;
+      return { participantMemberIds: null, unavailable: false };
     }
     const participantHandles = [...new Set(handles.flatMap((handle) => {
       const value = handle.handle.trim();
@@ -924,7 +942,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
         > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
     ) {
       logHostedLinqPendingGroupRoster("oversized_roster");
-      return null;
+      return { participantMemberIds: null, unavailable: false };
     }
     const resolved = await Promise.all(participantHandles.map(async (handle) =>
       await lookupHostedGroupParticipantMemberIdByHandle({
@@ -936,13 +954,16 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       memberId ? [memberId] : []
     ))];
     logHostedLinqPendingGroupRoster("resolved");
-    return memberIds;
+    return {
+      participantMemberIds: memberIds,
+      unavailable: false,
+    };
   } catch (error) {
     if (input.signal?.aborted) {
       throw error;
     }
     logHostedLinqPendingGroupRoster("unavailable");
-    return null;
+    return { participantMemberIds: null, unavailable: true };
   }
 }
 

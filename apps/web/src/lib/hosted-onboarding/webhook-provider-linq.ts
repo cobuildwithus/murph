@@ -772,6 +772,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
+  pendingGroupRosterUnavailable?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -856,6 +857,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       context,
       event: input.event,
       participantMemberIds: input.pendingGroupParticipantMemberIds ?? [],
+      rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       threadRouteAccountLookupKeys,
     });
@@ -2439,6 +2441,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   threadRouteAccountLookupKeys: readonly string[];
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -2522,6 +2525,15 @@ async function planHostedLinqGroupChatWebhook(input: {
     // owner exception is for an unknown phone participant speaking first; an
     // unverified email sender remains ineligible to start a group route.
     return ignored("sender-identity-unresolved");
+  }
+  if (!sender && input.rosterUnavailable) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 502,
+      message:
+        "Linq group roster authority is temporarily unavailable.",
+      retryable: true,
+    });
   }
   const pendingSetupParticipantMemberIds = activeSenderMemberId
     ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
