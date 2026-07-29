@@ -290,12 +290,10 @@ describe("hosted browser vault replica store", () => {
       replica: await createBrowserVaultReplica({
         metricPoints: [],
         generatedAt: "2026-04-18T00:00:00.000Z",
-        sourceBundleHash: "c".repeat(64),
+        sourceBundleHash: "b".repeat(64),
         vault: createVaultReadModel({
           entities: [],
-          metadata: {
-            revision: 2,
-          },
+          metadata: null,
           vaultRoot: "browser://vault",
         }),
       }),
@@ -303,7 +301,7 @@ describe("hosted browser vault replica store", () => {
     });
 
     expect(firstRef.objectKey).not.toBe(secondRef.objectKey);
-    expect(firstRef.dataVersion).not.toBe(secondRef.dataVersion);
+    expect(firstRef.dataVersion).toBe(secondRef.dataVersion);
     expect(bucket.objects.has(firstRef.objectKey)).toBe(true);
     expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
     expect(bucket.deleted).toEqual([]);

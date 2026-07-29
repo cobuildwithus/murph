@@ -126,6 +126,35 @@ describe("cloudflare worker queue backpressure routes", () => {
       kind: "runtime",
     });
   });
+
+  it("threads destination-active bridge status through the production Durable Object constructor", async () => {
+    const destination = createBucketStore();
+    const harness = createUserRunnerDurableObject({
+      BUNDLES_ENAM: destination.api,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+    await harness.durableObject.bindUser("member_123");
+    installOidcJwksFetch(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_STATUS_PATH) {
+        return Response.json({
+          mailboxLag: [],
+          userId: "member_123",
+          workspace: null,
+        });
+      }
+      throw new Error(`Unexpected fetch during R2 bridge status test: ${url.origin}${url.pathname}`);
+    });
+
+    await expect(harness.durableObject.runnerStatus()).resolves.toMatchObject({
+      r2Cutover: {
+        coexisting: true,
+        phase: "destination_active",
+        protocolVersion: "r2-oc-enam-v1",
+      },
+      userId: "member_123",
+    });
+  });
 });
 
 function createUserRunnerDurableObject(
@@ -161,8 +190,10 @@ function createBucketStore() {
 
   return {
     api: {
-      async delete(key: string) {
-        values.delete(key);
+      async delete(key: string | string[]) {
+        for (const item of Array.isArray(key) ? key : [key]) {
+          values.delete(item);
+        }
       },
       async get(key: string) {
         const value = values.get(key);
@@ -179,6 +210,26 @@ function createBucketStore() {
               bytes.byteOffset + bytes.byteLength,
             );
           },
+          key,
+          size: Buffer.byteLength(value),
+        };
+      },
+      async head(key: string) {
+        const value = values.get(key);
+        return value === undefined
+          ? null
+          : {
+              key,
+              size: Buffer.byteLength(value),
+            };
+      },
+      async list(input: { prefix?: string } = {}) {
+        return {
+          objects: [...values.keys()]
+            .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
+            .sort()
+            .map((key) => ({ key })),
+          truncated: false,
         };
       },
       async put(key: string, value: string) {

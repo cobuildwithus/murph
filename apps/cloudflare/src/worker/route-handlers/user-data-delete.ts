@@ -72,5 +72,22 @@ export async function handleUserDataDeleteRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
-  return json(await stub.deleteHostedUserData(userId));
+  const result = await stub.deleteHostedUserData(userId);
+  if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {
+    const retryAfterSeconds = "retryAfterSeconds" in result
+      && typeof result.retryAfterSeconds === "number"
+      ? result.retryAfterSeconds
+      : 1;
+    return new Response(JSON.stringify({
+      code: "r2_upload_drain_pending",
+      retryAfterSeconds,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "retry-after": String(retryAfterSeconds),
+      },
+      status: 503,
+    });
+  }
+  return json(result);
 }
