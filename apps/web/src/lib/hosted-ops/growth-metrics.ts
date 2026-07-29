@@ -213,7 +213,10 @@ export interface HostedGrowthTrialCohortRow {
 export interface HostedGrowthDashboard {
   activeUsers: {
     trailing30Days: number;
+    trailing30DaysComplete: boolean;
     trailing7Days: number;
+    trailing7DaysComplete: boolean;
+    wowComparisonComplete: boolean;
     wowPercent: number | null;
   };
   capturedAt: string;
@@ -595,6 +598,7 @@ export function getTrialMaturityCutoff(now: Date): Date {
 }
 
 interface HostedGrowthGroupMailboxRow {
+  contentRetiredAt: Date | null;
   dedupeKey: string;
   id: string;
   kind: string;
@@ -636,10 +640,18 @@ interface HostedGrowthAttributedGroupMessage {
   occurredAt: Date;
 }
 
+interface HostedGrowthDecodedGroupMessages {
+  messages: HostedGrowthAttributedGroupMessage[];
+  retiredMessageOccurredAt: Date[];
+}
+
 interface HostedGrowthActiveUserCounts {
   previous7Days: number;
+  previous7DaysComplete: boolean;
   trailing30Days: number;
+  trailing30DaysComplete: boolean;
   trailing7Days: number;
+  trailing7DaysComplete: boolean;
 }
 
 async function calculateHostedGrowthActiveUsers(input: {
@@ -653,7 +665,11 @@ async function calculateHostedGrowthActiveUsers(input: {
   prisma: HostedGrowthPrisma;
   trailing7DayStart: Date;
 }): Promise<HostedGrowthActiveUserCounts> {
-  const groupMessages = await decodeHostedGrowthGroupMessages(input.groupRows, input.prisma);
+  const decodedGroupMessages = await decodeHostedGrowthGroupMessages(
+    input.groupRows,
+    input.prisma,
+  );
+  const groupMessages = decodedGroupMessages.messages;
   const senderIdentities = await resolveHostedGrowthGroupSenderIdentities(
     groupMessages.map((message) => message.evidence),
     input.prisma,
@@ -694,17 +710,36 @@ async function calculateHostedGrowthActiveUsers(input: {
 
   return {
     previous7Days: previous7DayIdentities.size,
+    previous7DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
+      end: input.trailing7DayStart,
+      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      start: input.previousStart,
+    }),
     trailing30Days: trailing30DayIdentities.size,
+    trailing30DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
+      end: input.now,
+      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      start: input.monthlyStart,
+    }),
     trailing7Days: trailing7DayIdentities.size,
+    trailing7DaysComplete: !hasHostedGrowthRetiredMessageInWindow({
+      end: input.now,
+      retiredMessageOccurredAt: decodedGroupMessages.retiredMessageOccurredAt,
+      start: input.trailing7DayStart,
+    }),
   };
 }
 
 async function decodeHostedGrowthGroupMessages(
   rows: readonly HostedGrowthGroupMailboxRow[],
   prisma: HostedGrowthPrisma,
-): Promise<HostedGrowthAttributedGroupMessage[]> {
+): Promise<HostedGrowthDecodedGroupMessages> {
   return runWithHostedDomainRootUnwrapCache(async () => {
-    const messages = await Promise.all(rows.map(async (row) => {
+    const retiredMessageOccurredAt = rows.flatMap((row) =>
+      row.contentRetiredAt ? [row.occurredAt] : []
+    );
+    const retainedRows = rows.filter((row) => !row.contentRetiredAt);
+    const messages = await Promise.all(retainedRows.map(async (row) => {
       if (row.payloadRef && !row.payload) {
         throw new Error("Hosted growth group message sidecar payload is unavailable.");
       }
@@ -741,10 +776,24 @@ async function decodeHostedGrowthGroupMessages(
         occurredAt: row.occurredAt,
       };
     }));
-    return messages.filter(
-      (message): message is HostedGrowthAttributedGroupMessage => message !== null,
-    );
+    return {
+      messages: messages.filter(
+        (message): message is HostedGrowthAttributedGroupMessage => message !== null,
+      ),
+      retiredMessageOccurredAt,
+    };
   });
+}
+
+function hasHostedGrowthRetiredMessageInWindow(input: {
+  end: Date;
+  retiredMessageOccurredAt: readonly Date[];
+  start: Date;
+}): boolean {
+  return input.retiredMessageOccurredAt.some((occurredAt) =>
+    occurredAt.getTime() >= input.start.getTime()
+    && occurredAt.getTime() < input.end.getTime()
+  );
 }
 
 function readHostedGrowthGroupSenderEvidence(
@@ -1117,6 +1166,7 @@ export async function readHostedGrowthDashboard(
         occurredAt: "asc",
       },
       select: {
+        contentRetiredAt: true,
         dedupeKey: true,
         id: true,
         kind: true,
@@ -1209,11 +1259,18 @@ export async function readHostedGrowthDashboard(
   return {
     activeUsers: {
       trailing30Days: activeUsers.trailing30Days,
+      trailing30DaysComplete: activeUsers.trailing30DaysComplete,
       trailing7Days: activeUsers.trailing7Days,
-      wowPercent: calculatePercentChange(
-        activeUsers.trailing7Days,
-        activeUsers.previous7Days,
-      ),
+      trailing7DaysComplete: activeUsers.trailing7DaysComplete,
+      wowComparisonComplete:
+        activeUsers.trailing7DaysComplete && activeUsers.previous7DaysComplete,
+      wowPercent:
+        activeUsers.trailing7DaysComplete && activeUsers.previous7DaysComplete
+          ? calculatePercentChange(
+              activeUsers.trailing7Days,
+              activeUsers.previous7Days,
+            )
+          : null,
     },
     capturedAt: now.toISOString(),
     conversion: calculateTrialConversionSummary({

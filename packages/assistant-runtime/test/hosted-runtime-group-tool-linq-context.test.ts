@@ -317,6 +317,9 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
 
+    await groupTool.request({ action: "read_chat_name" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_name" });
+
     await groupTool.request({ action: "read_usage" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_usage" });
 
@@ -718,6 +721,16 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         unavailableReason: "authenticated_sender_required",
       });
     }
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({ action: "read_chat_name" })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
     expect(request).not.toHaveBeenCalled();
 
     await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({

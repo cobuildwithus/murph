@@ -53,6 +53,17 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
+`murph.group action="read_chat_name"` is the on-demand provider-title primitive.
+Web resolves the signed callback member's single encrypted thread-container
+route only after the model invokes it, then performs one bounded Linq chat read
+or Telegram `getChat` read. The model supplies no provider thread id. Linq's
+synthetic comma-joined handle label is returned as no name rather than exposing
+phone or email handles. The result contains only bounded untrusted display text
+with `ok`, `none`, or `unavailable` status; it grants no authority and creates
+no cache, retry, reconciliation, wake field, or new state owner. New-group setup
+may pass the exact immediately preceding `ok` result into the existing
+`create_join_link` or `post_join_offer` display-name field.
+
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
 the bounded, route-authorized current-turn Linq sender handles already visible
@@ -307,7 +318,12 @@ runtime entitlement authority. Direct wakes reject it. The growth projection
 uses current blind-index resolution only for legacy wakes and unregistered Linq
 participants, falls back to the existing keyed opaque sender identity when no
 legacy registration remains, and omits valid group-email wakes because that
-channel has no authenticated per-sender attribution.
+channel has no authenticated per-sender attribution. Mailbox content retirement
+remains authoritative over analytics: the projection never decrypts a row after
+its content-retirement marker is set, reports any affected rolling count as a
+lower bound, and withholds a week-over-week comparison when either weekly
+window has incomplete group-sender evidence. Missing unretired content remains
+an integrity failure.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
