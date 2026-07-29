@@ -120,7 +120,7 @@ export function startHostedContainerCpuWatchdog(input: {
   };
   // Seed the baseline immediately: boot-time burns are a primary target, and
   // waiting for the first setInterval firing would bake the whole boot window
-  // into a t≈20s baseline, making the first reportable interval start there.
+  // into a t≈10s baseline, making the first reportable interval start there.
   void tick();
   const interval = setInterval(() => {
     void tick();

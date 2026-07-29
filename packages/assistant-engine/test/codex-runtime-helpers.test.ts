@@ -596,6 +596,97 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('private output')
   })
 
+  it('uses the full safe structured chain when raw shell quoting fails closed', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_compound_fallback' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_compound_fallback',
+              command: "bash -lc 'cat '\\''private-record'\\'' && node private-script.js'",
+              commandActions: [
+                {
+                  type: 'read',
+                  command: "cat 'private-record'",
+                  path: 'private-record',
+                },
+                {
+                  type: 'unknown',
+                  command: 'node private-script.js',
+                },
+              ],
+              aggregatedOutput: '',
+              durationMs: 19_194,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_compound_fallback',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 19_194,
+        label: 'cat node',
+        outputChars: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-record')
+    expect(JSON.stringify(profile)).not.toContain('private-script')
+  })
+
+  it('does not build a partial structured chain across a later unsafe action', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_compound_unsafe' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_compound_unsafe',
+              command:
+                'bash -lc "cat private-record && /tmp/private-tool && node private-script.js"',
+              commandActions: [
+                {
+                  type: 'read',
+                  command: 'cat private-record',
+                  path: 'private-record',
+                },
+                {
+                  type: 'unknown',
+                  command: '/tmp/private-tool',
+                },
+                {
+                  type: 'unknown',
+                  command: 'node private-script.js',
+                },
+              ],
+              aggregatedOutput: '',
+              durationMs: 19_194,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_compound_unsafe',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 19_194,
+        label: 'cat',
+        outputChars: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-tool')
+    expect(JSON.stringify(profile)).not.toContain('private-script')
+  })
+
   it('caps the per-turn profile request series and tool list under the callback payload limit', () => {
     const rawEvents: unknown[] = [
       // Replayed pre-turn tool output must never count toward this turn even

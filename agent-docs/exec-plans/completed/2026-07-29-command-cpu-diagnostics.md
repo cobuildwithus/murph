@@ -1,6 +1,6 @@
 # Hosted command and CPU diagnostics
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -37,3 +37,4 @@ Updated: 2026-07-29
   schema, so Web and Cloudflare do not require a tandem deploy.
 - The CPU diagnostics activate only when the Cloudflare runner image is
   deployed; no database or alert-monitor migration is required.
+Completed: 2026-07-29
