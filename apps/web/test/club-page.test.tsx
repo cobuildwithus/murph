@@ -56,6 +56,9 @@ test("ClubPage presents the pilot clearly without pretending it is self-serve", 
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
   assert.match(markup, /You run the club\./);
   assert.match(markup, /Murph runs the challenge\./);
+  assert.match(markup, /Works in iMessage/);
+  assert.match(markup, /Create and run the whole challenge in iMessage\./);
+  assert.match(markup, /connect the supported wearables they already use/);
   assert.match(markup, /Plan a pilot/);
   assert.match(markup, /href="\/clubs"/);
   assert.match(markup, /mailto:clubs@withmurph\.ai\?/);
@@ -65,10 +68,19 @@ test("ClubPage presents the pilot clearly without pretending it is self-serve", 
   assert.match(markup, /Team vs\. team/);
   assert.match(markup, /Head to head/);
   assert.match(markup, /One sentence\. One link\. Everyone&#x27;s in\./);
+  assert.match(markup, /Different wearables\. One live challenge\./);
+  assert.match(markup, /No spreadsheets required/);
+  assert.match(markup, /Supported challenge inputs/);
+  assert.match(markup, /Heart-rate zones/);
+  assert.match(markup, /Logged protein/);
   assert.match(markup, /Keep the energy\. Lose the admin\./);
   assert.match(markup, /One challenge\. Personal support for everyone in it\./);
   assert.match(markup, /Share the score\. Keep the rest private\./);
-  assert.match(markup, /Illustrative early-access flow/);
+  assert.ok(
+    markup.indexOf("ATL moves together")
+      > markup.indexOf("can we see if the whole club"),
+  );
+  assert.doesNotMatch(markup, /Illustrative/);
   assert.doesNotMatch(markup, /Create your challenge/);
   assert.doesNotMatch(markup, /trusted by/i);
 });
