@@ -1988,7 +1988,7 @@ describe('Codex assistant registry helpers', () => {
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
   })
 
-  it('keeps Linq media uploads separate from Codex public Internet access', async () => {
+  it('reuses the application public fetch inside the Linq media tool', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -2029,7 +2029,7 @@ describe('Codex assistant registry helpers', () => {
       }
       throw new Error(`Unexpected provider request: ${url}`)
     })
-    const voiceMemoUploadFetch = vi.fn<typeof fetch>(async (input, init) => {
+    const applicationPublicFetch = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(
         'https://uploads.example.test/sponsor-song',
       )
@@ -2041,6 +2041,10 @@ describe('Codex assistant registry helpers', () => {
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: { provider: 'codex-cli' },
       turn: {
+        codexThreadConfig: {
+          'features.shell_tool': false,
+          web_search: 'disabled',
+        },
         dynamicTools: resolveMurphDynamicTools({
           progressUpdatesAvailable: false,
         }),
@@ -2050,9 +2054,8 @@ describe('Codex assistant registry helpers', () => {
         },
         prompt: 'generate one sponsor song',
         providerFetch,
-        publicInternetFetch: null,
+        publicInternetFetch: applicationPublicFetch,
         voiceMemoDeliveryChannel: 'linq',
-        voiceMemoUploadFetch,
         workingDirectory: '/tmp/provider-tests',
       },
     })
@@ -2061,12 +2064,15 @@ describe('Codex assistant registry helpers', () => {
     const appServerInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
     expect(appServerInput).toMatchObject({
-      publicInternetFetch: null,
+      publicInternetFetch: applicationPublicFetch,
+      threadConfig: {
+        'features.shell_tool': false,
+        web_search: 'disabled',
+      },
       voiceMemoRuntime: {
         kind: 'linq',
       },
     })
-    expect(appServerInput).not.toHaveProperty('voiceMemoUploadFetch')
     if (appServerInput?.voiceMemoRuntime?.kind !== 'linq') {
       throw new Error('Expected a Linq voice memo runtime')
     }
@@ -2091,7 +2097,7 @@ describe('Codex assistant registry helpers', () => {
       rpcSuccess: true,
     })
     expect(providerFetch).toHaveBeenCalledTimes(2)
-    expect(voiceMemoUploadFetch).toHaveBeenCalledOnce()
+    expect(applicationPublicFetch).toHaveBeenCalledOnce()
   })
 
   it('forwards message-target tools and their authorizer to Codex execution', async () => {

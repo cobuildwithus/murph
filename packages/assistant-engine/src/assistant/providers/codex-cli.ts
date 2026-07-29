@@ -190,7 +190,7 @@ export async function executeCodexAssistantTurnAttempt(
     env: input.env ?? process.env,
     fetchImpl: input.providerFetch ?? fetch,
     preferredVoiceId: input.assistantPreferredElevenLabsVoiceId ?? null,
-    publicFetchImpl: input.voiceMemoUploadFetch ?? null,
+    publicFetchImpl: input.publicInternetFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
   // Null when XAI_API_KEY is absent; the executor then fails closed with a
@@ -235,6 +235,7 @@ export async function executeCodexAssistantTurnAttempt(
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
+    threadConfig: input.codexThreadConfig ?? null,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {

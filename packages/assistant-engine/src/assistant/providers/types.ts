@@ -121,6 +121,7 @@ export interface AssistantProviderTurn {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null
+  codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
@@ -163,7 +164,6 @@ export interface AssistantProviderTurn {
   usageAttribution?: AssistantUsageAttribution | null
   assistantPreferredElevenLabsVoiceId?: string | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
-  voiceMemoUploadFetch?: typeof fetch | null
   vaultRoot?: string | null
   workingDirectory: string
 }

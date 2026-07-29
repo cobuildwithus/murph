@@ -663,34 +663,32 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
+    expect(providerInput?.codexConfigOverrides).toEqual([
       'features.shell_tool=true',
-    )
-    expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.apps=true',
-    )
+    ])
+    expect(providerInput?.codexThreadConfig).toMatchObject({
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.multi_agent': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.web_search_request': false,
+      web_search: 'disabled',
+    })
     expect(providerInput).toMatchObject({
       dynamicTools: [],
       groupConversation: false,
       environments: [],
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
-      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: null,
+      providerThreadEphemeral: true,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
     })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
@@ -807,28 +805,31 @@ describe('Codex model catalog', () => {
       approvalPolicy: 'never',
       sandbox: 'read-only',
     })
-    expect(providerInput?.codexConfigOverrides).toEqual(
-      expect.arrayContaining([
-        'features.shell_tool=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ]),
-    )
+    expect(providerInput?.codexConfigOverrides).toEqual([
+      'features.shell_tool=true',
+      'features.apps=true',
+    ])
+    expect(providerInput?.codexThreadConfig).toMatchObject({
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.multi_agent': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.web_search_request': false,
+      web_search: 'disabled',
+    })
     expect(providerInput).toMatchObject({
       dynamicTools: [MURPH_GENERATE_SONG_TOOL],
       environments: [],
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
-      processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: hostedProviderFetch,
-      publicInternetFetch: null,
+      providerThreadEphemeral: true,
+      publicInternetFetch: fetch,
       requireHostedPrivateImageDelivery: false,
-      voiceMemoUploadFetch: fetch,
     })
+    expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
