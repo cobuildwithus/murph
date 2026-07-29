@@ -926,9 +926,10 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Capture it silently without interrupting the workflow')
     expect(prompt).toContain('do not mention the log or ask permission')
     expect(prompt).toContain(
-      'Never retry after any tool result, including recorded, already recorded, unavailable, or failed',
+      'Never retry after any tool result, including accepted, already accepted, or unavailable',
     )
-    expect(prompt).toContain('continue with the best available fallback')
+    expect(prompt).toContain('persistence is best-effort after the reply')
+    expect(prompt).toContain('Continue with the best available fallback')
     expect(prompt).toContain('purely external or transient failures')
     expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
     expect(prompt).toContain(

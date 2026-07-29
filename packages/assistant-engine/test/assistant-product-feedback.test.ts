@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedRuntimeProductFeedbackRecord,
-} from "@murphai/hosted-execution/runtime-control";
-
 import {
   executeMurphDynamicToolRequest,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
@@ -88,7 +84,7 @@ describe("assistant product feedback", () => {
     expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
   });
 
-  it("reads the latest checkpointed input authority when recording", async () => {
+  it("collects the first candidate with the latest checkpointed input authority", async () => {
     let acceptedInputIds = ["assistant_input_1"];
     const recordProductFeedback = vi.fn(async () => ({
       feedbackId: "product_feedback_steered",
@@ -111,7 +107,8 @@ describe("assistant product feedback", () => {
 
     await recorder.recordProductFeedback(feedback);
 
-    expect(recordProductFeedback).toHaveBeenCalledWith({
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+    expect(recorder.readProductFeedback()).toEqual({
       ...feedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
         acceptedInputIds,
@@ -124,10 +121,11 @@ describe("assistant product feedback", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
-    expect(description).toContain("one structured Murph product-feedback item");
+    expect(description).toContain("one structured Murph product-feedback candidate");
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
-    expect(description).toContain("recorded, already recorded, unavailable, or failed");
+    expect(description).toContain("accepted, already accepted, or unavailable");
+    expect(description).toContain("persistence is best-effort after the reply");
     expect(description).toContain("do not retry after any result");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
@@ -140,10 +138,8 @@ describe("assistant product feedback", () => {
     expect(schema).not.toContain('"topic"');
   });
 
-  it("parses and records explicit feedback through the turn-scoped capability", async () => {
-    const recordProductFeedback = vi.fn(async (
-      _feedback: HostedRuntimeProductFeedbackRecord,
-    ) => ({
+  it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
+    const recordProductFeedback = vi.fn(async () => ({
       feedbackId: "product_feedback_123",
       recorded: true,
     }));
@@ -188,7 +184,8 @@ describe("assistant product feedback", () => {
       request,
     });
 
-    expect(recordProductFeedback).toHaveBeenCalledWith({
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+    expect(productFeedbackRecorder.readProductFeedback()).toEqual({
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
         acceptedInputIds: ["assistant_input_1"],
         feedback: {
@@ -203,8 +200,42 @@ describe("assistant product feedback", () => {
     });
     expect(result.rpcResult).toEqual({
       success: true,
-      contentItems: [{ type: "inputText", text: "product feedback recorded" }],
+      contentItems: [{ type: "inputText", text: "product feedback candidate accepted" }],
     });
+
+    const repeatedRequest = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          kind: "frustration",
+          summary: "This later candidate must not replace the first.",
+        },
+        namespace: "murph",
+        tool: "submit_product_feedback",
+      },
+    });
+    if (!repeatedRequest) {
+      throw new Error("Expected a repeated product feedback request.");
+    }
+    const repeatedResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 0,
+      productFeedbackRecorder,
+      progressDelivery: null,
+      request: repeatedRequest,
+    });
+
+    expect(repeatedResult.rpcResult).toEqual({
+      success: true,
+      contentItems: [{
+        type: "inputText",
+        text: "product feedback candidate already accepted",
+      }],
+    });
+    expect(productFeedbackRecorder.readProductFeedback()?.summary).toBe(
+      "Interested in native message formatting.",
+    );
   });
 
   it("parses generalized feature-request feedback without changelog ids", () => {

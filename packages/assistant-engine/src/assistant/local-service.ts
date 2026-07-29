@@ -1937,6 +1937,17 @@ export async function sendAssistantMessageLocal(
               : null,
         })
         turnInputController.complete(result)
+        const productFeedbackCandidate =
+          providerResult.productFeedbackCandidate ?? null
+        const productFeedbackRecorder =
+          executionContext?.hosted?.productFeedbackRecorder ?? null
+        if (productFeedbackCandidate && productFeedbackRecorder) {
+          await runAssistantTurnBestEffort(() =>
+            productFeedbackRecorder.recordProductFeedback(
+              productFeedbackCandidate,
+            ),
+          )
+        }
         return result
       } catch (error) {
         activeTurnInputController?.fail(error)

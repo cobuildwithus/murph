@@ -8,7 +8,6 @@ import type {
 } from './codex-turn/planning.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
-  HostedRuntimeProductFeedbackRecordResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   deliverAssistantProgressUpdate,
@@ -44,7 +43,9 @@ export interface AssistantProgressDelivery {
 export interface AssistantTurnProductFeedbackRecorder {
   recordProductFeedback(
     feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>,
-  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
+  ): Promise<{ recorded: boolean }>
+  discardProductFeedback(): void
+  readProductFeedback(): HostedRuntimeProductFeedbackRecord | null
 }
 
 export type AssistantProgressDeliverySource = 'model' | 'system'
@@ -101,17 +102,28 @@ export function createAssistantProductFeedbackRecorder(input: {
     return null
   }
 
+  let productFeedback: HostedRuntimeProductFeedbackRecord | null = null
   return {
     async recordProductFeedback(feedback) {
+      if (productFeedback) {
+        return { recorded: false }
+      }
       const normalized = normalizeAssistantProductFeedback(feedback)
       const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
-      return await productFeedbackRecorder.recordProductFeedback({
+      productFeedback = {
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
           acceptedInputIds,
           feedback: normalized,
         }),
-      })
+      }
+      return { recorded: true }
+    },
+    discardProductFeedback() {
+      productFeedback = null
+    },
+    readProductFeedback() {
+      return productFeedback
     },
   }
 }
