@@ -209,6 +209,71 @@ describe('onboarding goal check-in automation', () => {
     })
   })
 
+  it('upgrades an installed check-in target without moving or rerouting it', async () => {
+    const vaultRoot = await createVaultRoot('America/New_York')
+    const completedAt = '2026-03-01T05:30:00.000Z'
+    const installNow = new Date('2026-03-02T12:00:00.000Z')
+    const legacyRoute = {
+      ...defaultRoute,
+      deliveryTarget: 'legacy-telegram-thread',
+    }
+    await completeAssistantOnboarding({
+      completedAt,
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const currentSeed = buildOnboardingGoalCheckinSeed({
+      now: installNow,
+      onboardingState: completedOnboardingState({ completedAt }),
+      timeZone: 'America/New_York',
+    })
+    if (!currentSeed) {
+      throw new Error('Expected answered onboarding to produce a goal check-in seed.')
+    }
+    const { assistantTargetOverride, ...legacySeed } = currentSeed
+    expect(assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: legacyRoute,
+      now: installNow,
+      seeds: [legacySeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-03-02T12:01:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
+      route: legacyRoute,
+      schedule: {
+        at: '2026-03-22T17:30:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
+    })
+  })
+
   it('installs one stable catch-up for answered onboarding completed before rollout', async () => {
     const vaultRoot = await createVaultRoot('America/New_York')
     await completeAssistantOnboarding({

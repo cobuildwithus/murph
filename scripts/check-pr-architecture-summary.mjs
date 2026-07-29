@@ -16,9 +16,9 @@ const REQUIRED_ITEMS = [
 ];
 const EMPTY_VALUES = new Set([
   "",
-  "n/a",
+  "na",
   "none",
-  "not applicable",
+  "notapplicable",
   "tbd",
   "todo",
 ]);
@@ -40,7 +40,9 @@ function validatePrArchitectureSummary(prBodyHtml) {
     }
 
     const value = renderedText(item).slice(`${label}:`.length).trim();
-    const normalizedValue = value.toLowerCase().replace(/[.!?]+$/gu, "").trim();
+    const normalizedValue = value
+      .toLowerCase()
+      .replace(/[\p{P}\p{S}\s]+/gu, "");
     if (EMPTY_VALUES.has(normalizedValue)) {
       errors.push(
         `Complete the \`${label}:\` bullet with a concrete sentence; when the answer is none, explain why.`,

@@ -72,3 +72,18 @@ test("rejects empty placeholders but permits an explained absence", () => {
     [],
   );
 });
+
+test("rejects bare placeholders with punctuation-only suffixes", () => {
+  for (const placeholder of ["None;", "None —", "N/A:", "TBD…", "Todo;"]) {
+    const result = validatePrArchitectureSummary(
+      COMPLETE_SECTION.replace(
+        "No new abstraction; the seed uses its existing target override.",
+        placeholder,
+      ),
+    );
+
+    assert.deepEqual(result, [
+      "Complete the `New abstractions:` bullet with a concrete sentence; when the answer is none, explain why.",
+    ]);
+  }
+});
