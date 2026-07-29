@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Repo Checks
 
@@ -33,8 +33,20 @@ Last verified: 2026-07-28
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-production-500-regressions-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed hosted retention and late-runtime-log production 500 repairs. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Retention deletes an expired, already-consumed sequence-less preference row without updating it under the current `NOT VALID` constraint while retiring current rows in place; a diagnostic batch arriving after member deletion returns a truthful zero persisted count only for the exact runtime-log member foreign key |
 
-The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
-local by default. An explicitly forced remote run executes the same coverage
+For PR-bound work, run focused local proof and let required GitHub Actions own
+the broad suite on the exact head. `pnpm test:diff` remains an optional local
+helper, while `pnpm verify:acceptance` is mandatory before a direct push to
+`main` or another shared default branch. If CI fails, reproduce the narrowest
+failing owner or scenario locally before expanding to an umbrella command.
+The required host-support release gate keeps parity with local acceptance by
+assigning every package coverage owner, including Exercise Library and Health
+Metrics, and by running the prepared Messaging Ingress, Inboxd, and Hosted
+Local Harness package-boundary checks. The workflow guard locks those owners
+and commands against drift.
+
+When either canonical root command is selected, `pnpm test:diff` and
+`pnpm verify:acceptance` stay local by default. An explicitly forced remote run
+executes the same coverage
 surface through Crabbox's static SSH provider on a dedicated macOS account or
 through the direct Blacksmith Testbox provider; the command semantics in this
 map remain authoritative and only the finite executor changes. Ordinary GitHub

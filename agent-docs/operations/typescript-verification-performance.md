@@ -1,6 +1,6 @@
 # TypeScript Verification Performance
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 ## Purpose
 
@@ -11,9 +11,9 @@ method.
 The design stays deliberately small:
 
 - Normal verification keeps TypeScript's worker defaults.
-- Local Codex `test:diff` and acceptance commands use the conservative
-  shared-host profile by default; explicit offload can run them through
-  Crabbox on a dedicated static Mac or a Blacksmith Testbox.
+- When selected locally, Codex `test:diff` and acceptance commands use the
+  conservative shared-host profile by default; explicit offload can run them
+  through Crabbox on a dedicated static Mac or a Blacksmith Testbox.
 - One root runner selects the canonical TypeScript 7 compiler and adds only the
   lane's configured worker flags.
 - Host admission uses temporary directories. It has no daemon, database,
@@ -39,11 +39,11 @@ check. Next's TypeScript 5 contract check is never skipped by this reuse.
 
 ## Shared-Host Profile
 
-The canonical `pnpm test:diff` and `pnpm verify:acceptance` entrypoints first
-select their executor. Automatic dispatch stays local. An explicitly forced
-remote run uses either a per-worktree static Mac workspace or an isolated
-Blacksmith Testbox and disables shared-host throttling there. Local canonical
-verification and build entrypoints
+When selected, the canonical `pnpm test:diff` and `pnpm verify:acceptance`
+entrypoints first select their executor. Automatic dispatch stays local. An
+explicitly forced remote run uses either a per-worktree static Mac workspace or
+an isolated Blacksmith Testbox and disables shared-host throttling there. Local
+canonical verification and build entrypoints
 automatically use the profile when `CODEX_THREAD_ID` is present outside CI.
 Other local callers can opt in:
 
@@ -86,8 +86,10 @@ lane, but Codex/shared-host mode defaults them to one worker. Direct
 defaults, including in the host-support release check. Its config owns this
 budget so tooling-focused `test:diff` can pass its scoped override while keeping
 repo-tools outside the heavyweight lane. Direct TypeScript commands use the
-lane-specific shared budgets below. Prefer `pnpm test:diff` for normal iteration;
-reserve full verification for the completion gate.
+lane-specific shared budgets below. For PR-bound work, prefer focused direct
+checks and let required exact-head CI own broad verification; use `test:diff`
+when it is the smallest useful scoped check or CI reproducer. Reserve local
+acceptance for direct shared-default pushes or evidence-driven diagnosis.
 
 ## TypeScript Budgets
 
