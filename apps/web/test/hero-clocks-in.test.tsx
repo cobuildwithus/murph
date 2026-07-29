@@ -506,6 +506,7 @@ test("an explicit member selection immediately owns the group audience", async (
   assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
   assert.equal(groupConversation.getAttribute("role"), "log");
   assert.equal(view.window.document.activeElement, groupConversation);
+  assert.match(view.container.textContent ?? "", /Group conversation selected/);
   assert.doesNotMatch(
     groupConversation.textContent ?? "",
     /How are my steps this week\?|Average 8\.4k a day/,
@@ -537,6 +538,44 @@ test("an explicit member selection immediately owns the group audience", async (
     /How are my steps this week\?/,
   );
   assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+
+  await view.cleanup();
+});
+
+test("composer focus restores and announces the private audience from the automatic group", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(9_000);
+  });
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(groupHeader);
+  assert.ok(composer);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+  });
+
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  assert.match(view.container.textContent ?? "", /Private conversation selected/);
+  assert.match(
+    view.container.textContent ?? "",
+    /Did the magnesium actually do anything\?.*Two weeks in, deep sleep up 18%/s,
+  );
 
   await view.cleanup();
 });
@@ -668,6 +707,7 @@ test("group start clears the private 1:1 thread and topic clicks return to a fre
     privateThread,
     /Sauna nights show \+9 ms HRV vs non-sauna nights/,
   );
+  assert.match(privateThread, /Private conversation selected/);
   assert.doesNotMatch(privateThread, /Walk challenge · Day 5 of 7/);
   assert.doesNotMatch(privateThread, /Standings, day 5 of 7/);
   const activeGroupHeader = [...view.container.querySelectorAll(".hero-header-layer")]

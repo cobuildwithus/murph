@@ -1310,6 +1310,13 @@ export function HeroClocksIn({
                     />
                   </div>
                   <div className="relative h-[460px] lg:h-[580px]">
+                    <p role="status" className="sr-only">
+                      {engaged
+                        ? groupMode
+                          ? "Group conversation selected."
+                          : "Private conversation selected."
+                        : ""}
+                    </p>
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#f5f0e8] via-[#f5f0e8]/85 to-transparent"
