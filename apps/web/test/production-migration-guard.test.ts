@@ -24,6 +24,7 @@ import {
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
+  hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
   hostedWebProductionPrismaGenerateCommand,
@@ -108,6 +109,10 @@ describe("hosted web production migration guard", () => {
 
     assert.equal(result, "ran");
     assert.deepEqual(calls, [
+      {
+        command: hostedRuntimeLogProductionMigrationCommand.command,
+        args: ["--dir", "apps/web", "runtime-logs:migrate:deploy"],
+      },
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],

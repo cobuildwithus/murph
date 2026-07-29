@@ -58,7 +58,7 @@ function createHostedToolContext(input: {
 function parseCurrentSenderRequest(messageRef = SELECTED_INPUT_ID) {
   const request = readMurphDynamicToolRequest(groupToolCall({
     action: "ask_current_sender",
-    messageRef,
+    message_ref: messageRef,
   }));
   if (!request || request.kind !== "group") {
     throw new Error("Expected a parsed murph.group request.");
@@ -75,7 +75,7 @@ describe("murph.group ask_current_sender", () => {
 
     const withQuestion = readMurphDynamicToolRequest(groupToolCall({
       action: "ask_current_sender",
-      messageRef: SELECTED_INPUT_ID,
+      message_ref: SELECTED_INPUT_ID,
       question: "model paraphrase",
     }));
     expect(withQuestion).toMatchObject({ kind: "invalid-group-arguments" });
@@ -83,9 +83,17 @@ describe("murph.group ask_current_sender", () => {
     const withMember = readMurphDynamicToolRequest(groupToolCall({
       action: "ask_current_sender",
       memberId: "model_selected_member",
-      messageRef: SELECTED_INPUT_ID,
+      message_ref: SELECTED_INPUT_ID,
     }));
     expect(withMember).toMatchObject({ kind: "invalid-group-arguments" });
+
+    const withCamelCaseRef = readMurphDynamicToolRequest(groupToolCall({
+      action: "ask_current_sender",
+      messageRef: SELECTED_INPUT_ID,
+    }));
+    expect(withCamelCaseRef).toMatchObject({
+      kind: "invalid-group-arguments",
+    });
   });
 
   it("replaces the Message ref with a trusted accepted-input origin", async () => {

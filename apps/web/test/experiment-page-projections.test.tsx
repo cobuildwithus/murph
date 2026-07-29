@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
-import { resolveHealthCommonsExperimentResultsPublic } from "@/src/lib/health-commons/experiment-projections";
 import type { ProtocolTabExperiment } from "@/src/components/experiments/experiment-detail/protocol-tab";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 
@@ -87,11 +86,6 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-start-button-s
     return createElement("button", { type: "button" }, protocolTitle);
   },
   HostedExperimentStartButton(props: {
-    protocolRef?: {
-      key: string;
-      pageRevisionId: string;
-      runSpecRevisionId: string;
-    } | null;
     protocolTitle: string;
   }) {
     mocks.hostedStart(props);
@@ -229,19 +223,13 @@ describe("experiment page projections", () => {
       }),
     });
     const markup = renderToStaticMarkup(element);
-    const resultsPublic = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
-
-    if (!resultsPublic?.commons.runSpecRevisionId) {
-      throw new Error("Expected exact Finnish sauna protocol lineage.");
-    }
 
     expect(markup).toContain("child");
     expect(mocks.hostedStart).toHaveBeenCalledWith(expect.objectContaining({
-      protocolRef: {
-        key: resultsPublic.commons.key,
-        pageRevisionId: resultsPublic.commons.pageRevisionId,
-        runSpecRevisionId: resultsPublic.commons.runSpecRevisionId,
-      },
+      protocolTitle: expect.any(String),
+    }));
+    expect(mocks.hostedStart).not.toHaveBeenCalledWith(expect.objectContaining({
+      protocolRef: expect.anything(),
     }));
   });
 

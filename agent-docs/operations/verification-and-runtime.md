@@ -26,6 +26,14 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+For hosted Linq weighted line-planning changes, the focused owner proof is the
+hosted-web Vitest slice covering routing policy, on-demand line load, home
+routing, group outreach, canonical thread-route refresh/repair, the bounded
+account-projection backfill, and the production migration guard. Keep the
+5,000 assignment target assertions separate from the existing 7,000 provider
+traffic guideline; this verification slice must not add a runtime traffic-cap
+expectation.
+
 ## Verification Execution Location
 
 The verification matrix chooses the command and coverage surface; it does not
@@ -372,7 +380,10 @@ against the final base-to-head diff and PR body. Prefer an attached in-app
 Browser for this proof when available, then fall back to the repository-installed
 Playwright runtime against the local catalog when no tab is attached or the
 connection is unusable. Browser attachment alone must not block completion when
-Playwright can capture the required states.
+Playwright can capture the required states. Treat that fallback as required:
+attempt Playwright before asking for a browser attachment or reporting a
+screenshot blocker, and record the exact command and failure only if Playwright
+cannot capture the proof.
 
 ## Scoped Verification Mode
 

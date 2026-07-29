@@ -414,6 +414,13 @@ not enter evidence; and attachment-only input fails closed before provider work.
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare
   `container_rollout=immediate` is not applicable to this Vercel-only lane; the
   bounded drain wait and final alias check own the old-function window.
+- Hosted Linq weighted line-planning coverage is owned by the focused hosted-web
+  tests for routing policy, canonical direct/group load derivation, home and
+  proactive outreach selection, canonical thread-route refresh/repair, and the
+  bounded account-projection backfill. The migration guard proves the nullable
+  projection column and index remain additive. Assertions keep the 5,000 soft
+  assignment target distinct from the provider's 7,000 combined daily traffic
+  guideline and must not introduce a runtime traffic rejection path.
 - Automatic approval-outcome mailbox emission is unconditional. The first
   compatible Cloudflare/runner bundle and the first web bundle serving the
   action-approval read route are permanent rollback floors. Keep web at that
@@ -457,6 +464,29 @@ not enter evidence; and attachment-only input fails closed before provider work.
   turn, checkpoints it, destroys the container, approves, restores, and proves
   one attachment delivery with no duplicate or mailbox lag. The phase-one
   reader-compatible release remains the rollback floor after producer activation.
+
+Authenticated Linq group speaker-label coverage is split across the existing
+owners. Hosted-execution parser tests lock the additive provenance enum, legacy
+profile default, explicit non-overlapping name-miss evidence, exact response
+keys, and rejection of private participant ids.
+Hosted Web tests prove exact current-membership/profile candidates, pre-group
+and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
+pending-profile-snapshot recovery, profile-over-contact precedence, fail-soft
+advisory outcomes, one set-based profile/contact lookup, and operation-local
+overflow beyond the 16-phone contact bound. Assistant-runtime tests prove the operation-local
+reader memo, bounded private file-backed profile/contact-positive and
+valid-negative cache, operation-only policy omissions, reuse across fresh
+module instances, exact runtime and
+route scope isolation, the 14-day positive and six-hour true-miss boundaries,
+non-sliding FIFO eviction, failure-only operation suppression,
+corruption recovery, opaque keys, private permissions where portable, provenance
+preservation, duplicate
+rejection, malformed-batch rejection, and mixed batch miss behavior.
+Assistant-engine tests prove one four-handle reader call for a 20-message
+initial burst, delegation during separate live admissions, direct-Linq
+exclusion, Telegram ingress-name preservation, explicit prompt semantics, and
+absence of hosted member or participant ids. Cloudflare group-tool-port tests
+keep the one-second presentation-only deadline and late-result rejection.
 
 ## Current Gaps
 

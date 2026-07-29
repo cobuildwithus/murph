@@ -32,10 +32,40 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliverySendFailedTx: mocks.markDeliveryFailed,
 }));
 
-// Mock only the home-line load counter; chooseHostedLinqSignupWelcomeLine itself
+// Mock only the canonical load read; chooseHostedLinqSignupWelcomeLine itself
 // runs for real so these tests exercise the shared selection policy.
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-linq", () => ({
-  countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHomeBindings,
+vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
+  buildHostedLinqAssignmentPlanningMessages: (snapshot: {
+    byRecipientPhone: ReadonlyMap<string, { plannedMessages: number }>;
+  }) => new Map(
+    [...snapshot.byRecipientPhone].map(([recipientPhone, load]) => [
+      recipientPhone,
+      load.plannedMessages,
+    ]),
+  ),
+  readHostedLinqLinePlanningLoadSnapshot: vi.fn(async (input: {
+    lines: ReadonlyArray<{ phoneNumber: string }>;
+    now: Date;
+    prisma: unknown;
+  }) => {
+    const activeMembers = await mocks.countHomeBindings({
+      now: input.now,
+      prisma: input.prisma,
+      recipientPhones: input.lines.map((line) => line.phoneNumber),
+    });
+    return {
+      byRecipientPhone: new Map(input.lines.map((line) => [
+        line.phoneNumber,
+        {
+          activeDirectMemberCount: activeMembers.get(line.phoneNumber) ?? 0,
+          plannedMessages: (activeMembers.get(line.phoneNumber) ?? 0) * 10,
+          provisionedGroupThreadCount: 0,
+        },
+      ])),
+      projectionCoverageComplete: true,
+      unprojectedGroupThreadCount: 0,
+    };
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
@@ -78,7 +108,6 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-07-24T16:00:00.000Z");
 const LINE = {
-  activeMemberLimit: null,
   assignmentWeight: 100,
   maxNewConversationsPerDay: 20,
   phoneNumber: "+15550000001",

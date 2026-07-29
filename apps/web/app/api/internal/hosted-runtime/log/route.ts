@@ -15,8 +15,10 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
+  writeHostedRuntimeLogs,
+} from "@/src/lib/hosted-runtime-log/write";
+import {
   claimHostedAcceptedAttemptFailureRecheck,
-  recordHostedRuntimeLogs,
 } from "@/src/lib/hosted-workspace/store";
 
 const ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE = "runner.accepted_attempt_failed";
@@ -40,24 +42,8 @@ export const POST = withJsonError(async (request: Request) => {
     await signalAcceptedRuntimeAttemptFailureBestEffort({ userId });
   }
 
-  const loggedCount = await recordHostedRuntimeLogs({
-    entries: body.entries.map((entry) => ({
-      at: entry.at,
-      component: entry.component,
-      eventCode: entry.eventCode,
-      level: entry.level,
-      phase: entry.phase,
-      ...("attemptId" in entry ? { attemptId: entry.attemptId } : {}),
-      ...("checkpointVersion" in entry ? { checkpointVersion: entry.checkpointVersion } : {}),
-      ...("errorCode" in entry ? { errorCode: entry.errorCode } : {}),
-      ...("leaseGeneration" in entry ? { leaseGeneration: entry.leaseGeneration } : {}),
-      ...("mailboxLane" in entry ? { mailboxLane: entry.mailboxLane } : {}),
-      ...("mailboxSeqEnd" in entry ? { mailboxSeqEnd: entry.mailboxSeqEnd } : {}),
-      ...("mailboxSeqStart" in entry ? { mailboxSeqStart: entry.mailboxSeqStart } : {}),
-      ...("outboxIntentRef" in entry ? { outboxIntentRef: entry.outboxIntentRef } : {}),
-      ...("redactedJson" in entry ? { redacted: entry.redactedJson } : {}),
-      ...("workspaceVersion" in entry ? { workspaceVersion: entry.workspaceVersion } : {}),
-    })),
+  const loggedCount = await writeHostedRuntimeLogs({
+    entries: body.entries,
     userId,
   });
 

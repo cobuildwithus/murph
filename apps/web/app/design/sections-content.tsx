@@ -117,7 +117,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Changelog archive edition">
-        <ChangelogArchiveStudy />
+        <div data-design-section="changelog-archive">
+          <ChangelogArchiveStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -176,7 +178,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group usage funding and top-up follow-up">
+      <StudySection title="Group usage funding, recovery, and fulfilled receipt">
         <GroupUsageFundingStudy />
       </StudySection>
 
