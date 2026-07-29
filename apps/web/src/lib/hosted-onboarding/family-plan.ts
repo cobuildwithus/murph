@@ -1737,6 +1737,13 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     prisma: input.tx,
   });
 
+  const stripeSubscriptionId = coerceStripeSubscriptionId(
+    input.session.subscription,
+  );
+  if (!stripeSubscriptionId) {
+    return { groupId: group.id };
+  }
+
   await writeHostedAccountGroupStripeBillingTx({
     billingStatus: group.billingStatus,
     currentBillingPhase: null,
@@ -1745,7 +1752,7 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
     preserveLastStripeEventCreatedAt: true,
     stripeCustomerId: coerceStripeObjectId(input.session.customer),
     stripeEventCreatedAt: input.dispatchContext.eventCreatedAt ?? null,
-    stripeSubscriptionId: coerceStripeSubscriptionId(input.session.subscription),
+    stripeSubscriptionId,
     tx: input.tx,
   });
 

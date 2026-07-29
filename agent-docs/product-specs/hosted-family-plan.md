@@ -323,7 +323,11 @@ action while webhook processing is delayed. The short Family Checkout redirect
 branches on Stripe Session status: `open` requires a provider URL, `complete`
 preserves the claim and enters that verified success surface, and only exact
 `expired` clears the matching attempt. Missing URLs, unknown status, and
-retrieval ambiguity preserve the claim and fail retryably.
+retrieval ambiguity preserve the claim and fail retryably. A `complete` Session
+that does not yet expose its subscription identity also keeps the exact attempt
+and Session binding while success polling waits; only the same completion with
+the canonical subscription identity may replace that claim with the
+subscription binding.
 
 Regression coverage follows the production boundaries: terminal-before-active
 Stripe reconciliation releases the exact direct binding, dashboard auth returns

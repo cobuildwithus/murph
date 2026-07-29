@@ -87,6 +87,9 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  applyStripeCheckoutCompleted,
+} from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
   acceptHostedFamilyInvite,
   acceptHostedFamilyInviteFromTelegramTx,
   acceptHostedFamilyInviteFromPhoneTx,
@@ -5883,8 +5886,9 @@ describe("hosted Family plan", () => {
 
   it("routes a completed URL-less Family Session to verified success without clearing it", async () => {
     const sessionId = "cs_test_unavailable123";
+    const checkoutCreatedAt = new Date("2026-07-28T12:00:00.000Z");
     const group = {
-      billingStatus: HostedBillingStatus.not_started,
+      billingStatus: HostedBillingStatus.canceled,
       id: "hbag_family",
       ownerMemberId: "member_owner",
       suspendedAt: null,
@@ -5893,24 +5897,31 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    const pendingBillingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_current",
+        checkoutCreatedAt,
         checkoutSeatCount: 2,
         stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
         stripeSubscriptionIdEncrypted: null,
       }),
       group,
-    });
-    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+    };
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(
+      pendingBillingRef,
+    );
+    const completedSession = makeFamilyStripeCheckoutSession({
       checkoutAttemptId: "hbfca_current",
       sessionId,
       subscriptionId: null,
       url: null,
-    }));
+    });
+    const retrieve = vi.fn().mockResolvedValue(completedSession);
+    const create = vi.fn();
     runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
       checkout: {
         sessions: {
+          create,
           retrieve,
         },
       },
@@ -5923,7 +5934,64 @@ describe("hosted Family plan", () => {
       `https://local.withmurph.ai:3443/join?family_checkout=success&session_id=${sessionId}`,
     );
 
+    await expect(applyStripeCheckoutCompleted(
+      completedSession,
+      tx,
+      {
+        eventCreatedAt: new Date("2026-07-28T12:01:00.000Z"),
+        occurredAt: "2026-07-28T12:01:00.000Z",
+        sourceEventId: "checkout.session:cs_test_unavailable123",
+        sourceType: "stripe.checkout.session.completed",
+      },
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce({
+      ...group,
+      billingRef: {
+        checkoutAttemptId: pendingBillingRef.checkoutAttemptId,
+        checkoutCreatedAt: pendingBillingRef.checkoutCreatedAt,
+        stripeSubscriptionIdEncrypted:
+          pendingBillingRef.stripeSubscriptionIdEncrypted,
+      },
+      owner: { suspendedAt: null },
+    });
+    await expect(readHostedFamilyBillingRecoveryForOwner({
+      ownerMemberId: group.ownerMemberId,
+      prisma: tx,
+    })).resolves.toBe("checkout");
+
+    await expect(applyStripeCheckoutCompleted(
+      makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId,
+        subscriptionId: "sub_family",
+        url: null,
+      }),
+      tx,
+      {
+        eventCreatedAt: new Date("2026-07-28T12:02:00.000Z"),
+        occurredAt: "2026-07-28T12:02:00.000Z",
+        sourceEventId: "checkout.session:cs_test_unavailable123",
+        sourceType: "stripe.checkout.session.completed",
+      },
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("clears only an exact Stripe-expired Family checkout session", async () => {
