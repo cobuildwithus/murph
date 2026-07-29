@@ -1,6 +1,6 @@
 # voice-only-voice-memo-guidance
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -82,3 +82,4 @@ Updated: 2026-07-29
 - Exact provider-input delta for the changed JSON-string tool description,
   measured with `gpt-tokenizer` 3.4.0 `o200k_harmony`: +106 tokens and +586
   UTF-8 bytes in a voice-enabled initial turn.
+Completed: 2026-07-29
