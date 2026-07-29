@@ -1,6 +1,6 @@
 # Keep homepage auth progress in place
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -91,3 +91,4 @@ Updated: 2026-07-29
 - Preliminary specialist review accepted the frontend and API design and
   returned one medium coverage finding. Its test-only patch was inspected,
   applied, and verified with the requested focused command.
+Completed: 2026-07-29
