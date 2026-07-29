@@ -34,6 +34,7 @@ import type {
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
+  AssistantHostedIMessageContactTool,
   AssistantHostedImageGenerationLauncher,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
@@ -104,6 +105,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
@@ -121,6 +123,7 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
+  claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
   currentGroupPhoneCallPreviewAuthority?(input?: {
@@ -233,6 +236,7 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   let subscriptionActionClaimed = false
+  let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
     AssistantHostedClinicalRecordsConnectLinkTool['createConnectLink']
   > | null = null
@@ -258,6 +262,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
     newsletterTool,
@@ -309,6 +314,17 @@ export function createAssistantHostedToolContext(input: {
         return null
       }
       subscriptionActionClaimed = true
+      return assistantInputId
+    },
+    claimIMessageContactAssistantInputId: () => {
+      if (imessageContactActionClaimed) {
+        return null
+      }
+      const assistantInputId = readCurrentUserActionAssistantInputId()
+      if (assistantInputId === null) {
+        return null
+      }
+      imessageContactActionClaimed = true
       return assistantInputId
     },
     currentAssistantTarget: () => {

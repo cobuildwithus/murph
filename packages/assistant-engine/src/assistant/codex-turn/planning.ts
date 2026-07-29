@@ -834,6 +834,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
         planUsageAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.planUsageTool != null,
+        imessageContactAvailable:
+          privateInteractiveAudience &&
+          currentAudienceDeliveryFields.channel === 'telegram' &&
+          currentAudienceDeliveryFields.threadIsDirect === true &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.imessageContactTool != null,
         subscriptionAvailable:
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&

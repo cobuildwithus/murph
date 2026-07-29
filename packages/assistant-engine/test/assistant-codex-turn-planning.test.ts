@@ -2594,6 +2594,73 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
+    ['direct Telegram current user input', 'telegram', true, 'assistant-input', true],
+    ['direct non-Telegram current user input', 'email', true, 'assistant-input', false],
+    ['Telegram group current user input', 'telegram', false, 'assistant-input', false],
+    ['direct Telegram system input', 'telegram', true, 'system', false],
+  ] as const)(
+    'gates iMessage contact on %s',
+    async (_label, channel, threadIsDirect, source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        imessageContactTool: { ensure: vi.fn() },
+      }
+      const sharedPlan = threadIsDirect
+        ? createPrivateSharedPlan()
+        : createSharedPlan({}, {
+            channel,
+            effectiveThreadIsDirect: false,
+            threadId: 'telegram-group-thread',
+            threadIsDirect: false,
+          })
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'d'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-imessage-contact-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel,
+          threadId: threadIsDirect
+            ? 'telegram-direct-thread'
+            : 'telegram-group-thread',
+          threadIsDirect,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-27',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan,
+      })
+
+      expect(plan.dynamicTools.some((tool) => tool.name === 'imessage_contact'))
+        .toBe(expectedAvailable)
+    },
+  )
+
+  it.each([
     ['assistant-input', true],
     ['manual', true],
     ['initial', false],
