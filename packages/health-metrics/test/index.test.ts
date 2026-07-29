@@ -2321,6 +2321,29 @@ test("selects metric window comparisons and trends through shared selectors", ()
   assert.equal(mixedUnits.status, "unsupported");
   assert.equal(mixedUnits.delta, null);
 
+  const unitlessBaseline = selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-01", start: "2026-04-01", totalDays: 1 },
+    comparisonWindow: { end: "2026-04-02", start: "2026-04-02", totalDays: 1 },
+    metricKey: "resting-heart-rate",
+    points: [
+      { ...seriesPoint("2026-04-01", 60), unit: null },
+      seriesPoint("2026-04-02", 62),
+    ],
+  });
+  assert.equal(unitlessBaseline.status, "unsupported");
+  assert.equal(unitlessBaseline.delta, null);
+  assert.equal(unitlessBaseline.unit, null);
+
+  const oneSidedUnit = selectMetricWindowComparison({
+    baselineWindow: { end: "2026-04-01", start: "2026-04-01", totalDays: 1 },
+    comparisonWindow: { end: "2026-04-02", start: "2026-04-02", totalDays: 1 },
+    metricKey: "resting-heart-rate",
+    points: [seriesPoint("2026-04-01", 60)],
+  });
+  assert.equal(oneSidedUnit.status, "insufficient_data");
+  assert.equal(oneSidedUnit.delta, null);
+  assert.equal(oneSidedUnit.unit, "bpm");
+
   const flatTrend = selectMetricTrend({
     metricKey: "resting-heart-rate",
     points: [

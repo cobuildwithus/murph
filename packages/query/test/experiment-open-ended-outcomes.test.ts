@@ -341,6 +341,64 @@ test("incompatible custom outcome units fail closed without a false delta", () =
   assert.equal(metric?.unit, null);
 });
 
+test("unitless custom values do not compare against unit-bearing values", () => {
+  const slug = "unitless-comparison-review";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/open-ended-unitless-comparison",
+    metadata: { timezone: "UTC" },
+    entities: [makeExperiment({
+      slug,
+      runPlan: {
+        baselineStart: "2026-04-01",
+        baselineEnd: "2026-04-01",
+        interventionStart: "2026-04-02",
+        interventionEnd: "2026-04-02",
+        modality: "movement practice",
+      },
+      analysisPlan: {
+        primaryOutcome: {
+          kind: "metric",
+          key: "biomarker:movement-benchmark",
+          statistic: "latest",
+        },
+      },
+    })],
+  });
+  const baseline = metricPoint({
+    biomarkerKey: "biomarker:movement-benchmark",
+    date: "2026-04-01",
+    metricKey: "movement-benchmark",
+    recordId: "evt_unitless_baseline",
+    value: 10,
+  });
+  const outcome = analyzeExperimentOutcome(vault, slug, {
+    asOf: "2026-04-02",
+    metricPoints: [
+      {
+        ...baseline,
+        canonicalUnit: null,
+        unit: null,
+      },
+      metricPoint({
+        biomarkerKey: "biomarker:movement-benchmark",
+        date: "2026-04-02",
+        metricKey: "movement-benchmark",
+        recordId: "evt_unitful_followup",
+        unit: "seconds",
+        value: 12,
+      }),
+    ],
+  });
+  const metric = outcome.metricResults[0];
+
+  assert.equal(metric?.baselineMean, 10);
+  assert.equal(metric?.interventionMean, 12);
+  assert.equal(metric?.deltaAbs, null);
+  assert.equal(metric?.deltaPct, null);
+  assert.equal(metric?.completeness, "insufficient");
+  assert.equal(metric?.unit, null);
+});
+
 test("a planned baseline does not hide ordinary metric-window evidence", () => {
   const slug = "planned-measurement-fallback";
   const outcomeKey = "biomarker:repetition-capacity";
@@ -680,4 +738,79 @@ test("structured review readiness ignores unresolved evidence anchors", () => {
   assert.deepEqual(outcome.structuredReview?.baseline.recordIds, []);
   assert.deepEqual(outcome.structuredReview?.followup.recordIds, []);
   assert.match(outcome.conclusion.headline, /needs baseline and follow-up evidence/u);
+});
+
+test("structured review readiness uses canonical evidence dates over anchor claims", () => {
+  const outcomeKey = "biomarker:movement-quality-review";
+  for (const [variant, claimedObservedOn] of [
+    ["omitted", undefined],
+    ["incorrectly-early", "2026-04-02"],
+  ] as const) {
+    const slug = `movement-quality-future-evidence-${variant}`;
+    const followupAnchor = {
+      role: "followup",
+      kind: "document",
+      recordId: `evt_future_followup_${variant}`,
+      biomarkerKeys: [outcomeKey],
+      ...(claimedObservedOn === undefined ? {} : { observedOn: claimedObservedOn }),
+    };
+    const vault = createVaultReadModel({
+      vaultRoot: `/virtual/open-ended-structured-review-${variant}`,
+      metadata: { timezone: "UTC" },
+      entities: [
+        makeExperiment({
+          slug,
+          status: "completed",
+          runPlan: {
+            interventionStart: "2026-04-01",
+            interventionEnd: "2026-04-14",
+            modality: "mobility practice",
+          },
+          analysisPlan: {
+            primaryOutcome: {
+              kind: "structured_review",
+              key: outcomeKey,
+              label: "Movement quality",
+            },
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "document",
+                recordId: `evt_baseline_${variant}`,
+                biomarkerKeys: [outcomeKey],
+                observedOn: "2026-04-01",
+              },
+              followupAnchor,
+            ],
+          },
+        }),
+        evidenceEntity({
+          date: "2026-04-01",
+          kind: "document",
+          recordId: `evt_baseline_${variant}`,
+          slug,
+        }),
+        evidenceEntity({
+          date: "2026-04-20",
+          kind: "document",
+          recordId: `evt_future_followup_${variant}`,
+          slug,
+        }),
+      ],
+    });
+
+    const beforeEvidence = analyzeExperimentOutcome(vault, slug, {
+      asOf: "2026-04-14",
+    });
+    const afterEvidence = analyzeExperimentOutcome(vault, slug, {
+      asOf: "2026-04-20",
+    });
+
+    assert.equal(beforeEvidence.structuredReview?.status, "baseline_only");
+    assert.deepEqual(beforeEvidence.structuredReview?.followup.recordIds, []);
+    assert.equal(afterEvidence.structuredReview?.status, "ready_for_review");
+    assert.deepEqual(afterEvidence.structuredReview?.followup.recordIds, [
+      `evt_future_followup_${variant}`,
+    ]);
+  }
 });

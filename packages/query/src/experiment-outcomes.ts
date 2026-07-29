@@ -41,7 +41,7 @@ export interface ExperimentOutcomeEvidencePlanSummary {
 }
 
 export interface ExperimentOutcomeEvidenceOptions {
-  availableRecordIds?: ReadonlySet<string>;
+  evidenceObservedOnByRecordId?: ReadonlyMap<string, string | null>;
   observedThrough?: string;
 }
 
@@ -132,12 +132,29 @@ function summarizeRole(
       anchor.biomarkerKeys.some((key) => key.trim().toLowerCase() === normalizedKey),
   );
   const observedAnchors = matchingAnchors.filter(
-    (anchor) =>
-      (options.observedThrough === undefined ||
-        anchor.observedOn === undefined ||
-        anchor.observedOn <= options.observedThrough) &&
-      (options.availableRecordIds === undefined ||
-        options.availableRecordIds.has(anchor.recordId)),
+    (anchor) => {
+      const recordObservations = options.evidenceObservedOnByRecordId;
+      if (recordObservations === undefined) {
+        return (
+          options.observedThrough === undefined ||
+          anchor.observedOn === undefined ||
+          anchor.observedOn <= options.observedThrough
+        );
+      }
+      if (!recordObservations.has(anchor.recordId)) {
+        return false;
+      }
+
+      const canonicalObservedOn = recordObservations.get(anchor.recordId) ?? null;
+      const effectiveObservedOn = canonicalObservedOn ?? anchor.observedOn ?? null;
+      return (
+        effectiveObservedOn !== null &&
+        (
+          options.observedThrough === undefined ||
+          effectiveObservedOn <= options.observedThrough
+        )
+      );
+    },
   );
   const planned = (analysisPlan?.plannedMeasurements ?? []).filter(
     (measurement) =>

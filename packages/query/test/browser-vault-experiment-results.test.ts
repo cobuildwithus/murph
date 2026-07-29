@@ -1365,6 +1365,79 @@ test("browser structured-review readiness requires accessible evidence records",
   );
 });
 
+test("browser structured-review readiness uses evidence record dates over anchor claims", () => {
+  const outcomeKey = "biomarker:movement-quality-review";
+  for (const [variant, claimedObservedOn] of [
+    ["omitted", undefined],
+    ["incorrectly-early", "2026-04-02"],
+  ] as const) {
+    const slug = `structured-review-future-${variant}`;
+    const experiment = experimentEntity({
+      analysisPlan: {
+        primaryOutcome: {
+          key: outcomeKey,
+          kind: "structured_review",
+          label: "Movement quality",
+        },
+        measurementAnchors: [
+          {
+            biomarkerKeys: [outcomeKey],
+            kind: "document",
+            observedOn: "2026-04-01",
+            recordId: `evt_browser_baseline_${variant}`,
+            role: "baseline",
+          },
+          {
+            biomarkerKeys: [outcomeKey],
+            kind: "document",
+            recordId: `evt_browser_future_followup_${variant}`,
+            role: "followup",
+            ...(claimedObservedOn === undefined
+              ? {}
+              : { observedOn: claimedObservedOn }),
+          },
+        ],
+      },
+      endedOn: "2026-04-20",
+      id: `exp_structured_review_future_${variant}`,
+      runPlan: {
+        interventionEnd: "2026-04-14",
+        interventionStart: "2026-04-01",
+      },
+      slug,
+      status: "completed",
+    });
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        entities: [
+          experiment,
+          structuredReviewEvidenceEntity({
+            date: "2026-04-01",
+            id: `evt_browser_baseline_${variant}`,
+            slug,
+          }),
+          structuredReviewEvidenceEntity({
+            date: "2026-04-20",
+            id: `evt_browser_future_followup_${variant}`,
+            slug,
+          }),
+        ],
+        generatedAt: "2026-04-21T12:00:00.000Z",
+      }),
+    );
+
+    const beforeEvidence = selectBrowserVaultExperimentResults(client, slug, {
+      asOf: "2026-04-14",
+    });
+    const afterEvidence = selectBrowserVaultExperimentResults(client, slug, {
+      asOf: "2026-04-20",
+    });
+
+    assert.equal(beforeEvidence?.progress?.dataCoverage.status, "partial");
+    assert.equal(afterEvidence?.progress?.dataCoverage.status, "ready_for_review");
+  }
+});
+
 test("keeps multi-metric legacy summaries saved while pairing each metric with current bounded points", () => {
   const outcome = savedOutcome();
   const primaryMetric = outcome.metricResults[0];

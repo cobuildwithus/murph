@@ -76,13 +76,32 @@ const missingReview = makeExperiment({
     "Add both planned observations before reviewing the result. The experiment remains saved.",
 });
 
+const supportingMetricTrend: TrendData = {
+  active: [],
+  baseline: [],
+  baselineAvg: 61,
+  currentValue: 59,
+  delta: "-2 bpm",
+  history: [],
+  label: "Resting heart rate",
+  startDate: "2026-04-01",
+  statistic: "mean",
+  unit: "bpm",
+  windowComparison: {
+    baselineDaysWithData: 3,
+    baselineTotalDays: 3,
+    interventionDaysWithData: 3,
+    interventionTotalDays: 3,
+  },
+};
+
 const partialReview = makeExperiment({
   privateRun: makePrivateRun({
     id: "structured-review-partial",
     outcomeKind: "structured_review",
     structuredReviewStatus: "baseline_only",
     title: "Movement quality review",
-    trends: [],
+    trends: [supportingMetricTrend],
   }),
   summary: "The review still needs follow-up evidence.",
   summaryDetail:

@@ -54,6 +54,7 @@ import {
 } from "./protocols.ts";
 import {
   assessExperimentPrimaryMetricCapture,
+  metricWindowUnitsAreCompatible,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   validateExperimentSessionMetricValue,
@@ -426,7 +427,7 @@ export function analyzeExperimentOutcome(
         context.frontmatter.analysisPlan,
         primaryOutcome.key,
         {
-          availableRecordIds: collectVaultRecordIds(vault),
+          evidenceObservedOnByRecordId: collectVaultEvidenceObservedOn(vault),
           observedThrough: context.asOf,
         },
       )
@@ -572,14 +573,21 @@ function buildExperimentSummaryContext(
   };
 }
 
-function collectVaultRecordIds(vault: VaultReadModel): Set<string> {
-  return new Set(
-    vault.entities.flatMap((entity) => [
+function collectVaultEvidenceObservedOn(
+  vault: VaultReadModel,
+): Map<string, string | null> {
+  const observedOnByRecordId = new Map<string, string | null>();
+  for (const entity of vault.entities) {
+    const observedOn = entity.date ?? extractDate(entity.occurredAt);
+    for (const recordId of [
       entity.entityId,
       entity.primaryLookupId,
       ...entity.lookupIds,
-    ]),
-  );
+    ]) {
+      observedOnByRecordId.set(recordId, observedOn);
+    }
+  }
+  return observedOnByRecordId;
 }
 
 function buildExperimentFollowupContext(
@@ -642,12 +650,17 @@ function buildMetricResults(
       (interventionWindow.daysWithData === 0 || interventionMean !== null);
     const unitsCompatible =
       windowsSummarizable &&
-      (
-        outcome.statistic === "count" ||
-        baselineWindow.unit === null ||
-        interventionWindow.unit === null ||
-        unitsEquivalent(baselineWindow.unit, interventionWindow.unit)
-      );
+      metricWindowUnitsAreCompatible({
+        left: {
+          unit: baselineWindow.unit,
+          value: baselineMean,
+        },
+        right: {
+          unit: interventionWindow.unit,
+          value: interventionMean,
+        },
+        statistic: outcome.statistic,
+      });
     const deltaAbs =
       unitsCompatible && baselineMean !== null && interventionMean !== null
         ? round(interventionMean - baselineMean)
@@ -1042,7 +1055,7 @@ function buildCoverageSummary(input: {
       input.frontmatter.analysisPlan,
       primaryOutcome.key,
       {
-        availableRecordIds: collectVaultRecordIds(input.vault),
+        evidenceObservedOnByRecordId: collectVaultEvidenceObservedOn(input.vault),
         observedThrough: input.asOf,
       },
     );

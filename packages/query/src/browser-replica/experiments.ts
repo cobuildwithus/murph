@@ -30,6 +30,7 @@ import {
   type ResolvedExperimentMetricOutcome,
 } from "../experiment-outcomes.ts";
 import {
+  metricWindowUnitsAreCompatible,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricWindowComparison,
@@ -330,8 +331,8 @@ interface BrowserVaultExperimentRunContext {
   adherenceEvents: BrowserVaultEntity[];
   adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
-  availableRecordIds: ReadonlySet<string>;
   diagnostics: BrowserVaultExperimentResultDiagnostic[];
+  evidenceObservedOnByRecordId: ReadonlyMap<string, string | null>;
   evidenceThrough: string;
   entity: BrowserVaultEntity;
   events: BrowserVaultEntity[];
@@ -581,14 +582,11 @@ function buildRunContext(
   return {
     adherenceEvents,
     asOf: effectiveAsOf,
-    availableRecordIds: new Set(
-      client.replica.entities.flatMap((candidate) => [
-        candidate.id,
-        ...candidate.lookupIds,
-      ]),
-    ),
     diagnostics,
     entity,
+    evidenceObservedOnByRecordId: collectBrowserEvidenceObservedOn(
+      client.replica.entities,
+    ),
     evidenceThrough,
     events,
     eventTimeZone: runTimeZone,
@@ -598,6 +596,19 @@ function buildRunContext(
     run,
     unsupportedExplicitAdherenceTargets: parsedAdherenceTargets.unsupportedExplicit,
   };
+}
+
+function collectBrowserEvidenceObservedOn(
+  entities: readonly BrowserVaultEntity[],
+): Map<string, string | null> {
+  const observedOnByRecordId = new Map<string, string | null>();
+  for (const entity of entities) {
+    const observedOn = entity.date ?? extractDate(entity.occurredAt);
+    for (const recordId of [entity.id, ...entity.lookupIds]) {
+      observedOnByRecordId.set(recordId, observedOn);
+    }
+  }
+  return observedOnByRecordId;
 }
 
 function projectBrowserAdherenceTarget(
@@ -1182,11 +1193,17 @@ function buildAnchoredBiomarkerResult(input: {
     (intervention.daysWithData === 0 || intervention.mean !== null);
   const unitsCompatible =
     windowsSummarizable &&
-    (
-      input.statistic === "count" ||
-      (baseline.unit === null && intervention.unit === null) ||
-      unitsEquivalent(baseline.unit, intervention.unit)
-    );
+    metricWindowUnitsAreCompatible({
+      left: {
+        unit: baseline.unit,
+        value: baseline.mean,
+      },
+      right: {
+        unit: intervention.unit,
+        value: intervention.mean,
+      },
+      statistic: input.statistic,
+    });
   const deltaAbs =
     unitsCompatible && baseline.mean !== null && intervention.mean !== null
       ? round(intervention.mean - baseline.mean)
@@ -1884,7 +1901,7 @@ function buildProgressResult(
         readExperimentAnalysisPlan(context.entity.attributes),
         primaryOutcome.key,
         {
-          availableRecordIds: context.availableRecordIds,
+          evidenceObservedOnByRecordId: context.evidenceObservedOnByRecordId,
           observedThrough: context.evidenceThrough,
         },
       )

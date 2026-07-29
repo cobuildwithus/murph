@@ -154,30 +154,36 @@ export function ResultsTab({
         />
       )}
 
-      {hasPrivateRun && !hasRenderableOutcome && !isStopped && (
+      {hasPrivateRun && hasIncompleteStructuredReview && !isStopped && (
+        <ResultsEmptyState
+          title={experiment.summary ?? "Your review evidence is incomplete"}
+          body={experiment.summaryDetail ??
+            "Add the missing baseline or follow-up evidence to make this review ready."}
+        />
+      )}
+
+      {hasPrivateRun &&
+        !hasRenderableOutcome &&
+        !hasIncompleteStructuredReview &&
+        !isStopped && (
         <ResultsEmptyState
           title={isFinished
-            ? hasIncompleteStructuredReview
-              ? experiment.summary ?? "Your review evidence is incomplete"
-              : savedOutcomeStatus === "pending"
-                ? "Your saved analysis is still pending"
-                : savedOutcomeStatus === "unavailable"
-                  ? "Your saved analysis isn't available in this snapshot"
-                  : "Run complete, but there isn't enough data for a clear comparison"
+            ? savedOutcomeStatus === "pending"
+              ? "Your saved analysis is still pending"
+              : savedOutcomeStatus === "unavailable"
+                ? "Your saved analysis isn't available in this snapshot"
+                : "Run complete, but there isn't enough data for a clear comparison"
             : isPaused
               ? "Your experiment is paused"
               : "You're running this experiment"}
           body={isFinished
-            ? hasIncompleteStructuredReview
-              ? experiment.summaryDetail ??
-                "Add the missing baseline or follow-up evidence to make this review ready."
-              : savedOutcomeStatus === "pending"
-                ? "Your completed run is safely recorded in your vault. Its canonical outcome analysis has not been saved yet."
-                : savedOutcomeStatus === "unavailable"
-                  ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
-                  : savedOutcomeStatus === "available"
-                    ? "Your run is saved privately in your vault, but it does not include comparable metric windows to chart."
-                    : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
+            ? savedOutcomeStatus === "pending"
+              ? "Your completed run is safely recorded in your vault. Its canonical outcome analysis has not been saved yet."
+              : savedOutcomeStatus === "unavailable"
+                ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
+                : savedOutcomeStatus === "available"
+                  ? "Your run is saved privately in your vault, but it does not include comparable metric windows to chart."
+                  : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
             : isPaused
               ? "Your run is saved privately in your vault. Resume it to keep following the protocol and see outcomes here later."
               : "Outcome cards will appear here once there's enough measured data to compare."}

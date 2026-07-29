@@ -1257,7 +1257,9 @@ describe("experiment detail private-run composition", () => {
           plainLanguage:
             "Add the missing baseline or follow-up evidence before reviewing the result.",
         },
-        metricResults: [],
+        metricResults: state.status === "baseline_only"
+          ? base.metricResults
+          : [],
         structuredReview: {
           baseline: {
             kinds: state.baselineRecordIds.length > 0 ? ["document"] : [],
@@ -1326,6 +1328,11 @@ describe("experiment detail private-run composition", () => {
       expect(markup).not.toContain("Evidence ready for review");
       expect(markup).not.toContain("Saved result");
       expect(markup).not.toContain("does not include comparable metric windows to chart");
+      if (state.status === "baseline_only") {
+        expect(privateRun?.trends).toHaveLength(1);
+        expect(markup).toContain('data-slot="chart"');
+        expect(markup).toContain("Resting heart rate");
+      }
     }
   });
 

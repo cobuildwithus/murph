@@ -84,11 +84,11 @@ export function selectMetricWindowComparison(input: {
   const baseline = summarizeMetricWindow(metricRows, input.baselineWindow, statistic);
   const comparison = summarizeMetricWindow(metricRows, input.comparisonWindow, statistic);
   const warnings = buildWindowWarnings(baseline, comparison);
-  const unitsCompatible =
-    statistic === "count" ||
-    baseline.unit === null ||
-    comparison.unit === null ||
-    unitsEquivalent(baseline.unit, comparison.unit);
+  const unitsCompatible = metricWindowUnitsAreCompatible({
+    left: baseline,
+    right: comparison,
+    statistic,
+  });
   const selectedStatus = selectWindowStatus({
     baseline,
     comparison,
@@ -98,7 +98,13 @@ export function selectMetricWindowComparison(input: {
   const status = selectedStatus === "ready" && !unitsCompatible
     ? "unsupported"
     : selectedStatus;
-  const unit = unitsCompatible ? comparison.unit ?? baseline.unit : null;
+  const hasInvalidWindow =
+    (baseline.daysWithData > 0 && baseline.value === null) ||
+    (comparison.daysWithData > 0 && comparison.value === null);
+  const unit =
+    unitsCompatible && !hasInvalidWindow
+      ? comparison.unit ?? baseline.unit
+      : null;
   const delta = status === "ready" && baseline.value !== null && comparison.value !== null
     ? comparison.value - baseline.value
     : null;
@@ -191,6 +197,24 @@ export function selectMetricTrend(input: {
     label: `${latestWindowDays}-day ${input.policy.aggregation} vs prior ${comparisonWindowDays} days`,
     latestWindowDays,
   };
+}
+
+export function metricWindowUnitsAreCompatible(input: {
+  left: Pick<MetricWindowSummary, "unit" | "value">;
+  right: Pick<MetricWindowSummary, "unit" | "value">;
+  statistic: MetricAggregation;
+}): boolean {
+  if (
+    input.statistic === "count" ||
+    input.left.value === null ||
+    input.right.value === null
+  ) {
+    return true;
+  }
+  if (input.left.unit === null || input.right.unit === null) {
+    return input.left.unit === input.right.unit;
+  }
+  return unitsEquivalent(input.left.unit, input.right.unit);
 }
 
 function summarizeMetricWindow(

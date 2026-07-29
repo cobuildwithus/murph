@@ -1,6 +1,6 @@
 # Land open-ended experiment outcomes
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -125,6 +125,17 @@ Updated: 2026-07-29
   proves activation from an observed unregistered metric. The expanded design
   study covers ready, missing, partial, maximum, and count states on desktop
   and mobile.
+- The valid rerun found two further edge cases. The incomplete-primary notice
+  now remains visible when secondary metrics render underneath it, and
+  structured readiness resolves anchor ids to canonical record dates so an
+  omitted or incorrectly early anchor date cannot expose future evidence.
+  Canonical and browser tests cover both temporal variants, and the mixed
+  incomplete-primary plus secondary-metric state has desktop/mobile proof.
+- Parent final review found that a measured unitless value could still compare
+  with a unit-bearing value because the one-sided-window compatibility rule was
+  too broad. Shared metric-window, canonical, and browser comparisons now keep
+  the known unit only when one side has no value; two observed values require
+  compatible units before a delta is allowed.
 - CI regression review: the first exact-head platform shard exposed three
   legacy compatibility regressions. The legacy adapter again rejects unknown
   biomarker identifiers, canonical-unit filtering rejects incomparable
@@ -132,3 +143,4 @@ Updated: 2026-07-29
 - Claude UI double-check: attempted with the required Fable model and stopped
   after the CLI reported exhausted usage credits. Desktop and mobile catalog
   studies were inspected locally through the repository Playwright fallback.
+Completed: 2026-07-29
