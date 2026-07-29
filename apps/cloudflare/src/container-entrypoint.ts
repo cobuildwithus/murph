@@ -7,7 +7,16 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -123,6 +132,9 @@ const defaultHostedContainerProcessApi: HostedContainerProcessApi &
   HostedContainerCpuWatchdogProcessApi = {
   async readFile(path, encoding) {
     return await readFile(path, encoding);
+  },
+  async readlink(path) {
+    return await readlink(path);
   },
   async readdir(path) {
     return await readdir(path, { encoding: "utf8", withFileTypes: true });
