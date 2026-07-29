@@ -6,6 +6,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
@@ -160,6 +161,46 @@ describe("startAssistantProviderStubServer", () => {
 
       expect(followupResponse.status).toBe(200);
       expect(followupBody).toContain("follow-up text reply");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("streams a scripted custom_tool_call item for Terra dynamic tools", async () => {
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [
+          buildAssistantProviderMurphToolCall("automation", {
+            action: "save",
+            title: "Morning reminder",
+          }),
+        ],
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("response.completed");
+      expect(body).toContain('"type":"custom_tool_call"');
+      expect(body).toContain('"name":"exec"');
+      expect(body).toContain("tools.murph__automation");
+      expect(body).toContain("Morning reminder");
     } finally {
       await stopHttpStubServer(server);
     }
@@ -495,6 +536,9 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
     ]);
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode"),
+    ]);
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
@@ -516,6 +560,23 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         askGrokAvailable: true,
       },
     );
+  });
+});
+
+describe("buildAssistantProviderMurphToolCall", () => {
+  it("scripts Terra dynamic tools through canonical Codex code mode", () => {
+    const response = buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      title: "Morning reminder",
+    });
+
+    expect(response).toMatchObject({
+      customToolCall: {
+        name: "exec",
+      },
+    });
+    expect(JSON.stringify(response)).toContain("tools.murph__automation");
+    expect(JSON.stringify(response)).toContain("Morning reminder");
   });
 });
 
@@ -669,7 +730,7 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "top-level" = "top-level",
+  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -692,6 +753,20 @@ function buildResponsesRequest(
                 type: "additional_tools",
               },
             ],
+          }
+        : toolLocation === "code-mode"
+        ? {
+            tools: [{
+              description: namespacedToolNames
+                .filter((name) =>
+                  name !== "murph.automation" && name !== "murph.group"
+                )
+                .map((name) => name.replace(/^murph\./u, "murph__"))
+                .concat("ALL_TOOLS")
+                .join("\n"),
+              name: "exec",
+              type: "custom",
+            }],
           }
         : { tools },
     ),
