@@ -2,7 +2,10 @@ import type {
   AssistantInputCandidate,
   AssistantInputConversationRef,
 } from '../input-source.js'
-import { compareAssistantTimestampsAscending } from '../shared.js'
+import {
+  compareAssistantTimestampsAscending,
+  normalizeNullableString,
+} from '../shared.js'
 
 export interface AssistantAutomationInputSummary {
   inputId: string
@@ -15,9 +18,12 @@ export interface AssistantAutomationInputSummary {
   attachmentCount: number
   actorIsSelf: boolean
   affirmativeReaction?: true
-  // Provider-level native reply target (Linq only today). Carried on the
-  // summary so adjacent-grouping can split across reply-anchor boundaries
-  // without re-reading source metadata.
+  deliveryTarget: string | null
+  groupRoomBatchingEligible: boolean
+  projectionReady: boolean
+  // Provider-level native reply target (Linq only today). Direct conversation
+  // batching preserves this boundary; authenticated group-room batching keeps
+  // each message's anchor in its own prompt entry instead.
   replyToMessageId: string | null
 }
 
@@ -37,6 +43,19 @@ export function assistantAutomationInputSummaryFromCandidate(
     sourceMetadata?.kind === 'linq' ? sourceMetadata.replyToMessageId ?? null : null
   const affirmativeReaction =
     sourceMetadata?.kind === 'linq' && sourceMetadata.affirmativeReaction === true
+  const eventSource =
+    normalizeNullableString(input.event.source)?.toLowerCase() ?? null
+  const deliveryTarget = normalizeNullableString(input.event.replyTarget?.threadId)
+  const deliveryChannel =
+    normalizeNullableString(input.event.replyTarget?.channel)?.toLowerCase() ?? null
+  const groupRoomBatchingEligible =
+    conversation.threadIsDirect === false &&
+    conversation.actorIsSelf === false &&
+    (eventSource === 'linq' || eventSource === 'telegram') &&
+    sourceMetadata?.kind === eventSource &&
+    deliveryChannel === eventSource &&
+    deliveryTarget !== null &&
+    sourceMetadata.externalThreadRouteAuthorityPresent === true
 
   return {
     inputId: input.event.inputId,
@@ -49,6 +68,9 @@ export function assistantAutomationInputSummaryFromCandidate(
     attachmentCount: input.event.attachmentCount,
     actorIsSelf: conversation.actorIsSelf,
     ...(affirmativeReaction ? { affirmativeReaction: true } : {}),
+    deliveryTarget,
+    groupRoomBatchingEligible,
+    projectionReady: input.projection.status !== 'pending',
     replyToMessageId,
   }
 }

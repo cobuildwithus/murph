@@ -235,6 +235,10 @@ export async function executeCodexAssistantTurnAttempt(
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
+    onFirstAssistantResponseCompleted:
+      input.activeTurnSteering
+        ? () => input.activeTurnSteering?.closeInputAdmission()
+        : undefined,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {

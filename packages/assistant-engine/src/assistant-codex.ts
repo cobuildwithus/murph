@@ -33,6 +33,7 @@ import {
   extractCodexErrorMessage,
   extractCodexCompletedFinalAgentMessageTextFromNormalized,
   extractCodexProgressEventFromNormalized,
+  isCodexCompletedFinalAgentMessageItemFromNormalized,
   isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
   extractCodexStatusEventFromStderrLine,
@@ -444,6 +445,7 @@ export interface CodexAppServerTurnInput {
   model?: string | null
   modelProvider?: string | null
   outputSchema?: Readonly<Record<string, unknown>> | null
+  onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onFinishWithoutReplyAccepted?: ((
@@ -2791,6 +2793,7 @@ async function runCodexAppServerTurnOnProcess(
   // the final reply rather than a preceding duplicate.
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
+  let firstAssistantResponseCompleted = false
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
@@ -3919,7 +3922,7 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
-          deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
+          deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
@@ -4221,9 +4224,19 @@ async function runCodexAppServerTurnOnProcess(
 
     const completedFinalAgentMessageText =
       extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
-    if (completedFinalAgentMessageText !== null && !suppressDeliveryContext) {
+    const completedFinalAgentResponse =
+      isCodexCompletedFinalAgentMessageItemFromNormalized(normalizedEvent) &&
+      (
+        completedFinalAgentMessageText !== null ||
+        responseMedia.length > 0
+      )
+    if (completedFinalAgentResponse && !suppressDeliveryContext) {
       promoteTrailingSteerCandidate()
-      completedFinalAgentMessage = completedFinalAgentMessageText
+      completedFinalAgentMessage = completedFinalAgentMessageText ?? ''
+      if (!firstAssistantResponseCompleted) {
+        firstAssistantResponseCompleted = true
+        input.onFirstAssistantResponseCompleted?.()
+      }
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
       if (completedFinalAgentMessage !== null) {
         const completedResponseDeliveryContextOrdinal = Math.max(

@@ -73,6 +73,12 @@ const DIRECT_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = 
   },
 };
 
+const GROUP_REQUESTER = {
+  assistantInputId: `ain_${"1".repeat(32)}`,
+  senderHandle: "+12125550123",
+  source: "linq" as const,
+};
+
 const GROUP_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
   conversationShape: "thread-container",
   externalThreadRouteAuthority: {
@@ -1759,8 +1765,8 @@ describe("createHostedPhoneCall", () => {
 
     await createHostedPhoneCall({
       brief: VALID_BRIEF,
+      groupRequester: GROUP_REQUESTER,
       groupRequesterActivationAsserter,
-      inboundMailboxItemIds: ["mailbox_group_request"],
       memberId: "member_1",
       notificationDestinationResolver,
       prisma: store.prisma,
@@ -1777,8 +1783,17 @@ describe("createHostedPhoneCall", () => {
       memberId: "member_1",
       signal: expect.any(AbortSignal),
     });
-    expect(groupRequesterActivationAsserter).toHaveBeenCalledWith({
-      inboundMailboxItemIds: ["mailbox_group_request"],
+    expect(groupRequesterActivationAsserter).toHaveBeenCalledTimes(2);
+    expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(1, {
+      groupRequester: GROUP_REQUESTER,
+      inboundMailboxItemIds: [],
+      routeAuthority:
+        GROUP_NOTIFICATION_DESTINATION.externalThreadRouteAuthority,
+      signal: expect.any(AbortSignal),
+    });
+    expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(2, {
+      groupRequester: GROUP_REQUESTER,
+      inboundMailboxItemIds: [],
       routeAuthority:
         GROUP_NOTIFICATION_DESTINATION.externalThreadRouteAuthority,
       signal: expect.any(AbortSignal),
@@ -1797,6 +1812,42 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toEqual(effectiveBrief);
   });
 
+  it("passes legacy mailbox requester evidence through the Web rollout boundary", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_legacy_group_call",
+    });
+    const groupRequesterActivationAsserter = vi.fn(async () => undefined);
+
+    await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      groupRequesterActivationAsserter,
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      memberId: "member_1",
+      notificationDestinationResolver: async () =>
+        GROUP_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: "phone_call_legacy_group_request",
+      runtime: runtime.runtime,
+    });
+
+    expect(groupRequesterActivationAsserter).toHaveBeenCalledTimes(2);
+    expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(1, {
+      groupRequester: null,
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      routeAuthority:
+        GROUP_NOTIFICATION_DESTINATION.externalThreadRouteAuthority,
+      signal: expect.any(AbortSignal),
+    });
+    expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(2, {
+      groupRequester: null,
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      routeAuthority:
+        GROUP_NOTIFICATION_DESTINATION.externalThreadRouteAuthority,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("fails before storage or provider work when group requester activation is not proven", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -1805,10 +1856,10 @@ describe("createHostedPhoneCall", () => {
 
     await expect(createHostedPhoneCall({
       brief: VALID_BRIEF,
+      groupRequester: GROUP_REQUESTER,
       groupRequesterActivationAsserter: async () => {
         throw activationError;
       },
-      inboundMailboxItemIds: ["mailbox_group_request"],
       memberId: "member_1",
       notificationDestinationResolver: async () =>
         GROUP_NOTIFICATION_DESTINATION,
@@ -1821,6 +1872,37 @@ describe("createHostedPhoneCall", () => {
     expect(store.findFirstCalls).toEqual([]);
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("rechecks current group authority immediately before provider start", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const activationError = new Error("group requester left before dispatch");
+    const groupRequesterActivationAsserter = vi.fn(async () => {
+      if (groupRequesterActivationAsserter.mock.calls.length === 2) {
+        throw activationError;
+      }
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      groupRequester: GROUP_REQUESTER,
+      groupRequesterActivationAsserter,
+      memberId: "member_1",
+      notificationDestinationResolver: async () =>
+        GROUP_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter: vi.fn().mockResolvedValue({
+        runId: "run_group_recheck",
+      }),
+      requestKey: "phone_call_group_request_recheck",
+      runtime: runtime.runtime,
+    })).rejects.toBe(activationError);
+
+    expect(groupRequesterActivationAsserter).toHaveBeenCalledTimes(2);
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({ status: "failed" });
   });
 
   it("does not inspect group requester evidence for direct calls", async () => {
