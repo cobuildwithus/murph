@@ -226,10 +226,10 @@ Last verified: 2026-07-28
   saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
   purchases retain the legacy selection behavior for groups only, frozen v3
   purchases retain it for all targets, and v1 remains Checkout-only. Current
-  policy gives one explicitly reusable method priority over a
-  subscription-only default and otherwise keeps ambiguous selection in
-  Checkout. Current-policy Checkout exposes Stripe's explicit save choice;
-  older policy requests remain byte-for-byte reconstructible.
+  policy admits only explicitly reusable methods for direct payment and keeps
+  limited, unspecified, or ambiguous selection in Checkout. Current-policy
+  Checkout exposes Stripe's explicit save choice; older policy requests remain
+  byte-for-byte reconstructible.
   The producer must bind its encrypted exact reference under the payer lock
   before confirmation. The
   locked bind must re-read both payer suspension and purchase status; a

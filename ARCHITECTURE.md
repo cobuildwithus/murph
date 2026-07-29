@@ -722,13 +722,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time Stripe Checkout offers. The same purchase owner supports
   authenticated hosted-group funding while keeping payer and beneficiary
-  separate. All three current-policy targets first attempt one canonical card
-  attached to the payer's Stripe Customer. An explicitly reusable method takes
-  priority over a subscription-only default; ambiguous choice stays in
-  Checkout, where Stripe collects the payer's explicit save choice for later
-  top-ups. Web persists the unconfirmed PaymentIntent on the purchase and then
-  confirms it; only verified cancellation may release that binding before
-  Checkout fallback. Only verified Stripe-event reconciliation
+  separate. All three current-policy targets first attempt one explicitly
+  reusable canonical card attached to the payer's Stripe Customer. Limited,
+  unspecified, or ambiguous choices stay in Checkout, where Stripe collects the
+  payer's explicit save choice for later top-ups. Web persists the unconfirmed
+  PaymentIntent on the purchase and then confirms it; only verified cancellation
+  may release that binding before Checkout fallback. Only verified Stripe-event
+  reconciliation
   can grant purchased credit; a browser return or synchronous PaymentIntent
   response cannot. Conversational referrals instead require explicit arming by
   one trusted current sender, reserve both rolling caps under the beneficiary

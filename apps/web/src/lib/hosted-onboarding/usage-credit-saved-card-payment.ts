@@ -373,6 +373,7 @@ async function resolveHostedUsageCreditSavedCard(input: {
         ? [...preferredReusablePaymentMethodIds][0] ?? null
         : null;
     }
+    return null;
   }
   if (preferredPaymentMethodIds.size === 1) {
     return [...preferredPaymentMethodIds][0] ?? null;

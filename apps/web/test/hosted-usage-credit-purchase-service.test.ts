@@ -1567,6 +1567,59 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["limited", { allow_redisplay: "limited" }],
+    ["unspecified", {}],
+  ] as const)(
+    "keeps a %s v4 default card in Checkout",
+    async (_redisplayState, paymentMethodState) => {
+      const fake = createFakePrisma();
+      mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+        id: "cus_group_payer",
+        invoice_settings: { default_payment_method: "pm_legacy_default" },
+        livemode: false,
+        object: "customer",
+      });
+      mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+        data: [{
+          ...paymentMethodState,
+          customer: "cus_group_payer",
+          id: "pm_legacy_default",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/payment_methods",
+      });
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      })).resolves.toMatchObject({ status: "checkout_open" });
+
+      expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+      expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+      expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          saved_payment_method_options: {
+            allow_redisplay_filters: ["always"],
+            payment_method_save: "enabled",
+          },
+        }),
+        expect.any(Object),
+      );
+    },
+  );
+
   it("uses the reusable default when several reusable cards are attached", async () => {
     const fake = createFakePrisma();
     mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
@@ -4301,6 +4354,7 @@ function mockCanonicalSavedCard(customerId = "cus_group_payer"): void {
   });
   mocks.stripePaymentMethodsList.mockResolvedValueOnce({
     data: [{
+      allow_redisplay: "always",
       customer: customerId,
       id: "pm_saved_card_123",
       livemode: false,

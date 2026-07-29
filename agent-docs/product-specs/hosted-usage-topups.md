@@ -7,11 +7,12 @@ Last verified: 2026-07-29
 
 Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
 to decide who receives the usage and how it is consumed. Current-policy
-personal, Family, and group funding first reuse one canonical card attached to
-the authenticated payer's Stripe Customer and fall back to Checkout for card
-collection or authentication. Checkout lets the payer explicitly save the
-selected method for later top-ups; only that broadly reusable card state gets
-priority over a subscription-only default on a future purchase.
+personal, Family, and group funding first reuse one explicitly reusable
+canonical card attached to the authenticated payer's Stripe Customer and fall
+back to Checkout for card collection or authentication. Checkout lets the payer
+explicitly save the selected method for later top-ups; only that broadly
+reusable card state is eligible for direct payment on a future current-policy
+purchase.
 
 The personal and Family offer catalog is:
 
@@ -683,10 +684,10 @@ funding route share this sequence:
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
 11. For current-policy personal, Family, and group purchases, resolve one
-    canonical reusable card attached to the payer Customer. One explicitly
-    reusable card takes priority over a subscription-only default. Conflicting
-    reusable defaults, multiple reusable cards without one reusable default, or
-    multiple legacy cards without one canonical choice skip this path.
+    explicitly reusable card attached to the payer Customer. Multiple reusable
+    cards require one consistent reusable default. No reusable card or an
+    ambiguous reusable choice skips this path; limited and unspecified methods
+    remain in Checkout.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase, bind only an active payer's still-`created` purchase to
@@ -760,6 +761,13 @@ prefers one `allow_redisplay=always` card over a subscription-only default.
 Versions one through three retain their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
+
+After production persists its first v4 purchase, a v4-capable Web bundle is the
+minimum compatible consumer for status, cancellation, Stripe reconciliation,
+and account deletion involving retained v4 financial state. A safe rollback
+first disables new Add usage and group-funding intake, keeps v4-compatible
+consumers running, and forward-fixes. Rolling Web below that floor requires
+proof that no v4 purchase or retained v4 financial state exists.
 
 ## Stripe Catalog And Payment Configuration
 
