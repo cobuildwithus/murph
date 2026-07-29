@@ -153,6 +153,11 @@ export function buildHostedWranglerDeployConfig(
         bucket_name: environment.bundlesBucketName,
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
+      {
+        binding: "BUNDLES_ENAM",
+        bucket_name: environment.bundlesEnamBucketName,
+        preview_bucket_name: environment.bundlesEnamPreviewBucketName,
+      },
     ],
     ai: {
       binding: "AI",
