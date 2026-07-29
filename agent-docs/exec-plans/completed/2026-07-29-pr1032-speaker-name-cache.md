@@ -49,3 +49,27 @@ is absent or invalid.
 - Exact-head preliminary `completion-specialists` ReviewGPT coverage pass.
 - Parent final review followed by final ReviewGPT correction round and green CI.
 - Resolve the current `main` conflicts before the exact-head review gates.
+
+## Result
+
+- ReviewGPT implemented the bounded process cache and the two Web
+  failure-classification corrections.
+- The sole warm cache remains a module-private assistant-runtime `Map`, capped
+  at 2,048 entries, with one-hour positive and five-minute valid-negative TTLs.
+  Failures remain operation-local and uncached.
+- The latest `main` merge conflicts were resolved without re-keying phone calls
+  or introducing a second name, turn, or participant-authority owner.
+- Product-experience review passed. The preliminary specialist review found two
+  prompt/coverage ambiguities; both were corrected with request-bearing
+  `message_ref` language and a production-composition two-turn cache regression.
+- Focused Engine, Runtime, and Web suites and affected owner typechecks passed.
+  The full cache diff had already passed its changed owners and Cloudflare
+  reverse dependent. Final local reruns were limited by shared-host contention,
+  and the hosted-local rerun timed out during environment setup before an
+  application assertion.
+- The implementation head was pushed. Final PR-body publication, ReviewGPT
+  packaging, and CI inspection require renewed GitHub API authentication; SSH
+  push access remains available.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
