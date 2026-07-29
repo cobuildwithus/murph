@@ -68,6 +68,17 @@ process-owned temp root. Teardown removes the whole root after success or
 failure; a later run recovers only old marked roots whose owner is gone and
 which no current-user process uses as its working directory.
 
+Hosted assistant-provider choice coverage is split across existing owners.
+Hosted-execution locks the closed OpenAI/Venice contract and additive workspace
+field; operator-config and assistant-runtime prove Venice Codex configuration
+without forwarding raw Worker credentials. Hosted Web tests cover the nullable
+preference, rollout flag, Settings route/component, workspace projection, and
+expand-only migration. Cloudflare tests cover signed credential minting,
+all-or-none deploy preflight, exact Responses path/method allowlisting, bounded
+body parsing, canonical product-model validation, fixed model rewriting, and
+real-key injection only at Worker egress. Routine tests use synthetic keys and
+do not call Venice.
+
 Clinical-record execution coverage is split at its owners: hosted-execution
 tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove
 raw-first replay plus real multi-page importer resolution, assistant-runtime
@@ -464,6 +475,29 @@ not enter evidence; and attachment-only input fails closed before provider work.
   turn, checkpoints it, destroys the container, approves, restores, and proves
   one attachment delivery with no duplicate or mailbox lag. The phase-one
   reader-compatible release remains the rollback floor after producer activation.
+
+Authenticated Linq group speaker-label coverage is split across the existing
+owners. Hosted-execution parser tests lock the additive provenance enum, legacy
+profile default, explicit non-overlapping name-miss evidence, exact response
+keys, and rejection of private participant ids.
+Hosted Web tests prove exact current-membership/profile candidates, pre-group
+and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
+pending-profile-snapshot recovery, profile-over-contact precedence, fail-soft
+advisory outcomes, one set-based profile/contact lookup, and operation-local
+overflow beyond the 16-phone contact bound. Assistant-runtime tests prove the operation-local
+reader memo, bounded private file-backed profile/contact-positive and
+valid-negative cache, operation-only policy omissions, reuse across fresh
+module instances, exact runtime and
+route scope isolation, the 14-day positive and six-hour true-miss boundaries,
+non-sliding FIFO eviction, failure-only operation suppression,
+corruption recovery, opaque keys, private permissions where portable, provenance
+preservation, duplicate
+rejection, malformed-batch rejection, and mixed batch miss behavior.
+Assistant-engine tests prove one four-handle reader call for a 20-message
+initial burst, delegation during separate live admissions, direct-Linq
+exclusion, Telegram ingress-name preservation, explicit prompt semantics, and
+absence of hosted member or participant ids. Cloudflare group-tool-port tests
+keep the one-second presentation-only deadline and late-result rejection.
 
 ## Current Gaps
 
