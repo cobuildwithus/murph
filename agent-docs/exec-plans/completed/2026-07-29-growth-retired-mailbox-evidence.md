@@ -1,6 +1,6 @@
 # Restore growth dashboard across mailbox content retirement
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -66,3 +66,4 @@ Updated: 2026-07-29
 - Desktop and mobile design-catalog proof for the partial-history state.
 - Required product-experience, preliminary specialist, parent final, and
   applicable cross-cutting review gates.
+Completed: 2026-07-29
