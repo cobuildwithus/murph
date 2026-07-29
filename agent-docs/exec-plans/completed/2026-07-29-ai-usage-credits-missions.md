@@ -1,6 +1,6 @@
 # Show AI usage credits and referral missions in Settings
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -137,6 +137,18 @@ Current evidence:
 - Target-channel binding coverage passed: 146 hosted-web tests across referral
   policy plus Linq and Telegram container creation. Prepared hosted-web
   typecheck and touched-file ESLint passed on the same remediation.
+- After merging the latest `origin/main`, exact-head focused verification
+  passed: 178 hosted-web tests, 8 assistant skill tests, 20 assistant-runtime
+  tests, and 62 hosted-execution parser tests. Prepared typechecks passed for
+  all four affected workspaces.
+- Product-experience review accepted and verified three journey corrections:
+  email-only Settings no longer offers an unusable mission handoff; Telegram
+  cannot see or arm the new-person mission; and a Linq-armed new-person mission
+  cannot bind a Telegram group. The final re-review returned PASS.
+- Parent final review re-read the full authored diff and the referral
+  read/arm/bind call paths after the latest base merge. No unresolved finding
+  remains; canonical remote verification, exact-head CI, and final ReviewGPT
+  remain the final gates.
 - Desktop and mobile browser proof covered the production ordering study,
   production-composed history without a current usage bar, and enabled,
   selected/waiting, and disabled-new-missions history states. Every captured
@@ -147,3 +159,4 @@ Current evidence:
 - The optional Claude Code UI double-check was attempted once and stopped after
   the configured reviewer reported exhausted usage credits, as required by the
   review workflow.
+Completed: 2026-07-29
