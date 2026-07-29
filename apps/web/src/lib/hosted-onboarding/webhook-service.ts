@@ -5,6 +5,7 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedLinqMessageEditedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -19,6 +20,7 @@ import {
 } from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
+  planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
@@ -287,7 +289,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         return response;
       }
     }
-    if (providerEvent && event.event_type !== "message.received") {
+    if (
+      providerEvent
+      && event.event_type !== "message.received"
+      && event.event_type !== "message.edited"
+    ) {
       const prisma = input.prisma ?? getPrisma();
       const providerResult = event.event_type === "participant.added"
         || event.event_type === "participant.removed"
@@ -326,6 +332,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
+    if (event.event_type === "message.edited") {
+      const editedEvent = requireHostedLinqMessageEditedEvent(event);
+      const planTiming = startHostedOnboardingTiming(
+        "hosted-onboarding.webhook.linq.plan-message-edit",
+        {
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+          eventType: event.event_type,
+        },
+      );
+      let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
+      try {
+        editPlan = await runHostedOnboardingWebhookTransaction(
+          prisma,
+          (transaction) =>
+            planHostedLinqMessageEditedWebhook({
+              event: editedEvent,
+              prisma: transaction,
+            }),
+        );
+      } catch (error) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      finishHostedOnboardingTiming(
+        planTiming,
+        editPlan.response.reason ?? "completed",
+        {
+          duplicate: Boolean(editPlan.response.duplicate),
+          ok: editPlan.response.ok,
+          wakeUserPresent: Boolean(
+            editPlan.wakeHandoffs?.some((handoff) => handoff.userId),
+          ),
+        },
+      );
+
+      scheduleHostedLinqProviderEventIngestionBestEffort({
+        event: providerEvent,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const wakeHandoff = editPlan.wakeHandoffs?.[0];
+      const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+        response: editPlan.response,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+        signal: input.signal,
+        wakeHandoff,
+      });
+      responseReason = editPlan.response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        duplicate: Boolean(editPlan.response.duplicate),
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+        wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+        wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+        wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+      });
+      return editPlan.response;
+    }
+
     const planningResolution = await resolveHostedLinqPlanningEvent({
       event,
       prisma,
