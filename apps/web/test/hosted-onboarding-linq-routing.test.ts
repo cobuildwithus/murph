@@ -3,77 +3,100 @@ import { describe, expect, it } from "vitest";
 import {
   chooseHostedLinqHomeLine,
   chooseHostedLinqSignupWelcomeLine,
+  HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES,
   HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY,
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "@/src/lib/hosted-onboarding/linq-routing-policy";
 
 describe("chooseHostedLinqHomeLine", () => {
-  it("keeps a preferred DB line when active and daily caps have room", () => {
+  it("keeps a preferred eligible line below the soft planning target", () => {
+    const preferred = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 2,
+    });
     expect(
       chooseHostedLinqHomeLine({
-        activeMembersByRecipientPhone: new Map([["+15550100001", 1]]),
-        lines: [
-          buildLine("+15550100001", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 2,
-          }),
-          buildLine("+15550100002", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 2,
-          }),
-        ],
-        newAssignmentsByRecipientPhone: new Map([["+15550100001", 1]]),
-        preferredRecipientPhone: "+15550100001",
-      })?.phoneNumber,
-    ).toBe("+15550100001");
+        lines: [preferred, buildLine("+15550100002")],
+        newAssignmentsByRecipientPhone: new Map([[preferred.phoneNumber, 1]]),
+        plannedMessagesByRecipientPhone: new Map([
+          [preferred.phoneNumber, HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES - 1],
+          ["+15550100002", 100],
+        ]),
+        preferredRecipientPhone: preferred.phoneNumber,
+      }),
+    ).toBe(preferred);
   });
 
-  it("skips DB lines that reached their daily new-conversation cap", () => {
+  it("moves new placement off a preferred line at target when another eligible line is below it", () => {
+    const preferred = buildLine("+15550100001");
+    const belowTarget = buildLine("+15550100002");
+
     expect(
       chooseHostedLinqHomeLine({
-        activeMembersByRecipientPhone: new Map([
-          ["+15550100001", 0],
-          ["+15550100002", 2],
+        lines: [preferred, belowTarget],
+        newAssignmentsByRecipientPhone: new Map(),
+        plannedMessagesByRecipientPhone: new Map([
+          [preferred.phoneNumber, HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES],
+          [belowTarget.phoneNumber, HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES - 1],
         ]),
+        preferredRecipientPhone: preferred.phoneNumber,
+      }),
+    ).toBe(belowTarget);
+  });
+
+  it("skips lines that reached their separate daily new-conversation cap", () => {
+    expect(
+      chooseHostedLinqHomeLine({
         lines: [
-          buildLine("+15550100001", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 1,
-          }),
-          buildLine("+15550100002", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 3,
-          }),
+          buildLine("+15550100001", { maxNewConversationsPerDay: 1 }),
+          buildLine("+15550100002", { maxNewConversationsPerDay: 3 }),
         ],
         newAssignmentsByRecipientPhone: new Map([
           ["+15550100001", 1],
           ["+15550100002", 0],
+        ]),
+        plannedMessagesByRecipientPhone: new Map([
+          ["+15550100001", 0],
+          ["+15550100002", 2_000],
         ]),
         preferredRecipientPhone: "+15550100001",
       })?.phoneNumber,
     ).toBe("+15550100002");
   });
 
-  it("uses a daily-eligible line when every active target is full", () => {
-    const activeTargetLine = buildLine("+15550100001", {
-      activeMemberLimit: 3,
-      maxNewConversationsPerDay: 10,
-    });
+  it("selects the least-loaded eligible line when every line is at or above target", () => {
+    const preferred = buildLine("+15550100001");
+    const leastLoaded = buildLine("+15550100002");
+
     expect(
       chooseHostedLinqHomeLine({
-        activeMembersByRecipientPhone: new Map([["+15550100001", 3]]),
-        lines: [
-          activeTargetLine,
-          buildLine("+15550100002", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 1,
-          }),
-        ],
-        newAssignmentsByRecipientPhone: new Map([["+15550100002", 1]]),
-        preferredRecipientPhone: "+15550100001",
+        lines: [preferred, leastLoaded],
+        newAssignmentsByRecipientPhone: new Map(),
+        plannedMessagesByRecipientPhone: new Map([
+          [preferred.phoneNumber, 6_000],
+          [leastLoaded.phoneNumber, 5_100],
+        ]),
+        preferredRecipientPhone: preferred.phoneNumber,
       }),
-    ).toBe(activeTargetLine);
+    ).toBe(leastLoaded);
+  });
+
+  it("does not turn either 5,000 planning or 7,000 provider guidance into a traffic cap", () => {
+    const line = buildLine("+15550100001");
+    const providerDailyMessageGuideline = 7_000;
+
+    expect(HOSTED_LINQ_PLANNING_LOAD_TARGET_MESSAGES).toBe(5_000);
+    expect(
+      chooseHostedLinqHomeLine({
+        ignoreDailyNewConversationLimit: true,
+        lines: [line],
+        newAssignmentsByRecipientPhone: new Map(),
+        plannedMessagesByRecipientPhone: new Map([
+          [line.phoneNumber, providerDailyMessageGuideline + 1_000],
+        ]),
+        preferredRecipientPhone: line.phoneNumber,
+      }),
+    ).toBe(line);
   });
 });
 
@@ -84,12 +107,12 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
 
     expect(
       chooseHostedLinqSignupWelcomeLine({
-        activeMembersByRecipientPhone: new Map(),
         lines: [preferred, fallback],
         newAssignmentsByRecipientPhone: new Map([
           [preferred.phoneNumber, HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY],
           [fallback.phoneNumber, 0],
         ]),
+        plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: preferred.phoneNumber,
       }),
     ).toBe(fallback);
@@ -102,11 +125,11 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
 
     expect(
       chooseHostedLinqSignupWelcomeLine({
-        activeMembersByRecipientPhone: new Map(),
         lines: [line],
         newAssignmentsByRecipientPhone: new Map([
           [line.phoneNumber, HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY],
         ]),
+        plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
       }),
     ).toBeNull();
@@ -119,9 +142,9 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
 
     expect(
       chooseHostedLinqSignupWelcomeLine({
-        activeMembersByRecipientPhone: new Map(),
         lines: [line],
         newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 10]]),
+        plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
       }),
     ).toBeNull();
@@ -134,10 +157,10 @@ describe("chooseHostedLinqSignupWelcomeLine", () => {
 
     expect(
       chooseHostedLinqHomeLine({
-        activeMembersByRecipientPhone: new Map(),
         ignoreDailyNewConversationLimit: true,
         lines: [line],
         newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 1]]),
+        plannedMessagesByRecipientPhone: new Map(),
         preferredRecipientPhone: line.phoneNumber,
       }),
     ).toBe(line);
@@ -265,7 +288,6 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
 function buildLine(
   phoneNumber: string,
   overrides: Partial<{
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
     proactiveConversationCount: number | null;
@@ -273,7 +295,6 @@ function buildLine(
   }> = {},
 ) {
   return {
-    activeMemberLimit: overrides.activeMemberLimit ?? null,
     assignmentWeight: overrides.assignmentWeight ?? 100,
     maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
     phoneNumber,
