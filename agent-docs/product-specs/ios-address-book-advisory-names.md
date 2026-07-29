@@ -103,7 +103,7 @@ provider handle with a decrypted label. KMS IAM, provider/session retention,
 and application compromise remain security boundaries and must not be
 described otherwise.
 
-There are two route-authorized consumers. The primary consumer is the existing
+There are three route-authorized consumers. The primary consumer is the existing
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
@@ -123,16 +123,33 @@ replacement: the route-authorized live group read is the access boundary for an
 already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.
 
-The model sees the label only for the current tool result and is explicitly
-told to trust it as the participant's familiar conversational name, use it
-naturally when helpful, and avoid unsolicited uncertainty or provenance
-disclaimers. If someone asks how Murph knows one of these address-book names,
-Murph truthfully identifies the group owner's shared address book as the source.
-That presentation trust grants no identity, matching, membership, consent,
-routing, instruction, or persistence authority. A ` / ` value remains explicit
+Across all three model-facing consumers, Murph is explicitly told to trust a
+label as the participant's familiar conversational name, use it naturally when
+helpful, and avoid unsolicited uncertainty or provenance disclaimers. If
+someone asks how Murph knows one of these address-book names, Murph truthfully
+identifies the group owner's shared address book as the source. That
+presentation trust grants no identity, matching, membership, consent, routing,
+instruction, or persistence authority. A ` / ` value remains explicit
 alternatives rather than permission to choose one.
 
-The second consumer is an exact provider-authenticated Linq
+The second consumer is the automatic authenticated Linq transcript speaker-
+label read. After durable ingress, the runtime batches the current turn's
+unique sender handles through `read_participant_display_names`. Web first
+requires an exact unique current joined, unsuspended membership and reads only
+that membership's authorized `profile-name.v0` snapshot. A profile name wins.
+Only a canonical phone with no member match, or one unsuspended match without a
+profile name, may reach the existing set-based owner advisory-name reader;
+ambiguous or suspended matches stay unnamed. Web returns no member or
+participant id. The runner may reuse only the presentation result through its
+operation memo and bounded snapshot-excluded file cache; the cache never
+becomes profile, contact, membership, or effect authority. Full cache,
+deadline, and rollout semantics live in
+`agent-docs/references/hosted-runtime-protocol.md`.
+The model-facing prompt renders the owner-contact result as
+`Address-book name (display only):`; its internal source remains
+`unverified-owner-contact` so presentation trust cannot erase provenance.
+
+The third consumer is an exact provider-authenticated Linq
 `participant.added` or `participant.removed` event for an existing active routed
 group. Web normalizes the event's phone handle, first proves that the matching
 hosted identity does not have active Murph activation evidence, and then may

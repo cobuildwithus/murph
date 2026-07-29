@@ -117,6 +117,22 @@ describe("hosted orchestration status route", () => {
     expect(JSON.stringify(body)).not.toMatch(/payload|body|prompt|transcript/u);
   });
 
+  it("projects an unavailable runtime-log window as unknown", async () => {
+    mocks.getRunnerStatus.mockResolvedValue({
+      ...buildRunnerStatus(),
+      recentLogs: undefined,
+    });
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.cloudflare.runnerStatus.recentLogCount).toBeNull();
+  });
+
   it("returns nullable subsections when Temporal and Cloudflare status are unavailable", async () => {
     mocks.readHostedRuntimeTemporalSignalClientIfConfigured.mockResolvedValue(null);
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
