@@ -1,6 +1,6 @@
 # PlanetScale metrics discovery selector remediation
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -28,8 +28,9 @@ contract before its first deployment.
 2. Resolve exactly one discovery group by database and branch name, then keep
    failing closed on missing or ambiguous targets.
 3. Update focused fixtures, deploy tests, and rollout documentation.
-4. Run focused tests, canonical verification, PR review gates, deploy, and
-   confirm a healthy persisted sample without inducing a production failure.
+4. Run focused tests, canonical verification, and the protected PR review
+   gates; stage the validated production selector and credential contract
+   before deployment.
 
 ## Constraints
 
@@ -39,3 +40,21 @@ contract before its first deployment.
   required-metric checks.
 - Deploy Cloudflare only after the protected production environment contains
   the complete validated contract.
+
+## Result
+
+- The Worker resolves exactly one live Prometheus scrape target by
+  organization, database name, and branch name, then filters every metric
+  series by the configured PlanetScale branch ID.
+- Production contains the dedicated metrics-reader credential and all four
+  PlanetScale selector fields. A credential-safe live probe selected one
+  target and parsed every required metric family into a healthy snapshot.
+- Focused node tests, the real Workers-runtime SQLite scheduled test,
+  Cloudflare typecheck, and the canonical merged-head diff suite passed.
+- The full acceptance suite completed with one unrelated concurrent setup
+  wizard TTY race; the exact setup package then passed all 124 coverage tests
+  in isolation.
+- Linq delivery remains disabled until the existing direct conversation ID is
+  installed. Deployment and the first scheduled healthy-sample check are
+  operational follow-through after the protected PR lands.
+Completed: 2026-07-29
