@@ -47,6 +47,15 @@ const ANIMATED_GIF_FIXTURE_BASE64 = [
   "wYMIEypcyLChw4cQI0qcSLGixYsYM2rcaDAgADs=",
 ].join("");
 
+// Four cumulative frames encoded as transparent GIF deltas; later frames depend on replay.
+const OPTIMIZED_TRANSPARENT_GIF_FIXTURE_BASE64 = [
+  "R0lGODlhZAA8AIEAAAAAAP8AAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQFCgAAACwAAAAAZAA8AAAIqgABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLF",
+  "ixgzatzIsaPHjyBDihxJsqTJkyhTqlzJsqXLlzBjypxJs6bNmzhz6tzJs6dPmgGCCh1K9KdFokiHGq2YtOlSik2TPp0YFelUiVWLXoWYVenWh12FfgUbNsBY",
+  "h2XNnmWYdi3bsm4Xto2bcC7dg3bv6t3Lt6/fv4ADCx5MuLDhw4gTK17MuLHjx5AjS55MeWVAACH5BAUKAAAALBkAFAAPAA8AgQAAAP8AAP88AAAAAAgaAAUI",
+  "HEiwoMGDCBMqXMiwocOHECNKnEjxYUAAIfkEBQoAAAAsLQAUAA8ADwCBAAAA/wAA/zwA/3gACBoABwgcSLCgwYMIEypcyLChw4cQI0qcSPFhQAAh+QQFCgAA",
+  "ACxBABQADwAPAIIAAAD/AAD/PAD/eAD/tAAAAAAAAAAAAAAIGgAJCBxIsKDBgwgTKlzIsKHDhxAjSpxI8WFAADs=",
+].join("");
+
 async function createAnimatedGifBytes(input: {
   frameCount?: number;
   height?: number;
@@ -403,6 +412,56 @@ test("short animated GIFs preserve every frame in left-to-right order", async ()
       expectedColor,
     );
   }
+});
+
+test("optimized transparent GIFs replay delta frames onto the neutral background", async () => {
+  const gifBytes = new Uint8Array(
+    Buffer.from(OPTIMIZED_TRANSPARENT_GIF_FIXTURE_BASE64, "base64"),
+  );
+  const sharp = (await import("sharp")).default;
+  const sourceMetadata = await sharp(gifBytes, { animated: true }).metadata();
+  assert.equal(sourceMetadata.pages, 4);
+  assert.equal(sourceMetadata.pageHeight, 60);
+  assert.equal(sourceMetadata.hasAlpha, true);
+
+  const normalized = await normalizeGifBytes(gifBytes, "optimized.gif");
+  assert.ok(normalized);
+  const metadata = await sharp(normalized.bytes).metadata();
+  assert.equal(metadata.width, 424);
+  assert.equal(metadata.height, 60);
+  assert.equal(metadata.pages ?? 1, 1);
+  assert.equal(metadata.hasAlpha, false);
+
+  const secondFrameLeft = 100 + STORYBOARD_GAP;
+  assertRgbNear(
+    await readImagePixel({
+      bytes: normalized.bytes,
+      x: secondFrameLeft + 10,
+      y: 25,
+    }),
+    [255, 0, 0],
+  );
+  assertRgbNear(
+    await readImagePixel({
+      bytes: normalized.bytes,
+      x: secondFrameLeft + 30,
+      y: 25,
+    }),
+    [255, 60, 0],
+  );
+  assertRgbNear(
+    await readImagePixel({
+      bytes: normalized.bytes,
+      x: secondFrameLeft + 90,
+      y: 5,
+    }),
+    [
+      STORYBOARD_BACKGROUND_CHANNEL,
+      STORYBOARD_BACKGROUND_CHANNEL,
+      STORYBOARD_BACKGROUND_CHANNEL,
+    ],
+    8,
+  );
 });
 
 test("animated GIFs beyond the source frame budget fail closed", async () => {
