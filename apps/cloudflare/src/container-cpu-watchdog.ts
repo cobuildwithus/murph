@@ -40,7 +40,6 @@ export interface HostedContainerCpuWatchdogProcessApi {
 }
 
 interface HostedContainerCpuWatchdogProcessSample {
-  comm: string;
   cpuTicks: number;
   executable: string | null;
   // stat field 22 kept as an opaque equality token: same pid + same start time
@@ -162,12 +161,16 @@ async function readHostedContainerCpuWatchdogSample(
     }
     const parsed = parseHostedContainerProcPidStat(stat);
     if (parsed) {
+      const executable = await readHostedContainerCpuWatchdogExecutable(
+        processApi,
+        entry.name,
+      );
       perPid.set(Number.parseInt(entry.name, 10), {
-        ...parsed,
-        executable: await readHostedContainerCpuWatchdogExecutable(
-          processApi,
-          entry.name,
-        ),
+        cpuTicks: parsed.cpuTicks,
+        executable: executable === undefined
+          ? parsed.fallbackExecutable
+          : executable,
+        startTimeTicks: parsed.startTimeTicks,
       });
     } else {
       procScanComplete = false;
@@ -224,12 +227,16 @@ function parseHostedContainerCgroupCpuStat(text: string | null): {
   };
 }
 
-// Parses `pid (comm) state ppid ... utime stime ...`. Only the comm name (the
-// kernel-truncated executable name, never arguments or paths) is retained, so
-// watchdog logs stay free of command-line content.
+// Parses `pid (comm) state ppid ... utime stime ...`. The process-controlled
+// comm value is discarded unless it exactly matches the fixed executable
+// allowlist needed for readlink-unavailable fallback.
 function parseHostedContainerProcPidStat(
   text: string,
-): Omit<HostedContainerCpuWatchdogProcessSample, "executable"> | null {
+): {
+  cpuTicks: number;
+  fallbackExecutable: string | null;
+  startTimeTicks: string | null;
+} | null {
   const commStart = text.indexOf("(");
   const commEnd = text.lastIndexOf(")");
   if (commStart === -1 || commEnd <= commStart) {
@@ -245,8 +252,11 @@ function parseHostedContainerProcPidStat(
     return null;
   }
   return {
-    comm,
     cpuTicks: utime + stime,
+    fallbackExecutable:
+      HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(comm)
+        ? comm
+        : null,
     startTimeTicks: rest[19] ?? null,
   };
 }
@@ -254,16 +264,16 @@ function parseHostedContainerProcPidStat(
 async function readHostedContainerCpuWatchdogExecutable(
   processApi: HostedContainerCpuWatchdogProcessApi,
   pid: string,
-): Promise<string | null> {
+): Promise<string | null | undefined> {
   if (!processApi.readlink) {
-    return null;
+    return undefined;
   }
 
   let target: string;
   try {
     target = await processApi.readlink(`/proc/${pid}/exe`);
   } catch {
-    return null;
+    return undefined;
   }
   const basename = target
     .replace(/ \(deleted\)$/u, "")
@@ -286,7 +296,7 @@ function emitHostedContainerCpuWatchdogReport(input: {
   const intervalSeconds = intervalMs / 1000;
   const topCpuProcesses: Array<{
     cpuCores: number;
-    executable: string;
+    executable?: string;
     pid: number;
   }> = [];
   let perPidTicksDelta = 0;
@@ -318,23 +328,15 @@ function emitHostedContainerCpuWatchdogReport(input: {
     }
     perPidTicksDelta += deltaTicks;
     if (deltaTicks > 0) {
-      const executable = current.executable
-        ?? (
-          HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(current.comm)
-            ? current.comm
-            : null
-        );
-      if (executable) {
-        topCpuProcesses.push({
-          cpuCores: roundHostedContainerCpuCores(
-            deltaTicks
-              / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND
-              / intervalSeconds,
-          ),
-          executable,
-          pid,
-        });
-      }
+      topCpuProcesses.push({
+        cpuCores: roundHostedContainerCpuCores(
+          deltaTicks
+            / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND
+            / intervalSeconds,
+        ),
+        ...(current.executable ? { executable: current.executable } : {}),
+        pid,
+      });
     }
   }
   const cgroupUsageUsecDelta =

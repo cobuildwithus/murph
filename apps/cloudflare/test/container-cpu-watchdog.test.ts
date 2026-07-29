@@ -233,7 +233,9 @@ describe("startHostedContainerCpuWatchdog", () => {
     const details = emits[0]?.details as Record<string, unknown>;
     expect(details.cpuCoresUsed).toBe(0.65);
     expect(details.attributedCpuCores).toBe(0.65);
-    expect(details.topCpuProcesses).toEqual([]);
+    expect(details.topCpuProcesses).toEqual([
+      { cpuCores: 0.65, pid: 45 },
+    ]);
     expect(JSON.stringify(emits)).not.toContain("check_health.sh");
     expect(JSON.stringify(emits)).not.toContain("private-member-tool");
     expect(JSON.stringify(emits)).not.toContain("/private/runtime");
@@ -289,6 +291,46 @@ describe("startHostedContainerCpuWatchdog", () => {
     expect((emits[0]?.details as Record<string, unknown>).topCpuProcesses).toEqual([
       { cpuCores: 0.65, executable: "node", pid: 45 },
     ]);
+  });
+
+  it("keeps unknown processes in their true CPU rank without unsafe identity fallback", async () => {
+    const state: FakeProcessState = {
+      cpuStatText: null,
+      executableTargets: new Map([
+        ["44", "/usr/bin/zstd"],
+        ["45", "/usr/local/bin/node"],
+      ]),
+      pidStats: new Map([
+        ["44", pidStatText({ comm: "node", pid: 44, totalTicks: 100 })],
+        ["45", pidStatText({ comm: "MainThread", pid: 45, totalTicks: 100 })],
+      ]),
+    };
+    stopWatchdog = await startWatchdog({
+      processApi: createFakeProcessApi(state),
+    });
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+    state.pidStats.set(
+      "44",
+      pidStatText({ comm: "node", pid: 44, totalTicks: 800 }),
+    );
+    state.pidStats.set(
+      "45",
+      pidStatText({ comm: "MainThread", pid: 45, totalTicks: 200 }),
+    );
+    await vi.advanceTimersByTimeAsync(WATCHDOG_INTERVAL_MS);
+
+    const emits = watchdogEmits();
+    expect(emits).toHaveLength(1);
+    const details = emits[0]?.details as Record<string, unknown>;
+    expect(details.attributedCpuCores).toBe(0.8);
+    expect(details.topCpuProcesses).toEqual([
+      { cpuCores: 0.7, pid: 44 },
+      { cpuCores: 0.1, executable: "node", pid: 45 },
+    ]);
+    expect(JSON.stringify(emits)).not.toContain("zstd");
+    expect(JSON.stringify(emits)).not.toContain("/usr/bin");
+    expect(JSON.stringify(emits)).not.toContain("MainThread");
   });
 
   it("emits a one-time started signal reporting cgroup availability", async () => {
