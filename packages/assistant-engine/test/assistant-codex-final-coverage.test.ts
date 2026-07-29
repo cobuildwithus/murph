@@ -827,6 +827,7 @@ describe('Codex model catalog', () => {
       providerFetch: hostedProviderFetch,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
+      voiceMemoUploadFetch: fetch,
     })
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })

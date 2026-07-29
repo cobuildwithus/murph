@@ -163,6 +163,7 @@ export interface AssistantProviderTurn {
   usageAttribution?: AssistantUsageAttribution | null
   assistantPreferredElevenLabsVoiceId?: string | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
+  voiceMemoUploadFetch?: typeof fetch | null
   vaultRoot?: string | null
   workingDirectory: string
 }

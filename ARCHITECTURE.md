@@ -777,9 +777,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Verified fulfillment activates its optional Web-timed running bit and
   appends one purchase-deduplicated creative notification to the existing
   mailbox. The isolated creative turn exposes only `generate_song`, inherits
-  the output-only native-capability deny set, retains only the bound provider
-  transport required by that application-owned tool, and makes at most one
-  provider attempt; a committed delivery intent remains ordinary outbox work. Web
+  the output-only native-capability deny set, and makes at most one provider
+  attempt. Its application-owned media runtime retains the bound provider
+  transport for ElevenLabs and Linq API calls plus a separate signed-upload
+  transport that is never exposed as Codex public Internet access; a committed
+  delivery intent remains ordinary outbox work. Web
   projects only the current bit as an optional typed mailbox
   sidecar; `packages/assistant-runtime` attaches it only to fresh,
   route-authorized non-direct group input, and `packages/assistant-engine`

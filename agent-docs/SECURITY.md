@@ -186,8 +186,11 @@ Last verified: 2026-07-28
   delegated agents, web search, public fetch, artifact materialization,
   generated-image upload, or progress delivery. The bound provider transport
   remains available only to the application-owned song tool so ElevenLabs and
-  Linq egress retain their runtime authority headers. Its prompt asks for one
-  short original song through exactly one `generate_song` call and forbids
+  Linq API calls retain their runtime authority headers. A distinct media-upload
+  fetch may carry only the tool's validated Linq-issued presigned upload; it is
+  consumed while constructing that tool runtime and is never attached to Codex
+  as native public Internet access. Its prompt asks for one short original song
+  through exactly one `generate_song` call and forbids
   separate contact, scheduling, state mutation, or disclosure of private
   health, account, payment, or routing details. Running bits may reach only fresh
   route-authorized non-direct Linq or Telegram input

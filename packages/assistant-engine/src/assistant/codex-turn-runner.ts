@@ -611,6 +611,10 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+        voiceMemoUploadFetch:
+          outputOnlyTurn || readOnlyAutomationTurn
+          ? null
+          : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
           !nativeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&

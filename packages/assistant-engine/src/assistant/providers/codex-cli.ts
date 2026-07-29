@@ -190,7 +190,7 @@ export async function executeCodexAssistantTurnAttempt(
     env: input.env ?? process.env,
     fetchImpl: input.providerFetch ?? fetch,
     preferredVoiceId: input.assistantPreferredElevenLabsVoiceId ?? null,
-    publicFetchImpl: input.publicInternetFetch ?? null,
+    publicFetchImpl: input.voiceMemoUploadFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
   // Null when XAI_API_KEY is absent; the executor then fails closed with a
