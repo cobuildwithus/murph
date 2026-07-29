@@ -117,17 +117,33 @@ kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
 
-Built-in managed automations additionally carry one immutable owner scope from
-their exact current seed identity. Member seeds may reconcile and execute only
+Managed automations additionally carry one immutable owner scope from their
+exact current seed or registered dynamic identity. Member seeds may reconcile and execute only
 on personal/direct routes; authenticated-group seeds may do so only on live
 non-direct Linq/iMessage or Telegram routes. Reconciliation archives every
 nonterminal wrong-owner record, and claimed occurrences revalidate the current
 seed and live route before lifecycle hooks, evidence, provider/model work,
 tools, delivery, and commit. Caller-supplied unscoped seeds retain their prior
 compatibility behavior, and mutable tags, slugs, titles, or instructions never
-acquire this authority. Dynamically generated experiment-lifecycle seeds stay
+acquire this authority. The post-onboarding choice point is the one registered
+dynamic member identity; dynamically generated experiment-lifecycle seeds stay
 on their existing separately owned path until that owner exposes an exact
 identity resolver.
+
+The post-onboarding choice point is one ordinary managed one-shot. Answered
+onboarding schedules it 21 local-calendar days after completion; maintenance
+gives older eligible members one future same-weekday catch-up and keeps the
+installed occurrence stable. A claimed occurrence revalidates canonical
+onboarding state, then uses the ordinary scheduled-turn planner, current direct
+conversation, and a vault-readable shell. Its exact immutable identity adds one
+developer-level read-only policy, removes hosted dynamic mutation tools and
+external network access, and selects a filesystem-read permission profile in a
+fresh ephemeral one-shot Codex process. The fresh process replays the current
+session's committed conversation history but never resumes or replaces that
+session's ordinary provider thread. The ordinary save and ingestion rules are
+suspended only for this occurrence. The automation asks one low-pressure
+question or skips, and it cannot change goals, plans, memories, experiments, or
+automations before the member replies.
 
 No built-in member-facing group social automation currently ships. The removed
 Sunday superlatives ID remains only as a permanent retirement tombstone:
@@ -327,7 +343,7 @@ an integrity failure.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
-Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs through the existing one-shot App Server process path so its restrictive launch config cannot rotate the resident ordinary-turn process or terminate valid detached enrichment. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
+Hosted automation writes use a narrow root-turn tool backed by an invocation-scoped automation port. The already-bound member or synthetic-group runtime vault remains the sole owner of canonical automation records; the tool adds no service, credential, transport, or second record owner. An authenticated hosted conversation may edit, pause, archive, or reactivate any automation in that vault even when the record stores an older route. New records and explicit retargets persist only the trusted current route instead of model-supplied locators or directness; ordinary edits preserve the stored route. Scheduled automation occurrences enter the same conversation turn planner, prompt stack, thread policy, skill surface, and dynamic-tool assembly as attended turns. The stored automation instructions are the user request; occurrence and delivery facts are trusted turn context, and send-or-skip JSON is only the delivery envelope. Tool availability still follows the ordinary invocation's actual ports, audience, accepted-input evidence, and effect-owner checks rather than the trigger origin. A detached `assistant.notification.requested` system event without a valid occurrence is not a scheduled or user turn: it uses an isolated output-only formatter with no conversation history, private context, resume mutation, or tool and network surface, while the platform retains delivery ownership. That formatter runs through the existing one-shot App Server process path so its restrictive launch config cannot rotate the resident ordinary-turn process or terminate valid detached enrichment. Unauthenticated group-email replies remain read-only because their audience does not authorize durable room controls, not because they use a separate assistant profile. Explicit arbitrary-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. When that fallback selects a live direct thread, the route authority returns both its raw delivery target and its privacy-blinded conversation locator so the same thread selects conversation continuity and delivery. Unresolved authority remains retryable without a marker or manual-repair protocol.
 
 Detached phone-call results and usage-referral celebrations are the only
 notification families admitted through the dirty runtime's pre-checkpoint

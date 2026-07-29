@@ -1,6 +1,8 @@
 export const MURPH_GROUP_READ_PERMISSION_PROFILE = "murph-group-read" as const;
 export const MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE =
   "murph-group-room-model-maintenance" as const;
+export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
+  "murph-member-read" as const;
 
 export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string[] {
   return [
@@ -35,6 +37,26 @@ export function buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines():
     '"." = "deny"',
     "",
     `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ];
+}
+
+export function buildMurphMemberReadPermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Read-only scheduled member reflection using the current private vault.",
+    `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    "glob_scan_max_depth = 64",
+    "",
+    `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+    '"." = "read"',
+    '".runtime" = "deny"',
+    '".codex" = "deny"',
+    '"**/.env" = "deny"',
+    '"**/.env.*" = "deny"',
+    "",
+    `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.network]`,
     "enabled = false",
     "",
   ];

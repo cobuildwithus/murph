@@ -37,6 +37,9 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -2214,6 +2217,38 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
       providerResumeStateAction: 'persist-from-provider-turn',
+    }),
+  )
+
+  vi.clearAllMocks()
+
+  await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Offer one low-pressure health direction choice.',
+    scheduledInvocationAuthority: {
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      occurrenceAt: '2026-07-12T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+    serviceTier: 'flex',
+    vault: '/vaults/skip',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'preserve-existing',
     }),
   )
 
