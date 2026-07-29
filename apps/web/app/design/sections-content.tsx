@@ -153,7 +153,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Clubs early-access marketing page">
+      <StudySection title="Clubs iMessage and wearables marketing page">
         <ClubsPageStudy />
       </StudySection>
 

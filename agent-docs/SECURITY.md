@@ -46,8 +46,8 @@ Last verified: 2026-07-29
   deploy vars, not request input. The dedicated service token is
   organization-scoped because that is where PlanetScale grants
   `read_metrics_endpoints`, and it has no other permission. Service discovery
-  uses the fixed PlanetScale API origin and the
-  documented `token <id>:<token>` authorization contract; the authenticated
+  uses the fixed PlanetScale API origin and the documented `<id>:<token>`
+  authorization contract without an authentication scheme; the authenticated
   response may select only one HTTPS/443 scrape target with a bounded path and
   bounded signed `__param_*` query values. The service credential is sent only
   to the fixed discovery origin; signed scrape parameters are never persisted

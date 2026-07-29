@@ -1705,6 +1705,22 @@ export type HostedRuntimeFamilyPlanToolResponse =
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
     };
 
+export interface HostedRuntimeIMessageContactToolRequest {
+  assistantInputId: string;
+}
+
+export type HostedRuntimeIMessageContactToolResponse =
+  | {
+      phoneNumber: string;
+      status: "assigned" | "existing";
+      verifiedSenderPhoneHint: string;
+    }
+  | {
+      phoneNumber: null;
+      status: "identity_required" | "unavailable";
+      verifiedSenderPhoneHint: null;
+    };
+
 export type HostedRuntimeAssistantConfigurationToolRequest =
   | {
       action: "read";

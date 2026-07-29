@@ -1096,7 +1096,7 @@ describe("database health monitor", () => {
       throw new Error("Expected discovery and metrics requests.");
     }
     expect(discoveryRequest.headers.get("authorization"))
-      .toBe("token service-token-id:service-token");
+      .toBe("service-token-id:service-token");
     expect(metricsRequest.headers.get("authorization")).toBeNull();
     expect(new URL(metricsRequest.url).searchParams.get("sig"))
       .toBe("signed-scrape-token");
