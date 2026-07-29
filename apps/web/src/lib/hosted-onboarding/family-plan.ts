@@ -1372,6 +1372,25 @@ export async function lookupHostedAccountGroupStripeBillingRefByStripeSubscripti
   return resolveHostedAccountGroupBillingLookup(billingRefs, "stripeSubscriptionId", input.prisma);
 }
 
+export async function lookupHostedAccountGroupIdByStripeSubscriptionId(input: {
+  prisma: HostedOnboardingReadClient;
+  stripeSubscriptionId: string;
+}): Promise<string | null> {
+  const lookupKeys = createHostedStripeSubscriptionLookupKeyReadCandidates(
+    input.stripeSubscriptionId,
+  );
+  if (lookupKeys.length === 0) {
+    return null;
+  }
+  const billingRefs = await input.prisma.hostedAccountGroupBillingRef.findMany({
+    select: { groupId: true },
+    where: {
+      stripeSubscriptionLookupKey: { in: lookupKeys },
+    },
+  });
+  return billingRefs.length === 1 ? billingRefs[0]?.groupId ?? null : null;
+}
+
 export async function lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionItemId(input: {
   prisma: HostedOnboardingReadClient;
   stripeSubscriptionItemId: string;

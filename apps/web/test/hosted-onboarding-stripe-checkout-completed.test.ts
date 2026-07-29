@@ -11,12 +11,15 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId: vi.fn(),
+  lookupHostedAccountGroupIdByStripeSubscriptionId: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
+  readHostedMemberStripeBillingLookupState: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   cancelStripeSubscription: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
+  upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
@@ -29,8 +32,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
 
   return {
     ...actual,
-    lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId:
-      mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
+    lookupHostedAccountGroupIdByStripeSubscriptionId:
+      mocks.lookupHostedAccountGroupIdByStripeSubscriptionId,
     readHostedMemberFamilyBillingClaim:
       mocks.readHostedMemberFamilyBillingClaim,
   };
@@ -51,6 +54,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
     clearHostedMemberStripeCheckoutAttemptForSessionTx:
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    readHostedMemberStripeBillingLookupState:
+      mocks.readHostedMemberStripeBillingLookupState,
     writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
   };
 });
@@ -63,6 +68,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   return {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+    upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx:
+      mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
     upsertHostedMemberStripeCheckoutEmailIfFreshTx:
       mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   };
@@ -113,11 +121,77 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  applyStripeCheckoutCompleted,
+  applyStripeCheckoutCompleted as applyStripeCheckoutCompletedImpl,
   applyStripeSubscriptionUpdated,
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+
+async function applyStripeCheckoutCompleted(
+  ...args: Parameters<typeof applyStripeCheckoutCompletedImpl>
+): ReturnType<typeof applyStripeCheckoutCompletedImpl> {
+  const session = args[0];
+  const stripeCustomerId =
+    typeof session.customer === "string" ? session.customer : session.customer?.id;
+  const stripeSubscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+  const isStandardCheckout =
+    session.metadata?.kind !== "hosted_family_plan"
+    && session.metadata?.checkoutOffer !== "pulse_trial_7d";
+  const stripeCheckoutEmail = (
+    session.customer_details?.email ?? session.customer_email
+  )?.trim().toLowerCase() ?? null;
+  const canonicalSubscription =
+    isStandardCheckout && stripeSubscriptionId
+      ? (
+          typeof session.subscription === "object"
+            ? session.subscription
+            : await mocks.retrieveStripeSubscription(stripeSubscriptionId)
+        )
+      : null;
+  const preparedStandardCompletion =
+    args[4]
+    ?? (
+      isStandardCheckout
+        ? {
+            billingCompletion:
+              stripeCustomerId && stripeSubscriptionId
+                ? {
+                    memberId: "member_123",
+                    stripeCustomerId,
+                    stripeCustomerIdEncrypted: "encrypted-customer",
+                    stripeCustomerLookupKey: "customer-lookup",
+                    stripeSubscriptionId,
+                    stripeSubscriptionIdEncrypted: "encrypted-subscription",
+                    stripeSubscriptionLookupKey: "subscription-lookup",
+                  }
+                : null,
+            canonicalSubscription,
+            memberId: "member_123",
+            stripeCheckoutEmail: stripeCheckoutEmail
+              ? {
+                  address: stripeCheckoutEmail,
+                  addressEncrypted: "encrypted-checkout-email",
+                  memberId: "member_123",
+                }
+              : null,
+          }
+        : undefined
+    );
+  return applyStripeCheckoutCompletedImpl(
+    session,
+    args[1],
+    args[2],
+    args[3],
+    preparedStandardCompletion,
+  );
+}
 
 describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
@@ -132,9 +206,20 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(makeMemberSnapshot());
     mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
-    mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId.mockResolvedValue(null);
+    mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
+      null,
+    );
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
+    mocks.readHostedMemberCoreState.mockResolvedValue(
+      makeMemberSnapshot().core,
+    );
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
+    mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue({
+      stripeCustomerLookupKey:
+        createHostedStripeCustomerLookupKey("cus_123"),
+      stripeSubscriptionLookupKey:
+        createHostedStripeSubscriptionLookupKey("sub_123"),
+    });
     mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
       billingRef: {},
       kind: "accepted",
@@ -162,6 +247,8 @@ describe("applyStripeCheckoutCompleted", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
+    mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx
+      .mockResolvedValue(undefined);
     mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
       directPublicSender: null,
       memberId: "member_123",
@@ -225,17 +312,28 @@ describe("applyStripeCheckoutCompleted", () => {
       checkoutSessionId: "cs_123",
       currentCheckoutOffer: "standard",
       memberId: "member_123",
-      stripeCustomerId: "cus_123",
       eventCreatedAt: new Date(1_744_416_000 * 1000),
-      stripeSubscriptionId: "sub_123",
+      preparedCompletion: expect.objectContaining({
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
       tx: {},
     }));
-    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
-      address: "payer@example.com",
+    expect(
+      mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
+    ).toHaveBeenCalledWith({
       collectedAt: new Date(1_744_416_000 * 1000),
       memberId: "member_123",
-      prisma: {},
+      preparedEmail: {
+        address: "payer@example.com",
+        addressEncrypted: "encrypted-checkout-email",
+        memberId: "member_123",
+      },
+      tx: {},
     });
+    expect(
+      mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("cancels rather than binds a direct checkout completed after Family sponsorship", async () => {
@@ -355,19 +453,10 @@ describe("applyStripeCheckoutCompleted", () => {
       kind: "active_sponsorship",
       ownerMemberId: "member_123",
     });
-    mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId.mockResolvedValue({
-      billingRef: {
-        groupId: "hbag_family",
-        stripeSubscriptionId: "sub_123",
-      },
-      group: {
-        billingStatus: HostedBillingStatus.active,
-        id: "hbag_family",
-        ownerMemberId: "member_123",
-        suspendedAt: null,
-      },
-      matchedBy: "stripeSubscriptionId",
-    });
+    mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
+      "hbag_family",
+    );
+    mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
     const session = {
       created: 1_744_416_000,
       customer: "cus_123",
@@ -451,6 +540,7 @@ describe("applyStripeCheckoutCompleted", () => {
         kind: "bound_subscription",
         ownerMemberId: "member_123",
       });
+      mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
 
       for (const source of ["browser", "webhook"] as const) {
         if (source === "webhook") {

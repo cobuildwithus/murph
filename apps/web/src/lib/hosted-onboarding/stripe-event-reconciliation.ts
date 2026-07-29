@@ -26,6 +26,8 @@ import {
   cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
+  prepareHostedStandardStripeCheckoutCompletion,
+  type PreparedHostedStandardStripeCheckoutCompletion,
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
@@ -339,21 +341,32 @@ async function processHostedStripeEventRecord(
 
   switch (event.type) {
     case "checkout.session.completed":
+      if (processingContext.preparedStandardCheckoutCompletion) {
+        return mapHostedStripeActivationOutcome(
+          await applyStripeCheckoutCompleted(
+            payload as Stripe.Checkout.Session,
+            prisma,
+            dispatchContext,
+            processingContext.preparedCryptoDomainRoots.size > 0
+              ? processingContext.preparedCryptoDomainRoots
+              : undefined,
+            processingContext.preparedStandardCheckoutCompletion,
+          ),
+        );
+      }
       return mapHostedStripeActivationOutcome(
-        await (
-          processingContext.preparedCryptoDomainRoots.size > 0
-            ? applyStripeCheckoutCompleted(
+        processingContext.preparedCryptoDomainRoots.size > 0
+          ? await applyStripeCheckoutCompleted(
               payload as Stripe.Checkout.Session,
               prisma,
               dispatchContext,
               processingContext.preparedCryptoDomainRoots,
             )
-            : applyStripeCheckoutCompleted(
+          : await applyStripeCheckoutCompleted(
               payload as Stripe.Checkout.Session,
               prisma,
               dispatchContext,
-            )
-        ),
+            ),
       );
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
@@ -459,6 +472,8 @@ type HostedStripeEventProcessingContext = {
   customerId: string | null;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyCryptoDomainRoots: PreparedHostedFamilyCryptoDomainRoots;
+  preparedStandardCheckoutCompletion:
+    PreparedHostedStandardStripeCheckoutCompletion | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
@@ -476,6 +491,7 @@ async function prepareHostedStripeEventProcessingContext(
       customerId: null,
       preparedCryptoDomainRoots: new Map(),
       preparedFamilyCryptoDomainRoots: new Map(),
+      preparedStandardCheckoutCompletion: null,
     };
   }
 
@@ -491,6 +507,7 @@ async function prepareHostedStripeEventProcessingContext(
     customerId: customerContext.customerId,
     preparedCryptoDomainRoots: new Map(),
     preparedFamilyCryptoDomainRoots: new Map(),
+    preparedStandardCheckoutCompletion: null,
   };
 }
 
@@ -559,18 +576,11 @@ async function resolveHostedStripeEventProcessingMemberId(
 ): Promise<string | null> {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    if (session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
-      const memberIds = await listHostedStripeCheckoutSessionMemberIds({
-        prisma,
-        session,
-      });
-      return memberIds.length === 1 ? memberIds[0] ?? null : null;
-    }
-    const member = await findMemberForStripeCheckoutSession({
+    const memberIds = await listHostedStripeCheckoutSessionMemberIds({
       prisma,
       session,
     });
-    return member?.core.id ?? null;
+    return memberIds.length === 1 ? memberIds[0] ?? null : null;
   }
 
   if (isHostedStripeSubscriptionBillingEvent(event.type)) {
@@ -1067,17 +1077,37 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
   memberId: string;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
 }> {
-  const preflightProcessingContext = input.preflightProcessingContext;
+  const preflightProcessingContext =
+    input.preflightProcessingContext
+    ?? await prepareHostedStripeEventProcessingContext(input.stripeEvent);
+  const preparedStandardCheckoutCompletion =
+    input.stripeEvent.type === "checkout.session.completed"
+      ? await prepareHostedStandardStripeCheckoutCompletion({
+          canonicalSubscription:
+            preflightProcessingContext.canonicalSubscription,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          session: input.stripeEvent.data.object as Stripe.Checkout.Session,
+        })
+      : null;
+  const preparedProcessingContext = {
+    ...preflightProcessingContext,
+    canonicalSubscription:
+      preparedStandardCheckoutCompletion?.canonicalSubscription
+      ?? preflightProcessingContext.canonicalSubscription,
+    preparedStandardCheckoutCompletion,
+  };
   const preparedFamilyCryptoDomainRoots =
-    preflightProcessingContext?.canonicalSubscription
+    preparedProcessingContext.canonicalSubscription
       ? await prepareHostedFamilyStripeActivationCryptoDomainRoots({
           prisma: input.prisma,
-          subscription: preflightProcessingContext.canonicalSubscription,
+          subscription: preparedProcessingContext.canonicalSubscription,
         })
       : new Map();
   const preparedCryptoDomainRoots =
     await prepareHostedStripeEventCryptoDomainRoots({
-      canonicalSubscription: preflightProcessingContext?.canonicalSubscription ?? null,
+      canonicalSubscription:
+        preparedProcessingContext.canonicalSubscription,
       memberId: input.memberId,
       prisma: input.prisma,
       stripeEvent: input.stripeEvent,
@@ -1087,15 +1117,23 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
     prisma: input.prisma,
     run: async (transaction) => {
       const processingContext = {
-        ...await prepareHostedStripeEventProcessingContext(input.stripeEvent),
+        ...(
+          input.stripeEvent.type === "checkout.session.completed"
+            ? preparedProcessingContext
+            : await prepareHostedStripeEventProcessingContext(
+                input.stripeEvent,
+              )
+        ),
         preparedCryptoDomainRoots,
         preparedFamilyCryptoDomainRoots,
+        preparedStandardCheckoutCompletion,
       };
-      const processingMemberId = await resolveHostedStripeEventProcessingMemberId(
-        input.stripeEvent,
-        processingContext,
-        transaction,
-      );
+      const processingMemberId =
+        await resolveHostedStripeEventProcessingMemberId(
+          input.stripeEvent,
+          processingContext,
+          transaction,
+        );
       if (processingMemberId !== input.memberId) {
         throw new Error("Canonical Stripe billing ownership changed before processing.");
       }

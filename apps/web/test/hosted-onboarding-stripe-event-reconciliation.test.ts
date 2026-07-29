@@ -23,15 +23,18 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+  lookupHostedAccountGroupIdByStripeSubscriptionId: vi.fn(),
   cleanupHostedStandardCheckoutLoser: vi.fn(),
   materializeHostedGroupSponsorshipIfApplicable: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
+  prepareHostedStandardStripeCheckoutCompletion: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   reconcileHostedUsageCreditStripeEvent: vi.fn(),
+  readHostedMemberStripeBillingLookupState: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
@@ -81,6 +84,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots,
     prepareHostedLegacySyntheticFamilyCleanupTx:
       mocks.prepareHostedLegacySyntheticFamilyCleanupTx,
+    lookupHostedAccountGroupIdByStripeSubscriptionId:
+      mocks.lookupHostedAccountGroupIdByStripeSubscriptionId,
     readHostedMemberFamilyBillingClaim:
       mocks.readHostedMemberFamilyBillingClaim,
   };
@@ -95,6 +100,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
     ...actual,
     clearHostedMemberStripeCheckoutAttemptForSessionTx:
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    readHostedMemberStripeBillingLookupState:
+      mocks.readHostedMemberStripeBillingLookupState,
   };
 });
 
@@ -139,6 +146,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
+  prepareHostedStandardStripeCheckoutCompletion:
+    mocks.prepareHostedStandardStripeCheckoutCompletion,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", async () => {
@@ -334,18 +343,23 @@ describe("hosted Stripe event reconciliation", () => {
       core: { id: "member_123" },
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
+      null,
+    );
     mocks.materializeHostedGroupSponsorshipIfApplicable.mockResolvedValue(true);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
       new Map(),
     );
     mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue(null);
+    mocks.prepareHostedStandardStripeCheckoutCompletion.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx.mockResolvedValue(
       true,
     );
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
+    mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({ handled: false });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
@@ -1149,6 +1163,52 @@ describe("hosted Stripe event reconciliation", () => {
     }
   });
 
+  it("prepares standard Checkout bindings before taking the member lock", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const ordering: string[] = [];
+    const preparedStandardCompletion = {
+      billingCompletion: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_checkout",
+        stripeCustomerIdEncrypted: "encrypted-customer",
+        stripeCustomerLookupKey: "customer-lookup",
+        stripeSubscriptionId: "sub_checkout_123",
+        stripeSubscriptionIdEncrypted: "encrypted-subscription",
+        stripeSubscriptionLookupKey: "subscription-lookup",
+      },
+      canonicalSubscription: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.prepareHostedStandardStripeCheckoutCompletion.mockImplementationOnce(
+      async () => {
+        ordering.push("bindings-prepared");
+        return preparedStandardCompletion;
+      },
+    );
+    vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
+      ordering.push("member-locked");
+      return [];
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(ordering).toEqual(["bindings-prepared", "member-locked"]);
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "cs_checkout_123" }),
+      expect.anything(),
+      expect.any(Object),
+      undefined,
+      preparedStandardCompletion,
+    );
+  });
+
   it("fails before standard Checkout handling when ownership changes under the member lock", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
@@ -1159,10 +1219,11 @@ describe("hosted Stripe event reconciliation", () => {
       .mockImplementationOnce(async () => {
         ordering.push("owner-resolved");
         return { core: { id: "member_123" } };
-      })
+      });
+    mocks.listHostedStripeCheckoutSessionMemberIds
       .mockImplementationOnce(async () => {
         ordering.push("owner-revalidated");
-        return { core: { id: "member_456" } };
+        return ["member_456"];
       });
     vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
       ordering.push("member-locked");

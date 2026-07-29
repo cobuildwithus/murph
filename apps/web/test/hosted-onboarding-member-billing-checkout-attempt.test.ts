@@ -6,6 +6,8 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   createHostedStripeCheckoutSessionLookupKey,
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedMemberBillingCheckoutSessionPrivateColumn,
@@ -23,17 +25,12 @@ describe("hosted member Checkout completion ownership", () => {
       currentCheckoutOffer: "standard",
       eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
       memberId: "member_123",
-      stripeCustomerId: "cus_winner",
-      stripeSubscriptionId: "sub_winner",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
       tx: harness.tx as never,
     })).resolves.toMatchObject({
-      billingRef: {
-        checkoutAttemptId: null,
-        checkoutIntentHash: null,
-        stripeCheckoutSessionId: null,
-        stripeCustomerId: "cus_winner",
-        stripeSubscriptionId: "sub_winner",
-      },
       kind: "accepted",
     });
 
@@ -62,14 +59,12 @@ describe("hosted member Checkout completion ownership", () => {
       currentCheckoutOffer: "standard",
       eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
       memberId: "member_123",
-      stripeCustomerId: "cus_legacy",
-      stripeSubscriptionId: "sub_legacy",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_legacy",
+        "sub_legacy",
+      ),
       tx: harness.tx as never,
     })).resolves.toMatchObject({
-      billingRef: {
-        stripeCustomerId: "cus_legacy",
-        stripeSubscriptionId: "sub_legacy",
-      },
       kind: "accepted",
     });
   });
@@ -83,8 +78,10 @@ describe("hosted member Checkout completion ownership", () => {
       currentCheckoutOffer: "standard",
       eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
       memberId: "member_123",
-      stripeCustomerId: "cus_winner",
-      stripeSubscriptionId: "sub_winner",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
       tx: harness.tx as never,
     };
 
@@ -94,10 +91,6 @@ describe("hosted member Checkout completion ownership", () => {
       ...completion,
       eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
     })).resolves.toMatchObject({
-      billingRef: {
-        stripeCustomerId: "cus_winner",
-        stripeSubscriptionId: "sub_winner",
-      },
       kind: "already_accepted",
     });
 
@@ -113,8 +106,10 @@ describe("hosted member Checkout completion ownership", () => {
       currentCheckoutOffer: "standard",
       eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
       memberId: "member_123",
-      stripeCustomerId: "cus_winner",
-      stripeSubscriptionId: "sub_winner",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_winner",
+      ),
       tx: harness.tx as never,
     });
 
@@ -125,8 +120,10 @@ describe("hosted member Checkout completion ownership", () => {
       currentCheckoutOffer: "standard",
       eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
       memberId: "member_123",
-      stripeCustomerId: "cus_winner",
-      stripeSubscriptionId: "sub_loser",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_winner",
+        "sub_loser",
+      ),
       tx: harness.tx as never,
     })).resolves.toEqual({
       kind: "cleanup_superseded",
@@ -135,6 +132,28 @@ describe("hosted member Checkout completion ownership", () => {
     expect(harness.update).toHaveBeenCalledOnce();
   });
 });
+
+function buildPreparedCompletion(
+  stripeCustomerId: string,
+  stripeSubscriptionId: string,
+) {
+  const stripeCustomerLookupKey =
+    createHostedStripeCustomerLookupKey(stripeCustomerId);
+  const stripeSubscriptionLookupKey =
+    createHostedStripeSubscriptionLookupKey(stripeSubscriptionId);
+  if (!stripeCustomerLookupKey || !stripeSubscriptionLookupKey) {
+    throw new TypeError("Test Stripe identifiers are invalid.");
+  }
+  return {
+    memberId: "member_123",
+    stripeCustomerId,
+    stripeCustomerIdEncrypted: `encrypted:${stripeCustomerId}`,
+    stripeCustomerLookupKey,
+    stripeSubscriptionId,
+    stripeSubscriptionIdEncrypted: `encrypted:${stripeSubscriptionId}`,
+    stripeSubscriptionLookupKey,
+  };
+}
 
 async function createBillingRefHarness(input: {
   openAttempt?: boolean;

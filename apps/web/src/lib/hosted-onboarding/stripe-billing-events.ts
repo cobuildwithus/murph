@@ -8,6 +8,7 @@ import type Stripe from "stripe";
 import type {
   PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   reconcileHostedAiUsageGateForBillingModeChangeTx,
 } from "../hosted-execution/usage-allowance";
@@ -38,12 +39,22 @@ import {
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
+  prepareHostedMemberStripeCheckoutCompletion,
+  readHostedMemberStripeBillingLookupState,
+  type PreparedHostedMemberStripeCheckoutCompletion,
 } from "./hosted-member-billing-store";
 import {
+  prepareHostedMemberStripeCheckoutEmail,
+  type PreparedHostedMemberStripeCheckoutEmail,
   type HostedMemberBillingSnapshot,
-  readHostedMemberBillingSnapshot,
+  readHostedMemberCoreState,
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+  upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
 } from "./hosted-member-store";
+import {
+  createHostedStripeCustomerLookupKeyReadCandidates,
+  createHostedStripeSubscriptionLookupKeyReadCandidates,
+} from "./contact-privacy";
 import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
@@ -78,7 +89,7 @@ import {
   applyHostedFamilyStripeSubscriptionUpdatedTx,
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
-  lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
+  lookupHostedAccountGroupIdByStripeSubscriptionId,
   readHostedMemberFamilyBillingClaim,
   type PreparedHostedFamilyCryptoDomainRoots,
   type HostedFamilyStripeSubscriptionResult,
@@ -112,7 +123,15 @@ type HostedFamilyBillingClaimDisposition =
   | "none"
   | "same_family_subscription";
 
+export interface PreparedHostedStandardStripeCheckoutCompletion {
+  billingCompletion: PreparedHostedMemberStripeCheckoutCompletion | null;
+  canonicalSubscription: Stripe.Subscription | null;
+  memberId: string;
+  stripeCheckoutEmail: PreparedHostedMemberStripeCheckoutEmail | null;
+}
+
 async function classifyHostedFamilyBillingClaimTx(input: {
+  canonicalSubscription?: Stripe.Subscription | null;
   checkoutSession?: Stripe.Checkout.Session;
   memberId: string;
   stripeCustomerId: string | null;
@@ -120,45 +139,41 @@ async function classifyHostedFamilyBillingClaimTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyBillingClaimDisposition> {
   await lockHostedMemberRow(input.tx, input.memberId);
-  const currentMember = await readHostedMemberBillingSnapshot({
+  const currentBillingRef = await readHostedMemberStripeBillingLookupState({
     memberId: input.memberId,
     prisma: input.tx,
   });
-  const currentSubscriptionId =
-    currentMember?.billingRef?.stripeSubscriptionId ?? null;
-  const currentCustomerId = currentMember?.billingRef?.stripeCustomerId ?? null;
+  const subscriptionLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.stripeSubscriptionId,
+    );
+  const customerLookupKeys =
+    createHostedStripeCustomerLookupKeyReadCandidates(
+      input.stripeCustomerId,
+    );
   if (
     input.stripeSubscriptionId
-    && currentSubscriptionId === input.stripeSubscriptionId
+    && currentBillingRef?.stripeSubscriptionLookupKey
+    && subscriptionLookupKeys.includes(
+      currentBillingRef.stripeSubscriptionLookupKey,
+    )
     && (
       !input.stripeCustomerId
-      || !currentCustomerId
-      || currentCustomerId === input.stripeCustomerId
+      || !currentBillingRef.stripeCustomerLookupKey
+      || customerLookupKeys.includes(
+        currentBillingRef.stripeCustomerLookupKey,
+      )
     )
   ) {
     return "none";
   }
 
   if (input.checkoutSession) {
-    const checkoutAttemptId = normalizeNullableString(
-      input.checkoutSession.metadata?.checkoutAttemptId,
-    );
-    const currentCheckoutMatches =
-      currentMember?.billingRef?.stripeCheckoutSessionId === input.checkoutSession.id ||
-      Boolean(
-        checkoutAttemptId &&
-        currentMember?.billingRef?.checkoutAttemptId === checkoutAttemptId,
-      );
-    // A Family handoff can outlive both mutable billing projections. Browser
-    // success carries provider metadata; webhook replay rereads it only off the current Checkout.
+    // A Family handoff can outlive both mutable billing projections. The
+    // provider-owned Subscription is prepared before the member lock.
     const canonicalSubscription = readExpandedStripeCheckoutSubscription(
       input.checkoutSession,
-    ) ?? (
-      input.checkoutSession.metadata?.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER &&
-      !currentCheckoutMatches
-        ? await readHostedStripeCheckoutSessionSubscription(input.checkoutSession)
-        : null
-    );
+    ) ?? input.canonicalSubscription ?? null;
     if (
       canonicalSubscription &&
       await canonicalSubscriptionBelongsToHostedFamilyOwnerTx({
@@ -181,12 +196,12 @@ async function classifyHostedFamilyBillingClaimTx(input: {
     return "none";
   }
   if (input.stripeSubscriptionId) {
-    const familySubscription =
-      await lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId({
+    const familyGroupId =
+      await lookupHostedAccountGroupIdByStripeSubscriptionId({
         prisma: input.tx,
         stripeSubscriptionId: input.stripeSubscriptionId,
       });
-    if (familySubscription?.group.id === familyClaim.groupId) {
+    if (familyGroupId === familyClaim.groupId) {
       return "same_family_subscription";
     }
   }
@@ -231,6 +246,7 @@ export async function applyStripeCheckoutCompleted(
   prisma: Prisma.TransactionClient,
   dispatchContext?: HostedStripeDispatchContext,
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
+  preparedStandardCompletion?: PreparedHostedStandardStripeCheckoutCompletion,
 ): Promise<HostedStripeActivationOutcome> {
   const familyCheckout = await applyHostedFamilyStripeCheckoutCompletedTx({
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
@@ -244,11 +260,32 @@ export async function applyStripeCheckoutCompleted(
       welcomeEmailMemberId: null,
     };
   }
+  const isStandardCheckout =
+    session.metadata?.kind !== HOSTED_FAMILY_STRIPE_METADATA_KIND
+    && session.metadata?.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER;
+  if (isStandardCheckout && !preparedStandardCompletion) {
+    throw new TypeError(
+      "Standard Stripe Checkout must be prepared before the transaction.",
+    );
+  }
 
-  const member = await findMemberForStripeCheckoutSession({
-    prisma,
-    session,
-  });
+  const member = preparedStandardCompletion
+    ? (
+        !preparedStandardCompletion.billingCompletion
+        || preparedStandardCompletion.memberId ===
+            preparedStandardCompletion.billingCompletion.memberId
+          ? (
+              await readHostedMemberCoreState({
+                memberId: preparedStandardCompletion.memberId,
+                prisma,
+              })
+            )
+          : null
+      )
+    : await findMemberForStripeCheckoutSession({
+        prisma,
+        session,
+      });
 
   if (!member) {
     return {
@@ -257,17 +294,25 @@ export async function applyStripeCheckoutCompleted(
       welcomeEmailMemberId: null,
     };
   }
+  const memberSnapshot = "core" in member
+    ? member
+    : {
+        billingRef: null,
+        core: member,
+      };
 
   const familyClaimDisposition = await classifyHostedFamilyBillingClaimTx({
     checkoutSession: session,
-    memberId: member.core.id,
+    canonicalSubscription:
+      preparedStandardCompletion?.canonicalSubscription ?? null,
+    memberId: memberSnapshot.core.id,
     stripeCustomerId: coerceStripeObjectId(session.customer),
     stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription),
     tx: prisma,
   });
   if (familyClaimDisposition !== "none") {
     await clearHostedMemberStripeCheckoutAttemptForSessionTx({
-      memberId: member.core.id,
+      memberId: memberSnapshot.core.id,
       sessionId: session.id,
       tx: prisma,
     });
@@ -285,7 +330,7 @@ export async function applyStripeCheckoutCompleted(
   if (session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
     const outcome = await applyPulseTrialCheckoutCompletedTx({
       dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
-      member,
+      member: memberSnapshot,
       ...(preparedCryptoDomainRoots
         ? { preparedCryptoDomainRoots }
         : {}),
@@ -293,7 +338,7 @@ export async function applyStripeCheckoutCompleted(
       tx: prisma,
     });
     await clearHostedMemberStripeCheckoutAttemptForSessionTx({
-      memberId: member.core.id,
+      memberId: memberSnapshot.core.id,
       sessionId: session.id,
       tx: prisma,
     });
@@ -302,7 +347,11 @@ export async function applyStripeCheckoutCompleted(
 
   const accepted = await bindHostedStripeBillingRefsFromCheckoutSessionTx({
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
-    memberId: member.core.id,
+    memberId: memberSnapshot.core.id,
+    preparedCompletion:
+      preparedStandardCompletion?.billingCompletion ?? undefined,
+    preparedStripeCheckoutEmail:
+      preparedStandardCompletion?.stripeCheckoutEmail ?? null,
     session,
     tx: prisma,
   });
@@ -317,8 +366,65 @@ export async function applyStripeCheckoutCompleted(
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
-    welcomeEmailMemberId: member.core.id,
+    welcomeEmailMemberId: memberSnapshot.core.id,
   };
+}
+
+export async function prepareHostedStandardStripeCheckoutCompletion(input: {
+  canonicalSubscription?: Stripe.Subscription | null;
+  memberId: string;
+  prisma: PrismaClient;
+  session: Stripe.Checkout.Session;
+}): Promise<PreparedHostedStandardStripeCheckoutCompletion | null> {
+  if (
+    input.session.metadata?.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
+    || input.session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+  ) {
+    return null;
+  }
+  const stripeCustomerId = coerceStripeObjectId(input.session.customer);
+  const stripeSubscriptionId =
+    coerceStripeSubscriptionId(input.session.subscription);
+  const stripeCheckoutEmail =
+    readHostedStripeCheckoutSessionEmailAddress(input.session);
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const expandedSubscription =
+      readExpandedStripeCheckoutSubscription(input.session);
+    const [
+      billingCompletion,
+      canonicalSubscription,
+      preparedStripeCheckoutEmail,
+    ] = await Promise.all([
+      stripeCustomerId && stripeSubscriptionId
+        ? prepareHostedMemberStripeCheckoutCompletion({
+            memberId: input.memberId,
+            prisma: input.prisma,
+            stripeCustomerId,
+            stripeSubscriptionId,
+          })
+        : null,
+      input.canonicalSubscription
+      ?? expandedSubscription
+      ?? (
+        stripeSubscriptionId
+          ? readHostedStripeCheckoutSessionSubscription(input.session)
+          : null
+      ),
+      stripeCheckoutEmail
+        ? prepareHostedMemberStripeCheckoutEmail({
+            address: stripeCheckoutEmail,
+            memberId: input.memberId,
+            prisma: input.prisma,
+          })
+        : null,
+    ]);
+    return {
+      billingCompletion,
+      canonicalSubscription,
+      memberId: input.memberId,
+      stripeCheckoutEmail: preparedStripeCheckoutEmail,
+    };
+  });
 }
 
 function readExpandedStripeCheckoutSubscription(
@@ -333,6 +439,8 @@ function readExpandedStripeCheckoutSubscription(
 export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
   dispatchContext?: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
   memberId: string;
+  preparedCompletion?: PreparedHostedMemberStripeCheckoutCompletion;
+  preparedStripeCheckoutEmail: PreparedHostedMemberStripeCheckoutEmail | null;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
@@ -349,6 +457,26 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
       retryable: true,
     });
   }
+  if (
+    !input.preparedCompletion
+    || input.preparedCompletion.memberId !== input.memberId
+    || input.preparedCompletion.stripeCustomerId !== stripeCustomerId
+    || input.preparedCompletion.stripeSubscriptionId !== stripeSubscriptionId
+  ) {
+    throw new TypeError(
+      "Standard Stripe Checkout completion must be prepared before the transaction.",
+    );
+  }
+  const stripeCheckoutEmail =
+    readHostedStripeCheckoutSessionEmailAddress(input.session);
+  if (
+    (input.preparedStripeCheckoutEmail?.address ?? null) !==
+    stripeCheckoutEmail
+  ) {
+    throw new TypeError(
+      "Prepared Stripe checkout email does not match the Checkout Session.",
+    );
+  }
   const checkoutAttemptId = normalizeNullableString(
     input.session.metadata?.checkoutAttemptId,
   );
@@ -362,20 +490,21 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     currentCheckoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
     eventCreatedAt: dispatchContext.eventCreatedAt,
     memberId: input.memberId,
-    stripeCustomerId,
-    stripeSubscriptionId,
+    preparedCompletion: input.preparedCompletion,
     tx: input.tx,
   });
   if (acceptance.kind === "cleanup_superseded") {
     return false;
   }
 
-  await writeHostedStripeCheckoutEmailIfPresentTx({
-    collectedAt: dispatchContext.eventCreatedAt,
-    memberId: input.memberId,
-    stripeEmailAddress: readHostedStripeCheckoutSessionEmailAddress(input.session),
-    tx: input.tx,
-  });
+  if (input.preparedStripeCheckoutEmail) {
+    await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
+      collectedAt: dispatchContext.eventCreatedAt,
+      memberId: input.memberId,
+      preparedEmail: input.preparedStripeCheckoutEmail,
+      tx: input.tx,
+    });
+  }
 
   return true;
 }

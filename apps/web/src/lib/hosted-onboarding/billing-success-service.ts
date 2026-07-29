@@ -29,6 +29,7 @@ import {
   applyStripeCheckoutCompleted,
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
+  prepareHostedStandardStripeCheckoutCompletion,
 } from "./stripe-billing-events";
 import {
   cleanupHostedStandardCheckoutLoser,
@@ -127,6 +128,12 @@ async function applyHostedCheckoutSessionSuccess(input: {
           userId: input.memberId,
         })
       : null;
+  const preparedStandardCompletion =
+    await prepareHostedStandardStripeCheckoutCompletion({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      session: input.session,
+    });
   let activationOutcome: {
     activatedMemberId: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
@@ -157,6 +164,15 @@ async function applyHostedCheckoutSessionSuccess(input: {
         });
       }
 
+      if (preparedStandardCompletion) {
+        return applyStripeCheckoutCompleted(
+          input.session,
+          tx,
+          undefined,
+          preparedCryptoDomainRoots ?? undefined,
+          preparedStandardCompletion,
+        );
+      }
       return preparedCryptoDomainRoots
         ? applyStripeCheckoutCompleted(
             input.session,

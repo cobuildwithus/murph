@@ -6,6 +6,7 @@ import {
   coerceStripeSubscriptionId,
 } from "./billing";
 import {
+  listHostedMemberStripeBillingLookupMemberIds,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
 } from "./hosted-member-billing-store";
@@ -137,46 +138,18 @@ export async function listHostedStripeCheckoutSessionMemberIds(input: {
     }),
     prisma: input.prisma,
   });
-  const stripeLookupMemberIds = await listHostedStripeBillingLookupMemberIds({
-    customerId: coerceStripeObjectId(input.session.customer),
+  const stripeLookupMemberIds =
+    await listHostedMemberStripeBillingLookupMemberIds({
     prisma: input.prisma,
-    subscriptionId: coerceStripeSubscriptionId(input.session.subscription),
+    stripeCustomerId: coerceStripeObjectId(input.session.customer),
+    stripeSubscriptionId:
+      coerceStripeSubscriptionId(input.session.subscription),
   });
 
   return listHostedStripeUniqueMemberIds([
     ...directMemberIds,
     ...stripeLookupMemberIds,
   ]);
-}
-
-async function listHostedStripeBillingLookupMemberIds(input: {
-  customerId: string | null;
-  prisma: HostedOnboardingReadClient;
-  subscriptionId: string | null;
-}): Promise<string[]> {
-  const memberIds: string[] = [];
-
-  if (input.subscriptionId) {
-    const billingLookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionId({
-      prisma: input.prisma,
-      stripeSubscriptionId: input.subscriptionId,
-    });
-    if (billingLookup) {
-      memberIds.push(billingLookup.core.id);
-    }
-  }
-
-  if (input.customerId) {
-    const billingLookup = await lookupHostedMemberStripeBillingRefByStripeCustomerId({
-      prisma: input.prisma,
-      stripeCustomerId: input.customerId,
-    });
-    if (billingLookup) {
-      memberIds.push(billingLookup.core.id);
-    }
-  }
-
-  return listHostedStripeUniqueMemberIds(memberIds);
 }
 
 async function filterExistingHostedMemberIds(input: {

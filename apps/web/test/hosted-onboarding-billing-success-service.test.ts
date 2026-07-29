@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
     prepareHostedCryptoDomainRootCandidates: vi.fn(),
+    prepareHostedStandardStripeCheckoutCompletion: vi.fn(),
     preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
@@ -104,6 +105,8 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
+  prepareHostedStandardStripeCheckoutCompletion:
+    mocks.prepareHostedStandardStripeCheckoutCompletion,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", () => ({
@@ -137,6 +140,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
       mocks.preparedCryptoDomainRoots,
+    );
+    mocks.prepareHostedStandardStripeCheckoutCompletion.mockResolvedValue(
+      null,
     );
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
       client_reference_id: "member_123",
@@ -281,6 +287,55 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       tx,
       undefined,
       mocks.preparedCryptoDomainRoots,
+    );
+  });
+
+  it("prepares standard Checkout bindings before opening the member transaction", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (innerTx: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    };
+    const preparedStandardCompletion = {
+      billingCompletion: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeCustomerIdEncrypted: "encrypted-customer",
+        stripeCustomerLookupKey: "customer-lookup",
+        stripeSubscriptionId: "sub_123",
+        stripeSubscriptionIdEncrypted: "encrypted-subscription",
+        stripeSubscriptionLookupKey: "subscription-lookup",
+      },
+      canonicalSubscription: null,
+      memberId: "member_123",
+      stripeCheckoutEmail: null,
+    };
+    mocks.prepareHostedStandardStripeCheckoutCompletion.mockResolvedValueOnce(
+      preparedStandardCompletion,
+    );
+
+    await reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    });
+
+    expect(
+      mocks.prepareHostedStandardStripeCheckoutCompletion
+        .mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "cs_123" }),
+      tx,
+      undefined,
+      undefined,
+      preparedStandardCompletion,
     );
   });
 

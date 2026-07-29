@@ -96,6 +96,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
+import { createHostedStripeCustomerLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { buildHostedMemberBillingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 type BillingServiceInvite = {
@@ -684,7 +685,8 @@ describe("createHostedBillingCheckout", () => {
           stripeCustomerId: "cus_existing",
           stripeSubscriptionId: null,
         })),
-        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey("cus_existing"),
         stripeSubscriptionLookupKey: null,
       },
     });
@@ -784,10 +786,20 @@ describe("createHostedBillingCheckout", () => {
       },
     ]);
 
-    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
-    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
-      "cs_123",
+    const createCalls = mocks.stripe.checkout.sessions.create.mock.calls;
+    expect(createCalls.length).toBeGreaterThanOrEqual(1);
+    expect(createCalls.length).toBeLessThanOrEqual(2);
+    const idempotencyKeys = new Set(
+      createCalls.map((call) => call[1]?.idempotencyKey),
     );
+    expect(idempotencyKeys.size).toBe(1);
+    expect([...idempotencyKeys]).toEqual([
+      expect.stringMatching(
+        /^hosted-billing-checkout:[^:]+:[a-f0-9]{32}$/,
+      ),
+    ]);
+    expect(mocks.stripe.checkout.sessions.retrieve.mock.calls.length)
+      .toBeLessThanOrEqual(1);
   });
 
   it("rejects a different price while an earlier checkout is open", async () => {
@@ -871,7 +883,8 @@ describe("createHostedBillingCheckout", () => {
           stripeCustomerId: "cus_existing",
           stripeSubscriptionId: null,
         })),
-        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey("cus_existing"),
         stripeSubscriptionLookupKey: null,
       },
     });
@@ -1286,6 +1299,10 @@ function makePrisma(input: {
       ? { ...state, ...inputData.update }
       : {
           ...inputData.create,
+          stripeCheckoutSessionIdEncrypted:
+            inputData.create.stripeCheckoutSessionIdEncrypted ?? null,
+          stripeCheckoutSessionLookupKey:
+            inputData.create.stripeCheckoutSessionLookupKey ?? null,
           stripeCustomerIdEncrypted:
             inputData.create.stripeCustomerIdEncrypted ?? null,
           stripeCustomerLookupKey:
