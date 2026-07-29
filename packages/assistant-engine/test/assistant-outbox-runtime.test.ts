@@ -8,6 +8,7 @@ vi.mock('../src/outbound-channel.ts', () => ({
 }))
 
 import type {
+  AssistantCronJob,
   AssistantChannelDelivery,
   AssistantDeliveryError,
   AssistantOutboxIntent,
@@ -50,6 +51,9 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import {
+  buildAssistantCronNotificationDedupeToken,
+} from '../src/assistant/cron/notification-delivery.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
@@ -1063,12 +1067,43 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('rejects changed card values under the same transport identity', async () => {
+  it('reuses the first frozen card for one scheduled closeout occurrence', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-card-transport-identity-',
     )
-    const transportIdentity = 'sha256:response-card-delivery'
-    await createAssistantOutboxIntent({
+    const scheduledCloseout: Pick<AssistantCronJob, 'jobId' | 'state' | 'target'> = {
+      jobId: 'cron_daily_meal_closeout',
+      state: {
+        nextRunAt: '2026-07-29T01:00:00.000Z',
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: {
+          fromPhoneNumber: '+15550000',
+          kind: 'linq',
+        },
+        sessionId: null,
+        identityId: 'identity-closeout',
+        participantId: '+15550001',
+        threadId: 'thread-response-card',
+        deliveryTarget: null,
+      },
+    }
+    const transportIdentity = buildAssistantCronNotificationDedupeToken({
+      job: scheduledCloseout,
+      trigger: 'scheduled',
+    })
+    expect(transportIdentity).not.toBeNull()
+
+    const first = await createAssistantOutboxIntent({
       card: NUTRITION_RESPONSE_CARD,
       channel: 'linq',
       dedupeToken: transportIdentity,
@@ -1081,7 +1116,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    await expect(createAssistantOutboxIntent({
+    const retry = await createAssistantOutboxIntent({
       card: {
         ...NUTRITION_RESPONSE_CARD,
         totals: {
@@ -1101,9 +1136,13 @@ describe('assistant outbox runtime', () => {
       threadIsDirect: true,
       turnId: 'turn-response-card-transport',
       vault: vaultRoot,
-    })).rejects.toMatchObject({
-      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
     })
+
+    expect(retry.intentId).toBe(first.intentId)
+    expect(retry.card).toEqual(NUTRITION_RESPONSE_CARD)
+    expect(retry.message).toBe(first.message)
+    expect(retry.deliveryIdempotencyKey).toBe(first.deliveryIdempotencyKey)
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toHaveLength(1)
   })
 
   it('stores response media while explicit dedupe tokens ignore media drift', async () => {
@@ -4832,6 +4871,7 @@ async function expectRawOutboxIntentMessage(
   expect(raw.media).toEqual(message.media)
   expect(raw.subject).toBe(message.subject)
   expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('card')
   expect(raw).not.toHaveProperty('operation')
   expect(raw).not.toHaveProperty('payload')
 }

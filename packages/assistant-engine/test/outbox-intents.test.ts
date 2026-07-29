@@ -165,7 +165,7 @@ describe('assistant outbox intent helpers', () => {
     )
   })
 
-  it('changes delivery identity when only response-card values change', () => {
+  it('includes cards in content identity while explicit tokens freeze one delivery', () => {
     const changedCard = {
       ...NUTRITION_CARD,
       totals: {
@@ -208,13 +208,12 @@ describe('assistant outbox intent helpers', () => {
       dedupeToken: 'meal-closeout-token',
     })
 
-    expect(firstCardIdentity).not.toBe(legacyTokenIdentity)
-    expect(changedCardIdentity).not.toBe(firstCardIdentity)
+    expect(firstCardIdentity).toBe(legacyTokenIdentity)
+    expect(changedCardIdentity).toBe(firstCardIdentity)
     expect(hashAssistantOutboxLegacyMediaDedupeIdentity({
-      card: NUTRITION_CARD,
       dedupeToken: 'meal-closeout-token',
       media: [],
-    })).toBeNull()
+    })).not.toBeNull()
   })
 
   it('includes native reply intent in non-token identity while preserving legacy absence', () => {

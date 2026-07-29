@@ -30,7 +30,6 @@ function createHostedAssistantDeliveryPayload(
     answeredMailboxItemIds: [],
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat-1",
-    card: null,
     channel: "telegram",
     deliverySourceKey: null,
     explicitTarget: null,
@@ -139,7 +138,7 @@ describe("hosted assistant delivery contracts", () => {
   });
 
 
-  it("propagates strict response cards and defaults legacy payloads to null", () => {
+  it("propagates strict response cards and preserves legacy card omission", () => {
     const payload = createHostedAssistantDeliveryPayload({
       card: NUTRITION_CARD,
       channel: "linq",
@@ -160,7 +159,7 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffect({
       ...effect,
       payload: legacyPayload,
-    }).payload.card).toBeNull();
+    }).payload).not.toHaveProperty("card");
   });
 
   it("rejects malformed hosted response cards and card-media coexistence", () => {

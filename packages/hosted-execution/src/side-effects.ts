@@ -711,7 +711,7 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.bindingDeliveryTarget`,
     ),
     channel: requireNullableString(record.channel ?? null, `${label}.channel`),
-    card,
+    ...(record.card === undefined ? {} : { card }),
     deliverySourceKey: requireNullableString(
       record.deliverySourceKey ?? null,
       `${label}.deliverySourceKey`,

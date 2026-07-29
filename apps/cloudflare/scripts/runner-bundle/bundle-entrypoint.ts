@@ -61,7 +61,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // total and an 8,009,225B static closure on 2026-07-28. The combined graph added
 // no forbidden boot input; production assembly below still fails closed if any
 // dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_761_860 + 32_768;
+//
+// The native iMessage response-card contract, tool, outbox, and transport paths
+// measured 9,798,967B total on 2026-07-29. No forbidden subsystem entered the
+// boot graph. Advance only the measured total baseline and retain the existing
+// allowance and independent entry/static-closure caps.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_798_967 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

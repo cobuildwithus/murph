@@ -131,11 +131,7 @@ export function hashAssistantOutboxIdentity(input: {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
   if (dedupeToken) {
     return createHash('sha1')
-      .update(JSON.stringify(
-        input.card == null
-          ? { dedupeToken }
-          : { card: input.card, dedupeToken },
-      ))
+      .update(JSON.stringify({ dedupeToken }))
       .digest('hex')
   }
 
@@ -169,12 +165,11 @@ export function hashAssistantOutboxIdentity(input: {
 }
 
 export function hashAssistantOutboxLegacyMediaDedupeIdentity(input: {
-  card?: AssistantResponseCard | null
   dedupeToken?: string | null
   media?: readonly AssistantResponseMedia[] | null
 }): string | null {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
-  if (!dedupeToken || input.card != null) {
+  if (!dedupeToken) {
     return null
   }
 

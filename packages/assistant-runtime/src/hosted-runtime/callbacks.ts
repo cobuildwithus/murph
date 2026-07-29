@@ -5083,7 +5083,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
-    card: intent.card ?? null,
+    ...(intent.card == null ? {} : { card: intent.card }),
     channel: intent.channel ?? null,
     deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
     ...(intent.emailHtml == null ? {} : { emailHtml: intent.emailHtml }),

@@ -369,13 +369,11 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       deliveryIdempotencyKey,
       dedupeToken: input.dedupeToken,
-      card,
       vault: input.vault,
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       assertAssistantOutboxDedupeEffectMatches({
-        card,
         intent: existing,
         operation,
         persistedTarget,
@@ -1975,14 +1973,10 @@ function assertAssistantOutboxNativeReplyTarget(input: {
 }
 
 function assertAssistantOutboxDedupeEffectMatches(input: {
-  card: AssistantResponseCard | null
   intent: AssistantOutboxIntent
   operation: AssistantOutboxOperation | null
   persistedTarget: AssistantOutboxPersistedTarget
 }): void {
-  if (!sameAssistantResponseCard(input.intent.card, input.card)) {
-    throw createAssistantOutboxDedupeEffectMismatchError()
-  }
   const existingOperationKind = input.intent.operation?.kind ?? null
   const requestedOperationKind = input.operation?.kind ?? null
   if (existingOperationKind !== requestedOperationKind) {
@@ -2012,13 +2006,6 @@ function assertAssistantOutboxDedupeEffectMatches(input: {
   ) {
     throw createAssistantOutboxDedupeEffectMismatchError()
   }
-}
-
-function sameAssistantResponseCard(
-  left: AssistantResponseCard | null | undefined,
-  right: AssistantResponseCard | null | undefined,
-): boolean {
-  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
 }
 
 function assertAssistantOutboxCardCompatible(input: {
