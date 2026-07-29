@@ -24,6 +24,35 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Pack agent source files
+        run: |
+          tar --zstd -cf agent-source.tar.zst \
+            packages/hosted-execution/src/contracts.ts \
+            packages/hosted-execution/package.json \
+            packages/assistant-runtime/src/hosted-runtime/platform.ts \
+            packages/assistant-runtime/src/hosted-runtime/callbacks.ts \
+            packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts \
+            packages/assistant-engine/src/assistant/execution-context.ts \
+            packages/assistant-engine/src/assistant/cron/execution.ts \
+            packages/assistant-engine/src/assistant/automation/run-loop.ts \
+            packages/assistant-engine/src/assistant/notification-turn.ts \
+            apps/cloudflare/src/runtime-platform/effects-port.ts \
+            apps/cloudflare/test/runner-platform.test.ts \
+            apps/web/test/hosted-onboarding-linq-egress-engagement.test.ts \
+            apps/web/test/hosted-onboarding-linq-line-store.test.ts \
+            apps/web/test/hosted-onboarding-linq-phone-number-inventory.test.ts \
+            apps/web/test/hosted-onboarding-linq-observability-store.test.ts \
+            agent-docs/operations/imessage-deliverability.md
+
+      - name: Upload agent source files
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: agent-source-1118
+          path: agent-source.tar.zst
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
