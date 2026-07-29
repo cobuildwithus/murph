@@ -160,7 +160,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       success: true,
       contentItems: [{
         text: expect.stringContaining(
-          'will send it here in a separate message when it is ready',
+          'should come back here in a separate message when it is ready',
         ),
       }],
     })
@@ -184,6 +184,11 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(result.rpcResult).not.toMatchObject({
       contentItems: [{
         text: expect.stringContaining('do not guarantee success'),
+      }],
+    })
+    expect(result.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('will send it here'),
       }],
     })
     await vi.waitFor(() => {

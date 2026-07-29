@@ -576,7 +576,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }
     return [
       'Trusted hosted image status: an earlier image request in this conversation is still in progress.',
-      '- if the user asks where it is, say that it is still in progress and will return here separately when it is ready. state only the current status and next step until trusted completion evidence arrives.',
+      '- if the user asks where it is, say that it is still in progress and should return here separately when it is ready. state only the current status and expected next step until trusted completion evidence arrives.',
       '- do not call `murph.generate_image` while this status is present, even for a different image. if asked for another image, say that request was not started and ask the user to wait for this result first.',
     ].join('\n')
   })()
