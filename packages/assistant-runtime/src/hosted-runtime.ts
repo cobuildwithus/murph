@@ -1783,6 +1783,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return response.result.provider;
     };
+    const resolveInvocationAssistantProviderAuthority = async (): Promise<
+      "current" | "handoff"
+    > => {
+      const liveAssistantProvider = await readLiveAssistantProvider();
+      if (liveAssistantProvider === invocationAssistantProvider) {
+        return "current";
+      }
+      assistantProviderHandoffRequested = true;
+      return "handoff";
+    };
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -1932,9 +1942,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
                 }) => {
-                  const liveAssistantProvider = await readLiveAssistantProvider();
-                  if (liveAssistantProvider !== invocationAssistantProvider) {
-                    assistantProviderHandoffRequested = true;
+                  if (
+                    await resolveInvocationAssistantProviderAuthority()
+                      === "handoff"
+                  ) {
                     throw new AssistantActiveTurnInputUnavailableError(
                       "Assistant provider changed; retrying the turn with the saved provider.",
                     );
@@ -2185,7 +2196,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onStateMutation() {
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
+        options.runtimeWakeSignal?.notify();
       },
+      resolveProviderAuthority:
+        resolveInvocationAssistantProviderAuthority,
       usageRecordPort: runtime.platform.usageRecordPort ?? null,
       userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,

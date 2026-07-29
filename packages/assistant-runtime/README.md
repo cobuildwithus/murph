@@ -22,11 +22,13 @@ Current responsibilities:
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
 - apply every `member.preferences.updated` system-mailbox delta in mailbox order, carrying the mailbox owner's cross-lane causal sequence so the canonical preference owner stale-no-ops only fields superseded by newer accepted intent while current siblings still apply; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
-- re-read Web's effective core-provider choice immediately before accepted input
-  can reach provider egress; a missing or invalid owner response defers the turn
-  through the existing typed retry path, while a provider mismatch forces the
-  dirty checkpoint immediately and requests a fresh invocation without
-  advancing the accepted input
+- re-read Web's effective core-provider choice immediately before every
+  target-owned provider entry: resident accepted input, joined-group Assistant
+  Ask, consented private candidate, and private disclosure review; a missing or
+  invalid owner response uses the existing typed retry, while a mismatch closes
+  detached work in the stale invocation, requeues any claimed ask through its
+  existing encrypted mailbox with no delay, and forces the dirty checkpoint
+  and fresh invocation without consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, the structured group-newsletter write accepts only current group routes and system-owned delivery configuration, and the automation tool remains unavailable to scheduled turns and descendants
 - seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker

@@ -26250,6 +26250,136 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("hands a detached ask to a fresh invocation when the live provider changes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const askItem = createMailboxItem({
+      dedupeKey: "ask_event_detached_provider_handoff",
+      id: "mailbox_item_detached_provider_handoff",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let completionCalls = 0;
+    let providerEgressCount = 0;
+
+    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
+      events.push("ask.started");
+      await askInput.beforeProviderEntry?.();
+      providerEgressCount += 1;
+      return { answer: "stale answer", outcome: "answered" };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_detached_provider_handoff",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "1",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "b".repeat(64),
+                  key: "users/bundles/member-synthetic/detached-provider-handoff.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push("ask.imported");
+              return await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot,
+                wake: createAssistantAskRequestedWake({
+                  eventId: askItem.dedupeKey,
+                }),
+              });
+            },
+            platform: createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  if (request.action === "complete") {
+                    events.push("ask.completed");
+                    completionCalls += 1;
+                    return { action: "complete", status: "completed" };
+                  }
+                  events.push("ask.prepared");
+                  return {
+                    action: "prepare",
+                    question: "What did the group decide?",
+                    status: "ready",
+                    targetLabel: "100 Club",
+                  };
+                },
+              },
+              assistantConfigurationToolPort: {
+                async request() {
+                  return {
+                    action: "read",
+                    result: {
+                      availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                      availableProviders: ["openai", "venice"],
+                      availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                      configurationAvailable: true,
+                      dormantSolPreference: false,
+                      model: "gpt-5.6-terra",
+                      provider: "venice",
+                      reasoningEffort: "low",
+                      solAvailable: false,
+                    },
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events: [],
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              events.push("foreground");
+              return { progressed: false };
+            },
+            runtimeWakeSignal,
+            vaultRoot,
+          },
+        ),
+        30_000,
+        () => JSON.stringify({
+          checkpointCount: checkpointRequests.length,
+          completionCalls,
+          events,
+          providerEgressCount,
+        }),
+      );
+
+      assert.equal(providerEgressCount, 0);
+      assert.equal(completionCalls, 0);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.ok(result.nextWakeAt);
+      assert.equal(checkpointRequests.length, 1);
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.itemId, askItem.id);
+      assert.equal(pending[0]?.status, "pending");
+      assert.equal(pending[0]?.nextAttemptAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const tiedWakeAt = "2099-04-27T00:05:00.000Z";
