@@ -117,6 +117,9 @@ import {
 import {
   runHostedAssistantAutomationLane,
 } from "./maintenance.ts";
+import type {
+  HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
@@ -1439,12 +1442,14 @@ export async function runHostedWorkspaceAssistantPhase(
     resolveHostedClinicalRecordsConnectLinkTool(input.runtime.platform.clinicalRecordsPort);
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
-  const linqLatencyTraceContext = {
+  const initialLinqLatencyTraceContext = {
     assistantInputIds: initialAssistantInputIds,
     latencyTracePort: input.runtime.platform.latencyTracePort,
     runtimeAttemptId: input.request.attemptId,
     source: "linq" as const,
   };
+  let activeLinqProviderMilestoneTraceContext:
+    HostedAssistantMilestoneTraceContext | null = null;
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
@@ -1482,7 +1487,7 @@ export async function runHostedWorkspaceAssistantPhase(
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
-          latencyTraceContext: linqLatencyTraceContext,
+          readLatencyTraceContext: () => activeLinqProviderMilestoneTraceContext,
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1493,7 +1498,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv,
-          latencyTraceContext: linqLatencyTraceContext,
+          latencyTraceContext: initialLinqLatencyTraceContext,
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1829,6 +1834,10 @@ export async function runHostedWorkspaceAssistantPhase(
             },
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
+            onProviderMilestoneTraceContextChanged: (context) => {
+              activeLinqProviderMilestoneTraceContext =
+                context?.source === "linq" ? context : null;
+            },
             ...(input.beforeProviderAcceptedInputs
               ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
               : {}),

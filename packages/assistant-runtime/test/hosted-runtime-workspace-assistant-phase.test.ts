@@ -11692,6 +11692,76 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("binds progress tracing to the current provider inputs instead of grouped phase inputs", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+      ],
+      importedCount: 2,
+    }));
+
+    const progressInput =
+      mocks.createHostedAssistantProgressDeliveryDependencies.mock.calls.at(-1)?.[0];
+    const readLatencyTraceContext = progressInput?.readLatencyTraceContext;
+    const assistantLaneInput =
+      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const onProviderMilestoneTraceContextChanged =
+      assistantLaneInput?.onProviderMilestoneTraceContextChanged;
+
+    expect(progressInput).not.toHaveProperty("latencyTraceContext");
+    expect(readLatencyTraceContext?.()).toBeNull();
+
+    onProviderMilestoneTraceContextChanged?.({
+      assistantInputIds: ["ain_00000000000000000000000000000001"],
+      latencyTracePort: null,
+      runtimeAttemptId: "attempt_123",
+      source: "linq",
+    });
+    expect(readLatencyTraceContext?.()?.assistantInputIds).toEqual([
+      "ain_00000000000000000000000000000001",
+    ]);
+
+    onProviderMilestoneTraceContextChanged?.({
+      assistantInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_live_steered_successor",
+      ],
+      latencyTracePort: null,
+      runtimeAttemptId: "attempt_123",
+      source: "linq",
+    });
+    expect(readLatencyTraceContext?.()?.assistantInputIds).toEqual([
+      "ain_00000000000000000000000000000001",
+      "ain_live_steered_successor",
+    ]);
+  });
+
+  it("binds resumed backlog progress when the phase has no fresh import", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      importedCount: 0,
+    }));
+
+    const progressInput =
+      mocks.createHostedAssistantProgressDeliveryDependencies.mock.calls.at(-1)?.[0];
+    const assistantLaneInput =
+      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    assistantLaneInput?.onProviderMilestoneTraceContextChanged?.({
+      assistantInputIds: ["ain_resumed_backlog_input"],
+      latencyTracePort: null,
+      runtimeAttemptId: "attempt_123",
+      source: "linq",
+    });
+
+    expect(progressInput?.readLatencyTraceContext?.()).toEqual(
+      expect.objectContaining({
+        assistantInputIds: ["ain_resumed_backlog_input"],
+        source: "linq",
+      }),
+    );
+  });
+
   it("passes foreground Linq delivery context into hosted outbox delivery", async () => {
     const linqDeliveryContext = {
       directRecipientPhoneNumber: "+15550000001",

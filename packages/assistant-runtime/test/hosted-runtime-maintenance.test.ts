@@ -3453,6 +3453,72 @@ describe("runHostedDeviceSyncPass", () => {
 });
 
 describe("runHostedAssistantAutomationLane", () => {
+  it("publishes each provider request's exact accepted input set to progress tracing", async () => {
+    const onProviderMilestoneTraceContextChanged = vi.fn();
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onProviderRequestStarted?.({
+        assistantInputIds: ["input_conversation_a"],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      });
+      input.onProviderRequestStarted?.({
+        assistantInputIds: [
+          "input_conversation_a",
+          "input_live_steered_successor",
+        ],
+        providerRequestOrdinal: 1,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:02.000Z",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_provider_input_context",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      onProviderMilestoneTraceContextChanged,
+      requestId: "req_provider_input_context",
+      runtime: createHostedAutomationRuntime(),
+      runtimeAttemptId: "attempt_provider_input_context",
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(onProviderMilestoneTraceContextChanged).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        assistantInputIds: ["input_conversation_a"],
+        runtimeAttemptId: "attempt_provider_input_context",
+        source: "linq",
+      }),
+    );
+    expect(onProviderMilestoneTraceContextChanged).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        assistantInputIds: [
+          "input_conversation_a",
+          "input_live_steered_successor",
+        ],
+        runtimeAttemptId: "attempt_provider_input_context",
+        source: "linq",
+      }),
+    );
+  });
+
   it("projects committed terminal non-replies into the existing latency trace", async () => {
     const latencyTraceRecord = vi.fn(async () => ({
       matchedCount: 2,

@@ -908,14 +908,16 @@ upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
 first locally observed Codex output/text. An accepted ephemeral Linq progress
 send emits `progress_update_accepted` at the provider-acceptance boundary; a
-failed or merely attempted send emits no progress milestone. The reply-latency
-monitor groups completed traces by their shared Linq delivery and unresolved
-traces by their exact provider request, then measures the earliest accepted
-visible response across progress and final delivery. A progress update before
-the fixed 30-second boundary therefore suppresses the latency incident, while a
-late update does not hide the breached wait. Scheduled automation turns,
-including Flex-tier turns, have no user-ingress reply trace and stay outside
-this monitor. It projects
+failed or merely attempted send emits no progress milestone. Progress snapshots
+the active provider request's accepted input ids when Linq accepts the send; it
+does not infer turn membership from the workspace phase's initial mailbox
+batch. The reply-latency monitor groups completed traces by their shared Linq
+delivery and unresolved traces by their exact provider request, then measures
+the earliest accepted visible response across progress and final delivery. A
+progress update before the fixed 30-second boundary therefore suppresses the
+latency incident, while a late update does not hide the breached wait.
+Scheduled automation turns, including Flex-tier turns, have no user-ingress
+reply trace and stay outside this monitor. It projects
 `terminal_non_reply_committed` only from the assistant engine's existing durable
 `suppressed` terminal evidence for the named input set, either immediately after
 that write succeeds or when a replay reads the completed evidence. That marker

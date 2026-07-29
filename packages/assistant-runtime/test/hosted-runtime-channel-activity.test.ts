@@ -49,6 +49,7 @@ import {
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
 } from "../src/hosted-runtime/assistant-latency-trace.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -769,6 +770,75 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
   expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain(
     "Checking the current thread.",
+  );
+});
+
+test("hosted progress delivery snapshots the current provider-owned input set", async () => {
+  const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
+    matchedCount: 1,
+    recorded: true,
+    unmatchedCount: 0,
+  }));
+  let currentContext: HostedAssistantMilestoneTraceContext | null = {
+    assistantInputIds: ["input_conversation_a"],
+    latencyTracePort: {
+      record: latencyTraceRecord,
+    },
+    runtimeAttemptId: "attempt_progress_dynamic_1",
+    source: "linq",
+  };
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement(request) {
+        return buildClaimedLinqEngagementResult(request);
+      },
+      sendEmail: mocks.sendEmail,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    providerFetch: vi.fn<typeof fetch>(),
+    readLatencyTraceContext: () => currentContext,
+  });
+
+  await delivery.sendLinq?.({
+    message: "Checking the first conversation.",
+    target: "linq-thread-a",
+    targetKind: "thread",
+  });
+  currentContext = {
+    assistantInputIds: [
+      "input_conversation_a",
+      "input_live_steered_successor",
+    ],
+    latencyTracePort: {
+      record: latencyTraceRecord,
+    },
+    runtimeAttemptId: "attempt_progress_dynamic_1",
+    source: "linq",
+  };
+  await delivery.sendLinq?.({
+    message: "Checking the updated conversation.",
+    target: "linq-thread-a",
+    targetKind: "thread",
+  });
+
+  await vi.waitFor(() => {
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+  });
+  const recordedInputIds = latencyTraceRecord.mock.calls.map(([request]) => {
+    expect(request.event.type).toBe("assistant_milestone");
+    if (request.event.type !== "assistant_milestone") {
+      throw new Error("Expected an assistant milestone latency trace.");
+    }
+    return request.event.assistantInputIds;
+  });
+  expect(recordedInputIds).toEqual([
+    ["input_conversation_a"],
+    ["input_conversation_a", "input_live_steered_successor"],
+  ]);
+  expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain(
+    "input_unrelated_conversation_b",
   );
 });
 

@@ -1671,6 +1671,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   latencyTraceContext?: HostedAssistantMilestoneTraceContext | null;
+  readLatencyTraceContext?: (() => HostedAssistantMilestoneTraceContext | null) | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1711,8 +1712,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       linqEnv,
       linqDeliveryContexts,
       onProviderAccepted: (acceptedAt) => {
+        const latencyTraceContext = input.readLatencyTraceContext
+          ? input.readLatencyTraceContext()
+          : input.latencyTraceContext;
         recordHostedAssistantMilestonesBestEffort({
-          context: input.latencyTraceContext,
+          context: latencyTraceContext,
           milestones: [{
             at: acceptedAt.toISOString(),
             milestone: "progress_update_accepted",
