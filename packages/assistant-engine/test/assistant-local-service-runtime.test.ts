@@ -28,6 +28,9 @@ import type {
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
 import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
+import {
+  ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+} from '../src/assistant/response-media.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -851,7 +854,10 @@ test('sendAssistantMessageLocal retains every completed group response and media
   expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
     .toMatchObject({
       assistantTranscriptText: 'Answer three.',
-      precedingAssistantTranscriptTexts: ['Answer one.', 'Answer two.'],
+      precedingAssistantTranscriptTexts: [
+        `${ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER}\n\nAnswer one.`,
+        'Answer two.',
+      ],
     })
 })
 
