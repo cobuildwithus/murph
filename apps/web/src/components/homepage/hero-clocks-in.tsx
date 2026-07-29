@@ -1159,10 +1159,12 @@ export function HeroClocksIn({
       setEngaged();
       cancelDemoRef.current?.();
       prepareScheduledDemo();
-      // An explicit person choice owns the group audience immediately. The
-      // delayed compose-sheet sequence is presentation only; routing and the
-      // accessible acknowledgement already derive from the group audience.
+      // Commit the fresh thread and its audience together, then move focus onto
+      // the stable conversation surface before presentation begins.
+      setItems([]);
+      setTyping(false);
       setGroupMode(true);
+      focusConversation();
       startGroupSequence({ allowAfterEngaged: true });
       return;
     }
@@ -1308,13 +1310,6 @@ export function HeroClocksIn({
                     />
                   </div>
                   <div className="relative h-[460px] lg:h-[580px]">
-                    <p role="status" className="sr-only">
-                      {engaged
-                        ? groupMode
-                          ? "Group conversation selected."
-                          : "Private conversation selected."
-                        : ""}
-                    </p>
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#f5f0e8] via-[#f5f0e8]/85 to-transparent"

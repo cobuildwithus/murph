@@ -437,6 +437,8 @@ test("topic controls wait for Murph to finish the group kickoff reply", async ()
 
   await act(async () => {
     theoButton.click();
+  });
+  await act(async () => {
     await vi.advanceTimersByTimeAsync(7_000);
   });
 
@@ -503,7 +505,11 @@ test("an explicit member selection immediately owns the group audience", async (
   assert.ok(groupHeader);
   assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
   assert.equal(groupConversation.getAttribute("role"), "log");
-  assert.match(view.container.textContent ?? "", /Group conversation selected/);
+  assert.equal(view.window.document.activeElement, groupConversation);
+  assert.doesNotMatch(
+    groupConversation.textContent ?? "",
+    /How are my steps this week\?|Average 8\.4k a day/,
+  );
 
   await act(async () => {
     groupComposer.focus();
@@ -562,6 +568,8 @@ test("group start clears the private 1:1 thread and topic clicks return to a fre
 
   await act(async () => {
     theoButton.click();
+  });
+  await act(async () => {
     await vi.advanceTimersByTimeAsync(950);
   });
 
@@ -752,6 +760,30 @@ function installGlobals(
     configurable: true,
     value() {},
   });
+  const originalFocusDescriptor = Object.getOwnPropertyDescriptor(
+    window.HTMLElement.prototype,
+    "focus",
+  );
+  const originalActiveElementDescriptor = Object.getOwnPropertyDescriptor(
+    document,
+    "activeElement",
+  );
+  // LinkeDOM can deadlock React's act queue when a focused control is disabled
+  // during the same commit that moves focus. Keep the observable focus contract
+  // while avoiding that DOM-emulator behavior.
+  Object.defineProperty(document, "activeElement", {
+    configurable: true,
+    value: document.body,
+  });
+  Object.defineProperty(window.HTMLElement.prototype, "focus", {
+    configurable: true,
+    value(this: HTMLElement) {
+      Object.defineProperty(document, "activeElement", {
+        configurable: true,
+        value: this,
+      });
+    },
+  });
   // React's legacy input-event fallback probes these IE hooks when LinkeDOM
   // does not advertise native input-event support.
   Object.defineProperty(window.HTMLElement.prototype, "attachEvent", {
@@ -776,6 +808,26 @@ function installGlobals(
   });
 
   const restoreEntries = [
+    () => {
+      if (originalFocusDescriptor) {
+        Object.defineProperty(
+          window.HTMLElement.prototype,
+          "focus",
+          originalFocusDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(window.HTMLElement.prototype, "focus");
+      }
+      if (originalActiveElementDescriptor) {
+        Object.defineProperty(
+          document,
+          "activeElement",
+          originalActiveElementDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(document, "activeElement");
+      }
+    },
     setGlobal("window", window),
     setGlobal("self", window),
     setGlobal("document", document),
