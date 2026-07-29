@@ -1,19 +1,20 @@
 name: PR 1097 Land CLI Review Fix
 
 on:
-  pull_request:
+  push:
+    branches:
+      - agent/group-challenge-scorecards
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.pull_request.number == 1097
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: agent/group-challenge-scorecards
           fetch-depth: 0
       - name: Reconcile current main
         run: |
@@ -102,4 +103,4 @@ jobs:
           rm .github/workflows/pr1097-land-cli-review-fix.yml
           git add -A
           git commit -m "Review the challenge scoring input surface"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:agent/group-challenge-scorecards
