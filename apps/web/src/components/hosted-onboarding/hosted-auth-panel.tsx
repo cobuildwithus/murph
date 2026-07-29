@@ -43,6 +43,7 @@ type HostedResumableAuth = {
 export type HostedAuthPanelView = "auth" | "consent" | "finishing";
 
 export function HostedAuthPanel({
+  inviteCode,
   methods,
   onCompleted,
   onSignOut,
@@ -51,6 +52,7 @@ export function HostedAuthPanel({
   showPassiveLegalNotice,
   size,
 }: {
+  inviteCode?: string | null;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -72,7 +74,10 @@ export function HostedAuthPanel({
   const consentDeclinedRef = useRef(false);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
-  const completion = useHostedAuthCompletion({ onCompleted: handleAuthCompleted });
+  const completion = useHostedAuthCompletion({
+    inviteCode,
+    onCompleted: handleAuthCompleted,
+  });
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
@@ -217,6 +222,7 @@ export function HostedAuthPanel({
         />
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
+          inviteCode={inviteCode}
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}

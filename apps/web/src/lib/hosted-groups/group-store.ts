@@ -174,6 +174,16 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
   selectedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
 }
 
+export interface HostedGroupJoinOfferTarget {
+  displayName: string | null;
+  groupId: string;
+  joinCode: string;
+  messageLookupKey: string;
+  offerId: string;
+  projectionKindsJson: Prisma.JsonValue;
+  runtimeMemberId: string;
+}
+
 export type HostedGroupMemberEmailShareRevocationTxResult =
   | {
       groupId: string;
@@ -1395,15 +1405,12 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   };
 }
 
-export async function acceptHostedGroupJoinOfferTx(input: {
+export async function readHostedGroupJoinOfferTargetTx(input: {
   channel: HostedGroupOfferChannel;
-  confirmationPublicBaseUrl?: string | null;
-  memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
-  now: Date;
   threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
+}): Promise<HostedGroupJoinOfferTarget> {
   const messageLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
     input.messageLookupKeyReadCandidates,
   );
@@ -1440,18 +1447,19 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   await lockHostedGroupRow(input.tx, offerLookup.groupId);
   const offer = await input.tx.hostedGroupJoinOffer.findFirst({
     where: {
+      groupId: offerLookup.groupId,
       messageLookupKey: {
         in: messageLookupKeyReadCandidates,
       },
       revokedAt: null,
     },
     select: {
-      groupId: true,
+      id: true,
       messageLookupKey: true,
       projectionKindsJson: true,
-      revokedAt: true,
       group: {
         select: {
+          displayName: true,
           id: true,
           joinCode: true,
           runtimeMemberId: true,
@@ -1503,6 +1511,33 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     });
   }
 
+  return {
+    displayName: group.displayName,
+    groupId: group.id,
+    joinCode: group.joinCode,
+    messageLookupKey: offer.messageLookupKey,
+    offerId: offer.id,
+    projectionKindsJson: offer.projectionKindsJson,
+    runtimeMemberId: group.runtimeMemberId,
+  };
+}
+
+export async function acceptHostedGroupJoinOfferTx(input: {
+  channel: HostedGroupOfferChannel;
+  confirmationPublicBaseUrl?: string | null;
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  now: Date;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
+  const offer = await readHostedGroupJoinOfferTargetTx({
+    channel: input.channel,
+    messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+    threadIdentityLookupKeyReadCandidates:
+      input.threadIdentityLookupKeyReadCandidates,
+    tx: input.tx,
+  });
   const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     offer.projectionKindsJson,
   );
@@ -1512,7 +1547,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
-    groupId: group.id,
+    groupId: offer.groupId,
     joinOrigin: "group_chat_reaction",
     memberId: input.memberId,
     now: input.now,
@@ -1523,7 +1558,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
 
   return {
     ...accepted,
-    joinCode: group.joinCode,
+    joinCode: offer.joinCode,
     messageLookupKey: offer.messageLookupKey,
     selectedVaultShareProjectionKinds,
     selectedVaultShareProjectionScopes,
