@@ -83,6 +83,25 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: false,
       },
     });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"e".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      sourceConversation: {
+        channel: "linq",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
+    });
   });
 
   it("denies referral actions on group email where the human sender is not authoritative", async () => {
@@ -128,6 +147,40 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       action: "read_shared",
       telegramSenderHandles: ["1234567890", "9876543210"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("injects the Telegram source conversation into referral reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "telegram",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"4".repeat(32)}`,
+        participantId: `hid_${"5".repeat(32)}`,
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["1234567890"],
+    });
+
+    await groupTool.request({
+      action: "read_usage_referral",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        threadId: `hid_${"6".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      telegramSenderHandles: ["1234567890"],
     });
   });
 

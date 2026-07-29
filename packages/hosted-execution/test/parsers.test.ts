@@ -1866,9 +1866,19 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: [" +15551110001 "],
+      sourceConversation: {
+        channel: "linq",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     })).toEqual({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
+      sourceConversation: {
+        channel: "linq",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",

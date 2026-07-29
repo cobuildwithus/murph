@@ -18,6 +18,7 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeProductFeedbackRecord,
+  type HostedRuntimeUsageReferralSourceContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -400,7 +401,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return await input.groupToolPort.request({
           ...referralRequest,
           ...senderHandles,
-          ...(request.action === "arm_usage_referral"
+          ...(request.action !== "cancel_usage_referral"
             ? sourceContext
             : {}),
         });
@@ -431,10 +432,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
 
 function resolveHostedUsageReferralSourceContext(
   route: AssistantCurrentDeliveryRoute | null | undefined,
-): Pick<
-  Extract<HostedRuntimeGroupToolRequest, { action: "arm_usage_referral" }>,
-  "sourceConversation"
-> {
+): HostedRuntimeUsageReferralSourceContext {
   const channel = normalizeAssistantRouteString(route?.channel)?.toLowerCase();
   const threadId = normalizeAssistantRouteString(route?.threadId);
   if (

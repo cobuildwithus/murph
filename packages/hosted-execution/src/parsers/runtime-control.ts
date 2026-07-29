@@ -1209,10 +1209,24 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (
-    action === "read_usage_referral"
-    || action === "cancel_usage_referral"
-  ) {
+  if (action === "read_usage_referral") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "sourceConversation",
+        "telegramSenderHandles",
+      ]),
+      `Hosted runtime group tool ${action} request`,
+    );
+    return {
+      action,
+      ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      ...parseHostedRuntimeUsageReferralSourceContext(record),
+    };
+  }
+  if (action === "cancel_usage_referral") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "linqSenderHandles", "telegramSenderHandles"]),

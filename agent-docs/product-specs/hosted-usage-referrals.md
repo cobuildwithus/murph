@@ -57,6 +57,9 @@ tells the referrer only to bring one new person and Murph together in a fresh
 group. The ordinary first-reply group setup flow owns the reciprocal onboarding:
 Murph shares its contact card once and naturally invites the newcomer to save
 and text it. Setup happens in the newcomer's 1:1 thread after they initiate it.
+Because that group onboarding path is currently Linq-owned, the runtime offers
+and arms the new-person mission only from a Linq conversation. Telegram remains
+eligible for the provider-neutral active-group mission.
 The person completes the ordinary activation flow with the same provider
 identity observed in the target, returns to the group, and says hi. The
 combination of post-arm activation and target presence provides attribution;

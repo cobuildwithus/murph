@@ -59,8 +59,13 @@ type ReferralState = {
 };
 
 const PERSONAL_SOURCE = {
-  channel: "telegram" as const,
+  channel: "linq" as const,
   threadId: `hid_${"1".repeat(32)}`,
+  threadIsDirect: true,
+};
+const TELEGRAM_PERSONAL_SOURCE = {
+  channel: "telegram" as const,
+  threadId: `hid_${"2".repeat(32)}`,
   threadIsDirect: true,
 };
 
@@ -118,7 +123,10 @@ describe("hosted usage referral tool", () => {
     await expect(handleHostedUsageReferralGroupTool({
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toEqual({
       action: "read_usage_referral",
       result: {
@@ -137,7 +145,10 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toMatchObject({
       action: "read_usage_referral",
       result: {
@@ -176,7 +187,10 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toMatchObject({
       result: {
         referral: {
@@ -195,6 +209,73 @@ describe("hosted usage referral tool", () => {
             },
           ],
         },
+      },
+    });
+  });
+
+  it("offers only the provider-neutral mission from Telegram", async () => {
+    const { prisma } = buildPrisma();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          availablePolicies: [
+            {
+              code: "active_group_v1",
+            },
+          ],
+        },
+        status: "ok",
+      },
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "active_group_v1",
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "armed",
+        referral: {
+          active: {
+            policyCode: "active_group_v1",
+            state: "armed",
+          },
+        },
+        status: "ok",
       },
     });
   });

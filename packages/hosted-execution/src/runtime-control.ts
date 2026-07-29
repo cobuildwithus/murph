@@ -1283,7 +1283,10 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "read_chat_name" }
   | { action: "read_usage" }
-  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "read_usage_referral";
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
   | ({
       action: "arm_usage_referral";
       policyCode: HostedUsageReferralPolicyCode;

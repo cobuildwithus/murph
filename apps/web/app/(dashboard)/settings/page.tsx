@@ -301,7 +301,7 @@ export default async function SettingsPage({
     usageActivity?.missionsEnabled === true && account
       ? resolveMurphContactOptions({
           contactChannels: {
-            email: Boolean(account.email.murphEmailAddress),
+            email: false,
             telegram: Boolean(account.telegram.telegramUserId),
             text: Boolean(account.phone.number),
           },

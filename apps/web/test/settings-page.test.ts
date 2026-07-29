@@ -36,6 +36,11 @@ const mocks = vi.hoisted(() => ({
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
   resolveMurphContactOptions: vi.fn((input?: {
+    contactChannels?: {
+      email?: boolean;
+      telegram?: boolean;
+      text?: boolean;
+    } | null;
     message?: { body?: string | null } | null;
   }) => {
     if (input?.message?.body === "Hey Murph, I just added more usage.") {
@@ -1448,7 +1453,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   }), undefined);
 });
 
-test("SettingsPage drops the voice-test chat link for an email-only member", async () => {
+test("SettingsPage drops unsupported chat links for an email-only member", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -1478,11 +1483,20 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
       },
     },
   });
-  mocks.resolveMurphContactOptions.mockReturnValueOnce([{
-    href: "mailto:murph@mail.withmurph.ai?body=test",
-    kind: "email",
-    label: "Email",
-  }]);
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [],
+    missionsEnabled: true,
+  });
+  mocks.resolveMurphContactOptions.mockImplementation((input) =>
+    input?.contactChannels?.email === true
+      ? [{
+          href: "mailto:murph@mail.withmurph.ai?body=test",
+          kind: "email",
+          label: "Email",
+        }]
+      : []
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -1491,6 +1505,24 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
   expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
     voiceTestContactOption: null,
   }), undefined);
+  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      missionContactOption: null,
+    }),
+    undefined,
+  );
+  expect(mocks.resolveMurphContactOptions).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      contactChannels: {
+        email: false,
+        telegram: false,
+        text: false,
+      },
+      message: {
+        body: "Hey Murph, what usage missions can I choose from?",
+      },
+    }),
+  );
 });
 
 test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscription", async () => {

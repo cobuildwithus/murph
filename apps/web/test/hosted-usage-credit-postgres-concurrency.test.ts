@@ -1358,7 +1358,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
       const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
       const sourceConversation = {
-        channel: "telegram" as const,
+        channel: "linq" as const,
         threadId: `hid_${fixtureId.replaceAll("-", "")}`,
         threadIsDirect: true,
       };
@@ -1395,7 +1395,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           enabled: true,
           memberId,
           prisma,
-          request: { action: "read_usage_referral" },
+          request: {
+            action: "read_usage_referral",
+            sourceConversation,
+          },
         })).resolves.toMatchObject({
           result: {
             outcome: "read",

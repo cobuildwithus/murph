@@ -311,13 +311,23 @@ export async function handleHostedUsageReferralGroupTool(input: {
         "usage_referral_not_available",
       );
     }
+    const requestSourceConversation =
+      input.request.action === "cancel_usage_referral"
+        ? null
+        : readHostedUsageReferralSourceConversation(
+            input.request.sourceConversation ?? null,
+          );
 
     if (input.request.action === "read_usage_referral") {
       return {
         action: input.request.action,
         result: {
           outcome: "read",
-          referral: await readHostedUsageReferralSnapshot({ actor, prisma }),
+          referral: await readHostedUsageReferralSnapshot({
+            actor,
+            prisma,
+            sourceConversation: requestSourceConversation,
+          }),
           status: "ok",
         },
       };
@@ -374,12 +384,21 @@ export async function handleHostedUsageReferralGroupTool(input: {
     }
 
     const policy = POLICIES[input.request.policyCode];
+    if (
+      !isHostedUsageReferralPolicyAvailableFromSource({
+        policyCode: policy.code,
+        sourceConversation: requestSourceConversation,
+      })
+    ) {
+      return unavailableToolResponse(
+        input.request.action,
+        "usage_referral_not_available",
+      );
+    }
     const personalSource =
       actor.beneficiaryMemberId === actor.referrerMemberId;
     const sourceConversation = personalSource
-      ? readHostedUsageReferralSourceConversation(
-          input.request.sourceConversation ?? null,
-        )
+      ? requestSourceConversation
       : null;
     if (
       personalSource
@@ -1556,6 +1575,7 @@ async function readHostedUsageReferralSnapshot(input: {
   actor: HostedUsageReferralActor;
   now?: Date;
   prisma: PrismaClient;
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation | null;
 }): Promise<HostedRuntimeUsageReferralSnapshot> {
   const now = input.now ?? new Date();
   const destinationKind =
@@ -1615,15 +1635,22 @@ async function readHostedUsageReferralSnapshot(input: {
           state: active.status === "armed" ? "armed" : "target_bound",
         }
       : null,
-    availablePolicies: availablePolicyCodes.map((code) => ({
-          code,
-          requirementsLabel: POLICIES[code].requirementsLabel,
-          rewardLabel: buildHostedUsageReferralRewardLabel({
-            destinationKind,
-            model: destinationModel,
-            policyCode: code,
-          }),
-        })),
+    availablePolicies: availablePolicyCodes
+      .filter((policyCode) =>
+        isHostedUsageReferralPolicyAvailableFromSource({
+          policyCode,
+          sourceConversation: input.sourceConversation ?? null,
+        })
+      )
+      .map((code) => ({
+        code,
+        requirementsLabel: POLICIES[code].requirementsLabel,
+        rewardLabel: buildHostedUsageReferralRewardLabel({
+          destinationKind,
+          model: destinationModel,
+          policyCode: code,
+        }),
+      })),
     trialCreditNotice:
       personalUsage !== null
       && personalUsage.status !== "unavailable"
@@ -1631,6 +1658,14 @@ async function readHostedUsageReferralSnapshot(input: {
         ? "Bonus usage does not extend the trial end date."
         : null,
   };
+}
+
+function isHostedUsageReferralPolicyAvailableFromSource(input: {
+  policyCode: HostedUsageReferralPolicyCode;
+  sourceConversation: HostedRuntimeUsageReferralSourceConversation | null;
+}): boolean {
+  return input.policyCode !== "new_person_activation_v1"
+    || input.sourceConversation?.channel === "linq";
 }
 
 async function readHostedUsageReferralDestinationModel(input: {

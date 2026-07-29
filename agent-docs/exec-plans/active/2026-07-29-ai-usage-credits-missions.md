@@ -29,11 +29,12 @@ Updated: 2026-07-29
 ## Scope
 
 - In scope: a member-bound read projection, reusable Settings presentation,
-  current Settings integration, design-catalog studies, focused tests, and the
-  live usage-referral product contract.
+  current Settings integration, design-catalog studies, focused tests, the
+  natural conversational mission handoff, and channel eligibility at the
+  existing usage-referral runtime boundary.
 - Out of scope: new credit or referral writes, schema changes, Stripe calls,
-  referral policy changes, qualification counters, provider/runtime changes,
-  and any new persistence or background process.
+  qualification counters, new provider onboarding behavior, and any new
+  persistence or background process.
 
 ## Constraints
 
@@ -103,6 +104,12 @@ Updated: 2026-07-29
   now states the introduction and completion outcome, while the ordinary group
   first-reply flow owns newcomer consent and setup. Qualification, attribution,
   reward, and deadline behavior remain unchanged.
+- The natural new-person handoff depends on the ordinary Linq group onboarding
+  path. Runtime-injected source context therefore limits that mission to Linq
+  while Telegram continues to offer the provider-neutral active-group mission.
+- Email ingress cannot authenticate referral actions. Settings omits the
+  mission handoff for an email-only member instead of linking to a conversation
+  that cannot complete the request.
 
 ## Verification
 
@@ -121,10 +128,16 @@ Current evidence:
   billing layout, referral policy, and Settings integration.
 - Hosted-web prepared typecheck, touched-file ESLint, and `git diff --check`
   passed.
+- Follow-up channel-eligibility coverage passed: 43 hosted-web tests, 20
+  assistant-runtime tests, and 62 hosted-execution parser tests. Prepared
+  hosted-web, assistant-runtime, and hosted-execution typechecks also passed.
 - Desktop and mobile browser proof covered the production ordering study,
   production-composed history without a current usage bar, and enabled,
   selected/waiting, and disabled-new-missions history states. Every captured
   study had equal client and scroll widths and retained semantic table labels.
+- The existing design proof predates the final copy adjustment. Exact-current
+  recapture was attempted, but the connected in-app browser was unavailable;
+  static component coverage and the final frontend gate remain required.
 - The optional Claude Code UI double-check was attempted once and stopped after
   the configured reviewer reported exhausted usage credits, as required by the
   review workflow.
