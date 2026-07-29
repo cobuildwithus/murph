@@ -67,7 +67,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-29",
     title: "Corrections that carry forward",
     summary:
-      "iMessage edits now become real corrections, Telegram can hand off the right iMessage line, Murph can circle back once after onboarding, clubs have clearer planning, and group context, experiment history, image updates, and the public site all read more clearly.",
+      "iMessage edits become real corrections, dense reminders become a natural reply loop, group challenges gain team and multi-metric scorecards, Telegram can hand off the right iMessage line, and onboarding, clubs, group context, images, experiments, and the public site all get clearer.",
     items: [
       {
         id: "post-onboarding-choice-point",
@@ -80,6 +80,30 @@ const RAW_CHANGELOG_EDITIONS = [
           "It is a one-time choice point, not a recurring nudge. Existing eligible members get one future catch-up rather than an immediate late message, and nothing changes until they reply.",
         relevanceTags: ["onboarding", "assistant", "follow-up", "goals"],
         sourcePullRequests: [1061],
+      },
+      {
+        id: "additive-group-challenge-scorecards",
+        kind: "feature",
+        priority: 5,
+        title: "Group challenges can score the game you meant",
+        summary:
+          "Murph can now run individual, team, or whole-group challenges with up to five additive scoring components, including weighted combinations such as steps, logged protein, and qualifying workouts.",
+        details:
+          "Rules and team membership freeze before scoring. Missing data stays visibly partial instead of becoming zero, and cumulative challenges can roll forward without rewriting earlier results.",
+        relevanceTags: ["groups", "challenges", "scoring", "wearables"],
+        sourcePullRequests: [1097],
+      },
+      {
+        id: "dense-reminders-become-conversation",
+        kind: "improvement",
+        priority: 5,
+        title: "Frequent reminders become one conversation",
+        summary:
+          "When you ask for several same-purpose reminders in one day, Murph can offer one finite check-in loop that asks naturally about the previous action while cueing the current one.",
+        details:
+          "It carries forward at most one unresolved occurrence, never builds reminder debt, and goes quiet after one unanswered combined check-in until you re-engage.",
+        relevanceTags: ["reminders", "automation", "assistant", "messaging"],
+        sourcePullRequests: [1116],
       },
       {
         id: "clubs-challenge-pilot-page",

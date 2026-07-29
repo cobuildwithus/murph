@@ -90,6 +90,29 @@ describe("changelog registry", () => {
     });
   });
 
+  it("keeps additive challenge scorecards bounded and evidence-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "additive-group-challenge-scorecards",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1097],
+      summary: expect.stringContaining("up to five additive scoring components"),
+      details: expect.stringContaining("Missing data stays visibly partial"),
+    });
+  });
+
+  it("keeps dense reminder conversations finite", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "dense-reminders-become-conversation",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1116],
+      details: expect.stringContaining("at most one unresolved occurrence"),
+    });
+  });
+
   it("publishes the complete July 20 through July 29 shipment set", () => {
     expect(
       listChangelogEditions().slice(0, 10).map((edition) => ({
@@ -101,6 +124,8 @@ describe("changelog registry", () => {
         id: "2026-07-29",
         itemIds: [
           "post-onboarding-choice-point",
+          "additive-group-challenge-scorecards",
+          "dense-reminders-become-conversation",
           "clubs-challenge-pilot-page",
           "group-chat-title-on-demand",
           "telegram-imessage-contact-handoff",

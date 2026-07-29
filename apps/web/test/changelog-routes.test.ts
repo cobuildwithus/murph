@@ -35,14 +35,16 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(23);
+    expect(items).toHaveLength(25);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 10 }, () => "2026-07-29"),
+      ...Array.from({ length: 12 }, () => "2026-07-29"),
       ...Array.from({ length: 13 }, () => "2026-07-28"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
         "post-onboarding-choice-point",
+        "additive-group-challenge-scorecards",
+        "dense-reminders-become-conversation",
         "telegram-imessage-contact-handoff",
         "imessage-edits-become-corrections",
         "clubs-challenge-pilot-page",
