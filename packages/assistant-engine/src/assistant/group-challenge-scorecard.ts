@@ -1,7 +1,9 @@
 export const GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS = 5 as const
 
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const MAX_STABLE_ID_LENGTH = 80
 const MAX_TEXT_LENGTH = 160
+const TARGET_PROGRESS_COMPLETE_BASIS_POINTS = 10_000n
 
 export type GroupChallengeComponentStatus =
   | 'available'
@@ -287,13 +289,12 @@ function computeComponentPoints(
   component: GroupChallengeScorecardComponent,
   quantity: number,
 ): number {
-  const uncapped = bigIntToSafeInteger(
-    (BigInt(quantity) * BigInt(component.points)) / BigInt(component.perQuantity),
-    `points for component ${component.id}`,
-  )
-  return component.maxPoints === undefined
+  const uncapped =
+    (BigInt(quantity) * BigInt(component.points)) / BigInt(component.perQuantity)
+  const capped = component.maxPoints === undefined
     ? uncapped
-    : Math.min(uncapped, component.maxPoints)
+    : minBigInt(uncapped, BigInt(component.maxPoints))
+  return bigIntToSafeInteger(capped, `points for component ${component.id}`)
 }
 
 function buildScoreboard(input: {
@@ -416,7 +417,11 @@ function buildTeamEntries(input: {
     const verifiedPoints = input.format.aggregation === 'sum'
       ? verifiedSubtotalPoints
       : complete
-        ? Math.floor(verifiedSubtotalPoints / teamParticipants.length)
+        ? divideSafeInteger(
+            verifiedSubtotalPoints,
+            teamParticipants.length,
+            `team ${team.id} average points`,
+          )
         : null
 
     return {
@@ -456,7 +461,7 @@ function buildTeamEntries(input: {
     if (right.verifiedPoints === null) {
       return -1
     }
-    return right.verifiedPoints - left.verifiedPoints
+    return compareSafeIntegersDescending(left.verifiedPoints, right.verifiedPoints)
       || left.teamId.localeCompare(right.teamId)
   })
 }
@@ -488,13 +493,13 @@ function buildObjectiveProgress(
   targetPoints: number,
 ): GroupChallengeObjectiveProgress {
   assertPositiveSafeInteger(targetPoints, 'target points')
-  const verifiedProgressBasisPoints = Math.min(
-    10_000,
-    bigIntToSafeInteger(
-      (BigInt(verifiedPoints) * 10_000n) / BigInt(targetPoints),
-      'target progress basis points',
-    ),
-  )
+  const uncappedProgressBasisPoints =
+    (BigInt(verifiedPoints) * TARGET_PROGRESS_COMPLETE_BASIS_POINTS)
+      / BigInt(targetPoints)
+  const verifiedProgressBasisPoints = Number(minBigInt(
+    uncappedProgressBasisPoints,
+    TARGET_PROGRESS_COMPLETE_BASIS_POINTS,
+  ))
   return {
     remainingPoints: Math.max(0, targetPoints - verifiedPoints),
     targetPoints,
@@ -507,13 +512,22 @@ function compareScoreboardEntries(
   left: GroupChallengeIndividualScoreboardEntry,
   right: GroupChallengeIndividualScoreboardEntry,
 ): number {
-  return right.verifiedPoints - left.verifiedPoints
+  return compareSafeIntegersDescending(left.verifiedPoints, right.verifiedPoints)
     || left.participantId.localeCompare(right.participantId)
 }
 
+function compareSafeIntegersDescending(left: number, right: number): number {
+  if (left === right) {
+    return 0
+  }
+  return left > right ? -1 : 1
+}
+
 function assertStableId(value: string, label: string): void {
-  if (!STABLE_ID_PATTERN.test(value)) {
-    throw new TypeError(`${label} must be lowercase kebab-case.`)
+  if (value.length > MAX_STABLE_ID_LENGTH || !STABLE_ID_PATTERN.test(value)) {
+    throw new TypeError(
+      `${label} must be 1-${MAX_STABLE_ID_LENGTH} characters in lowercase kebab-case.`,
+    )
   }
 }
 
@@ -541,11 +555,24 @@ function assertNonNegativeSafeInteger(value: number, label: string): void {
   }
 }
 
+function divideSafeInteger(
+  dividend: number,
+  divisor: number,
+  label: string,
+): number {
+  assertPositiveSafeInteger(divisor, `${label} divisor`)
+  return bigIntToSafeInteger(BigInt(dividend) / BigInt(divisor), label)
+}
+
 function sumSafeIntegers(values: readonly number[], label: string): number {
   return bigIntToSafeInteger(
     values.reduce((total, value) => total + BigInt(value), 0n),
     label,
   )
+}
+
+function minBigInt(left: bigint, right: bigint): bigint {
+  return left < right ? left : right
 }
 
 function bigIntToSafeInteger(value: bigint, label: string): number {
