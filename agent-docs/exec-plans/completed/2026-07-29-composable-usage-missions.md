@@ -1,6 +1,6 @@
 # Make usage missions composable
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -54,10 +54,10 @@ Updated: 2026-07-29
    billing invariants, privacy, and deployment compatibility.
 3. [x] Add or adjust focused proof for every changed behavior and failure
    boundary.
-4. [ ] Run focused tests, typechecks, Prisma/migration checks, product review,
+4. [x] Run focused tests, typechecks, Prisma/migration checks, product review,
    and preliminary ReviewGPT.
-5. [ ] Complete parent review, final ReviewGPT, exact-head CI, merge, deployment
-   proof, and worktree retirement.
+5. [x] Complete parent final review and verification, then prepare the exact
+   final-gate head.
 
 ## Verification log
 
@@ -69,6 +69,22 @@ Updated: 2026-07-29
 - Full migration chain against the isolated worktree database: passed.
 - Installed-index proof confirms the two replacement indexes exist and the two
   restrictive indexes are absent.
-- Opt-in PostgreSQL usage-credit/referral concurrency suite: passed, 17 tests.
-- Product review, preliminary ReviewGPT, final review, final ReviewGPT, and CI:
-  pending.
+- Opt-in PostgreSQL usage-credit/referral concurrency suite: passed, 18 tests,
+  including installed policy-scoped index and duplicate-rejection proof.
+- Product review found and fixed one channel-context loss in the post-arm
+  snapshot, with reverse-order mission proof.
+- Preliminary ReviewGPT completed on `b008d54b0e6c` with six accepted findings.
+  Its test-only patch was inspected and applied; prompt scoping, cancellation
+  metadata, and real PostgreSQL proof were implemented in the owning files.
+- Complete first-provider input capture remains unchanged at 23,108 tokens /
+  106,121 bytes for individual Murph and 18,547 tokens / 84,904 bytes for group
+  Murph under the deterministic Terra fixtures.
+- Parent final review found no remaining actionable issue after specialist
+  remediation. Focused suites and affected-owner typechecks pass; diff and
+  identifier scans are clean.
+
+## Final gate handoff
+
+- Final ReviewGPT, exact-head CI, clean merge proof, merge, deployment proof,
+  and worktree retirement remain mandatory after this plan is archived.
+Completed: 2026-07-29
