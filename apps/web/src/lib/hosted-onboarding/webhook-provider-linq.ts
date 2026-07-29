@@ -937,6 +937,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         participantMemberId: existingMember?.id ?? null,
         participantPhoneNumber,
         recipientPhoneNumber,
+        replyToMessageId:
+          messageEvent.data.message.reply_to?.message_id ?? null,
         sourceEventId: input.event.event_id,
         tx: input.prisma,
       })

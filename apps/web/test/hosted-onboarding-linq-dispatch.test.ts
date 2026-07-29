@@ -9,6 +9,7 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -4932,6 +4933,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const groupId = "hgrp_instant_start_reply";
     const groupJoinCode = "join_instant_start_reply";
     const groupJoinOutreachId = "hgrpjoa_instant_start_reply";
+    const newerGroupId = "hgrp_instant_start_reply_newer";
+    const newerGroupJoinCode = "join_instant_start_reply_newer";
+    const newerGroupJoinOutreachId = "hgrpjoa_instant_start_reply_newer";
+    const providerGroupOutreachMessageId = "provider_group_outreach";
+    const providerNewerGroupOutreachMessageId =
+      "provider_group_outreach_newer";
     let createdMemberId: string | null = null;
     const createdInviteState: {
       current: {
@@ -5011,7 +5018,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const participantPhoneLookupKey = createHostedPhoneLookupKey("+15551234567");
     const linqChatLookupKey = createHostedLinqChatLookupKey("chat_123");
-    if (!participantPhoneLookupKey || !linqChatLookupKey) {
+    const providerGroupOutreachLookupKey =
+      createHostedLinqMessageLookupKey(providerGroupOutreachMessageId);
+    const providerNewerGroupOutreachLookupKey =
+      createHostedLinqMessageLookupKey(providerNewerGroupOutreachMessageId);
+    if (
+      !participantPhoneLookupKey
+      || !linqChatLookupKey
+      || !providerGroupOutreachLookupKey
+      || !providerNewerGroupOutreachLookupKey
+    ) {
       throw new Error("Expected group-outreach lookup keys.");
     }
     const hostedLinqDeliveryFindMany = vi.fn(async ({ where }: {
@@ -5026,6 +5042,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             participantPhoneLookupKey?: { in?: string[] };
           };
         };
+        messageLookupKey?: { in?: string[] };
         source?: string;
         template?: string;
       };
@@ -5036,11 +5053,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         ?.flatMap((condition) => condition.OR ?? [])
         .flatMap((condition) => condition.linqChatLookupKey?.in ?? [])
         ?? [];
+      const messageLookupKeys = where?.messageLookupKey?.in ?? [];
       return where?.source === "hosted_group_join_outreach"
         && where?.template === "group_join_outreach"
         && participantPhoneLookupKeys.includes(participantPhoneLookupKey)
         && linqChatLookupKeys.includes(linqChatLookupKey)
           ? [{
+              groupJoinOutreach: {
+                id: newerGroupJoinOutreachId,
+                offer: {
+                  group: {
+                    id: newerGroupId,
+                    joinCode: newerGroupJoinCode,
+                    runtimeMember: { suspendedAt: null },
+                    runtimeMemberId: "member_group_runtime_newer",
+                  },
+                  revokedAt: null,
+                },
+              },
+              groupJoinOutreachId: newerGroupJoinOutreachId,
+              id: "hld_group_opener_newer",
+              linqChatLookupKey,
+              messageLookupKey: providerNewerGroupOutreachLookupKey,
+              phoneNumberLookupKey: participantPhoneLookupKey,
+            }, {
               groupJoinOutreach: {
                 id: groupJoinOutreachId,
                 offer: {
@@ -5056,8 +5092,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               groupJoinOutreachId,
               id: "hld_group_opener",
               linqChatLookupKey,
+              messageLookupKey: providerGroupOutreachLookupKey,
               phoneNumberLookupKey: participantPhoneLookupKey,
-            }]
+            }].filter((delivery) =>
+              messageLookupKeys.includes(delivery.messageLookupKey)
+            )
           : [];
     });
     const prismaMocks = {
@@ -5154,7 +5193,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           },
           parts: [{ type: "text", value: "Hey Murph, what can you do?" }],
           reply_to: {
-            message_id: "provider_group_outreach",
+            message_id: providerGroupOutreachMessageId,
             part_index: 0,
           },
         },

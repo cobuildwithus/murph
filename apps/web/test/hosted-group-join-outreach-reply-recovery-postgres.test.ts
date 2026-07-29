@@ -282,6 +282,10 @@ describe.skipIf(!runPostgresProof)(
 
       const newerProviderMessageId = `linq-message-newer-${randomUUID()}`;
       const originalProviderMessageId = `linq-message-original-${randomUUID()}`;
+      const newerOpenerMessageId =
+        `linq-message-opener-newer-${randomUUID()}`;
+      const originalOpenerMessageId =
+        `linq-message-opener-original-${randomUUID()}`;
       const genericProviderMessageId = `linq-message-generic-${randomUUID()}`;
       const retryProviderMessageId = `linq-message-retry-${randomUUID()}`;
       const genericEffectId = buildHostedLinqInviteSignupEffectId({
@@ -374,11 +378,84 @@ describe.skipIf(!runPostgresProof)(
           acceptedAt: new Date("2026-07-24T19:02:00.000Z"),
           attemptedAt: new Date("2026-07-24T19:01:00.000Z"),
           chatId: null,
-          messageId: `linq-message-opener-${randomUUID()}`,
+          messageId: originalOpenerMessageId,
           outreachId,
           prisma,
           recipientPhoneLookupKey,
         });
+        await prisma.hostedGroup.create({
+          data: {
+            displayName: "Newer Recovery Proof Group",
+            id: newerGroupId,
+            joinCode: newerJoinCode,
+            joinCodeCreatedAt: new Date("2026-07-24T19:03:00.000Z"),
+            ownerMemberId: newerOwnerMemberId,
+            runtimeMemberId: newerRuntimeMemberId,
+          },
+        });
+        await prisma.hostedGroupJoinOffer.create({
+          data: {
+            groupId: newerGroupId,
+            id: newerOfferId,
+            messageLookupKey: `message-lookup-${randomUUID()}`,
+            postedAt: new Date("2026-07-24T19:03:00.000Z"),
+            projectionKindsJson: ["best_effort"],
+          },
+        });
+        const newerEnqueue = await prisma.$transaction((tx) =>
+          enqueueHostedGroupJoinOutreachTx({
+            offerId: newerOfferId,
+            participantPhoneNumber: participantPhone,
+            requestedAt: new Date("2026-07-24T19:03:00.000Z"),
+            tx,
+          })
+        );
+        newerOutreachId = newerEnqueue.outreachId;
+        await recordAcceptedGroupJoinOutreachOpener({
+          acceptedAt: new Date("2026-07-24T19:03:02.000Z"),
+          attemptedAt: new Date("2026-07-24T19:03:01.000Z"),
+          chatId,
+          messageId: newerOpenerMessageId,
+          outreachId: newerOutreachId,
+          prisma,
+          recipientPhoneLookupKey,
+        });
+        await expect(prisma.$transaction((tx) =>
+          readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: chatId,
+            participantMemberId,
+            participantPhoneNumber: participantPhone,
+            recipientPhoneNumber: recipientPhone,
+            replyToMessageId: originalOpenerMessageId,
+            tx,
+          })
+        )).resolves.toEqual({
+          joinCode,
+          outreachId,
+        });
+        await expect(prisma.$transaction((tx) =>
+          readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: chatId,
+            participantMemberId,
+            participantPhoneNumber: participantPhone,
+            recipientPhoneNumber: recipientPhone,
+            replyToMessageId: newerOpenerMessageId,
+            tx,
+          })
+        )).resolves.toEqual({
+          joinCode: newerJoinCode,
+          outreachId: newerOutreachId,
+        });
+        await expect(prisma.$transaction((tx) =>
+          readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: chatId,
+            participantMemberId,
+            participantPhoneNumber: participantPhone,
+            recipientPhoneNumber: recipientPhone,
+            replyToMessageId: `unmatched-opener-${randomUUID()}`,
+            tx,
+          })
+        )).resolves.toBeNull();
 
         const blockedEvent = buildDirectReplyEvent({
           chatId,
@@ -413,6 +490,7 @@ describe.skipIf(!runPostgresProof)(
           occurredAt: "2026-07-24T20:01:00.000Z",
           participantPhone,
           recipientPhone,
+          replyToMessageId: originalOpenerMessageId,
         });
         const recoveredPlan = await prisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
@@ -523,43 +601,6 @@ describe.skipIf(!runPostgresProof)(
         // A newer same-day inbound is an independent group intention. It sends
         // under its own exact-source provider key without rewriting or waiting
         // for the crashed original event.
-        await prisma.hostedGroup.create({
-          data: {
-            displayName: "Newer Recovery Proof Group",
-            id: newerGroupId,
-            joinCode: newerJoinCode,
-            joinCodeCreatedAt: new Date("2026-07-24T20:00:30.000Z"),
-            ownerMemberId: newerOwnerMemberId,
-            runtimeMemberId: newerRuntimeMemberId,
-          },
-        });
-        await prisma.hostedGroupJoinOffer.create({
-          data: {
-            groupId: newerGroupId,
-            id: newerOfferId,
-            messageLookupKey: `message-lookup-${randomUUID()}`,
-            postedAt: new Date("2026-07-24T20:00:30.000Z"),
-            projectionKindsJson: ["best_effort"],
-          },
-        });
-        const newerEnqueue = await prisma.$transaction((tx) =>
-          enqueueHostedGroupJoinOutreachTx({
-            offerId: newerOfferId,
-            participantPhoneNumber: participantPhone,
-            requestedAt: new Date("2026-07-24T20:00:30.000Z"),
-            tx,
-          })
-        );
-        newerOutreachId = newerEnqueue.outreachId;
-        await recordAcceptedGroupJoinOutreachOpener({
-          acceptedAt: new Date("2026-07-24T20:00:32.000Z"),
-          attemptedAt: new Date("2026-07-24T20:00:31.000Z"),
-          chatId,
-          messageId: `linq-message-opener-newer-${randomUUID()}`,
-          outreachId: newerOutreachId,
-          prisma,
-          recipientPhoneLookupKey,
-        });
         const newerInboundEvent = buildDirectReplyEvent({
           chatId,
           eventId: `event-newer-${randomUUID()}`,
@@ -567,6 +608,7 @@ describe.skipIf(!runPostgresProof)(
           occurredAt: "2026-07-24T20:01:30.000Z",
           participantPhone,
           recipientPhone,
+          replyToMessageId: newerOpenerMessageId,
         });
         await expect(handleHostedOnboardingLinqWebhook({
           prisma,
@@ -2658,6 +2700,7 @@ function buildDirectReplyEvent(input: {
   occurredAt: string;
   participantPhone: string;
   recipientPhone: string | null;
+  replyToMessageId?: string;
 }) {
   return parseHostedLinqWebhookEvent(JSON.stringify({
     api_version: "v3",
@@ -2680,6 +2723,14 @@ function buildDirectReplyEvent(input: {
       direction: "inbound",
       id: input.messageId,
       parts: [{ type: "text", value: "yes" }],
+      ...(input.replyToMessageId
+        ? {
+            reply_to: {
+              message_id: input.replyToMessageId,
+              part_index: 0,
+            },
+          }
+        : {}),
       sender_handle: {
         handle: input.participantPhone,
         id: "sender-handle",

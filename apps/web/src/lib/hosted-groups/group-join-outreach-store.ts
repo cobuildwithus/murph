@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { sha256Hex } from "../primitives";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
@@ -300,6 +301,7 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
   participantMemberId?: string | null;
   participantPhoneNumber: string;
   recipientPhoneNumber: string | null;
+  replyToMessageId?: string | null;
   sourceEventId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<{ joinCode: string; outreachId: string } | null> {
@@ -319,6 +321,8 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
   const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     input.recipientPhoneNumber,
   );
+  const replyToMessageLookupKeys =
+    createHostedLinqMessageLookupKeyReadCandidates(input.replyToMessageId);
   if (
     participantPhoneLookupKeys.length === 0
     || linqChatLookupKeys.length === 0
@@ -338,6 +342,9 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
         },
       },
       groupJoinOutreachId: { not: null },
+      ...(replyToMessageLookupKeys.length > 0
+        ? { messageLookupKey: { in: replyToMessageLookupKeys } }
+        : {}),
       source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
       template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
       OR: [
