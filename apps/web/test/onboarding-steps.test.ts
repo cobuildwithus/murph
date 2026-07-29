@@ -116,3 +116,20 @@ test("OnboardingSteps leads with the message card and takes the primary style", 
     markup.indexOf("border-primary/35") < markup.indexOf("Connect devices"),
   );
 });
+
+test("OnboardingSteps keeps four desktop cards on one horizontal track", async () => {
+  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
+  const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
+    messageMurphAction: createElement("a", { href: "/message" }, "Message"),
+  }));
+
+  assert.match(markup, /data-onboarding-steps="true"/);
+  assert.match(markup, /lg:flex/);
+  assert.match(markup, /lg:overflow-x-auto/);
+  assert.doesNotMatch(markup, /xl:grid-cols-3/);
+  assert.equal(markup.match(/data-onboarding-step=/gu)?.length, 4);
+  assert.equal(
+    markup.match(/lg:basis-\[calc\(\(100%-2\.5rem\)\/3\)\]/gu)?.length,
+    4,
+  );
+});
