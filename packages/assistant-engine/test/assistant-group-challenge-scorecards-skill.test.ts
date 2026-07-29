@@ -72,6 +72,22 @@ describe('assistant group challenge scorecard guidance', () => {
     )
   })
 
+  it('generalizes the referee voice without inventing a loser in cooperative games', async () => {
+    const comedy = (await readSkill('groupchat-comedy')).replace(/\s+/gu, ' ')
+
+    expect(comedy).not.toContain('someone actually losing')
+    expect(comedy).toContain(
+      'A cooperative game can have suspense without inventing an individual loser.',
+    )
+    expect(comedy).toContain(
+      'In a collective game, the group reaches, unlocks, celebrates, gives, or completes something together',
+    )
+    expect(comedy).toContain(
+      'In collective games, never turn the least-active member into the price of missing the target.',
+    )
+    expect(comedy).toContain('collective mission control and milestone countdowns')
+  })
+
   it('acknowledges the staged five-scope transport migration rather than overclaiming support', async () => {
     const skill = (await readSkill('group-challenge-scorecards')).replace(/\s+/gu, ' ')
 
