@@ -8,6 +8,10 @@ import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
+  resolveHostedLinqEgressPolicyForRuntime,
+  type HostedLinqEgressBlockCode,
+} from "@/src/lib/hosted-onboarding/linq-egress-policy";
+import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -111,6 +115,16 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
+    const health = await resolveHostedLinqEgressPolicyForRuntime({
+      fromPhoneNumber,
+      prisma: tx,
+      target: providerTarget,
+      targetKind: providerTargetKind,
+    });
+    if (health.policy.kind === "block") {
+      throwHostedLinqEgressHealthBlock(health.policy.code);
+    }
+
     const assistantAskAuthority =
       await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
         answeredMailboxItemIds,
@@ -156,6 +170,7 @@ export const POST = withJsonError(async (request: Request) => {
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
       asserted,
+      health,
       providerDispatchClaimed,
     };
   });
@@ -169,11 +184,43 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
       : {}),
+    ...(assertion.health.policy.posture === "normal"
+      ? {}
+      : { deliveryPosture: assertion.health.policy.posture }),
+    ...(assertion.health.policy.signals.length === 0
+      ? {}
+      : { deliverySignals: assertion.health.policy.signals }),
+    ...(assertion.health.healthObservedAt
+      ? { healthObservedAt: assertion.health.healthObservedAt }
+      : {}),
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
   });
 });
+
+function throwHostedLinqEgressHealthBlock(
+  code: HostedLinqEgressBlockCode,
+): never {
+  const messages: Record<HostedLinqEgressBlockCode, string> = {
+    operator_disabled: "Hosted Linq delivery is disabled for this line.",
+    line_flagged: "Hosted Linq delivery is blocked while the line is flagged.",
+    line_critical: "Hosted Linq delivery is blocked while line reputation is critical.",
+    line_at_risk_new_conversation:
+      "Hosted Linq first-contact delivery is blocked on an at-risk line.",
+    chat_critical: "Hosted Linq delivery is blocked while chat health is critical.",
+    chat_opted_out: "Hosted Linq delivery is blocked because the chat opted out.",
+    delivery_unhealthy: "Hosted Linq delivery is blocked by local delivery health.",
+    delivery_warning_new_conversation:
+      "Hosted Linq first-contact delivery is blocked by local delivery warning state.",
+  };
+  throw hostedOnboardingError({
+    code: `HOSTED_LINQ_EGRESS_${code.toUpperCase()}`,
+    httpStatus: 409,
+    message: messages[code],
+    retryable: false,
+  });
+}
 
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
