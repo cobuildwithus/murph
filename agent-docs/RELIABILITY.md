@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Guardrails
 
@@ -214,7 +214,13 @@ Last verified: 2026-07-28
 - The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
-- Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
+- Reviewed Assistant Ask completions enter the existing foreground-causal,
+  output-only continuation immediately; they do not wait for the routine idle
+  checkpoint or a second wake. The caller Murph may compose from room context,
+  but the resulting outbox intent still carries the completion id and expiry.
+  Linq and Telegram revalidate that disclosure authority inside their existing
+  Web-owned provider-entry checks. If it expires or changes after queueing, the
+  outbox persists the fixed text-only fallback and retries that same intent.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. Every create retry during the first 30 minutes uses the
@@ -419,10 +425,10 @@ Last verified: 2026-07-28
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
-  wake. A dirty runtime admits only the exact joined-group request and legacy
-  completion shapes through the pre-checkpoint-safe system prefix; consented or
-  reviewed shapes remain checkpoint-gated. Completion ordering uses the
-  existing pending-input occurrence proof, and incomplete or invalid index
+  wake. A dirty runtime admits the exact joined-group request and every
+  accepted-input completion through the pre-checkpoint-safe system prefix;
+  consented-member requests remain checkpoint-gated. Completion ordering uses
+  the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed
