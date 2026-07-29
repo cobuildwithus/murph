@@ -156,6 +156,61 @@ describe("hosted runtime assistant configuration tool", () => {
     });
   });
 
+  it("updates the provider without rewriting model intent", async () => {
+    mocks.updateConfiguration.mockResolvedValue({
+      ...buildSnapshot({ provider: "venice" }),
+      hostedAssistantProviderOverride: "venice",
+      updated: true,
+    });
+    const request = {
+      action: "update" as const,
+      assistantInputId: `ain_${"a".repeat(32)}`,
+      provider: "venice" as const,
+    };
+
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request,
+    })).resolves.toMatchObject({
+      action: "update",
+      result: {
+        model: "gpt-5.6-terra",
+        provider: "venice",
+        status: "updated",
+      },
+    });
+    expect(mocks.updateConfiguration).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: { label: "tx" },
+      provider: "venice",
+    });
+  });
+
+  it("returns a gate-aware unavailable provider result", async () => {
+    mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      httpStatus: 403,
+      message: "Venice is not available for this Murph deployment.",
+    }));
+
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: {
+        action: "update",
+        assistantInputId: `ain_${"b".repeat(32)}`,
+        provider: "venice",
+      },
+    })).resolves.toEqual({
+      action: "update",
+      result: {
+        ...buildSnapshot(),
+        appliesAt: "next_turn",
+        requiredPlan: null,
+        status: "unavailable",
+      },
+    });
+  });
+
   it("returns an Edge upgrade requirement without changing the saved target", async () => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
@@ -186,14 +241,17 @@ describe("hosted runtime assistant configuration tool", () => {
 function buildSnapshot(overrides: {
   dormantSolPreference?: boolean;
   model?: "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol";
+  provider?: "openai" | "venice";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
   return {
     availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"] as const,
+    availableProviders: ["openai", "venice"] as const,
     availableReasoningEfforts: ["low", "medium", "high", "xhigh"] as const,
     configurationAvailable: true,
     dormantSolPreference: overrides.dormantSolPreference ?? false,
     model: overrides.model ?? "gpt-5.6-terra",
+    provider: overrides.provider ?? "openai",
     reasoningEffort: overrides.reasoningEffort ?? "low",
     solAvailable: false,
   };

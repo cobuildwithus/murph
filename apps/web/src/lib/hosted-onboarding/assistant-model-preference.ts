@@ -113,6 +113,7 @@ type HostedMemberAssistantModelTransactionClient = Pick<
 
 export interface HostedMemberAssistantModelResolution {
   availableModels: readonly HostedAssistantProductModel[];
+  availableProviders: readonly HostedAssistantProvider[];
   availableReasoningEfforts: readonly HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
@@ -120,6 +121,7 @@ export interface HostedMemberAssistantModelResolution {
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -222,6 +224,16 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
         : "Active Murph access is required to change assistant settings.",
     });
   }
+  if (
+    input.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+    && !isHostedVeniceAssistantEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      httpStatus: 403,
+      message: "Venice is not available for this Murph deployment.",
+    });
+  }
   if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !current.solAvailable) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
@@ -311,10 +323,12 @@ export function resolveHostedMemberAssistantModel(
   if (!member) {
     return {
       availableModels: [],
+      availableProviders: [],
       availableReasoningEfforts: [],
       configurationAvailable: false,
       dormantSolPreference: false,
       model: HOSTED_ASSISTANT_TERRA_MODEL,
+      provider: HOSTED_ASSISTANT_DEFAULT_PROVIDER,
       reasoningEffort: HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
       solAvailable: false,
     };
@@ -352,12 +366,18 @@ export function resolveHostedMemberAssistantModel(
   const reasoningEffortOverride = parseHostedAssistantReasoningEffortOverride(
     storedReasoningEffort,
   );
+  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
 
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
           (candidate) => candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable,
         )
+      : [],
+    availableProviders: configurationAvailable
+      ? isHostedVeniceAssistantEnabled()
+        ? [HOSTED_ASSISTANT_DEFAULT_PROVIDER, HOSTED_ASSISTANT_VENICE_PROVIDER]
+        : [HOSTED_ASSISTANT_DEFAULT_PROVIDER]
       : [],
     availableReasoningEfforts: configurationAvailable
       ? HOSTED_ASSISTANT_REASONING_EFFORTS
@@ -374,6 +394,7 @@ export function resolveHostedMemberAssistantModel(
       ? { hostedAssistantReasoningEffortOverride: reasoningEffortOverride }
       : {}),
     model,
+    provider,
     reasoningEffort: storedReasoningEffort,
     solAvailable,
   };

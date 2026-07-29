@@ -59,6 +59,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
+      provider: "venice",
       solAvailable: true,
       updated: true,
     });
@@ -73,6 +74,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
+      provider: "openai",
       solAvailable: true,
       updated: true,
     });
@@ -85,6 +87,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       model: "gpt-5.6-sol",
       ok: true,
+      provider: "openai",
       solAvailable: true,
       updated: true,
     });
@@ -131,6 +134,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: true,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
+      provider: "venice",
       solAvailable: false,
       updated: true,
     });
@@ -156,6 +160,13 @@ describe("assistant model settings route", () => {
   });
 
   it("rejects Venice before the rollout gate opens", async () => {
+    mocks.updateHostedMemberAssistantConfigurationTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+        httpStatus: 403,
+        message: "Venice is not available for this Murph deployment.",
+      }),
+    );
     const response = await route.POST(jsonRequest({
       model: "gpt-5.6-terra",
       provider: "venice",
@@ -167,13 +178,15 @@ describe("assistant model settings route", () => {
         code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
       },
     });
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
   });
 
   it("returns the canonical idempotent result", async () => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
+      hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
+      provider: "openai",
       solAvailable: true,
       updated: false,
     });
@@ -187,6 +200,7 @@ describe("assistant model settings route", () => {
       dormantSolPreference: false,
       model: "gpt-5.6-terra",
       ok: true,
+      provider: "openai",
       solAvailable: true,
       updated: false,
     });

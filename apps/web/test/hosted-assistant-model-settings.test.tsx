@@ -147,12 +147,59 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.container.textContent ?? "", /Terra through Venice/u);
   assert.match(
     view.container.textContent ?? "",
-    /An active conversation may take up to three minutes to switch\./u,
+    /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
   );
   assert.ok(isRadioChecked(findModelRadio(
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
   )));
+  view.cleanup();
+});
+
+test("a model-only save adopts the server's canonical provider", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: false,
+    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+    solAvailable: true,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
+    url: "/api/settings/assistant-model",
+  });
+  const openAiInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_OPENAI_PROVIDER}"]`,
+  );
+  assert.ok(openAiInput);
+  assert.ok(isRadioChecked(openAiInput));
+  assert.match(
+    view.container.textContent ?? "",
+    /New core replies will use Luna through OpenAI\./u,
+  );
+
   view.cleanup();
 });
 
@@ -635,6 +682,55 @@ test("a stale Edge page removes Sol without changing the saved model", async () 
   view.cleanup();
 });
 
+test("a stale Venice page falls back to OpenAI and removes the unavailable choice", async () => {
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      message: "unavailable",
+    }),
+  );
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  assert.ok(veniceInput);
+
+  await act(async () => {
+    veniceInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  assert.match(
+    view.container.textContent ?? "",
+    /Venice is no longer available\. Murph will keep using OpenAI\./,
+  );
+  assert.equal(
+    view.container.querySelector(
+      `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+    ),
+    null,
+  );
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("refreshed eligibility resets the client state after an Edge upgrade", async () => {
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
@@ -772,6 +868,25 @@ test("members without active personal access see read-only model controls", () =
   assert.match(markup, /<fieldset[^>]*disabled=""/);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Save change<\/button>/);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan/);
+});
+
+test("members without active personal access see both provider and model controls explained", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: false,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /Provider and model choices are read-only until personal Murph access is active\./,
+  );
 });
 
 function findModelRadio(

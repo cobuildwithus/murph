@@ -1,6 +1,4 @@
 import {
-  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-  HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
   isHostedAssistantProvider,
   type HostedAssistantProductModel,
@@ -10,7 +8,6 @@ import {
 import { getPrisma } from "@/src/lib/prisma";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  isHostedVeniceAssistantEnabled,
   updateHostedMemberAssistantConfigurationTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -33,16 +30,6 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorMessage: "Assistant model request body is too large.",
   });
   const configuration = parseAssistantModelRequestBody(body);
-  if (
-    configuration.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
-    && !isHostedVeniceAssistantEnabled()
-  ) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
-      httpStatus: 403,
-      message: "Venice is not available for this Murph deployment.",
-    });
-  }
   const prisma = getPrisma();
   const result = await prisma.$transaction(
     async (tx) => updateHostedMemberAssistantConfigurationTx({
@@ -62,13 +49,7 @@ export const POST = withJsonError(async (request: Request) => {
     dormantSolPreference: result.dormantSolPreference,
     model: result.model,
     ok: true,
-    ...(configuration.provider === undefined
-      ? {}
-      : {
-          provider:
-            result.hostedAssistantProviderOverride
-            ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER,
-        }),
+    provider: result.provider,
     solAvailable: result.solAvailable,
     updated: result.updated,
   });

@@ -13,6 +13,7 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
@@ -1951,10 +1952,12 @@ describe('assistant codex runtime', () => {
 
     const configurationSnapshot = () => ({
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: savedModel,
+      provider: "openai" as const,
       reasoningEffort: savedReasoningEffort,
       solAvailable: true,
     })
@@ -1995,6 +1998,7 @@ describe('assistant codex runtime', () => {
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
+        provider: "openai",
         reasoningEffort: 'low',
       }),
     }

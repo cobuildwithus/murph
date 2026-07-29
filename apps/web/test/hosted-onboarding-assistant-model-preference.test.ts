@@ -1,5 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findUniqueHostedMember: vi.fn(),
@@ -26,10 +26,15 @@ import {
 
 describe("hosted member assistant model preference", () => {
   beforeEach(() => {
+    delete process.env.HOSTED_VENICE_ENABLED;
     vi.clearAllMocks();
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
     mocks.updateHostedMember.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    delete process.env.HOSTED_VENICE_ENABLED;
   });
 
   it("keeps OpenAI as the fail-closed provider until Venice is enabled", () => {
@@ -165,6 +170,7 @@ describe("hosted member assistant model preference", () => {
   });
 
   it("keeps Terra while resolving Venice as an independent provider override", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
       assistantProviderPreference: "venice",
@@ -174,8 +180,10 @@ describe("hosted member assistant model preference", () => {
       memberId: "member_edge",
       prisma: createReadClient(),
     })).resolves.toMatchObject({
+      availableProviders: ["openai", "venice"],
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
+      provider: "venice",
       reasoningEffort: "low",
     });
   });
@@ -195,12 +203,14 @@ describe("hosted member assistant model preference", () => {
         "gpt-5.6-terra",
         "gpt-5.6-sol",
       ],
+      availableProviders: ["openai"],
       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
       configurationAvailable: true,
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-luna",
       hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-luna",
+      provider: "openai",
       reasoningEffort: "high",
       solAvailable: true,
     });
@@ -220,11 +230,13 @@ describe("hosted member assistant model preference", () => {
       prisma: createReadClient(),
     })).resolves.toEqual({
       availableModels: [],
+      availableProviders: [],
       availableReasoningEfforts: [],
       configurationAvailable: false,
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
+      provider: "openai",
       reasoningEffort: "low",
       solAvailable: false,
     });
@@ -370,6 +382,7 @@ describe("hosted member assistant model preference", () => {
   });
 
   it("stores Venice independently from the selected product model", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -393,6 +406,24 @@ describe("hosted member assistant model preference", () => {
         id: "member_edge",
       },
     });
+  });
+
+  it("rejects Venice updates while the rollout gate is closed", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      assistantProviderPreference: null,
+    }));
+
+    await expect(updateHostedMemberAssistantConfigurationTx({
+      memberId: "member_edge",
+      prisma: tx,
+      provider: "venice",
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      httpStatus: 403,
+    });
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
   it("clears the stored provider override when switching back to OpenAI", async () => {
@@ -424,6 +455,7 @@ describe("hosted member assistant model preference", () => {
   });
 
   it("preserves dormant Sol across a provider switch and restores it with Edge", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     const tx = createTransactionClient();
     const prisma = createReadClient();
     let currentBillingPlanCode = "launch_monthly";

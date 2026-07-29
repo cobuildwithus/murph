@@ -471,6 +471,15 @@ hosted Web; the Worker and runner carry only the normalized semantic
 request/response. Deploy the compatible Web route and credential first, then
 Cloudflare/runtime. Roll back Cloudflare/runtime first so deploy skew fails
 closed as Labs unavailable instead of calling a removed Web route.
+
+For the first OpenAI/Venice provider-choice release, keep
+`HOSTED_VENICE_ENABLED` disabled until both Web and Cloudflare/runtime are
+deployed. A new runtime accepts the preceding provider-less assistant
+configuration response as OpenAI, so either deploy order preserves ordinary
+replies while the flag is closed. Deploy Web before enabling Venice, deploy
+Cloudflare/runtime immediately afterward with `container_rollout=immediate`,
+then enable the Web flag only after managed-container smoke reports the new
+runner fingerprint. Roll back by disabling the Web flag first.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.

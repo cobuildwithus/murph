@@ -952,9 +952,13 @@ application code.
 - Hosted core-assistant provider intent is a separate Web-owned nullable
   `HostedMember.assistantProviderPreference`. OpenAI is derived when it is null
   or when the Venice rollout flag is disabled; Venice is projected only through
-  the signed workspace read for eligible personal members. The vault,
-  workspace snapshot, assistant runtime, and Cloudflare Durable Object do not
-  keep another provider preference.
+  the signed workspace read for eligible personal members. Settings and the
+  input-bound assistant-configuration tool write through the same Web
+  transaction. Immediately before core provider entry, the runtime re-reads
+  that owner; an unavailable read defers the accepted turn without provider
+  egress, while a changed provider checkpoints and hands the pending turn to a
+  fresh invocation. The vault, workspace snapshot, assistant runtime, and
+  Cloudflare Durable Object do not keep another provider preference.
 - Cloudflare remains the credential and translation boundary for both core
   providers. The runner holds a signed provider/user/runner credential rather
   than either real API key. OpenAI uses its existing Responses intercept;

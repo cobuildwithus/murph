@@ -39,6 +39,7 @@ import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
+const VENICE_UNAVAILABLE_ERROR_CODE = "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE";
 
 const MODEL_OPTIONS = [
   {
@@ -132,6 +133,9 @@ function HostedAssistantModelSettingsForm(
     props.initialDormantSolPreference,
   );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
+  const [veniceAvailable, setVeniceAvailable] = useState(
+    props.veniceAvailable === true,
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
@@ -157,7 +161,7 @@ function HostedAssistantModelSettingsForm(
           ...(modelChanged || replaceDormantSol
             ? { model: draftModel }
             : {}),
-          ...(props.veniceAvailable === true && providerChanged
+          ...(veniceAvailable && providerChanged
             ? { provider: draftProvider }
             : {}),
         },
@@ -167,8 +171,10 @@ function HostedAssistantModelSettingsForm(
       if (
         !isHostedAssistantProductModel(response.model)
         || (
-          response.provider !== undefined
-          && !isHostedAssistantProvider(response.provider)
+          veniceAvailable
+            ? !isHostedAssistantProvider(response.provider)
+            : response.provider !== undefined
+              && !isHostedAssistantProvider(response.provider)
         )
         || typeof response.dormantSolPreference !== "boolean"
         || typeof response.solAvailable !== "boolean"
@@ -176,7 +182,9 @@ function HostedAssistantModelSettingsForm(
         throw new Error("Assistant model response was invalid.");
       }
 
-      const provider = response.provider ?? draftProvider;
+      const provider = isHostedAssistantProvider(response.provider)
+        ? response.provider
+        : draftProvider;
       setCurrentModel(response.model);
       setDraftModel(response.model);
       setCurrentProvider(provider);
@@ -184,8 +192,8 @@ function HostedAssistantModelSettingsForm(
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setStatus({
-        message: props.veniceAvailable === true
-          ? `Saved. Future core replies will use ${readProductModelName(response.model)} through ${readProviderName(provider)}. An active conversation may take up to three minutes to switch.`
+        message: veniceAvailable
+          ? `Saved. New core replies will use ${readProductModelName(response.model)} through ${readProviderName(provider)}. A reply already in progress may finish with your previous choice.`
           : `Saved. Future core replies will use ${readModelName(response.model)}. An active conversation may take up to three minutes to switch.`,
         tone: "success",
       });
@@ -193,15 +201,27 @@ function HostedAssistantModelSettingsForm(
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
         error.code === SOL_REQUIRES_EDGE_ERROR_CODE;
+      const veniceNoLongerAvailable =
+        error instanceof HostedOnboardingApiError &&
+        error.code === VENICE_UNAVAILABLE_ERROR_CODE;
       if (solNoLongerAvailable) {
         setDraftModel(currentModel);
         setSolAvailable(false);
       }
+      if (veniceNoLongerAvailable) {
+        setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setDraftProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
+        setVeniceAvailable(false);
+      }
       setStatus({
         message: solNoLongerAvailable
           ? `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+          : veniceNoLongerAvailable
+            ? "Venice is no longer available. Murph will keep using OpenAI."
           : "We couldn’t save this change. Try again.",
-        tone: solNoLongerAvailable ? "neutral" : "destructive",
+        tone: solNoLongerAvailable || veniceNoLongerAvailable
+          ? "neutral"
+          : "destructive",
       });
     } finally {
       setIsSaving(false);
@@ -221,7 +241,7 @@ function HostedAssistantModelSettingsForm(
         Choose the intelligence behind your personal health assistant.
       </p>
 
-      {props.veniceAvailable === true ? (
+      {veniceAvailable ? (
         <>
           <FieldSet
             className="w-full gap-3"
@@ -269,7 +289,9 @@ function HostedAssistantModelSettingsForm(
 
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Model choices are read-only until personal Murph access is active.
+          {veniceAvailable
+            ? "Provider and model choices are read-only until personal Murph access is active."
+            : "Model choices are read-only until personal Murph access is active."}
         </p>
       ) : null}
 
