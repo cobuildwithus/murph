@@ -1,4 +1,11 @@
 import Image from "next/image";
+import {
+  Activity,
+  Apple,
+  Dumbbell,
+  Footprints,
+  MoonStar,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ClubChallengeModes } from "@/src/components/clubs/club-challenge-modes";
@@ -12,7 +19,7 @@ import {
   type PhoneMessage,
 } from "@/src/components/homepage/phone-mock";
 import {
-  buildClubPilotMailto,
+  buildClubChallengeMailto,
   MURPH_CLUBS_EMAIL,
 } from "@/src/lib/club-contact";
 
@@ -30,6 +37,7 @@ const CLUB_WEARABLES = [
 
 const CHALLENGE_INPUT_GROUPS = [
   {
+    icon: Footprints,
     items: [
       "Steps",
       "Distance",
@@ -39,8 +47,10 @@ const CHALLENGE_INPUT_GROUPS = [
       "Activity minutes",
     ],
     label: "Move",
+    surface: "#e2ead8",
   },
   {
+    icon: Dumbbell,
     items: [
       "Workouts",
       "Session count",
@@ -52,8 +62,10 @@ const CHALLENGE_INPUT_GROUPS = [
       "Sauna",
     ],
     label: "Train",
+    surface: "#eadfc9",
   },
   {
+    icon: Activity,
     items: [
       "Heart-rate zones",
       "Workout strain",
@@ -63,8 +75,10 @@ const CHALLENGE_INPUT_GROUPS = [
       "Max heart rate",
     ],
     label: "Perform",
+    surface: "#dce7e3",
   },
   {
+    icon: MoonStar,
     items: [
       "Sleep duration",
       "Deep sleep",
@@ -74,8 +88,10 @@ const CHALLENGE_INPUT_GROUPS = [
       "HRV",
     ],
     label: "Recover",
+    surface: "#e4e1eb",
   },
   {
+    icon: Apple,
     items: [
       "Logged protein",
       "Logged calories",
@@ -84,6 +100,7 @@ const CHALLENGE_INPUT_GROUPS = [
       "Logged fiber",
     ],
     label: "Nourish",
+    surface: "#eee0d2",
   },
 ] as const;
 
@@ -136,10 +153,10 @@ const MEMBER_MESSAGES: ReadonlyArray<PhoneMessage> = [
 
 export function ClubsPageContent({
   animatePhoneDemo = true,
-  pilotMailto = buildClubPilotMailto(),
+  clubMailto = buildClubChallengeMailto(),
 }: {
   animatePhoneDemo?: boolean;
-  pilotMailto?: string;
+  clubMailto?: string;
 }) {
   return (
     <main
@@ -149,7 +166,7 @@ export function ClubsPageContent({
     >
       <HeroSection
         animatePhoneDemo={animatePhoneDemo}
-        pilotMailto={pilotMailto}
+        clubMailto={clubMailto}
       />
       <ModesSection />
       <HowItWorksSection />
@@ -158,26 +175,26 @@ export function ClubsPageContent({
       <MemberSection />
       <PrivacySection />
       <FaqSection />
-      <FinalCtaSection pilotMailto={pilotMailto} />
+      <FinalCtaSection clubMailto={clubMailto} />
     </main>
   );
 }
 
 function HeroSection({
   animatePhoneDemo,
-  pilotMailto,
+  clubMailto,
 }: {
   animatePhoneDemo: boolean;
-  pilotMailto: string;
+  clubMailto: string;
 }) {
   return (
     <section
       aria-labelledby="club-hero-title"
       className="relative overflow-hidden bg-[#2a2520] px-5 pb-20 pt-28 sm:px-10 sm:pb-24 sm:pt-32 lg:px-16 lg:pb-28 lg:pt-40"
     >
-      <div className="relative mx-auto grid max-w-[1180px] items-center gap-16 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-20">
+      <div className="relative mx-auto grid max-w-[1180px] items-center gap-16 lg:grid-cols-[minmax(0,1fr)_284px] lg:gap-20">
         <div>
-          <SectionEyebrow dark>Early access · Works in iMessage</SectionEyebrow>
+          <SectionEyebrow dark>Works in iMessage</SectionEyebrow>
           <h1
             className="mt-8 max-w-[13ch] font-serif text-[clamp(2.75rem,6.6vw,5.4rem)] font-semibold leading-[0.97] tracking-[-0.045em] text-balance text-[#f5f0e8]"
             id="club-hero-title"
@@ -193,9 +210,9 @@ function HeroSection({
           <div className="mt-9 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
             <a
               className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#f5f0e8] px-6 text-[0.9375rem] font-semibold text-[#2a2520] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#c4a882]"
-              href={pilotMailto}
+              href={clubMailto}
             >
-              Plan a pilot
+              Start a challenge
               <span aria-hidden="true">→</span>
             </a>
             <a
@@ -210,7 +227,7 @@ function HeroSection({
           </p>
         </div>
 
-        <div className="mx-auto w-full max-w-[310px] lg:translate-y-5">
+        <div className="mx-auto w-full max-w-[284px] lg:translate-y-5">
           <ClubPhoneDemo
             animate={animatePhoneDemo}
             murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
@@ -261,8 +278,8 @@ function HowItWorksSection() {
             One sentence. One link. Everyone&apos;s in.
           </h2>
           <p className="mx-auto mt-6 max-w-[58ch] text-[1rem] leading-[1.7] text-pretty text-[#635a48]">
-            Start in plain language. Murph turns the idea into a challenge
-            members can understand and join.
+            Murph turns the idea into a challenge members can understand and
+            join.
           </p>
         </div>
 
@@ -338,97 +355,122 @@ function HowItWorksSection() {
 
 function WearablesSection() {
   return (
-    <section
-      aria-labelledby="club-wearables-title"
-      className="bg-[#dfe7d3] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
-    >
-      <div className="mx-auto max-w-[1120px]">
-        <div className="grid items-end gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
-          <div>
-            <SectionEyebrow>Wearables, handled</SectionEyebrow>
-            <h2
-              className="mt-6 max-w-[15ch] font-serif text-[clamp(2.2rem,5vw,4.2rem)] font-semibold leading-[0.99] tracking-[-0.04em] text-balance text-[#2d3436]"
-              id="club-wearables-title"
-            >
-              Different wearables. One live challenge.
-            </h2>
-          </div>
-          <div>
-            <p className="max-w-[52ch] text-[1rem] leading-[1.75] text-pretty text-[#4d4533]">
-              Members connect a supported source they already use. Murph
-              automatically turns it into the exact daily stat each person
-              approves, keeps the standings current, and checks missing data
-              without handing the organizer a spreadsheet.
-            </p>
-            <p className="mt-5 font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#3d5028]">
-              No spreadsheets required
-            </p>
-          </div>
-        </div>
-
-        <div
-          aria-label="Connected wearable sources"
-          className="mt-14 grid grid-cols-3 border-y border-[#5a6e32]/20 py-8 sm:grid-cols-5 lg:grid-cols-9"
-        >
-          {CLUB_WEARABLES.map((wearable) => (
-            <div
-              className="flex min-h-24 flex-col items-center justify-center gap-3 px-2 py-3"
-              key={wearable.label}
-            >
-              <Image
-                alt={wearable.label}
-                className="h-8 w-auto max-w-full object-contain sm:h-9"
-                height={72}
-                src={wearable.src}
-                width={72}
-              />
-              <span className="text-center font-mono text-[8px] font-medium uppercase tracking-[0.11em] text-[#635a48]">
-                {wearable.label}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-14">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+    <section aria-labelledby="club-wearables-title">
+      <div
+        className="bg-[#dfe7d3] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+        data-club-wearables-surface="sources"
+      >
+        <div className="mx-auto max-w-[1120px]">
+          <div className="grid items-end gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
             <div>
-              <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#3d5028]">
-                Supported challenge inputs
+              <SectionEyebrow>Wearables, handled</SectionEyebrow>
+              <h2
+                className="mt-6 max-w-[15ch] font-serif text-[clamp(2.2rem,5vw,4.2rem)] font-semibold leading-[0.99] tracking-[-0.04em] text-balance text-[#2d3436]"
+                id="club-wearables-title"
+              >
+                Different wearables. One live challenge.
+              </h2>
+            </div>
+            <div>
+              <p className="max-w-[52ch] text-[1rem] leading-[1.75] text-pretty text-[#4d4533]">
+                Members connect a supported source they already use. Murph
+                turns it into the exact daily stat each person approves, keeps
+                the standings current, and checks missing data automatically.
               </p>
-              <h3 className="mt-3 max-w-[22ch] font-serif text-[1.8rem] font-semibold leading-[1.05] tracking-[-0.03em] text-[#2d3436] sm:text-[2.2rem]">
+              <p className="mt-5 font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#3d5028]">
+                No spreadsheets required
+              </p>
+            </div>
+          </div>
+
+          <div
+            aria-label="Connected wearable sources"
+            className="mt-14 grid grid-cols-3 overflow-hidden rounded-[1.5rem] border border-[#5a6e32]/15 bg-[#fffcf6] px-3 py-5 shadow-[0_1px_0_rgba(45,52,54,0.04)] sm:grid-cols-5 sm:px-5 lg:grid-cols-9"
+          >
+            {CLUB_WEARABLES.map((wearable) => (
+              <div
+                className="flex min-h-24 flex-col items-center justify-center gap-3 px-2 py-3"
+                key={wearable.label}
+              >
+                <Image
+                  alt={wearable.label}
+                  className="h-8 w-auto max-w-full object-contain sm:h-9"
+                  height={72}
+                  src={wearable.src}
+                  width={72}
+                />
+                <span className="text-center font-mono text-[8px] font-medium uppercase tracking-[0.11em] text-[#635a48]">
+                  {wearable.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="bg-[#f5f0e8] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+        data-club-wearables-surface="inputs"
+      >
+        <div className="mx-auto max-w-[1120px]">
+          <div className="grid gap-6 lg:grid-cols-[1fr_0.7fr] lg:items-end lg:gap-20">
+            <div>
+              <SectionEyebrow>Automatically tracked</SectionEyebrow>
+              <h3 className="mt-5 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.35rem)] font-semibold leading-[1] tracking-[-0.035em] text-[#2d3436]">
                 Score what your community already tracks.
               </h3>
             </div>
-            <p className="max-w-[45ch] text-[0.875rem] leading-[1.65] text-[#635a48]">
-              Availability depends on the connected source. Each challenge asks
-              only for the bounded metric it needs.
+            <p className="max-w-[34ch] font-serif text-[1.25rem] leading-[1.45] text-[#635a48]">
+              Choose one supported metric. Murph keeps the score live.
+              <span className="mt-3 block font-mono text-[8px] font-semibold uppercase tracking-[0.14em] text-[#5a6e32]">
+                Availability depends on the connected source
+              </span>
             </p>
           </div>
 
-          <div className="mt-9 grid border-y border-[#5a6e32]/20 sm:grid-cols-2 lg:grid-cols-5">
-            {CHALLENGE_INPUT_GROUPS.map((group) => (
-              <div
-                className="border-b border-[#5a6e32]/20 px-1 py-6 last:border-b-0 sm:px-5 lg:border-b-0 lg:border-l lg:first:border-l-0"
-                key={group.label}
-              >
-                <p className="font-serif text-[1.2rem] font-semibold text-[#2d3436]">
-                  {group.label}
-                </p>
-                <ul className="mt-4 space-y-2">
-                  {group.items.map((item) => (
-                    <li
-                      className="flex gap-2 text-[0.8125rem] leading-[1.4] text-[#4d4533]"
-                      key={item}
-                    >
-                      <span aria-hidden="true" className="text-[#5a6e32]">
-                        ·
-                      </span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            {CHALLENGE_INPUT_GROUPS.map((group, index) => {
+              const Icon = group.icon;
+              return (
+                <div
+                  className={`relative overflow-hidden rounded-[1.35rem] border border-[#5a6e32]/10 px-6 py-7 sm:px-7 sm:py-8 ${
+                    index < 3 ? "lg:col-span-2" : "lg:col-span-3"
+                  }`}
+                  data-challenge-input-group={group.label.toLowerCase()}
+                  key={group.label}
+                  style={{ backgroundColor: group.surface }}
+                >
+                  <Icon
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -right-5 -top-6 size-32 text-[#5a6e32]/[0.075]"
+                    strokeWidth={1.25}
+                  />
+                  <div className="relative flex items-center gap-3">
+                    <span className="flex size-11 items-center justify-center rounded-full bg-[#fffcf6]/75 text-[#4f662b] ring-1 ring-[#5a6e32]/10">
+                      <Icon aria-hidden="true" className="size-5" strokeWidth={1.8} />
+                    </span>
+                    <div>
+                      <p className="font-serif text-[1.35rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
+                        {group.label}
+                      </p>
+                      <p className="mt-1.5 font-mono text-[8px] font-semibold uppercase tracking-[0.14em] text-[#5a6e32]">
+                        {group.items.length} trackable signals
+                      </p>
+                    </div>
+                  </div>
+                  <ul className="relative mt-6 flex flex-wrap gap-2">
+                    {group.items.map((item) => (
+                      <li
+                        className="rounded-full bg-[#fffcf6]/70 px-3 py-2 text-[0.8125rem] leading-none text-[#4d4533] ring-1 ring-[#5a6e32]/8"
+                        key={item}
+                      >
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -442,7 +484,7 @@ function OrganizerSection() {
       aria-labelledby="club-organizer-title"
       className="bg-[#1a1f16] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
     >
-      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-24">
+      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[minmax(0,1fr)_284px] lg:gap-24">
         <div>
           <SectionEyebrow dark>For organizers</SectionEyebrow>
           <h2
@@ -460,7 +502,7 @@ function OrganizerSection() {
 
         <div
           aria-label="Organizer conversation in iMessage"
-          className="mx-auto w-full max-w-[320px]"
+          className="mx-auto w-full max-w-[284px]"
         >
           <PhoneMock
             conversationHeight={480}
@@ -482,11 +524,11 @@ function MemberSection() {
       aria-labelledby="club-member-title"
       className="bg-[#f5f0e8] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
     >
-      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[320px_minmax(0,1fr)] lg:gap-24">
+      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[284px_minmax(0,1fr)] lg:gap-24">
         <div className="order-2 lg:order-1">
           <div
             aria-label="Private member conversation in iMessage"
-            className="mx-auto w-full max-w-[320px]"
+            className="mx-auto w-full max-w-[284px]"
           >
             <PhoneMock
               conversationHeight={420}
@@ -593,7 +635,12 @@ const FAQS = [
   },
   {
     answer:
-      "Tell us the activity. Before an early pilot starts, we confirm whether its source and scoring method are supported.",
+      "Organizers buy AI usage as needed—there’s no platform fee. Members get Murph free for two weeks, then can continue on the Group plan for $3.50/month.",
+    question: "How much does it cost?",
+  },
+  {
+    answer:
+      "Tell us the activity. We’ll confirm whether its source and scoring method are supported before the challenge starts.",
     question: "Can we track something a wearable does not measure?",
   },
   {
@@ -640,11 +687,11 @@ function FaqSection() {
   );
 }
 
-function FinalCtaSection({ pilotMailto }: { pilotMailto: string }) {
+function FinalCtaSection({ clubMailto }: { clubMailto: string }) {
   return (
     <section className="bg-[#2a2520] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[900px] text-center">
-        <SectionEyebrow centered dark>Early access</SectionEyebrow>
+        <SectionEyebrow centered dark>Ready to run</SectionEyebrow>
         <h2 className="mx-auto mt-7 max-w-[15ch] font-serif text-[clamp(2.4rem,5.5vw,4.6rem)] font-semibold leading-[0.98] tracking-[-0.045em] text-balance text-[#f5f0e8]">
           What should your club chase first?
         </h2>
@@ -656,9 +703,9 @@ function FinalCtaSection({ pilotMailto }: { pilotMailto: string }) {
         <div className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <a
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#f5f0e8] px-6 text-[0.9375rem] font-semibold text-[#2a2520] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#c4a882]"
-            href={pilotMailto}
+            href={clubMailto}
           >
-            Plan a pilot
+            Start a challenge
             <span aria-hidden="true">→</span>
           </a>
           <a
