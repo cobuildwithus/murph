@@ -974,6 +974,22 @@ function parseHostedExecutionLinqConversationMessage(
       ? {}
       : { affirmativeReaction: true }),
     chatId: requireString(record.chatId, `${label} chatId`),
+    ...(record.editedTextPartIndex === undefined
+      ? {}
+      : {
+          editedTextPartIndex: parseHostedExecutionLinqEditedTextPartIndex(
+            record.editedTextPartIndex,
+            `${label} editedTextPartIndex`,
+          ),
+        }),
+    ...(record.editedSourceInputId === undefined
+      ? {}
+      : {
+          editedSourceInputId: parseHostedExecutionLinqEditedSourceInputId(
+            record.editedSourceInputId,
+            `${label} editedSourceInputId`,
+          ),
+        }),
     from: requireString(record.from, `${label} from`),
     isFromMe: requireBoolean(record.isFromMe, `${label} isFromMe`),
     messageId: requireString(record.messageId, `${label} messageId`),
@@ -1017,6 +1033,28 @@ function parseHostedExecutionLinqConversationMessage(
             : requireBoolean(record.threadIsDirect, `${label} threadIsDirect`),
         }),
   };
+}
+
+function parseHostedExecutionLinqEditedTextPartIndex(
+  value: unknown,
+  label: string,
+): number {
+  const index = requireNumber(value, label);
+  if (!Number.isSafeInteger(index) || index < 0 || index > 2_147_483_647) {
+    throw new TypeError(`${label} must be a non-negative int32.`);
+  }
+  return index;
+}
+
+function parseHostedExecutionLinqEditedSourceInputId(
+  value: unknown,
+  label: string,
+): string {
+  const inputId = requireString(value, label);
+  if (!/^ain_[0-9a-f]{32}$/u.test(inputId)) {
+    throw new TypeError(`${label} must be an opaque assistant input id.`);
+  }
+  return inputId;
 }
 
 function parseHostedExecutionLinqConversationMessagePart(

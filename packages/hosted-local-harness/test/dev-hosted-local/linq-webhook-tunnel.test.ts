@@ -19,6 +19,7 @@ type LinqWebhookSubscriptionResult = {
 };
 
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.edited",
   "message.sent",
   "message.received",
   "participant.added",
@@ -106,7 +107,8 @@ describe("normalizeLinqWebhookPublicUrl", () => {
 
     expect(normalizeLinqWebhookPublicUrl("https://tunnel.example.test")).toEqual({
       publicBaseUrl: "https://tunnel.example.test",
-      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      targetUrl:
+        "https://tunnel.example.test/api/hosted-onboarding/linq/webhook?version=2026-02-03",
     });
   });
 
@@ -119,7 +121,8 @@ describe("normalizeLinqWebhookPublicUrl", () => {
       ),
     ).toEqual({
       publicBaseUrl: "https://tunnel.example.test",
-      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      targetUrl:
+        "https://tunnel.example.test/api/hosted-onboarding/linq/webhook?version=2026-02-03",
     });
   });
 
@@ -215,7 +218,8 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
       publicBaseUrl: "https://tunnel.example.test",
       shouldRegister: true,
       shouldStartTunnel: true,
-      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      targetUrl:
+        "https://tunnel.example.test/api/hosted-onboarding/linq/webhook?version=2026-02-03",
       tunnelConfigPath: expect.stringMatching(/\.tmp\/cloudflared-linq-webhook\.yml$/u),
       tunnelName: "dev",
     });
@@ -253,7 +257,8 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
       publicBaseUrl: "https://manual.example.test",
       shouldRegister: true,
       shouldStartTunnel: false,
-      targetUrl: "https://manual.example.test/api/hosted-onboarding/linq/webhook",
+      targetUrl:
+        "https://manual.example.test/api/hosted-onboarding/linq/webhook?version=2026-02-03",
       tunnelConfigPath: null,
       tunnelName: null,
     });
@@ -281,7 +286,8 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
       publicBaseUrl: "https://feature-a.example.test",
       shouldRegister: true,
       shouldStartTunnel: false,
-      targetUrl: "https://feature-a.example.test/api/hosted-onboarding/linq/webhook",
+      targetUrl:
+        "https://feature-a.example.test/api/hosted-onboarding/linq/webhook?version=2026-02-03",
       tunnelConfigPath: null,
       tunnelName: null,
     });

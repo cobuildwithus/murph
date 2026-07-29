@@ -23,7 +23,9 @@ broader privacy redaction policy above that transport-level sanitization.
 
 ## Current scope
 
-- Linq: webhook signature verification, `message.received` parsing, summaries, and sparse raw minimization
+- Linq: webhook signature verification, `message.received` and versioned
+  `message.edited` parsing, summaries, and sparse raw minimization that omits
+  edited replacement text
 - Telegram: webhook secret-token verification, preverified update parsing, thread-target grammar, message extraction/summaries, and sparse raw minimization
 
 ## Non-goals

@@ -31,7 +31,6 @@ import type {
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
-  HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
@@ -226,10 +225,10 @@ export interface AssistantHostedActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
-export interface AssistantHostedProductFeedbackRecorder {
-  recordProductFeedback(
+export interface AssistantHostedProductFeedbackCandidateSink {
+  acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
-  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
+  ): void
 }
 
 export interface AssistantHostedFamilyPlanTool {
@@ -400,7 +399,7 @@ export interface AssistantHostedExecutionContext {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
-  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
+  productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
@@ -477,8 +476,8 @@ export function normalizeAssistantExecutionContext(
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
     hosted?.privateImageUrlPublisher,
   )
-  const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
-    hosted?.productFeedbackRecorder,
+  const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
+    hosted?.productFeedbackCandidateSink,
   )
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
@@ -541,7 +540,7 @@ export function normalizeAssistantExecutionContext(
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackRecorder ? { productFeedbackRecorder } : {}),
+      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies
@@ -670,15 +669,16 @@ function normalizeAssistantPrivateImageUrlPublisher(
   }
 }
 
-function normalizeAssistantProductFeedbackRecorder(
-  input: AssistantHostedExecutionContext['productFeedbackRecorder'] | undefined,
-): AssistantHostedProductFeedbackRecorder | undefined {
-  if (!input || typeof input.recordProductFeedback !== 'function') {
+function normalizeAssistantProductFeedbackCandidateSink(
+  input: AssistantHostedExecutionContext['productFeedbackCandidateSink'] | undefined,
+): AssistantHostedProductFeedbackCandidateSink | undefined {
+  if (!input || typeof input.acceptProductFeedbackCandidate !== 'function') {
     return undefined
   }
 
   return {
-    recordProductFeedback: input.recordProductFeedback,
+    acceptProductFeedbackCandidate:
+      input.acceptProductFeedbackCandidate.bind(input),
   }
 }
 
