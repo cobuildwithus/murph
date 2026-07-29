@@ -771,6 +771,7 @@ export async function executeClaimedAssistantCronJob(
           }
           const authorizedDelivery = maintenanceJob
             ? {
+                conversationThreadId: null,
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
@@ -905,7 +906,9 @@ export async function executeClaimedAssistantCronJob(
             participantId: claimedJob.target.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-            threadId: claimedJob.target.threadId,
+            threadId:
+              authorizedDelivery.conversationThreadId ??
+              claimedJob.target.threadId,
             bindingDeliveryTarget:
               deliveryRoute.bindingDelivery?.target ??
               deliveryRoute.deliveryTarget ??
@@ -2323,6 +2326,7 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     }
   } else {
     authorizedDelivery = {
+      conversationThreadId: null,
       externalThreadRouteAuthority: null,
       route: declaredRoute,
     }
@@ -2394,7 +2398,9 @@ function assistantCronManagedOwnerAuthorizationMatches(
     expected.ownerScope === current.ownerScope &&
     expected.channel === current.channel &&
     expected.target === current.target &&
-    expected.threadIsDirect === current.threadIsDirect
+    expected.threadIsDirect === current.threadIsDirect &&
+    expected.authorizedDelivery.conversationThreadId ===
+      current.authorizedDelivery.conversationThreadId
 }
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
@@ -2402,13 +2408,18 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   signal: AbortSignal
   target: AssistantCronJob['target']
 }): Promise<{
+  conversationThreadId: string | null
   externalThreadRouteAuthority:
     AssistantOutboxIntent['externalThreadRouteAuthority']
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
 }> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
-    return { externalThreadRouteAuthority: null, route }
+    return {
+      conversationThreadId: null,
+      externalThreadRouteAuthority: null,
+      route,
+    }
   }
 
   if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
@@ -2447,13 +2458,18 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       )
     }
     return {
+      conversationThreadId: null,
       externalThreadRouteAuthority: authority,
       route,
     }
   }
 
   if (input.target.channel !== 'linq') {
-    return { externalThreadRouteAuthority: null, route }
+    return {
+      conversationThreadId: null,
+      externalThreadRouteAuthority: null,
+      route,
+    }
   }
 
   const target = normalizeNullableString(
@@ -2487,10 +2503,20 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     targetKind,
   })
   const authorizedTarget = normalizeNullableString(authority.target)
+  const conversationThreadId = normalizeNullableString(
+    authority.conversationThreadId,
+  )
   if (!authorizedTarget || typeof authority.threadIsDirect !== 'boolean') {
     throw new VaultCliError(
       'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       'Hosted Linq delivery requires direct or group authority before provider work.',
+      { retryable: true },
+    )
+  }
+  if (authorizedTarget !== target && !conversationThreadId) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      'Hosted Linq route changes require a matching conversation locator.',
       { retryable: true },
     )
   }
@@ -2505,6 +2531,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
+    conversationThreadId,
     externalThreadRouteAuthority: null,
     route: {
       bindingDelivery,

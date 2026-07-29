@@ -47,6 +47,12 @@ Updated: 2026-07-28
 - Express reflection, suppression, evidence quality, and no-mutation behavior
   in the managed automation instructions, following the existing unfinished
   onboarding follow-up pattern.
+- On a quiet rollout wake for an existing member, reuse a valid active route
+  from an immutable member-owned managed automation before consulting local
+  delivery defaults; do not make backfill wait for another inbound message.
+- When live Linq authority moves a personal route to the current home thread,
+  carry the authority-owned privacy-blinded conversation locator separately
+  from the raw provider target and use both views of that same thread.
 
 ## Verification
 
@@ -58,3 +64,32 @@ Updated: 2026-07-28
 - `pnpm verify:acceptance`.
 - Product-experience review, preliminary prompt/coverage ReviewGPT, parent
   final review, final ReviewGPT, CI, and clean merge proof.
+
+## Evidence
+
+- Focused Assistant Engine choice-point, cron, outbox, and
+  managed-automation tests: 314 passed.
+- Focused Assistant Runtime workspace-phase tests: 263 passed.
+- Focused Cloudflare runner-platform tests: 138 passed.
+- Focused Web egress-authority and canonical messaging-state tests: 47 passed.
+- Assistant Engine, Assistant Runtime, Cloudflare, and Web typechecks: passed.
+- Direct existing-member schedule probe: an old answered completion produced
+  one future same-weekday occurrence, seven-day expiry, preserved continuity,
+  and member ownership.
+- Canonical `pnpm verify:acceptance`: passed on the simplified exact head before
+  the route/session parity correction.
+- Product experience review accepted one route/session parity finding. Its
+  first correction incorrectly treated a raw provider chat ID as a blinded
+  conversation locator; re-review caught that production-shaped mismatch. The
+  replacement derives the locator in the existing Web route-authority owner
+  through the canonical direct-notification route resolver and its
+  member/contact identity blind, then carries it separately through the
+  existing control-plane response.
+- Product-experience re-review passed the final route/session parity design:
+  exact-target validation and missing-identity handling fail closed, while a
+  current-home fallback resumes and delivers in the same canonical direct
+  conversation.
+- Canonical `pnpm test:diff` passed after the final route/session correction
+  across all affected packages and apps, including 181 Assistant Engine files,
+  80 Assistant Runtime files, 559 Web files plus lint/dev-smoke/production
+  build, and 112 Cloudflare Node/Workers files.

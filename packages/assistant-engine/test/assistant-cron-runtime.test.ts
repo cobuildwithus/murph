@@ -6655,20 +6655,31 @@ describe('assistant cron runtime orchestration', () => {
   )
 
   it.each([
-    ['group from an unspecified route', undefined, 'mismatch'],
-    ['group from a direct route', true, 'mismatch'],
-    ['direct chat from an unspecified route', undefined, 'direct'],
+    ['static group from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'mismatch'],
+    ['static group from a direct route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, true, 'mismatch'],
+    ['static direct chat from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'direct'],
+    ['dynamic onboarding direct chat from an old route', MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID, true, 'direct'],
   ] as const)(
-    'enforces a static member managed automation when live Linq authority resolves a %s',
-    async (_label, savedThreadIsDirect, liveAuthority) => {
+    'enforces a member managed automation when live Linq authority resolves a %s',
+    async (_label, automationId, savedThreadIsDirect, liveAuthority) => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         'assistant-cron-runtime-member-owner-live-group-rejection-',
       )
+      if (automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID) {
+        await completeAssistantOnboarding({
+          completedAt: '2025-11-03T14:00:00.000Z',
+          reason: 'user_answered',
+          vault: vaultRoot,
+        })
+      }
       getVaultAutomationStore(vaultRoot).push({
-        automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-        continuityPolicy: 'fresh',
+        automationId,
+        continuityPolicy:
+          automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+            ? 'preserve'
+            : 'fresh',
         createdAt: '2026-04-12T16:00:00.000Z',
         instructions: 'Send product notes.',
         route: {
@@ -6677,7 +6688,7 @@ describe('assistant cron runtime orchestration', () => {
           deliveryTarget: 'saved-member-chat',
           identityId: null,
           participantId: null,
-          threadId: null,
+          threadId: 'saved-member-chat',
           ...(savedThreadIsDirect === undefined
             ? {}
             : { threadIsDirect: savedThreadIsDirect }),
@@ -6697,6 +6708,7 @@ describe('assistant cron runtime orchestration', () => {
             { retryable: false },
           ))
         : vi.fn().mockResolvedValue({
+            conversationThreadId: 'hid_live_member_chat',
             target: 'live-member-chat',
             threadIsDirect: true,
           })
@@ -6737,6 +6749,7 @@ describe('assistant cron runtime orchestration', () => {
           expect.objectContaining({
             bindingDeliveryTarget: 'live-member-chat',
             deliveryTarget: 'live-member-chat',
+            threadId: 'hid_live_member_chat',
             threadIsDirect: true,
           }),
         )
@@ -6750,8 +6763,7 @@ describe('assistant cron runtime orchestration', () => {
         expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
         const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
         const runtimeRecord = runtimeStore.jobs.find(
-          (record) =>
-            record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+          (record) => record.jobId === automationId,
         )
         expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
         expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
@@ -6789,6 +6801,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     const resolveScheduledLinqRoute = vi.fn()
       .mockResolvedValueOnce({
+        conversationThreadId: 'hid_admitted_member_chat',
         target: 'admitted-member-chat',
         threadIsDirect: true,
       })
@@ -6808,6 +6821,7 @@ describe('assistant cron runtime orchestration', () => {
       expect(input).toMatchObject({
         bindingDeliveryTarget: 'admitted-member-chat',
         deliveryTarget: 'admitted-member-chat',
+        threadId: 'hid_admitted_member_chat',
         threadIsDirect: true,
       })
       await input.beforeProviderAcceptedInputs?.()
@@ -6988,6 +7002,7 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      conversationThreadId: 'hid_current_home_chat',
       target: 'current-home-chat',
       threadIsDirect: true,
     })
@@ -7040,6 +7055,7 @@ describe('assistant cron runtime orchestration', () => {
       expect.objectContaining({
         bindingDeliveryTarget: 'current-home-chat',
         deliveryTarget: 'current-home-chat',
+        threadId: 'hid_current_home_chat',
         threadIsDirect: true,
       }),
     )
@@ -7079,6 +7095,7 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      conversationThreadId: 'hid_current_home_chat',
       target: 'current-home-chat',
       threadIsDirect: true,
     })
@@ -7114,6 +7131,7 @@ describe('assistant cron runtime orchestration', () => {
         bindingDeliveryTarget: 'current-home-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
+        threadId: 'hid_current_home_chat',
         threadIsDirect: true,
       }),
     )

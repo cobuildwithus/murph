@@ -1407,6 +1407,15 @@ async function resolveMurphManagedAutomationCreateRoute(
       : null
   }
 
+  const existingManagedMemberRoute =
+    await resolveExistingMurphManagedMemberRoute({
+      routeValidationProfile,
+      vaultRoot: input.vaultRoot,
+    })
+  if (existingManagedMemberRoute) {
+    return existingManagedMemberRoute
+  }
+
   const resolvedTarget = await applyAssistantSelfDeliveryTargetDefaults(
     {
       channel: null,
@@ -1425,6 +1434,42 @@ async function resolveMurphManagedAutomationCreateRoute(
     resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
     routeValidationProfile,
   )
+}
+
+async function resolveExistingMurphManagedMemberRoute(input: {
+  routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
+  vaultRoot: string
+}): Promise<AutomationRoute | null> {
+  for (const seed of MURPH_STATIC_MANAGED_AUTOMATIONS) {
+    if ((seed.ownerScope ?? 'member') !== 'member') {
+      continue
+    }
+
+    const existing = await showAutomation({
+      automationId: seed.automationId,
+      vaultRoot: input.vaultRoot,
+    })
+    if (
+      existing?.status !== 'active' ||
+      !murphManagedAutomationMatchesRoute(seed, existing.route)
+    ) {
+      continue
+    }
+
+    try {
+      const route = resolveDeliverableAutomationRoute(
+        existing.route,
+        input.routeValidationProfile,
+      )
+      if (route) {
+        return route
+      }
+    } catch {
+      // One malformed legacy record must not hide a later valid managed route.
+    }
+  }
+
+  return null
 }
 
 function onboardingFollowupAutomationDefinitionChanged(

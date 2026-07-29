@@ -1599,7 +1599,10 @@ export async function runHostedWorkspaceAssistantPhase(
               { retryable: true },
             );
           }
+          const conversationThreadId =
+            authority.targetOverride?.conversationThreadId?.trim() ?? "";
           return {
+            ...(conversationThreadId ? { conversationThreadId } : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

@@ -16,6 +16,10 @@ import {
 import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
+import {
+  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberMessagingState,
+} from "./messaging-state";
 import { normalizePhoneNumber } from "./phone";
 import {
   assertActiveHostedThreadRouteContainerAccess,
@@ -32,6 +36,7 @@ import {
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 export type HostedLinqRuntimeEgressTargetOverride = {
+  conversationThreadId?: string;
   target: string;
   targetKind: "thread";
 };
@@ -414,8 +419,21 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     const privateState = await readHostedMemberRoutingPrivateState(routing, input.prisma);
     const homeChatId = normalizeNullable(privateState.linqChatId);
     if (homeChatId) {
+      // Session identity follows the member/contact blind used by ordinary
+      // direct inbound and notification routing, not the assigned Murph line.
+      const identity = await input.prisma.hostedMemberIdentity.findUnique({
+        select: { phoneLookupKey: true },
+        where: { memberId: input.memberId },
+      });
+      const conversationThreadId =
+        resolveHostedLinqConversationThreadId({
+          memberId: input.memberId,
+          memberPhoneLookupKey: identity?.phoneLookupKey,
+          threadId: homeChatId,
+        });
       return {
         targetOverride: {
+          ...(conversationThreadId ? { conversationThreadId } : {}),
           target: homeChatId,
           targetKind: "thread",
         },
@@ -425,6 +443,34 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   }
 
   throwHostedLinqRouteAuthorityMismatch();
+}
+
+function resolveHostedLinqConversationThreadId(input: {
+  memberId: string;
+  memberPhoneLookupKey: string | null | undefined;
+  threadId: string;
+}): string | null {
+  const memberId = normalizeNullable(input.memberId);
+  const memberPhoneLookupKey = normalizeNullable(input.memberPhoneLookupKey);
+  const threadId = normalizeNullable(input.threadId);
+  if (!memberId || !memberPhoneLookupKey || !threadId) {
+    return null;
+  }
+
+  const messaging = resolveHostedMemberMessagingState({
+    identity: { phoneLookupKey: memberPhoneLookupKey },
+    routing: { linqChatId: threadId },
+  });
+  const route = resolveHostedMemberAssistantNotificationRoute({
+    linqChatId: threadId,
+    memberId,
+    messaging,
+  });
+  return route?.channel === "linq"
+    && route.delivery.kind === "thread"
+    && route.delivery.target === threadId
+    ? route.threadId
+    : null;
 }
 
 function canResolveHostedLinqHomeRouteOverride(input: {

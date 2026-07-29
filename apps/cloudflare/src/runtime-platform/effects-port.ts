@@ -351,7 +351,12 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const target = readOptionalStringField(targetOverride, "target");
   const targetKind = readOptionalStringField(targetOverride, "targetKind");
   if (target && targetKind === "thread") {
+    const conversationThreadId = readOptionalStringField(
+      targetOverride,
+      "conversationThreadId",
+    );
     result.targetOverride = {
+      ...(conversationThreadId ? { conversationThreadId } : {}),
       target,
       targetKind,
     };

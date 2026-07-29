@@ -78,14 +78,18 @@ catalog or expose a production credential.
 Post-onboarding choice-point coverage is owned by assistant-engine tests. The
 seed suite proves answered-onboarding eligibility, 21-day local scheduling,
 seven-day expiry, stable installed occurrences, future same-weekday catch-up
-for older members, member ownership, and idempotent reconciliation. Managed
-maintenance tests prove that malformed onboarding state isolates this optional
-seed without blocking unrelated automations.
+for older members, quiet-wake route reuse from an existing immutable
+member-owned managed automation, member ownership, and idempotent
+reconciliation. Managed maintenance tests prove that malformed onboarding
+state isolates this optional seed without blocking unrelated automations.
 
 Cron and outbox suites prove that the registered dynamic identity rejects
 non-direct routes, uses the ordinary scheduled-notification turn rather than a
 feature-specific assistant profile, and revalidates canonical onboarding state
-at claim and queued provider entry. Prompt assertions keep unclear or unshared
+at claim and queued provider entry. Web, transport, runtime, and cron coverage
+also prove that a live direct Linq fallback carries its privacy-blinded current
+conversation locator separately from the raw provider delivery target. Prompt
+assertions keep unclear or unshared
 goals, evidence-grounded reflection, quiet skip, one easy question, and
 no-mutation-before-reply behavior explicit without adding a second evidence or
 session pipeline.

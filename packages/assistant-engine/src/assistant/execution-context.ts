@@ -410,6 +410,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    conversationThreadId?: string | null
     target: string
     threadIsDirect: boolean
   }>

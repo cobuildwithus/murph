@@ -9,6 +9,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_MANAGED_AUTOMATIONS,
   applyMurphManagedAutomations,
   resolveMurphManagedAutomationOwnerScope,
 } from '../src/assistant/managed-automations.ts'
@@ -208,15 +209,31 @@ describe('onboarding goal check-in automation', () => {
       vault: vaultRoot,
     })
 
+    // Model an existing hosted member whose ordinary managed automations were
+    // installed before this choice point shipped. A quiet maintenance wake has
+    // no fresh current-route input, so the new seed reuses an immutable
+    // member-owned managed route rather than waiting for another message.
     await expect(
       applyMurphManagedAutomations({
         defaultRoute,
+        now: new Date('2026-07-01T15:59:00.000Z'),
+        seeds: MURPH_MANAGED_AUTOMATIONS,
+        vaultRoot,
+      }),
+    ).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(
+      applyMurphManagedAutomations({
         now: new Date('2026-07-01T16:00:00.000Z'),
         vaultRoot,
       }),
     ).resolves.toEqual({
-      created: 6,
-      skipped: 0,
+      created: 1,
+      skipped: 5,
       updated: 0,
     })
     await expect(
@@ -226,6 +243,7 @@ describe('onboarding goal check-in automation', () => {
       }),
     ).resolves.toMatchObject({
       activeUntil: '2026-07-13T17:30:00.000Z',
+      route: defaultRoute,
       schedule: {
         at: '2026-07-06T17:30:00.000Z',
         kind: 'at',

@@ -552,7 +552,9 @@ After answered onboarding, Murph gets one low-pressure chance to ask what
 deserves attention now. The one-shot is scheduled 21 local-calendar days after
 completion and expires seven days later. Existing eligible members receive one
 future same-weekday catch-up rather than an immediate late message; once
-installed, its occurrence does not drift.
+installed, its occurrence does not drift. A quiet rollout wake may reuse the
+route of an active immutable member-owned managed automation, so an existing
+member does not need to send another message before the catch-up is installed.
 
 This is an ordinary member-owned managed automation in the current private
 conversation. Murph uses recent conversation and targeted canonical vault
@@ -565,6 +567,12 @@ Missing or messy data is not failure, and praise requires specific evidence.
 The scheduled turn does not create or change goals, plans, experiments,
 regimens, memories, or automations; normal conversation owns any change after
 the member replies.
+
+If live Linq authority replaces an older personal route with the member's
+current home chat, that same authority supplies the raw delivery target and its
+privacy-blinded conversation locator. Murph resumes the current private
+conversation rather than reasoning in the old chat and delivering in the new
+one.
 
 Canonical onboarding state remains the scheduling and execution authority.
 Open, declined, and manual completion do not create the one-shot, and reopened

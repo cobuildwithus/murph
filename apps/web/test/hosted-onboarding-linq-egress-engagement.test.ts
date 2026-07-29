@@ -58,6 +58,10 @@ import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
+  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberMessagingState,
+} from "@/src/lib/hosted-onboarding/messaging-state";
+import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -293,8 +297,27 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
+    const homeLinePhone = "+15550100099";
+    const memberPhone = "+15550100001";
+    const memberPhoneLookupKey = createRequiredPhoneLookupKey(memberPhone);
+    if (!memberPhoneLookupKey) {
+      throw new Error("Expected a member phone lookup key.");
+    }
+    const expectedRoute = resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat-current-home",
+      memberId: "member-1",
+      messaging: resolveHostedMemberMessagingState({
+        identity: { phoneLookupKey: memberPhoneLookupKey },
+        routing: { linqChatId: "chat-current-home" },
+      }),
+    });
+    if (!expectedRoute?.threadId) {
+      throw new Error("Expected a canonical direct conversation locator.");
+    }
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
+      homeLinePhone,
+      identityPhone: memberPhone,
     });
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
       linqChatId: "chat-current-home",
@@ -315,6 +338,7 @@ describe("hosted Linq egress authority", () => {
       targetKind: "explicit",
     })).resolves.toEqual({
       targetOverride: {
+        conversationThreadId: expectedRoute.threadId,
         target: "chat-current-home",
         targetKind: "thread",
       },
@@ -1215,8 +1239,27 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("returns direct audience authority with a current home-route override", async () => {
+    const homeLinePhone = "+15550100099";
+    const memberPhone = "+15550100001";
+    const memberPhoneLookupKey = createRequiredPhoneLookupKey(memberPhone);
+    if (!memberPhoneLookupKey) {
+      throw new Error("Expected a member phone lookup key.");
+    }
+    const expectedRoute = resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat-current-home",
+      memberId: "member-1",
+      messaging: resolveHostedMemberMessagingState({
+        identity: { phoneLookupKey: memberPhoneLookupKey },
+        routing: { linqChatId: "chat-current-home" },
+      }),
+    });
+    if (!expectedRoute?.threadId) {
+      throw new Error("Expected a canonical direct conversation locator.");
+    }
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
+      homeLinePhone,
+      identityPhone: memberPhone,
     });
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
       linqChatId: "chat-current-home",
@@ -1248,6 +1291,7 @@ describe("hosted Linq egress authority", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       targetOverride: {
+        conversationThreadId: expectedRoute.threadId,
         target: "chat-current-home",
         targetKind: "thread",
       },

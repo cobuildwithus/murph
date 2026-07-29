@@ -1115,6 +1115,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       })
       .mockResolvedValueOnce({
         targetOverride: {
+          conversationThreadId: "hid_current_direct",
+          target: "chat_current_direct",
+          targetKind: "thread" as const,
+        },
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({
+        targetOverride: {
           target: "chat_current_direct",
           targetKind: "thread" as const,
         },
@@ -1138,6 +1146,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         })).resolves.toEqual({
           target: "chat_current_group",
           threadIsDirect: false,
+        });
+        await expect(resolveScheduledLinqRoute({
+          homeRouteFallbackAllowed: true,
+          target: "chat_saved_direct",
+          targetKind: "explicit",
+        })).resolves.toEqual({
+          conversationThreadId: "hid_current_direct",
+          target: "chat_current_direct",
+          threadIsDirect: true,
         });
         await expect(resolveScheduledLinqRoute({
           homeRouteFallbackAllowed: true,
