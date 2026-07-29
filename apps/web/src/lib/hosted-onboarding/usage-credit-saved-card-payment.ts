@@ -55,6 +55,8 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
+  stripeSubscriptionId: string | null;
+  stripeSubscriptionRequired: boolean;
 }): Promise<HostedUsageCreditPurchase | null> {
   let current = await readCurrentHostedUsageCreditPurchase(input);
   const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(current);
@@ -103,6 +105,8 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
       customerId,
       purchase: current,
       stripe: input.stripe,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+      stripeSubscriptionRequired: input.stripeSubscriptionRequired,
     });
     if (!paymentMethodId) {
       return null;
@@ -259,6 +263,8 @@ async function resolveHostedUsageCreditSavedCard(input: {
   customerId: string;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
+  stripeSubscriptionId: string | null;
+  stripeSubscriptionRequired: boolean;
 }): Promise<string | null> {
   let customer: Stripe.Customer | Stripe.DeletedCustomer;
   let paymentMethods: Stripe.ApiList<Stripe.PaymentMethod>;
@@ -318,7 +324,9 @@ async function resolveHostedUsageCreditSavedCard(input: {
   }
 
   const preferredPaymentMethodIds = new Set<string>();
-  const subscriptionDefaultPaymentMethodIds = new Set<string>();
+  let boundSubscriptionDefaultInvalid = false;
+  let boundSubscriptionDefaultPaymentMethodId: string | null = null;
+  let boundSubscriptionMatched = false;
   const customerDefaultPaymentMethodId = coerceStripeObjectId(
     customer.invoice_settings.default_payment_method,
   );
@@ -347,21 +355,46 @@ async function resolveHostedUsageCreditSavedCard(input: {
       subscription.default_payment_method,
     );
     if (
+      input.purchase.checkoutRequestPolicyVersion ===
+        HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION &&
+      input.stripeSubscriptionId &&
+      subscription.id === input.stripeSubscriptionId
+    ) {
+      boundSubscriptionMatched = true;
+      if (
+        subscriptionPaymentMethodId &&
+        !attachedPaymentMethodIds.has(subscriptionPaymentMethodId)
+      ) {
+        boundSubscriptionDefaultInvalid = true;
+      } else {
+        boundSubscriptionDefaultPaymentMethodId =
+          subscriptionPaymentMethodId;
+      }
+    }
+    if (
       subscriptionPaymentMethodId &&
       attachedPaymentMethodIds.has(subscriptionPaymentMethodId)
     ) {
       preferredPaymentMethodIds.add(subscriptionPaymentMethodId);
-      subscriptionDefaultPaymentMethodIds.add(subscriptionPaymentMethodId);
     }
   }
   if (
     input.purchase.checkoutRequestPolicyVersion ===
       HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
   ) {
-    if (subscriptionDefaultPaymentMethodIds.size === 1) {
-      return [...subscriptionDefaultPaymentMethodIds][0] ?? null;
+    if (input.stripeSubscriptionId) {
+      if (!boundSubscriptionMatched || boundSubscriptionDefaultInvalid) {
+        return null;
+      }
+      if (boundSubscriptionDefaultPaymentMethodId) {
+        return boundSubscriptionDefaultPaymentMethodId;
+      }
+      return customerDefaultPaymentMethodId &&
+          attachedPaymentMethodIds.has(customerDefaultPaymentMethodId)
+        ? customerDefaultPaymentMethodId
+        : null;
     }
-    if (subscriptionDefaultPaymentMethodIds.size > 1) {
+    if (input.stripeSubscriptionRequired) {
       return null;
     }
     if (

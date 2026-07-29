@@ -7,14 +7,15 @@ Last verified: 2026-07-29
 
 Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
 to decide who receives the usage and how it is consumed. Current-policy
-personal, Family, and group funding first reuse one unambiguous canonical card
-already attached to the authenticated payer's Stripe Customer. One nonterminal
-Subscription default outranks the generic Customer default. When no
-Subscription default exists, the Customer default or only attached card may be
-used; multiple Subscription defaults or multiple non-default cards fall back to
-Checkout. Stripe's `allow_redisplay` setting controls whether Checkout may show
-a stored method again; it does not gate the payer's explicit use of the
-existing subscription card for a top-up.
+personal and Family funding reuses the exact Murph billing Subscription's
+attached default card, or the attached Customer default that Subscription
+inherits. The billing Subscription must match the frozen purchase Customer;
+missing, stale, terminal, customer-mismatched, or unattached state falls back
+to Checkout, and unrelated Subscriptions never participate. Hosted-group
+funding does not require a Murph billing Subscription and may use the attached
+Customer default or sole attached card. Stripe's `allow_redisplay` setting
+controls whether Checkout may show a stored method again; it does not gate the
+payer's explicit use of the existing subscription card for a top-up.
 
 The personal and Family offer catalog is:
 
@@ -685,13 +686,15 @@ funding route share this sequence:
     configured Stripe Price, and verify its live/test mode, active state,
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
-11. For current-policy personal, Family, and group purchases, resolve one
-    canonical card attached to the payer Customer. Prefer one nonterminal
-    Subscription default over the generic Customer default. When no
-    Subscription default exists, use the Customer default or require exactly
-    one attached card. Multiple Subscription defaults and multiple non-default
-    cards skip this path. Do not treat `allow_redisplay` as a chargeability
-    signal.
+11. For current-policy personal and Family purchases, resolve the exact Murph
+    billing Subscription already owned by the target and require its Customer
+    to match the frozen purchase. Use that Subscription's attached explicit
+    default, or its inherited attached Customer default. Missing, stale,
+    terminal, customer-mismatched, or unattached exact-subscription state skips
+    this path, and unrelated Subscriptions never participate. Group funding
+    has no required billing Subscription and may use the attached Customer
+    default or require exactly one attached card. Do not treat
+    `allow_redisplay` as a chargeability signal.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase, bind only an active payer's still-`created` purchase to
@@ -761,8 +764,11 @@ saved-card payment for group purchases only. New purchases freeze
 version three with both behaviors for personal, Family, and group targets.
 New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
 targets, adds Stripe's explicit payment-method save choice to Checkout, and
-prefers one unambiguous existing Subscription default over the generic Customer
-default regardless of whether Stripe may redisplay it in Checkout.
+binds personal and Family card selection to the target's exact Murph billing
+Subscription. It uses that Subscription's explicit default or inherited
+Customer default regardless of whether Stripe may redisplay the card in
+Checkout. Group funding remains Customer-scoped because it has no required
+Murph billing Subscription.
 Versions one through three retain their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
@@ -907,10 +913,12 @@ expose debt in a group chat, or charge another participant.
   Radar and a reviewed operational velocity ceiling must be configured before
   production launch.
 - Saved-card funding never accepts a browser-supplied PaymentMethod.
-  Murph selects only one canonical card attached to the authenticated payer's
-  verified Customer. Current policy prefers one nonterminal Subscription
-  default over the generic Customer default; when neither exists, it requires
-  exactly one attached card. `allow_redisplay` is used only for Stripe Checkout
+  For personal and Family purchases, Murph selects only the exact billing
+  Subscription's attached explicit default or inherited Customer default,
+  after matching the Subscription owner to the verified Customer. Unrelated
+  Subscriptions never participate. Group funding may use the attached Customer
+  default or sole attached card because it has no required billing
+  Subscription. `allow_redisplay` is used only for Stripe Checkout
   presentation. Murph persists the resulting PaymentIntent before confirmation
   and never stores raw card details.
 - Payment records and health-sharing permissions remain separate. Buying usage
@@ -944,8 +952,8 @@ does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
 
 Choosing an amount has no payment effect. The explicit **Sponsor ~200 messages · $10** click
-authorizes only that one fixed contribution. Murph uses one unambiguous
-Customer or nonterminal Subscription default card, or the sole attached card.
+authorizes only that one fixed contribution. Murph uses the payer Customer's
+attached default card, or its sole attached card.
 If there is no canonical choice, Stripe Checkout collects a card. This is
 neither recurring billing nor auto-recharge.
 

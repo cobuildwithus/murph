@@ -226,10 +226,14 @@ Last verified: 2026-07-28
   saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
   purchases retain the legacy selection behavior for groups only, frozen v3
   purchases retain it for all targets, and v1 remains Checkout-only. Current
-  policy selects one unambiguous attached nonterminal Subscription default
-  before the generic Customer default, or the only attached method when no
-  default exists. Multiple Subscription defaults and multiple non-default
-  methods remain in Checkout.
+  policy binds personal and Family selection to the exact Murph billing
+  Subscription whose Customer matches the frozen purchase, using its attached
+  explicit default or its inherited attached Customer default. Missing, stale,
+  terminal, customer-mismatched, or unattached exact-subscription state remains
+  in Checkout, and unrelated Subscriptions never participate. Group funding
+  has no required billing Subscription and may use the attached Customer
+  default or the only attached method; multiple non-default methods remain in
+  Checkout.
   `allow_redisplay` affects Checkout presentation rather than direct
   chargeability. Current-policy Checkout exposes Stripe's explicit save choice;
   older policy requests remain byte-for-byte reconstructible.

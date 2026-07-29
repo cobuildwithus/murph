@@ -15,6 +15,7 @@ import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import {
+  readHostedAccountGroupStripeBillingRef,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
   type HostedFamilyUsageCreditCheckoutTarget,
 } from "./family-plan";
@@ -51,6 +52,7 @@ import {
   projectHostedUsageCreditPurchaseStatusResult,
   projectHostedUsageCreditPurchaseTarget,
   type HostedUsageCreditCheckoutResult,
+  type HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
@@ -893,6 +895,23 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     stripe,
   });
+  const stripeCustomerId = typeof checkoutRequest.customer === "string"
+    ? checkoutRequest.customer
+    : null;
+  if (!stripeCustomerId) {
+    throw buildHostedUsageCreditInvariantError("purchase_customer_missing");
+  }
+  const stripeSubscriptionBinding =
+    canStartSavedCardPayment &&
+      !purchase.stripePaymentIntentLookupKey &&
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      ? await resolveHostedUsageCreditStripeSubscriptionBinding({
+          payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
+          prisma: input.prisma,
+          stripeCustomerId,
+          target,
+        })
+      : { required: false, stripeSubscriptionId: null };
   let checkoutPurchase = purchase;
   if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
@@ -902,6 +921,9 @@ async function continueHostedUsageCreditCheckout(input: {
       prisma: input.prisma,
       purchase,
       stripe,
+      stripeSubscriptionId:
+        stripeSubscriptionBinding.stripeSubscriptionId,
+      stripeSubscriptionRequired: stripeSubscriptionBinding.required,
     });
     if (directPaymentPurchase) {
       const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
@@ -963,6 +985,36 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase: attached,
   });
   return finalProjection.checkout;
+}
+
+async function resolveHostedUsageCreditStripeSubscriptionBinding(input: {
+  payerMemberId: string;
+  prisma: PrismaClient;
+  stripeCustomerId: string;
+  target: HostedUsageCreditPurchaseTargetProjection;
+}): Promise<{
+  required: boolean;
+  stripeSubscriptionId: string | null;
+}> {
+  if (input.target.kind === "group") {
+    return { required: false, stripeSubscriptionId: null };
+  }
+  const billingRef = input.target.kind === "family"
+    ? await readHostedAccountGroupStripeBillingRef({
+        groupId: input.target.familyGroupId,
+        prisma: input.prisma,
+      })
+    : await readHostedMemberStripeBillingRef({
+        memberId: input.payerMemberId,
+        prisma: input.prisma,
+      });
+  return {
+    required: true,
+    stripeSubscriptionId:
+      billingRef?.stripeCustomerId === input.stripeCustomerId
+        ? billingRef.stripeSubscriptionId
+        : null,
+  };
 }
 
 async function projectHostedUsageCreditCheckoutForCurrentTarget(input: {

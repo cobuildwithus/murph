@@ -193,12 +193,14 @@ Last verified: 2026-07-28
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
-- Current-policy saved-card personal, Family, and group funding may select one
-  unambiguous card already attached to the authenticated payer's verified
-  Stripe Customer. One nonterminal Subscription default outranks the generic
-  Customer default. With no Subscription default, Murph uses the Customer
-  default or requires exactly one attached method; multiple Subscription
-  defaults or multiple non-default methods stay in Checkout.
+- Current-policy personal and Family saved-card funding resolves the exact
+  Murph billing Subscription whose Customer matches the authenticated payer's
+  verified Stripe Customer. Murph may use that Subscription's attached
+  explicit default or its inherited attached Customer default. Missing, stale,
+  terminal, customer-mismatched, or unattached exact-subscription state stays
+  in Checkout; unrelated Subscriptions never participate. Hosted-group funding
+  does not require a Murph billing Subscription and may use the attached
+  Customer default or require exactly one attached method.
   Frozen v2 purchases retain the legacy behavior for group targets only,
   frozen v3 purchases retain it for all targets, and v1 retains no saved-card
   path. The browser cannot supply a PaymentMethod. `allow_redisplay` governs
