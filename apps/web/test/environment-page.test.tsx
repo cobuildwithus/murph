@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
+
+import {
+  HABITAT_CATALOG,
+  type HabitatIndicatorDefinition,
+  type HabitatIndicatorValue,
+} from "@murphai/contracts";
 
 import {
   deriveCategoryNote,
   evaluateIndicatorTarget,
   overallGrade,
 } from "../app/(dashboard)/environment/category-notes";
+import { EnvironmentHero } from "../app/(dashboard)/environment/environment-components";
 import {
   type HabitatValues,
   resolveEnvironmentCoverage,
@@ -51,6 +60,7 @@ test("a fair grade waits until at least half of eligible conditions are known", 
     letter: null,
     met: 3,
     pct: null,
+    redFlags: 0,
   });
 });
 
@@ -80,54 +90,58 @@ test("declined conditions are visible but cannot suppress a fair grade or covera
     letter: "A",
     met: 3,
     pct: 100,
+    redFlags: 0,
   });
   assert.equal(sleep.skippedFacts.length, 5);
   assert.equal(sleep.known, 3);
-  assert.equal(sleep.total, 5);
+  assert.equal(sleep.total, 3);
   assert.equal(sleepCategory.known, 3);
-  assert.equal(sleepCategory.total, 5);
-  assert.equal(
-    resolveEnvironmentCoverage(scene, values).total,
-    scene.total + 2,
-  );
+  assert.equal(sleepCategory.total, 3);
+  assert.deepEqual(resolveEnvironmentCoverage(scene), {
+    coverage: Math.round((100 * scene.known) / scene.total),
+    known: scene.known,
+    total: scene.total,
+  });
 });
 
+const TARGET_ENVIRONMENT_VALUES: HabitatValues = {
+  "home-air": {
+    damp_or_mold: "none",
+    smoke_sources: "none",
+  },
+  lighting: {
+    daytime_light: "by_window",
+    evening_light: "warm_dim",
+    light_therapy_lamp: false,
+    morning_light_access: "outdoor_routine",
+  },
+  "recovery-access": {
+    cold_exposure: "none",
+    red_light: "none",
+    sauna_access: "none",
+  },
+  "sleep-environment": {
+    bedding_overheating: "never",
+    co2_typical_ppm: 780,
+    darkness: "blackout",
+    mattress_satisfaction: "good",
+    night_noise: "quiet",
+    night_temp_c: 20,
+    phone_by_bed: false,
+    tv_in_bedroom: false,
+  },
+  workspace: {
+    breaks: "systematic",
+    chair: "ordinary",
+    external_keyboard: false,
+    screen_at_eye_level: true,
+    standing_desk: "fixed",
+    wrist_complaints: false,
+  },
+};
+
 test("optional equipment cannot lower the environment grade", () => {
-  const values: HabitatValues = {
-    "home-air": {
-      damp_or_mold: "none",
-      smoke_sources: "none",
-    },
-    lighting: {
-      daytime_light: "by_window",
-      evening_light: "warm_dim",
-      light_therapy_lamp: false,
-      morning_light_access: "outdoor_routine",
-    },
-    "recovery-access": {
-      cold_exposure: "none",
-      red_light: "none",
-      sauna_access: "none",
-    },
-    "sleep-environment": {
-      bedding_overheating: "never",
-      co2_typical_ppm: 780,
-      darkness: "blackout",
-      mattress_satisfaction: "good",
-      night_noise: "quiet",
-      night_temp_c: 20,
-      phone_by_bed: false,
-      tv_in_bedroom: false,
-    },
-    workspace: {
-      breaks: "systematic",
-      chair: "ordinary",
-      external_keyboard: false,
-      screen_at_eye_level: true,
-      standing_desk: "fixed",
-      wrist_complaints: false,
-    },
-  };
+  const values = TARGET_ENVIRONMENT_VALUES;
   const scene = resolveHabitatScene(values);
   const notes = scene.categories.map((category) =>
     deriveCategoryNote(category, values),
@@ -139,6 +153,7 @@ test("optional equipment cannot lower the environment grade", () => {
     letter: "A",
     met: 16,
     pct: 100,
+    redFlags: 0,
   });
   const recovery = notes.find((note) => note.id === "recovery");
   assert.ok(recovery);
@@ -146,6 +161,106 @@ test("optional equipment cannot lower the environment grade", () => {
   assert.ok(
     recovery.rows.every((row) => row.met === null && row.target === null),
   );
+});
+
+test("urgent exposures cap an otherwise strong grade at E", () => {
+  for (const [indicatorId, value, expectedMet, expectedPct] of [
+    ["damp_or_mold", "visible_mold", 15, 94],
+    ["smoke_sources", "smoking", 15, 94],
+    ["radon_tested", "tested_high", 16, 100],
+  ] as const) {
+    const values: HabitatValues = {
+      ...TARGET_ENVIRONMENT_VALUES,
+      "home-air": {
+        ...TARGET_ENVIRONMENT_VALUES["home-air"],
+        [indicatorId]: value,
+      },
+    };
+    const scene = resolveHabitatScene(values);
+    const grade = overallGrade(
+      scene.categories.map((category) => deriveCategoryNote(category, values)),
+    );
+
+    assert.deepEqual(grade, {
+      eligible: 16,
+      graded: 16,
+      letter: "E",
+      met: expectedMet,
+      pct: expectedPct,
+      redFlags: 1,
+    });
+  }
+});
+
+test("radon testing is neutral unless a high result is known", () => {
+  for (const value of [undefined, "declined", "not_tested"] as const) {
+    const values: HabitatValues = {
+      ...TARGET_ENVIRONMENT_VALUES,
+      "home-air": {
+        ...TARGET_ENVIRONMENT_VALUES["home-air"],
+        ...(value === undefined ? {} : { radon_tested: value }),
+      },
+    };
+    const scene = resolveHabitatScene(values);
+    const grade = overallGrade(
+      scene.categories.map((category) => deriveCategoryNote(category, values)),
+    );
+
+    assert.equal(grade.letter, "A");
+    assert.equal(grade.redFlags, 0);
+  }
+});
+
+test("the hero explains urgent grade caps without requiring a dialog", () => {
+  const strongValues: HabitatValues = {
+    ...TARGET_ENVIRONMENT_VALUES,
+    "home-air": {
+      ...TARGET_ENVIRONMENT_VALUES["home-air"],
+      damp_or_mold: "visible_mold",
+    },
+  };
+  const strongScene = resolveHabitatScene(strongValues);
+  const strongNotes = strongScene.categories.map((category) =>
+    deriveCategoryNote(category, strongValues),
+  );
+  const strongMarkup = renderEnvironmentHero(
+    strongScene,
+    overallGrade(strongNotes),
+    strongNotes,
+  );
+
+  assert.match(strongMarkup, />94%/);
+  assert.match(strongMarkup, /of known conditions within target/);
+  assert.match(strongMarkup, /1 urgent issue caps the grade at E/);
+
+  const sparseValues: HabitatValues = {
+    "home-air": { damp_or_mold: "visible_mold" },
+  };
+  const sparseScene = resolveHabitatScene(sparseValues);
+  const sparseNotes = sparseScene.categories.map((category) =>
+    deriveCategoryNote(category, sparseValues),
+  );
+  const sparseMarkup = renderEnvironmentHero(
+    sparseScene,
+    overallGrade(sparseNotes),
+    sparseNotes,
+  );
+
+  assert.match(sparseMarkup, /Not enough information for a fair grade/);
+  assert.match(sparseMarkup, /1 urgent issue needs attention now/);
+});
+
+test("every catalog condition that is not informational has a target evaluator", () => {
+  for (const aspect of HABITAT_CATALOG.aspects) {
+    for (const indicator of aspect.indicators) {
+      if (indicator.informational) continue;
+      assert.notEqual(
+        evaluateIndicatorTarget(indicator.id, sampleIndicatorValue(indicator)),
+        null,
+        `${aspect.id}.${indicator.id} must be evaluated or marked informational`,
+      );
+    }
+  }
 });
 
 test("folded facts stay visible when their parent fact is unknown", () => {
@@ -185,8 +300,46 @@ test("a category with only informational facts has no grade or target text", () 
     letter: null,
     met: 0,
     pct: null,
+    redFlags: 0,
   });
   assert.equal(water.rows[0]?.target, null);
   assert.equal(water.known, 0);
   assert.equal(water.total, 0);
 });
+
+function sampleIndicatorValue(
+  indicator: HabitatIndicatorDefinition,
+): HabitatIndicatorValue {
+  switch (indicator.valueType.kind) {
+    case "boolean":
+      return true;
+    case "enum":
+      return indicator.valueType.values[0] ?? null;
+    case "number":
+      return indicator.valueType.min ?? 0;
+    case "text":
+      return "known";
+  }
+}
+
+function renderEnvironmentHero(
+  scene: ReturnType<typeof resolveHabitatScene>,
+  grade: ReturnType<typeof overallGrade>,
+  notes: ReturnType<typeof deriveCategoryNote>[],
+): string {
+  return renderToStaticMarkup(
+    createElement(EnvironmentHero, {
+      context: {
+        areaType: "Apartment",
+        location: "Warsaw",
+        nights: "Cool",
+        outdoorAir: "Good",
+        weather: "Clear",
+      },
+      grade,
+      known: scene.known,
+      notes,
+      total: scene.total,
+    }),
+  );
+}

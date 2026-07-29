@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-23
-Updated: 2026-07-23
+Updated: 2026-07-29
 
 ## Goal
 
@@ -19,6 +19,8 @@ Updated: 2026-07-23
   not lower the grade.
 - The assessment grades conditions and exposures, not purchases. Optional
   recovery equipment can only appear as non-required positive context.
+- Every gradeable catalog condition has an evaluator, and visible mold or indoor
+  smoking caps a sufficiently covered assessment at E.
 - A member can record one guided voice memo from the page and hand it to Murph
   for transcription/extraction without reviewing a form.
 - Weather and outdoor air quality use a real city-level source when the stored

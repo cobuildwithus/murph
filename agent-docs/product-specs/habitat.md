@@ -177,14 +177,15 @@ Evidence anchors: top of screen at eye level, 50–75 cm viewing distance, desk 
 
 Zone/aspect grades (A–E or `unknown`) render on the home visualization — specified now, built only after the foundation ships. Framing: research audit, not gamification — every grade traces to named indicators, ships with reasoning and a concrete "what to improve" list; no points, streaks, or celebratory copy. Grading rubrics live in the catalog (versioned product spec), evidence-anchored per aspect. All thresholds below are tunable defaults.
 
-**Scale.** A = optimized (high-priority indicators known and on target) · B = good (minor gaps, no high-impact issue) · C = needs attention (≥1 high-impact indicator off target) · D = poor (several off target) · E = act now (a red-flag indicator with documented health risk, e.g. visible mold or indoor smoking; red flags also cap the grade) · `unknown` = coverage below threshold; first-class state that invites the UI handoff.
+**Scale.** A = optimized (high-priority indicators known and on target) · B = good (minor gaps, no high-impact issue) · C = needs attention (≥1 high-impact indicator off target) · D = poor (several off target) · E = act now (a red-flag indicator with documented health risk, e.g. visible mold, indoor smoking, or a known high-radon result; red flags also cap the grade) · `unknown` = coverage below threshold; first-class state that invites the UI handoff.
 
 **Levels (all derived, never stored):**
 
 1. Indicator status: each gradeable condition evaluates against its catalog rule to on-target / off-target / unknown / declined. Informational indicators and equipment/access facts inform advice but never grade.
-2. Equipment and access status: facts such as sauna access, red-light panels, air purifiers, and standing desks are informational. They can tailor advice or unlock a bonus capability, but `none`, missing, and declined never count as off-target.
+2. Context and access status: facts without a universal healthy target — including window habits, ventilation type, stove type, radon-test relevance, work mode/hours, and equipment such as saunas, red-light panels, air purifiers, and standing desks — are informational. They can tailor advice or unlock a capability, but their value, absence, or decline never counts as off-target.
 3. Zone grade: coverage = known gradeable conditions ÷ all gradeable conditions; below 50% the zone is `unknown`. Score = on-target ÷ known, mapped ≥90% A · ≥75% B · ≥55% C · ≥35% D · else E. `declined` is excluded from the denominator — declining is respected, never penalized.
-4. Domain/home grade: the same formula runs over all gradeable conditions in the domain and is always displayed with its coverage so confident grades and thin-data grades never look alike.
+4. Red-flag cap: a known urgent exposure such as visible mold, indoor smoking, or a high-radon result forces an E once enough gradeable conditions are known to issue a grade. Missing, declined, and `not_tested` radon remain neutral. The UI still discloses the raw within-target proportion and names the cap instead of disguising it as a lower percentage.
+5. Domain/home grade: the same formula runs over all gradeable conditions in the domain and is always displayed with its coverage so confident grades and thin-data grades never look alike.
 
 ## Environment UI
 
@@ -216,3 +217,4 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 - 2026-07-23 — Habitat is not added as a universal onboarding survey. Collection is opportunistic, conversational, or a user-started voice walkthrough.
 - 2026-07-23 — Grades measure known conditions and habits. Optional equipment and access are neutral when absent; missing and declined facts are excluded until coverage is sufficient.
 - 2026-07-23 — Live weather and outdoor air quality are transient city-level context, not stored member truth.
+- 2026-07-29 — Every non-informational catalog indicator must have an evaluator. Context without a universal target stays informational, while visible mold, indoor smoking, and a known high-radon result cap a sufficiently covered audit at E.

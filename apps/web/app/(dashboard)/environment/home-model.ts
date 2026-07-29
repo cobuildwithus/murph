@@ -325,20 +325,15 @@ export function resolveHabitatScene(values: HabitatValues): HabitatScene {
   return { categories, known, total };
 }
 
-// Home-context facts shown in the hero strip rather than category lists.
-// They still count toward overall coverage everywhere the score appears.
-export function resolveEnvironmentCoverage(
-  scene: HabitatScene,
-  values: HabitatValues,
-): { known: number; total: number; coverage: number } {
-  const homeFacts = [
-    values["home-location"]?.location,
-    values["home-location"]?.area_type,
-  ];
-  const known = scene.known + homeFacts.filter(isKnownIndicatorValue).length;
-  const total =
-    scene.total +
-    homeFacts.filter((value) => value !== HABITAT_DECLINED_VALUE).length;
+// Coverage uses the same gradeable catalog indicators as the audit.
+// Home context is still useful for the hero and live conditions, but it does
+// not make the health assessment look more complete.
+export function resolveEnvironmentCoverage(scene: HabitatScene): {
+  known: number;
+  total: number;
+  coverage: number;
+} {
+  const { known, total } = scene;
   return {
     known,
     total,

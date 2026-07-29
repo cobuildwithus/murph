@@ -215,7 +215,7 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
 
   assert.match(markup, /Your environment/);
   assert.match(markup, /Environment grade/);
-  assert.match(markup, /Murph knows 8 of 25/);
+  assert.match(markup, /Murph knows 6 of 16/);
   assert.match(markup, /Lisbon/);
   assert.match(markup, /Not enough information for a fair grade/);
   assert.match(markup, /Air &amp; water/);

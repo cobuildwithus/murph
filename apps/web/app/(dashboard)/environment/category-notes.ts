@@ -14,6 +14,7 @@ export type CategoryGrade = {
   met: number;
   graded: number;
   eligible: number;
+  redFlags: number;
 };
 
 export type FactRow = {
@@ -104,6 +105,14 @@ const TARGET_EVALUATORS: Readonly<Record<string, Evaluator>> = {
   },
 };
 
+const RED_FLAG_DETECTORS: Readonly<
+  Record<string, (value: HabitatIndicatorValue) => boolean>
+> = {
+  damp_or_mold: (value) => value === "visible_mold",
+  radon_tested: (value) => value === "tested_high",
+  smoke_sources: (value) => value === "smoking",
+};
+
 const aspectById = new Map(
   HABITAT_CATALOG.aspects.map((aspect) => [aspect.id, aspect]),
 );
@@ -174,21 +183,25 @@ function gradeFromCounts(
   met: number,
   graded: number,
   eligible: number,
+  redFlags: number,
 ): CategoryGrade {
   if (
     graded === 0 ||
     eligible === 0 ||
     graded / eligible < MIN_GRADE_COVERAGE
   ) {
-    return { letter: null, pct: null, met, graded, eligible };
+    return { letter: null, pct: null, met, graded, eligible, redFlags };
   }
 
   const pct = Math.round((100 * met) / graded);
-  if (pct >= 90) return { letter: "A", pct, met, graded, eligible };
-  if (pct >= 75) return { letter: "B", pct, met, graded, eligible };
-  if (pct >= 55) return { letter: "C", pct, met, graded, eligible };
-  if (pct >= 35) return { letter: "D", pct, met, graded, eligible };
-  return { letter: "E", pct, met, graded, eligible };
+  if (redFlags > 0) {
+    return { letter: "E", pct, met, graded, eligible, redFlags };
+  }
+  if (pct >= 90) return { letter: "A", pct, met, graded, eligible, redFlags };
+  if (pct >= 75) return { letter: "B", pct, met, graded, eligible, redFlags };
+  if (pct >= 55) return { letter: "C", pct, met, graded, eligible, redFlags };
+  if (pct >= 35) return { letter: "D", pct, met, graded, eligible, redFlags };
+  return { letter: "E", pct, met, graded, eligible, redFlags };
 }
 
 export function overallGrade(notes: readonly CategoryNote[]): CategoryGrade {
@@ -196,6 +209,7 @@ export function overallGrade(notes: readonly CategoryNote[]): CategoryGrade {
     notes.reduce((sum, note) => sum + note.grade.met, 0),
     notes.reduce((sum, note) => sum + note.grade.graded, 0),
     notes.reduce((sum, note) => sum + note.grade.eligible, 0),
+    notes.reduce((sum, note) => sum + note.grade.redFlags, 0),
   );
 }
 
@@ -339,6 +353,10 @@ export function deriveCategoryNote(
 
   const met = rows.filter((row) => row.met === true).length;
   const graded = rows.filter((row) => row.met !== null).length;
+  const redFlags = indicators.filter(({ indicator, value }) => {
+    const detectsRedFlag = RED_FLAG_DETECTORS[indicator.id];
+    return isKnownValue(value) && detectsRedFlag?.(value) === true;
+  }).length;
   const eligible = indicators.filter(
     ({ indicator, value }) =>
       indicator.informational !== true &&
@@ -351,7 +369,7 @@ export function deriveCategoryNote(
     title: category.title,
     known,
     total,
-    grade: gradeFromCounts(met, graded, eligible),
+    grade: gradeFromCounts(met, graded, eligible, redFlags),
     rows: rows.map(
       ({
         indicatorId,

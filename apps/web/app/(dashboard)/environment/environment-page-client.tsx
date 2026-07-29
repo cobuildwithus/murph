@@ -2,10 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HABITAT_DECLINED_VALUE } from "@murphai/contracts";
-import {
-  ArrowRight,
-  Lightbulb,
-} from "lucide-react";
+import { ArrowRight, Lightbulb } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -38,10 +35,7 @@ const EMPTY_HABITAT_NOTES = EMPTY_HABITAT_SCENE.categories.map((category) =>
   deriveCategoryNote(category, EMPTY_HABITAT_VALUES),
 );
 const EMPTY_HABITAT_GRADE = overallGrade(EMPTY_HABITAT_NOTES);
-const EMPTY_HABITAT_COVERAGE = resolveEnvironmentCoverage(
-  EMPTY_HABITAT_SCENE,
-  EMPTY_HABITAT_VALUES,
-);
+const EMPTY_HABITAT_COVERAGE = resolveEnvironmentCoverage(EMPTY_HABITAT_SCENE);
 
 export default function EnvironmentPageClient({
   contactAction,
@@ -60,10 +54,7 @@ export default function EnvironmentPageClient({
     [scene, values],
   );
   const grade = useMemo(() => overallGrade(notes), [notes]);
-  const coverage = useMemo(
-    () => resolveEnvironmentCoverage(scene, values),
-    [scene, values],
-  );
+  const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
   const location = readableLocation(values);
   const conditions = useEnvironmentConditions(location);
 
@@ -195,9 +186,7 @@ function EnvironmentReport({
           location: contextValue(values["home-location"]?.location),
           areaType: contextValue(values["home-location"]?.area_type),
           weather: conditions.weather,
-          nights: contextValue(
-            values["sleep-environment"]?.night_noise,
-          ),
+          nights: contextValue(values["sleep-environment"]?.night_noise),
           outdoorAir: conditions.outdoorAir,
         }}
       />

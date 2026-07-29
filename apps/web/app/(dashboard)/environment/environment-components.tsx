@@ -103,7 +103,11 @@ export function GradeBadge({
 }) {
   const label =
     grade.letter && grade.pct !== null
-      ? `Grade ${grade.letter}, ${grade.pct} percent`
+      ? grade.redFlags > 0
+        ? `Grade ${grade.letter}, capped by ${grade.redFlags} red ${
+            grade.redFlags === 1 ? "flag" : "flags"
+          }; ${grade.pct} percent of known conditions within target`
+        : `Grade ${grade.letter}, ${grade.pct} percent`
       : "Grade not available";
 
   return (
@@ -143,7 +147,23 @@ function GradeDialog({
                 {grade.eligible === 0
                   ? "Informational facts only. This category isn't graded."
                   : grade.letter === null
-                  ? `Murph knows ${grade.graded} of ${grade.eligible} scoreable conditions. At least half are needed for a fair grade.`
+                  ? grade.redFlags > 0
+                    ? `Murph found ${
+                        grade.redFlags === 1
+                          ? "an urgent issue"
+                          : `${grade.redFlags} urgent issues`
+                      }, but knows only ${grade.graded} of ${
+                        grade.eligible
+                      } scoreable conditions. At least half are needed for a complete grade.`
+                    : `Murph knows ${grade.graded} of ${grade.eligible} scoreable conditions. At least half are needed for a fair grade.`
+                  : grade.redFlags > 0
+                  ? `${
+                      grade.redFlags === 1
+                        ? "An urgent issue caps"
+                        : `${grade.redFlags} urgent issues cap`
+                    } this grade at E. ${grade.met} of ${
+                      grade.graded
+                    } known conditions are within target.`
                   : `${grade.met} of ${grade.graded} known conditions are within target. Unknown facts do not lower the grade.`}
               </DialogDescription>
             </div>
@@ -394,15 +414,33 @@ export function EnvironmentHero({
                   : "Not enough information for a fair grade"}
               </p>
             ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setGradeOpen(true)}
+                  aria-label="How this grade is calculated"
+                  className="mt-1 cursor-pointer border-b border-dotted border-muted-foreground/60 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {grade.pct}%
+                </button>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  of known conditions within target
+                </p>
+              </>
+            )}
+            {grade.redFlags > 0 ? (
               <button
                 type="button"
                 onClick={() => setGradeOpen(true)}
-                aria-label="How this grade is calculated"
-                className="mt-1 cursor-pointer border-b border-dotted border-muted-foreground/60 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mt-2 block text-left text-xs font-medium text-destructive underline decoration-destructive/40 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {grade.pct}%
+                {grade.redFlags} urgent{" "}
+                {grade.redFlags === 1 ? "issue" : "issues"}{" "}
+                {grade.letter === "E"
+                  ? `${grade.redFlags === 1 ? "caps" : "cap"} the grade at E`
+                  : `${grade.redFlags === 1 ? "needs" : "need"} attention now`}
               </button>
-            )}
+            ) : null}
           </div>
           <OverallGradeDialog
             open={gradeOpen}
