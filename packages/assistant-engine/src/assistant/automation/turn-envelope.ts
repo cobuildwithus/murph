@@ -1,6 +1,9 @@
 import type { AutomationAssistantTargetOverride } from '@murphai/contracts'
 import type { AssistantTurnTrigger } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantExecutionContext } from '../execution-context.js'
+import {
+  normalizeAssistantExecutionContext,
+  type AssistantExecutionContext,
+} from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type {
@@ -11,19 +14,24 @@ import {
   compactAutomationAssistantTargetOverride,
 } from './target-override.js'
 
-export type AssistantAutomationTurnEnvelope = Pick<
-  AssistantMessageInput,
-  | 'abortSignal'
-  | 'assistantTargetOverride'
-  | 'deliveryDispatchMode'
-  | 'executionContext'
-  | 'scheduledAutomationAuthority'
-  | 'scheduledInvocationAuthority'
-  | 'scheduledOccurrenceAt'
-  | 'serviceTier'
-  | 'turnEnvironment'
-  | 'turnTrigger'
->
+export type AssistantAutomationTurnEnvelope = Omit<
+  Pick<
+    AssistantMessageInput,
+    | 'abortSignal'
+    | 'assistantTargetOverride'
+    | 'deliveryDispatchMode'
+    | 'executionContext'
+    | 'scheduledAutomationAuthority'
+    | 'scheduledInvocationAuthority'
+    | 'scheduledOccurrenceAt'
+    | 'serviceTier'
+    | 'turnEnvironment'
+    | 'turnTrigger'
+  >,
+  'executionContext'
+> & {
+  executionContext: AssistantExecutionContext
+}
 
 export function buildAssistantAutomationTurnEnvelope(input: {
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -45,7 +53,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     abortSignal: input.signal,
     ...(targetOverride ? { assistantTargetOverride: targetOverride } : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: input.executionContext,
+    executionContext: normalizeAssistantExecutionContext(input.executionContext),
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
