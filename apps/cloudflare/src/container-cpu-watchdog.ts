@@ -3,10 +3,29 @@ import {
   sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 
-const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 20_000;
+const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 10_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
 const HOSTED_CONTAINER_CPU_WATCHDOG_TOP_PROCESS_COUNT = 3;
 const HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM = "[redacted]";
+const HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES = new Set([
+  "bash",
+  "cat",
+  "codex",
+  "dash",
+  "grep",
+  "murph",
+  "node",
+  "pnpm",
+  "python",
+  "python3",
+  "rg",
+  "sed",
+  "sh",
+  "tail",
+  "tini",
+  "vault-cli",
+  "zsh",
+]);
 // Linux exports per-process utime/stime in USER_HZ ticks; USER_HZ is 100 on the
 // linux/amd64 hosted runner image. Diagnostics-only conversion, not authority.
 const HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND = 100;
@@ -20,12 +39,14 @@ interface HostedContainerCpuWatchdogDirectoryEntryLike {
 // watchdog stays decoupled from the entrypoint module graph.
 export interface HostedContainerCpuWatchdogProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
+  readlink?(path: string): Promise<string>;
   readdir(path: string): Promise<HostedContainerCpuWatchdogDirectoryEntryLike[]>;
 }
 
 interface HostedContainerCpuWatchdogProcessSample {
   comm: string;
   cpuTicks: number;
+  executable: string | null;
   // stat field 22 kept as an opaque equality token: same pid + same start time
   // is the same process; a changed start time is a reused pid.
   startTimeTicks: string | null;
@@ -48,9 +69,10 @@ interface HostedContainerCpuWatchdogSample {
 // Always-on CPU attribution sampler for the hosted runner container. Samples
 // cgroup CPU totals plus per-process tick counters on a fixed interval and
 // emits one structured log per interval whose CPU usage crosses the threshold,
-// naming the top processes by kernel comm name only (never command lines), so
-// production CPU burns are attributable to a specific process. Diagnostics
-// only: sampling failures never affect the runner.
+// naming the top processes by kernel comm plus an allowlisted executable
+// basename read from /proc/<pid>/exe (never command lines, arguments, or
+// executable paths), so production CPU burns are attributable to a specific
+// process. Diagnostics only: sampling failures never affect the runner.
 export function startHostedContainerCpuWatchdog(input: {
   processApi: HostedContainerCpuWatchdogProcessApi;
 }): () => void {
@@ -143,7 +165,13 @@ async function readHostedContainerCpuWatchdogSample(
     }
     const parsed = parseHostedContainerProcPidStat(stat);
     if (parsed) {
-      perPid.set(Number.parseInt(entry.name, 10), parsed);
+      perPid.set(Number.parseInt(entry.name, 10), {
+        ...parsed,
+        executable: await readHostedContainerCpuWatchdogExecutable(
+          processApi,
+          entry.name,
+        ),
+      });
     } else {
       procScanComplete = false;
     }
@@ -204,7 +232,7 @@ function parseHostedContainerCgroupCpuStat(text: string | null): {
 // watchdog logs stay free of command-line content.
 function parseHostedContainerProcPidStat(
   text: string,
-): HostedContainerCpuWatchdogProcessSample | null {
+): Omit<HostedContainerCpuWatchdogProcessSample, "executable"> | null {
   const commStart = text.indexOf("(");
   const commEnd = text.lastIndexOf(")");
   if (commStart === -1 || commEnd <= commStart) {
@@ -226,6 +254,30 @@ function parseHostedContainerProcPidStat(
   };
 }
 
+async function readHostedContainerCpuWatchdogExecutable(
+  processApi: HostedContainerCpuWatchdogProcessApi,
+  pid: string,
+): Promise<string | null> {
+  if (!processApi.readlink) {
+    return null;
+  }
+
+  let target: string;
+  try {
+    target = await processApi.readlink(`/proc/${pid}/exe`);
+  } catch {
+    return null;
+  }
+  const basename = target
+    .replace(/ \(deleted\)$/u, "")
+    .split("/")
+    .at(-1);
+  return basename
+    && HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(basename)
+    ? basename
+    : null;
+}
+
 function emitHostedContainerCpuWatchdogReport(input: {
   current: HostedContainerCpuWatchdogSample;
   previous: HostedContainerCpuWatchdogSample;
@@ -239,6 +291,7 @@ function emitHostedContainerCpuWatchdogReport(input: {
     comm: string;
     commRedacted: boolean;
     cpuCores: number;
+    executable?: string;
     pid: number;
   }> = [];
   let perPidTicksDelta = 0;
@@ -277,6 +330,7 @@ function emitHostedContainerCpuWatchdogReport(input: {
         cpuCores: roundHostedContainerCpuCores(
           deltaTicks / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND / intervalSeconds,
         ),
+        ...(current.executable ? { executable: current.executable } : {}),
         pid,
       });
     }
