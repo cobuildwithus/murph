@@ -27,6 +27,7 @@ describe.skipIf(!runPostgresProof)(
       const suffix = randomUUID();
       const busyLineKey = `test:linq-recent-load:busy:${suffix}`;
       const quietLineKey = `test:linq-recent-load:quiet:${suffix}`;
+      const noiseLineKey = `test:linq-recent-load:noise:${suffix}`;
       const deliveryPrefix = `test:hld:linq-recent-load:${suffix}:`;
       const eventPrefix = `test:linq-recent-load:event:${suffix}:`;
       const now = at("2026-07-29T15:00:00.000Z");
@@ -61,7 +62,7 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         await prisma.hostedLinqLine.createMany({
-          data: [busyLineKey, quietLineKey].map((phoneNumberLookupKey) => ({
+          data: [busyLineKey, quietLineKey, noiseLineKey].map((phoneNumberLookupKey) => ({
             phoneNumberHint: "*** test",
             phoneNumberLookupKey,
             source: "test",
@@ -78,16 +79,9 @@ describe.skipIf(!runPostgresProof)(
             delivery("unbound", null, at("2026-07-29T14:00:00.000Z")),
             ...Array.from({ length: 512 }, (_, index) => (
               delivery(
-                `busy-history-${index}`,
-                busyLineKey,
-                at("2026-07-01T14:00:00.000Z"),
-              )
-            )),
-            ...Array.from({ length: 512 }, (_, index) => (
-              delivery(
-                `quiet-history-${index}`,
-                quietLineKey,
-                at("2026-07-01T14:00:00.000Z"),
+                `noise-recent-${index}`,
+                noiseLineKey,
+                at("2026-07-29T14:00:00.000Z"),
               )
             )),
           ],
@@ -103,20 +97,11 @@ describe.skipIf(!runPostgresProof)(
             event("unbound", null, "inbound", "message.received", at("2026-07-29T14:30:00.000Z")),
             ...Array.from({ length: 512 }, (_, index) => (
               event(
-                `busy-history-${index}`,
-                busyLineKey,
+                `noise-recent-${index}`,
+                noiseLineKey,
                 "inbound",
                 "message.received",
-                at("2026-07-01T14:00:00.000Z"),
-              )
-            )),
-            ...Array.from({ length: 512 }, (_, index) => (
-              event(
-                `quiet-history-${index}`,
-                quietLineKey,
-                "inbound",
-                "message.received",
-                at("2026-07-01T14:00:00.000Z"),
+                at("2026-07-29T14:00:00.000Z"),
               )
             )),
           ],
@@ -158,7 +143,11 @@ describe.skipIf(!runPostgresProof)(
           where: { id: { startsWith: deliveryPrefix } },
         });
         await prisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: { in: [busyLineKey, quietLineKey] } },
+          where: {
+            phoneNumberLookupKey: {
+              in: [busyLineKey, quietLineKey, noiseLineKey],
+            },
+          },
         });
         await prisma.$disconnect();
       }
