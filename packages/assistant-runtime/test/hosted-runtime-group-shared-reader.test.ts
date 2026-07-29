@@ -1,3 +1,15 @@
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type {
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
@@ -7,14 +19,32 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
+  resolveHostedGroupParticipantDisplayNameCachePath,
 } from "../src/hosted-runtime/group-shared-reader.ts";
 import type { HostedRuntimeGroupToolPort } from "../src/hosted-runtime/platform.ts";
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const STEPS_SCOPE = { projectionKind: "steps-days.v0" } as const;
 
-afterEach(() => {
+const testVaultRoots = new Set<string>();
+
+async function createTestVaultRoot(): Promise<string> {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-group-display-name-cache-"),
+  );
+  testVaultRoots.add(vaultRoot);
+  return vaultRoot;
+}
+
+afterEach(async () => {
   vi.useRealTimers();
+  await Promise.all(
+    [...testVaultRoots].map((vaultRoot) => rm(vaultRoot, {
+      force: true,
+      recursive: true,
+    })),
+  );
+  testVaultRoots.clear();
 });
 
 describe("createHostedGroupSharedReader", () => {
@@ -128,7 +158,8 @@ describe("createHostedGroupSharedReader", () => {
 });
 
 describe("createHostedGroupParticipantDisplayNameReader", () => {
-  it("returns only exact unique current Linq membership names", async () => {
+  it("returns exact unique names without persisting a malformed batch", async () => {
+    const vaultRoot = await createTestVaultRoot();
     const request = vi.fn(async () => ({
       action: "read_participant_display_names" as const,
       result: {
@@ -156,6 +187,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request } as HostedRuntimeGroupToolPort,
       routeConversationKey: "linq\0room-exact-current-membership",
       runtimeMemberId: "member-exact-current-membership",
+      vaultRoot,
     });
 
     await expect(reader.read({
@@ -172,9 +204,13 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       action: "read_participant_display_names",
       linqSenderHandles: ["+15551110000", "+15552220000"],
     });
+    await expect(access(
+      resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot),
+    )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("reuses positive entries for one fixed hour without crossing runtime or room scope", async () => {
+    const vaultRoot = await createTestVaultRoot();
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-07-29T12:00:00.000Z");
     vi.setSystemTime(startedAtMs);
@@ -204,6 +240,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }) => createHostedGroupParticipantDisplayNameReader({
       groupToolPort: { request },
       ...input,
+      vaultRoot,
     });
     const senderHandle = "+15551112222";
     const senderHandles = [senderHandle] as const;
@@ -218,9 +255,15 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }]);
 
     vi.setSystemTime(startedAtMs + 59 * 60 * 1_000);
-    const sameScopeReader = createReader({
+    vi.resetModules();
+    const {
+      createHostedGroupParticipantDisplayNameReader: createFreshReader,
+    } = await import("../src/hosted-runtime/group-shared-reader.ts");
+    const sameScopeReader = createFreshReader({
+      groupToolPort: { request },
       routeConversationKey: "linq\0room-positive-ttl",
       runtimeMemberId: "member-positive-ttl",
+      vaultRoot,
     });
     await expect(sameScopeReader.read({
       channel: "linq",
@@ -255,6 +298,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
   });
 
   it("batches only cache misses and refreshes a valid unnamed result after five minutes", async () => {
+    const vaultRoot = await createTestVaultRoot();
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-07-29T13:00:00.000Z");
     vi.setSystemTime(startedAtMs);
@@ -292,11 +336,12 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request },
       routeConversationKey: "linq\0room-mixed-cache",
       runtimeMemberId: "member-mixed-cache",
+      vaultRoot,
     });
 
-    const firstOperation = createReader();
-    await firstOperation.read({ channel: "linq", senderHandles: [actorA] });
-    await expect(firstOperation.read({
+    await createReader().read({ channel: "linq", senderHandles: [actorA] });
+    const mixedOperation = createReader();
+    await expect(mixedOperation.read({
       channel: "linq",
       senderHandles: [actorA, actorB, actorC],
     })).resolves.toEqual([
@@ -344,7 +389,8 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
-  it("suppresses an unavailable lookup for one operation without process-caching it", async () => {
+  it("suppresses an unavailable lookup for one operation without file-caching it", async () => {
+    const vaultRoot = await createTestVaultRoot();
     const senderHandle = "+15554440004";
     let round = 0;
     const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
@@ -374,6 +420,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request },
       routeConversationKey: "linq\0room-operation-failure",
       runtimeMemberId: "member-operation-failure",
+      vaultRoot,
     });
     const firstOperation = createReader();
 
@@ -386,6 +433,9 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       senderHandles: [senderHandle],
     })).resolves.toEqual([]);
     expect(request).toHaveBeenCalledTimes(1);
+    await expect(access(
+      resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot),
+    )).rejects.toMatchObject({ code: "ENOENT" });
 
     await expect(createReader().read({
       channel: "linq",
@@ -398,7 +448,8 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("does not promote an ambiguous response into the process negative cache", async () => {
+  it("does not promote an ambiguous response into the file negative cache", async () => {
+    const vaultRoot = await createTestVaultRoot();
     const senderHandle = "+15555550005";
     let round = 0;
     const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
@@ -432,6 +483,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request },
       routeConversationKey: "linq\0room-ambiguous-response",
       runtimeMemberId: "member-ambiguous-response",
+      vaultRoot,
     });
     const firstOperation = createReader();
 
@@ -456,7 +508,8 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("does not promote an unexpected participant response into the process cache", async () => {
+  it("does not promote an unexpected participant response into the file cache", async () => {
+    const vaultRoot = await createTestVaultRoot();
     const senderHandle = "+15556660006";
     let round = 0;
     const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
@@ -490,6 +543,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request },
       routeConversationKey: "linq\0room-unexpected-response",
       runtimeMemberId: "member-unexpected-response",
+      vaultRoot,
     });
     const firstOperation = createReader();
 
@@ -515,10 +569,12 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
   });
 
   it("fails soft when presentation lookup is unavailable", async () => {
+    const vaultRoot = await createTestVaultRoot();
     const absent = createHostedGroupParticipantDisplayNameReader({
       groupToolPort: null,
       routeConversationKey: "linq\0room-unavailable-absent",
       runtimeMemberId: "member-unavailable-absent",
+      vaultRoot,
     });
     await expect(absent.read({
       channel: "linq",
@@ -533,6 +589,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       },
       routeConversationKey: "linq\0room-unavailable-failed",
       runtimeMemberId: "member-unavailable-failed",
+      vaultRoot,
     });
     await expect(failed.read({
       channel: "linq",
@@ -540,7 +597,112 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     })).resolves.toEqual([]);
   });
 
-  it("evicts the oldest entry after 2,048 process-local cache entries without reordering hits", async () => {
+  it("recovers from a corrupt cache file and reuses the repaired entry", async () => {
+    const vaultRoot = await createTestVaultRoot();
+    const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot);
+    await mkdir(path.dirname(cacheFilePath), {
+      mode: 0o700,
+      recursive: true,
+    });
+    await writeFile(cacheFilePath, "{not-json", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+
+    const senderHandle = "+15557770007";
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Recovered From Corruption",
+          displayNameSource: "profile-name",
+          senderHandle,
+        }],
+        status: "ok",
+      },
+    }));
+    const createReader = () => createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request },
+      routeConversationKey: "linq\0room-corrupt-cache",
+      runtimeMemberId: "member-corrupt-cache",
+      vaultRoot,
+    });
+
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([{
+      displayName: "Recovered From Corruption",
+      displayNameSource: "profile-name",
+      senderHandle,
+    }]);
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    const repaired = JSON.parse(await readFile(cacheFilePath, "utf8")) as {
+      schema?: unknown;
+      schemaVersion?: unknown;
+      value?: { entries?: unknown[] };
+    };
+    expect(repaired.schema).toBe(
+      "murph.hosted-group-participant-display-name-cache.v1",
+    );
+    expect(repaired.schemaVersion).toBe(1);
+    expect(repaired.value?.entries).toHaveLength(1);
+  });
+
+  it("uses one private fixed cache file with opaque scoped keys", async () => {
+    const vaultRoot = await createTestVaultRoot();
+    const senderHandle = "+15558880008";
+    const routeConversationKey = "linq\0room-private-cache-route";
+    const runtimeMemberId = "member-private-cache-owner";
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Private Presentation Label",
+          displayNameSource: "unverified-owner-contact",
+          senderHandle,
+        }],
+        status: "ok",
+      },
+    }));
+    const reader = createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request },
+      routeConversationKey,
+      runtimeMemberId,
+      vaultRoot,
+    });
+
+    await reader.read({ channel: "linq", senderHandles: [senderHandle] });
+
+    const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot);
+    expect(path.relative(vaultRoot, cacheFilePath).split(path.sep).join("/"))
+      .toBe(
+        ".runtime/cache/assistant-runtime/group-participant-display-names.json",
+      );
+    const raw = await readFile(cacheFilePath, "utf8");
+    expect(raw).not.toContain(senderHandle);
+    expect(raw).not.toContain("room-private-cache-route");
+    expect(raw).not.toContain(runtimeMemberId);
+    const parsed = JSON.parse(raw) as {
+      value?: { entries?: Array<{ key?: unknown }> };
+    };
+    expect(parsed.value?.entries?.[0]?.key).toMatch(/^[a-f0-9]{64}$/u);
+
+    if (process.platform !== "win32") {
+      const directoryStats = await stat(path.dirname(cacheFilePath));
+      const fileStats = await stat(cacheFilePath);
+      expect(directoryStats.mode & 0o777).toBe(0o700);
+      expect(fileStats.mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("evicts the oldest entry after 2,048 file cache entries without reordering hits", async () => {
+    const vaultRoot = await createTestVaultRoot();
     vi.resetModules();
     const {
       createHostedGroupParticipantDisplayNameReader: createFreshReader,
@@ -568,6 +730,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       groupToolPort: { request },
       routeConversationKey: `linq\0room-bounded-cache-${routeIndex}`,
       runtimeMemberId,
+      vaultRoot,
     });
     const handlesForRoute = (routeIndex: number) => Array.from(
       { length: 32 },

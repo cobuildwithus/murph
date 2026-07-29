@@ -1341,22 +1341,33 @@ human group owner's explicitly enabled address-book projection may provide one
 safe unique canonical-phone label marked as unverified. Failure leaves the
 speaker unnamed.
 
-The assistant-runtime Linq presentation adapter owns both the compound
-operation memo and one bounded opportunistic process cache. Initial prompt
-preparation reads unresolved unique handles in one batch; later live admissions
-reuse operation-local positive, negative, and fail-soft entries and read only
-new handles. Across ordinary turns in the same resident Node process, validated
-positive labels have a fixed one-hour TTL and valid successful omissions have a
-fixed five-minute TTL. Entries are keyed by the callback-bound runtime member,
-exact accepted-input route conversation key, channel, and normalized handle in
-a 2,048-entry insertion-ordered `Map`; hits do not slide TTL or eviction order.
-There are no timers, single-flight owner, mutation invalidation, persistence, or
-distributed coordination. Failures never enter the process cache, while cold
-starts, deploys, expiry, and other process instances simply re-read Web. Neither cache layer is checkpointed or
-copied into profile truth. Profile and owner-contact labels remain presentation
-only, and the name read returns no member or participant identifier. For participant-scoped effects, the opaque
-`Message ref` plus trusted server derivation remains the sole path; display
-labels and handles are never selectors.
+The assistant-runtime Linq presentation adapter owns the compound operation
+memo and one bounded private file cache at
+`vault/.runtime/cache/assistant-runtime/group-participant-display-names.json`.
+Initial prompt preparation reads unresolved unique handles in one batch; later
+live admissions reuse operation-local positive, negative, and fail-soft entries
+and read only new handles. Across ordinary turns that reuse the same local
+workspace, validated positive labels have a fixed one-hour TTL and valid
+successful omissions have a fixed five-minute TTL. Each entry uses an opaque
+SHA-256 key over the callback-bound runtime member, exact accepted-input route
+conversation key, channel, and normalized handle. The versioned JSON file is
+atomically replaced, capped at 2,048 insertion-ordered entries and two MiB on
+read, stored below a `0700` owner directory as a `0600` file, and never names a
+member, route, handle, or label in its path. Hits do not slide TTL or eviction
+order. Missing, corrupt, oversized, or unreadable files are ordinary misses;
+expired entries are pruned opportunistically without timers. Resolver failures,
+timeouts, rollout skew, malformed or ambiguous responses, and authorization
+loss remain operation-local and are never written. There is no second resident
+cross-operation cache, single-flight owner, mutation invalidation, lock manager,
+or distributed coordination. `.runtime/cache/**` is excluded from hosted
+workspace checkpoints, so the file can bridge fresh reader or process instances
+only while the same local workspace survives; a cold restore or replacement
+re-reads Web. Neither the operation memo nor the cache becomes profile or
+contact truth. Profile and owner-contact labels remain presentation only, and
+the name read returns no member or participant identifier. For
+participant-scoped effects, the opaque `Message ref` plus trusted server
+derivation remains the sole path; display labels and handles are never
+selectors.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not runtime work. A unique participant addition may set one nullable

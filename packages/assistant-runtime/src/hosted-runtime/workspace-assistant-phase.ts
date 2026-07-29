@@ -683,6 +683,7 @@ function createHostedAssistantAutomationOperationScope(
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
         runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
+        vaultRoot: input.restored.vaultRoot,
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
@@ -819,6 +820,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
+  vaultRoot: string;
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
     ? createHostedGroupToolWithCurrentTurnContext({
@@ -855,6 +857,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
           groupToolPort: input.groupToolPort,
           routeConversationKey,
           runtimeMemberId: input.runtimeMemberId,
+          vaultRoot: input.vaultRoot,
         })
       : null;
   return {

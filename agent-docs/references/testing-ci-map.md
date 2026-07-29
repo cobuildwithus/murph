@@ -412,9 +412,11 @@ Hosted Web tests prove exact current-membership/profile candidates, pre-group
 and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
 profile-over-contact precedence, fail-soft advisory outcomes, and one set-based
 profile/contact lookup. Assistant-runtime tests prove the operation-local
-reader memo, bounded process-local positive and valid-negative cache, exact
-runtime and route scope isolation, fixed TTLs, non-sliding FIFO eviction,
-failure-only operation suppression, provenance preservation, duplicate
+reader memo, bounded private file-backed positive and valid-negative cache,
+reuse across fresh module instances, exact runtime and route scope isolation,
+fixed TTLs, non-sliding FIFO eviction, failure-only operation suppression,
+corruption recovery, opaque keys, private permissions where portable, provenance
+preservation, duplicate
 rejection, malformed-batch rejection, and mixed batch miss behavior.
 Assistant-engine tests prove one four-handle reader call for a 20-message
 initial burst, delegation during separate live admissions, direct-Linq

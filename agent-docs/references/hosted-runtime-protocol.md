@@ -1608,20 +1608,25 @@ and `displayNameSource` (`profile-name` or `unverified-owner-contact`); it never
 returns a hosted member id or participant id.
 
 The assistant-runtime presentation reader owns one operation-local memo and one
-module-private bounded process cache for those results. Initial prompt
-preparation reads unresolved unique handles once, including a 20-message/four-
-sender burst as one four-handle request. Later live admissions reuse
-operation-local positive, negative, and fail-soft entries and batch only newly
-unresolved handles. Across ordinary turns in one resident Node process, a
-validated positive entry has a fixed one-hour TTL and a valid successful
-omission has a fixed five-minute TTL. The 2,048-entry insertion-ordered `Map` is keyed by
+bounded versioned file cache at
+`.runtime/cache/assistant-runtime/group-participant-display-names.json` for those
+results. Initial prompt preparation reads unresolved unique handles once,
+including a 20-message/four-sender burst as one four-handle request. Later live
+admissions reuse operation-local positive, negative, and fail-soft entries and
+batch only newly unresolved handles. Across ordinary turns and fresh reader or
+process instances sharing one local workspace, a validated positive entry has
+a fixed one-hour TTL and a valid successful omission has a fixed five-minute
+TTL. The 2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
 callback-bound runtime member, exact accepted-input route conversation key,
 channel, and normalized handle; hits neither slide expiry nor reorder eviction.
-Failures are operation-local only. Cold starts, deploys, expiry, or another
-process re-read Web without affecting correctness. There are no timers,
-single-flight, mutation invalidation, persistence, schema, or distributed cache
-owners. Neither cache layer is checkpointed or becomes profile or contact
-state. Profile names render as display-only profile text; owner-contact labels render
+The fixed-path JSON is atomically replaced under `0700`/`0600` permissions and
+rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
+ordinary misses. Failures and malformed or unauthorized responses are
+operation-local only and never written. There are no timers, resident mirror,
+single-flight, mutation invalidation, locks, or distributed cache owners.
+`.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
+same surviving local workspace can reuse the file; cold restore or replacement
+re-reads Web. Neither cache layer becomes profile or contact state. Profile names render as display-only profile text; owner-contact labels render
 explicitly as unverified display-only text. Neither label nor the raw handle
 authorizes participant selection or an effect. Only an accepted opaque message
 ref plus trusted server derivation can authorize a participant-scoped action.
