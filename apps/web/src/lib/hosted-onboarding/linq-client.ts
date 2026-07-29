@@ -81,8 +81,9 @@ export async function createHostedLinqChat(input: {
     });
   }
 
+  let linkResult: HostedLinqSendResult;
   try {
-    const linkResult = await sendHostedLinqMessageBody({
+    linkResult = await sendHostedLinqMessageBody({
       body: buildHostedLinqRichLinkMessageBody({
         idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
         linkUrl: split.linkUrl,
@@ -91,15 +92,6 @@ export async function createHostedLinqChat(input: {
       signal: input.signal,
       timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
     });
-    const providerMessageIds = collectHostedLinqProviderMessageIds(
-      result.messageId,
-      linkResult.messageId,
-    );
-    return {
-      ...linkResult,
-      chatId: linkResult.chatId ?? result.chatId,
-      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
-    };
   } catch (error) {
     throw createHostedLinqRichLinkPartialDeliveryFailure({
       chatId: result.chatId,
@@ -107,6 +99,24 @@ export async function createHostedLinqChat(input: {
       providerMessageIds: collectHostedLinqProviderMessageIds(result.messageId),
     });
   }
+  const providerMessageIds = collectHostedLinqProviderMessageIds(
+    result.messageId,
+    linkResult.messageId,
+  );
+  if (providerMessageIds.length !== 2) {
+    throw createHostedLinqRichLinkPartialDeliveryFailure({
+      chatId: result.chatId,
+      error: new Error(
+        "Linq did not return an identity for every accepted rich-link message.",
+      ),
+      providerMessageIds,
+    });
+  }
+  return {
+    ...linkResult,
+    chatId: linkResult.chatId ?? result.chatId,
+    providerMessageIds,
+  };
 }
 
 async function createHostedLinqChatWithPrimaryMessage(input: {
@@ -182,8 +192,9 @@ export async function sendHostedLinqChatMessage(input: {
     message: split.message,
     timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
   });
+  let linkResult: HostedLinqSendResult;
   try {
-    const linkResult = await sendHostedLinqMessageBody({
+    linkResult = await sendHostedLinqMessageBody({
       body: buildHostedLinqRichLinkMessageBody({
         idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
         linkUrl: split.linkUrl,
@@ -192,15 +203,6 @@ export async function sendHostedLinqChatMessage(input: {
       signal: input.signal,
       timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
     });
-    const providerMessageIds = collectHostedLinqProviderMessageIds(
-      primaryResult.messageId,
-      linkResult.messageId,
-    );
-    return {
-      ...linkResult,
-      chatId: linkResult.chatId ?? primaryResult.chatId ?? input.chatId,
-      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
-    };
   } catch (error) {
     throw createHostedLinqRichLinkPartialDeliveryFailure({
       chatId: primaryResult.chatId ?? input.chatId,
@@ -210,6 +212,24 @@ export async function sendHostedLinqChatMessage(input: {
       ),
     });
   }
+  const providerMessageIds = collectHostedLinqProviderMessageIds(
+    primaryResult.messageId,
+    linkResult.messageId,
+  );
+  if (providerMessageIds.length !== 2) {
+    throw createHostedLinqRichLinkPartialDeliveryFailure({
+      chatId: linkResult.chatId ?? primaryResult.chatId ?? input.chatId,
+      error: new Error(
+        "Linq did not return an identity for every accepted rich-link message.",
+      ),
+      providerMessageIds,
+    });
+  }
+  return {
+    ...linkResult,
+    chatId: linkResult.chatId ?? primaryResult.chatId ?? input.chatId,
+    providerMessageIds,
+  };
 }
 
 async function sendHostedLinqTextMessage(input: {
@@ -302,7 +322,7 @@ function createHostedLinqRichLinkPartialDeliveryFailure(input: {
     },
     httpStatus: 502,
     message:
-      "Linq rich-link delivery failed after the primary message was accepted.",
+      "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
     retryable: false,
   });
   return Object.assign(failure, {

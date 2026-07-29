@@ -394,8 +394,9 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
+  let linkResponse: LinqMessageSendResponse
   try {
-    const linkResponse = await sendLinqChatRichLink(
+    linkResponse = await sendLinqChatRichLink(
       {
         chatId: input.chatId,
         idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
@@ -403,14 +404,6 @@ export async function sendLinqChatMessage(
       },
       dependencies,
     )
-    const providerMessageIds = collectLinqProviderMessageIds(
-      primaryResponse.message?.id,
-      linkResponse.message?.id,
-    )
-    return {
-      ...linkResponse,
-      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
-    }
   } catch (error) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error,
@@ -422,6 +415,26 @@ export async function sendLinqChatMessage(
       target: input.chatId,
       targetKind: 'thread',
     })
+  }
+  const providerMessageIds = collectLinqProviderMessageIds(
+    primaryResponse.message?.id,
+    linkResponse.message?.id,
+  )
+  if (providerMessageIds.length !== 2) {
+    throw createLinqRichLinkPartialDeliveryFailure({
+      error: new Error(
+        'Linq did not return an identity for every accepted rich-link message.',
+      ),
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds,
+      providerThreadId: input.chatId,
+      target: input.chatId,
+      targetKind: 'thread',
+    })
+  }
+  return {
+    ...linkResponse,
+    providerMessageIds,
   }
 }
 
@@ -922,8 +935,9 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
+  let linkResponse: LinqMessageSendResponse
   try {
-    const linkResponse = await sendLinqChatRichLink(
+    linkResponse = await sendLinqChatRichLink(
       {
         chatId,
         idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
@@ -931,16 +945,6 @@ export async function createLinqChat(
       },
       dependencies,
     )
-    const linkMessageId = normalizeNullableString(linkResponse.message?.id ?? null)
-    const providerMessageIds = collectLinqProviderMessageIds(
-      result.messageId,
-      linkMessageId,
-    )
-    return {
-      ...result,
-      messageId: linkMessageId ?? result.messageId,
-      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
-    }
   } catch (error) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error,
@@ -950,6 +954,28 @@ export async function createLinqChat(
       target: chatId,
       targetKind: 'thread',
     })
+  }
+  const linkMessageId = normalizeNullableString(linkResponse.message?.id ?? null)
+  const providerMessageIds = collectLinqProviderMessageIds(
+    result.messageId,
+    linkMessageId,
+  )
+  if (providerMessageIds.length !== 2) {
+    throw createLinqRichLinkPartialDeliveryFailure({
+      error: new Error(
+        'Linq did not return an identity for every accepted rich-link message.',
+      ),
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds,
+      providerThreadId: chatId,
+      target: chatId,
+      targetKind: 'thread',
+    })
+  }
+  return {
+    ...result,
+    messageId: linkMessageId,
+    providerMessageIds,
   }
 }
 
@@ -1053,7 +1079,7 @@ function createLinqRichLinkPartialDeliveryFailure(input: {
   const providerMessageIds = [...input.providerMessageIds]
   const failure = new VaultCliError(
     'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
-    'iMessage rich-link delivery failed after the primary message was accepted; automatic retry is disabled to avoid duplicate text.',
+    'iMessage rich-link delivery could not confirm both provider messages after the primary request was accepted; automatic retry is disabled to avoid duplicate text.',
     {
       idempotencyKey: input.idempotencyKey,
       providerMessageIds,

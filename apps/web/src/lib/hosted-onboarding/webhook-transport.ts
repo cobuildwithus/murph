@@ -838,12 +838,30 @@ async function sendHostedLinqSideEffect(
       && usageLimitPayload
     ) {
       if (usageLimitDispatchClaimed) {
-        await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt: new Date(usageLimitPayload.claimToken.sentAt),
-          failureCode: "linq_usage_limit_dispatch_retryable",
-          idempotencyKey: deliveryEffect.effectId,
-          prisma: options.prisma,
-        });
+        const partialDelivery =
+          readHostedLinqRichLinkPartialDeliveryFailure(error);
+        await markHostedLinqDeliverySendFailedTx(
+          partialDelivery
+            ? {
+                expectedAttemptedAt: new Date(
+                  usageLimitPayload.claimToken.sentAt,
+                ),
+                failureCode: partialDelivery.failureCode,
+                failureReason: error instanceof Error ? error.message : null,
+                idempotencyKey: deliveryEffect.effectId,
+                linqChatId: partialDelivery.linqChatId,
+                messageIds: partialDelivery.messageIds,
+                prisma: options.prisma,
+              }
+            : {
+                expectedAttemptedAt: new Date(
+                  usageLimitPayload.claimToken.sentAt,
+                ),
+                failureCode: "linq_usage_limit_dispatch_retryable",
+                idempotencyKey: deliveryEffect.effectId,
+                prisma: options.prisma,
+              },
+        );
       }
       console.error(
         "Hosted Linq side-effect delivery failed.",
@@ -1406,23 +1424,17 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
 }): Promise<void> {
   try {
     const errorRecord = readErrorRecord(input.error);
-    const partialMessageIds = readHostedLinqPartialDeliveryMessageIds(input.error);
-    const partialRichLinkDelivery =
-      readHostedLinqSideEffectString(errorRecord, "code")
-      === "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
-    const partialChatId = readHostedLinqSideEffectString(
-      errorRecord,
-      "providerThreadId",
-    );
+    const partialDelivery =
+      readHostedLinqRichLinkPartialDeliveryFailure(input.error);
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: input.expectedAttemptedAt,
       failureCode: readHostedLinqSideEffectString(errorRecord, "code"),
       failureReason: input.error instanceof Error ? input.error.message : null,
       idempotencyKey: input.effect.effectId,
-      ...(partialRichLinkDelivery
+      ...(partialDelivery
         ? {
-            linqChatId: partialChatId,
-            messageIds: partialMessageIds,
+            linqChatId: partialDelivery.linqChatId,
+            messageIds: partialDelivery.messageIds,
           }
         : {}),
       prisma: input.prisma,
@@ -1430,6 +1442,30 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
   } catch {
     // Preserve the original delivery error. This telemetry update is non-critical.
   }
+}
+
+function readHostedLinqRichLinkPartialDeliveryFailure(
+  error: unknown,
+): {
+  failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+  linqChatId: string | null;
+  messageIds: string[];
+} | null {
+  const errorRecord = readErrorRecord(error);
+  if (
+    readHostedLinqSideEffectString(errorRecord, "code")
+    !== "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY"
+  ) {
+    return null;
+  }
+  return {
+    failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+    linqChatId: readHostedLinqSideEffectString(
+      errorRecord,
+      "providerThreadId",
+    ),
+    messageIds: readHostedLinqPartialDeliveryMessageIds(error),
+  };
 }
 
 function readHostedLinqPartialDeliveryMessageIds(error: unknown): string[] {

@@ -416,6 +416,37 @@ test('linq runtime serializes reply targets only for marked native replies', asy
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
 })
 
+const incompleteTwoPartMessageIdentityCases = [
+  {
+    expectedMessageId: 'message-text',
+    expectedMessageIds: ['message-text'],
+    label: 'only the primary message id',
+    linkMessageId: null,
+    primaryMessageId: 'message-text',
+  },
+  {
+    expectedMessageId: 'message-link',
+    expectedMessageIds: ['message-link'],
+    label: 'only the link message id',
+    linkMessageId: 'message-link',
+    primaryMessageId: null,
+  },
+  {
+    expectedMessageId: null,
+    expectedMessageIds: [],
+    label: 'neither message id',
+    linkMessageId: null,
+    primaryMessageId: null,
+  },
+  {
+    expectedMessageId: 'message-duplicate',
+    expectedMessageIds: ['message-duplicate'],
+    label: 'the same id for both messages',
+    linkMessageId: 'message-duplicate',
+    primaryMessageId: 'message-duplicate',
+  },
+] as const
+
 test('linq runtime sends a terminal payment URL as a separate rich-link message', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
@@ -471,6 +502,74 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
     },
   ])
 })
+
+test.each(incompleteTwoPartMessageIdentityCases)(
+  'linq runtime keeps an existing-chat rich-link delivery terminal with $label',
+  async ({
+    expectedMessageId,
+    expectedMessageIds,
+    linkMessageId,
+    primaryMessageId,
+  }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    const bodies: Record<string, unknown>[] = []
+    let requestCount = 0
+    const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+      requestCount += 1
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: requestCount === 1
+          ? primaryMessageId
+            ? { id: primaryMessageId }
+            : {}
+          : linkMessageId
+            ? { id: linkMessageId }
+            : {},
+      })
+    })
+
+    await assert.rejects(
+      () => sendLinqChatMessage(
+        {
+          chatId: 'chat-123',
+          idempotencyKey: 'payment-message-123',
+          message:
+            'Complete payment here:\nhttps://pay.example.test/checkout/session_123',
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => {
+        const partial = error as {
+          code?: unknown
+          deliveryMayHaveSucceeded?: unknown
+          providerMessageId?: unknown
+          providerMessageIds?: unknown
+          providerThreadId?: unknown
+        }
+        return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+          && partial.deliveryMayHaveSucceeded === true
+          && partial.providerMessageId === expectedMessageId
+          && partial.providerThreadId === 'chat-123'
+          && JSON.stringify(partial.providerMessageIds)
+            === JSON.stringify(expectedMessageIds)
+      },
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    assert.deepEqual(bodies[1], {
+      message: {
+        idempotency_key: 'payment-message-123:link',
+        parts: [{
+          type: 'link',
+          value: 'https://pay.example.test/checkout/session_123',
+        }],
+      },
+    })
+  },
+)
 
 test('linq runtime sends a link-only payment URL without adding text', async () => {
   const env = {
@@ -581,6 +680,81 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
     },
   ])
 })
+
+test.each(incompleteTwoPartMessageIdentityCases)(
+  'linq runtime keeps a new-chat rich-link delivery terminal with $label',
+  async ({
+    expectedMessageId,
+    expectedMessageIds,
+    linkMessageId,
+    primaryMessageId,
+  }) => {
+    const env = {
+      LINQ_API_BASE_URL: 'https://linq.example.test',
+      LINQ_API_TOKEN: 'linq-token',
+    } satisfies NodeJS.ProcessEnv
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = []
+    const fetchImplementation = vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({
+        body: parseJsonRequestBody(requireStringRequestBody(init.body)),
+        url,
+      })
+      if (url.endsWith('/chats')) {
+        return createJsonResponse({
+          chat: {
+            id: 'chat-created',
+            message: primaryMessageId ? { id: primaryMessageId } : {},
+          },
+        })
+      }
+      return createJsonResponse({
+        chat_id: 'chat-created',
+        message: linkMessageId ? { id: linkMessageId } : {},
+      })
+    })
+
+    await assert.rejects(
+      () => createLinqChat(
+        {
+          from: '+15550000000',
+          idempotencyKey: 'create-123',
+          message:
+            'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+          to: ['+15550000001'],
+        },
+        { env, fetchImplementation },
+      ),
+      (error) => {
+        const partial = error as {
+          code?: unknown
+          deliveryMayHaveSucceeded?: unknown
+          providerMessageId?: unknown
+          providerMessageIds?: unknown
+          providerThreadId?: unknown
+        }
+        return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+          && partial.deliveryMayHaveSucceeded === true
+          && partial.providerMessageId === expectedMessageId
+          && partial.providerThreadId === 'chat-created'
+          && JSON.stringify(partial.providerMessageIds)
+            === JSON.stringify(expectedMessageIds)
+      },
+    )
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    assert.deepEqual(requests[1], {
+      body: {
+        message: {
+          idempotency_key: 'create-123:link',
+          parts: [{
+            type: 'link',
+            value: 'https://pay.example.test/checkout/session_123',
+          }],
+        },
+      },
+      url: 'https://linq.example.test/chats/chat-created/messages',
+    })
+  },
+)
 
 test('linq runtime preserves the accepted primary identity when the rich-link follow-up fails', async () => {
   const env = {

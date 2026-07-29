@@ -41,6 +41,8 @@ import {
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
+const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
+  "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
   failedAt: null;
@@ -1983,7 +1985,8 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
   const failedMessages = messages.filter((message) => message.status === "failed");
   const incompletePartialDelivery =
     delivery.status === "failed"
-    && delivery.failureCode === "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY"
+    && delivery.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
     && messages.length < 2;
   const allMessagesDelivered =
     messages.length > 0
@@ -2254,6 +2257,7 @@ function isHostedLinqDeliveryLifecycleFinal(input: {
 function isHostedLinqDeliveryProviderCorrelated(input: {
   acceptedAt: Date | null;
   deliveredAt: Date | null;
+  failureCode?: string | null;
   lastReceiptAt: Date | null;
   messageLookupKey: string | null;
   status: string;
@@ -2263,6 +2267,8 @@ function isHostedLinqDeliveryProviderCorrelated(input: {
       || input.deliveredAt
       || input.lastReceiptAt
       || input.messageLookupKey
+      || input.failureCode
+        === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
       || input.status === "accepted"
       || input.status === "delivered",
   );

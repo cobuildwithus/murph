@@ -474,6 +474,94 @@ describe("createHostedLinqChat", () => {
     ]);
   });
 
+  it.each([
+    {
+      expectedMessageId: "msg_text",
+      expectedMessageIds: ["msg_text"],
+      label: "only the primary message id",
+      linkMessageId: null,
+      primaryMessageId: "msg_text",
+    },
+    {
+      expectedMessageId: "msg_link",
+      expectedMessageIds: ["msg_link"],
+      label: "only the link message id",
+      linkMessageId: "msg_link",
+      primaryMessageId: null,
+    },
+    {
+      expectedMessageId: null,
+      expectedMessageIds: [],
+      label: "neither message id",
+      linkMessageId: null,
+      primaryMessageId: null,
+    },
+    {
+      expectedMessageId: "msg_duplicate",
+      expectedMessageIds: ["msg_duplicate"],
+      label: "the same id for both messages",
+      linkMessageId: "msg_duplicate",
+      primaryMessageId: "msg_duplicate",
+    },
+  ])(
+    "keeps a two-part new-chat delivery terminal when Linq returns $label",
+    async ({
+      expectedMessageId,
+      expectedMessageIds,
+      linkMessageId,
+      primaryMessageId,
+    }) => {
+      const requestBodies: unknown[] = [];
+      let requestCount = 0;
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          requestBodies.push(readJsonRequestBody(init));
+          requestCount += 1;
+          if (requestCount === 1) {
+            return createJsonResponse({
+              chat: {
+                id: "chat_created",
+                message: primaryMessageId ? { id: primaryMessageId } : {},
+              },
+            }, 200);
+          }
+          return createJsonResponse({
+            chat_id: "chat_created",
+            message: linkMessageId ? { id: linkMessageId } : {},
+          }, 200);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(createHostedLinqChat({
+        from: "+15550000000",
+        idempotencyKey: "create-123",
+        message:
+          "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
+        to: ["+15550000001"],
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        expectedProviderMessageCount: 2,
+        providerMessageId: expectedMessageId,
+        providerMessageIds: expectedMessageIds,
+        providerThreadId: "chat_created",
+        retryable: false,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(requestBodies[1]).toEqual({
+        message: {
+          idempotency_key: "create-123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      });
+    },
+  );
+
   it("never fabricates text for a link-only new chat", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -564,7 +652,7 @@ describe("createHostedLinqChat", () => {
             code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
             deliveryMayHaveSucceeded: true,
             message:
-              "Linq rich-link delivery failed after the primary message was accepted.",
+              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
             providerMessageIds: ["msg_text"],
             retryable: false,
           });
@@ -790,6 +878,91 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
+  it.each([
+    {
+      expectedMessageId: "msg_text",
+      expectedMessageIds: ["msg_text"],
+      label: "only the primary message id",
+      linkMessageId: null,
+      primaryMessageId: "msg_text",
+    },
+    {
+      expectedMessageId: "msg_link",
+      expectedMessageIds: ["msg_link"],
+      label: "only the link message id",
+      linkMessageId: "msg_link",
+      primaryMessageId: null,
+    },
+    {
+      expectedMessageId: null,
+      expectedMessageIds: [],
+      label: "neither message id",
+      linkMessageId: null,
+      primaryMessageId: null,
+    },
+    {
+      expectedMessageId: "msg_duplicate",
+      expectedMessageIds: ["msg_duplicate"],
+      label: "the same id for both messages",
+      linkMessageId: "msg_duplicate",
+      primaryMessageId: "msg_duplicate",
+    },
+  ])(
+    "keeps a two-part existing-chat delivery terminal when Linq returns $label",
+    async ({
+      expectedMessageId,
+      expectedMessageIds,
+      linkMessageId,
+      primaryMessageId,
+    }) => {
+      const requestBodies: unknown[] = [];
+      let requestCount = 0;
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          requestBodies.push(readJsonRequestBody(init));
+          requestCount += 1;
+          return createJsonResponse({
+            chat_id: "chat_123",
+            message: requestCount === 1
+              ? primaryMessageId
+                ? { id: primaryMessageId }
+                : {}
+              : linkMessageId
+                ? { id: linkMessageId }
+                : {},
+          }, 200);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(sendHostedLinqChatMessage({
+        chatId: "chat_123",
+        idempotencyKey: "payment-message:evt_123",
+        message:
+          "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        expectedProviderMessageCount: 2,
+        providerMessageId: expectedMessageId,
+        providerMessageIds: expectedMessageIds,
+        providerThreadId: "chat_123",
+        retryable: false,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(requestBodies[1]).toEqual({
+        message: {
+          idempotency_key: "payment-message:evt_123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      });
+    },
+  );
+
   it("preserves the accepted primary identity when the rich-link follow-up fails permanently", async () => {
     const requestBodies: unknown[] = [];
     let requestCount = 0;
@@ -870,7 +1043,7 @@ describe("sendHostedLinqChatMessage", () => {
             code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
             deliveryMayHaveSucceeded: true,
             message:
-              "Linq rich-link delivery failed after the primary message was accepted.",
+              "Linq rich-link delivery could not confirm both provider messages after the primary request was accepted.",
             providerMessageIds: ["msg_text"],
             retryable: false,
           });

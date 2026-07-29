@@ -2271,6 +2271,24 @@ describe("hosted Linq observability stores", () => {
       },
     },
     {
+      label: "unidentifiable rich-link partial delivery",
+      row: {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_partial_usage_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "failed",
+      },
+    },
+    {
       label: "terminal Telegram",
       row: {
         acceptedAt: null,
