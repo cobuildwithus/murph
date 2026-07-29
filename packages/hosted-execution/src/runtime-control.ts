@@ -990,14 +990,16 @@ export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
 export type HostedUsageReferralPolicyCode =
   (typeof HOSTED_USAGE_REFERRAL_POLICY_CODES)[number];
 
+export interface HostedRuntimeUsageReferralMissionSnapshot {
+  destinationKind: "group" | "personal";
+  expiresAt: string;
+  policyCode: HostedUsageReferralPolicyCode;
+  rewardLabel: string;
+  state: "armed" | "target_bound";
+}
+
 export interface HostedRuntimeUsageReferralSnapshot {
-  active: {
-    destinationKind: "group" | "personal";
-    expiresAt: string;
-    policyCode: HostedUsageReferralPolicyCode;
-    rewardLabel: string;
-    state: "armed" | "target_bound";
-  } | null;
+  activeMissions: HostedRuntimeUsageReferralMissionSnapshot[];
   availablePolicies: Array<{
     code: HostedUsageReferralPolicyCode;
     requirementsLabel: string;
@@ -1292,7 +1294,10 @@ export type HostedRuntimeGroupToolRequest =
       policyCode: HostedUsageReferralPolicyCode;
     } & HostedRuntimeGroupToolSenderContext
       & HostedRuntimeUsageReferralSourceContext)
-  | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "cancel_usage_referral";
+      policyCode: HostedUsageReferralPolicyCode;
+    } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";
       /**

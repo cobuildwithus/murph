@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
-      referralId: null,
+      referralIds: [],
     })),
     ensureHostedThreadContainerRouteTx: vi.fn(async () => ({
       activationEventId: null,
@@ -91,10 +91,10 @@ const mocks = vi.hoisted(() => {
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
       isBoundReferralTarget: boolean;
-      qualificationCandidateReferralId: string | null;
+      qualificationCandidateReferralIds: string[];
     }> => ({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     })),
     reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
@@ -307,11 +307,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       demotedMailboxConsumedAt: null,
     });
     mocks.bindArmedHostedUsageReferralToNewContainerTx.mockResolvedValue({
-      referralId: null,
+      referralIds: [],
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: false,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
     mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
@@ -597,7 +597,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "usage_referral_1",
+      qualificationCandidateReferralIds: ["usage_referral_1"],
     });
     const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({

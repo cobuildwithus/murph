@@ -300,41 +300,23 @@ describe("hosted usage referral policy", () => {
     })).toBe(false);
   });
 
-  it.each([
-    {
-      expectedReferralId: null,
-      policyCode: "new_person_activation_v1" as const,
-      targetChannel: "telegram" as const,
-      title: "keeps a Linq-armed new-person mission unbound from Telegram",
-    },
-    {
-      expectedReferralId: "referral_1",
-      policyCode: "new_person_activation_v1" as const,
-      targetChannel: "linq" as const,
-      title: "binds a new-person mission to a new Linq group",
-    },
-    {
-      expectedReferralId: "referral_1",
-      policyCode: "active_group_v1" as const,
-      targetChannel: "telegram" as const,
-      title: "binds an active-group mission to a new Telegram group",
-    },
-  ])("$title", async ({
-    expectedReferralId,
-    policyCode,
-    targetChannel,
-  }) => {
+  it("binds every eligible armed policy owned by the new container creator", async () => {
     const occurredAt = new Date("2026-07-26T12:00:00.000Z");
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const findFirst = vi.fn().mockResolvedValue({
-      armedAt: new Date("2026-07-26T11:59:00.000Z"),
-      id: "referral_1",
-      policyCode,
-    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 2 });
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "referral_person",
+        policyCode: "new_person_activation_v1",
+      },
+      {
+        id: "referral_group",
+        policyCode: "active_group_v1",
+      },
+    ]);
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(1),
       hostedUsageReferral: {
-        findFirst,
+        findMany,
         updateMany,
       },
     };
@@ -343,12 +325,14 @@ describe("hosted usage referral policy", () => {
       enabled: true,
       occurredAt,
       ownerMemberId: "member_referrer",
-      targetChannel,
+      targetChannel: "linq",
       targetContainerMemberId: "member_target_container",
       tx: tx as never,
-    })).resolves.toEqual({ referralId: expectedReferralId });
+    })).resolves.toEqual({
+      referralIds: ["referral_person", "referral_group"],
+    });
 
-    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         armedAt: { lte: occurredAt },
         expiresAt: { gt: occurredAt },
@@ -356,26 +340,112 @@ describe("hosted usage referral policy", () => {
         status: "armed",
       },
     }));
-    if (expectedReferralId) {
-      expect(updateMany).toHaveBeenCalledWith({
-        data: {
-          status: "target_bound",
-          targetBoundAt: occurredAt,
-          targetContainerMemberId: "member_target_container",
-        },
-        where: {
-          id: "referral_1",
-          status: "armed",
-          targetContainerMemberId: null,
-        },
-      });
-    } else {
-      expect(updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({
-          status: "target_bound",
-        }),
-      }));
-    }
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        status: "target_bound",
+        targetBoundAt: occurredAt,
+        targetContainerMemberId: "member_target_container",
+      },
+      where: {
+        id: { in: ["referral_person", "referral_group"] },
+        status: "armed",
+        targetContainerMemberId: null,
+      },
+    });
+  });
+
+  it("leaves a Linq-only mission armed when Telegram binds an eligible policy", async () => {
+    const occurredAt = new Date("2026-07-26T12:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "referral_person",
+            policyCode: "new_person_activation_v1",
+          },
+          {
+            id: "referral_group",
+            policyCode: "active_group_v1",
+          },
+        ]),
+        updateMany,
+      },
+    };
+
+    await expect(bindArmedHostedUsageReferralToNewContainerTx({
+      enabled: true,
+      occurredAt,
+      ownerMemberId: "member_referrer",
+      targetChannel: "telegram",
+      targetContainerMemberId: "member_target_container",
+      tx: tx as never,
+    })).resolves.toEqual({ referralIds: ["referral_group"] });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: { in: ["referral_group"] },
+      }),
+    }));
+  });
+
+  it("fans one inbound event out to every policy bound to the group", async () => {
+    const occurredAt = new Date("2026-07-26T12:00:00.000Z");
+    const referrals = [
+      {
+        expiresAt: new Date("2026-08-02T11:55:00.000Z"),
+        id: "referral_person",
+        policyCode: "new_person_activation_v1",
+        qualifiedAt: occurredAt,
+        referrerMemberId: "member_referrer",
+        referrerSubjectKey: "subject_referrer",
+        status: "target_bound",
+        targetBoundAt: new Date("2026-07-26T11:59:00.000Z"),
+      },
+      {
+        expiresAt: new Date("2026-08-02T11:55:00.000Z"),
+        id: "referral_group",
+        policyCode: "active_group_v1",
+        qualifiedAt: occurredAt,
+        referrerMemberId: "member_referrer",
+        referrerSubjectKey: "subject_referrer",
+        status: "target_bound",
+        targetBoundAt: new Date("2026-07-26T11:59:00.000Z"),
+      },
+    ];
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue(referrals.map((referral) => ({
+          id: referral.id,
+          referrerMemberId: referral.referrerMemberId,
+        }))),
+        findUnique: vi.fn().mockImplementation(async (input: {
+          where: { id: string };
+        }) =>
+          referrals.find((referral) => referral.id === input.where.id) ?? null
+        ),
+      },
+    };
+
+    await expect(observeHostedUsageReferralInboundTx({
+      containerMemberId: "member_target_container",
+      enabled: true,
+      eventKey: "event_shared",
+      occurredAt,
+      senderMemberId: "member_other",
+      senderSubjectKey: "subject_other",
+      tx: tx as never,
+    })).resolves.toEqual({
+      isBoundReferralTarget: true,
+      qualificationCandidateReferralIds: [
+        "referral_person",
+        "referral_group",
+      ],
+    });
+
+    expect(tx.hostedUsageReferral.findUnique).toHaveBeenCalledTimes(2);
   });
 
   it("dedupes provider events and qualifies after two other speakers carry the majority", async () => {
@@ -412,6 +482,10 @@ describe("hosted usage referral policy", () => {
         }),
       },
       hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: referral.id,
+          referrerMemberId: referral.referrerMemberId,
+        }]),
         findUnique: vi.fn().mockImplementation(async () => ({ ...referral })),
         update: vi.fn().mockImplementation(async (input: {
           data: Partial<typeof referral>;
@@ -422,7 +496,7 @@ describe("hosted usage referral policy", () => {
       },
     };
 
-    let candidate: string | null = null;
+    let candidates: string[] = [];
     for (let index = 0; index < 15; index += 1) {
       const nonReferrer = index >= 7;
       const observation = await observeHostedUsageReferralInboundTx({
@@ -449,10 +523,10 @@ describe("hosted usage referral policy", () => {
             : "subject_referrer",
         tx: tx as never,
       });
-      candidate = observation.qualificationCandidateReferralId;
+      candidates = observation.qualificationCandidateReferralIds;
     }
 
-    expect(candidate).toBe("referral_1");
+    expect(candidates).toEqual(["referral_1"]);
     expect(referral.humanMessageCount).toBe(15);
     expect(referral.nonReferrerMessageCount).toBe(8);
     expect(referral.observedSpeakerKeysJson).toEqual([
@@ -476,7 +550,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "referral_1",
+      qualificationCandidateReferralIds: ["referral_1"],
     });
     expect(referral.humanMessageCount).toBe(15);
   });
@@ -507,6 +581,10 @@ describe("hosted usage referral policy", () => {
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(1),
       hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: referral.id,
+          referrerMemberId: referral.referrerMemberId,
+        }]),
         findUnique: vi.fn().mockResolvedValue(referral),
         update,
       },
@@ -522,7 +600,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
 
     expect(update).not.toHaveBeenCalled();
@@ -583,6 +661,16 @@ describe("hosted usage referral policy", () => {
       $executeRaw: vi.fn().mockResolvedValue(1),
       hostedUsageReferral: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockImplementation(async (input: {
+          where?: { status?: string };
+        }) =>
+          input.where?.status === "armed"
+            ? []
+            : [{
+                id: referral.id,
+                referrerMemberId: referral.referrerMemberId,
+              }]
+        ),
         findUnique: vi.fn().mockImplementation(async () => ({ ...referral })),
         update,
         updateMany,
@@ -599,7 +687,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
     expect(update).not.toHaveBeenCalled();
 
@@ -610,7 +698,7 @@ describe("hosted usage referral policy", () => {
       targetChannel: "linq",
       targetContainerMemberId: "member_later_container",
       tx: tx as never,
-    })).resolves.toEqual({ referralId: null });
+    })).resolves.toEqual({ referralIds: [] });
     expect(referral.status).toBe("target_bound");
 
     await expect(observeHostedUsageReferralInboundTx({
@@ -623,7 +711,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
     expect(update).toHaveBeenCalledOnce();
     expect(referral.humanMessageCount).toBe(1);
@@ -640,7 +728,7 @@ describe("hosted usage referral policy", () => {
       targetChannel: "linq",
       targetContainerMemberId: "member_after_grace_container",
       tx: tx as never,
-    })).resolves.toEqual({ referralId: null });
+    })).resolves.toEqual({ referralIds: [] });
     expect(referral.status).toBe("expired");
   });
 
@@ -714,6 +802,10 @@ describe("hosted usage referral policy", () => {
       },
       hostedUsageReferral: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([{
+          id: referral.id,
+          referrerMemberId: referral.referrerMemberId,
+        }]),
         findUnique: vi.fn().mockImplementation(async () => ({ ...referral })),
         update,
       },
@@ -729,7 +821,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "referral_person_1",
+      qualificationCandidateReferralIds: ["referral_person_1"],
     });
 
     expect(tx.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
@@ -775,6 +867,10 @@ describe("hosted usage referral policy", () => {
       $executeRaw: vi.fn().mockResolvedValue(1),
       hostedMemberIdentity: { findUnique: findMemberIdentity },
       hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: referral.id,
+          referrerMemberId: referral.referrerMemberId,
+        }]),
         findUnique: vi.fn().mockResolvedValue(referral),
         update,
       },
@@ -790,7 +886,7 @@ describe("hosted usage referral policy", () => {
       tx: tx as never,
     })).resolves.toEqual({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: null,
+      qualificationCandidateReferralIds: [],
     });
 
     expect(findMemberIdentity).toHaveBeenCalledOnce();

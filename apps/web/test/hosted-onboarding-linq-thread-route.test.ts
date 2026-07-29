@@ -46,14 +46,14 @@ const secureBoxMocks = vi.hoisted(() => ({
 }));
 const usageReferralMocks = vi.hoisted(() => ({
   bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
-    referralId: null,
+    referralIds: [],
   })),
   observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
     isBoundReferralTarget: boolean;
-    qualificationCandidateReferralId: string | null;
+    qualificationCandidateReferralIds: string[];
   }> => ({
     isBoundReferralTarget: false,
-    qualificationCandidateReferralId: null,
+    qualificationCandidateReferralIds: [],
   })),
   reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
 }));
@@ -226,10 +226,10 @@ const TEST_KEYRING_ENTRIES = {
 beforeEach(() => {
   vi.clearAllMocks();
   usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx
-    .mockResolvedValue({ referralId: null });
+    .mockResolvedValue({ referralIds: [] });
   usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
     isBoundReferralTarget: false,
-    qualificationCandidateReferralId: null,
+    qualificationCandidateReferralIds: [],
   });
   usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit
     .mockResolvedValue(null);
@@ -5023,7 +5023,7 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralId: "usage_referral_1",
+      qualificationCandidateReferralIds: ["usage_referral_1"],
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);

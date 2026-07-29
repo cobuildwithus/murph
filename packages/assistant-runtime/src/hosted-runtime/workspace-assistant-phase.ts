@@ -392,12 +392,12 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         const sourceContext = resolveHostedUsageReferralSourceContext(
           input.currentDeliveryRoute,
         );
-        const referralRequest = request.action === "arm_usage_referral"
-          ? {
+        const referralRequest = request.action === "read_usage_referral"
+          ? { action: request.action }
+          : {
               action: request.action,
               policyCode: request.policyCode,
-            }
-          : { action: request.action };
+            };
         return await input.groupToolPort.request({
           ...referralRequest,
           ...senderHandles,

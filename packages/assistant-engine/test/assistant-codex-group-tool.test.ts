@@ -282,9 +282,13 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
     }))).toEqual({
       kind: "group",
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({

@@ -1229,12 +1229,21 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "cancel_usage_referral") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "linqSenderHandles", "telegramSenderHandles"]),
-      `Hosted runtime group tool ${action} request`,
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "policyCode",
+        "telegramSenderHandles",
+      ]),
+      "Hosted runtime group tool cancel_usage_referral request",
     );
     return {
       action,
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+        record.policyCode,
+        "Hosted runtime group tool cancel_usage_referral request policyCode",
+      ),
     };
   }
   if (action === "arm_usage_referral") {
@@ -2896,9 +2905,29 @@ function parseHostedRuntimeUsageReferralSnapshot(
   const record = requireObject(value, label);
   assertAllowedObjectKeys(
     record,
-    new Set(["active", "availablePolicies", "trialCreditNotice"]),
+    new Set(["activeMissions", "availablePolicies", "trialCreditNotice"]),
     label,
   );
+  const activeMissionValues = requireArray(
+    record.activeMissions,
+    `${label} activeMissions`,
+  );
+  if (activeMissionValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length) {
+    throw new TypeError(`${label} activeMissions has too many entries.`);
+  }
+  const activePolicies = new Set<HostedUsageReferralPolicyCode>();
+  const activeMissions = activeMissionValues.map((value, index) => {
+    const mission = parseHostedRuntimeUsageReferralMissionSnapshot(
+      value,
+      `${label} activeMissions[${index}]`,
+    );
+    if (activePolicies.has(mission.policyCode)) {
+      throw new TypeError(`${label} activeMissions must have unique policies.`);
+    }
+    activePolicies.add(mission.policyCode);
+    return mission;
+  });
+
   const availablePolicyValues = requireArray(
     record.availablePolicies,
     `${label} availablePolicies`,
@@ -2922,6 +2951,9 @@ function parseHostedRuntimeUsageReferralSnapshot(
     if (seenPolicies.has(code)) {
       throw new TypeError(`${label} availablePolicies must be unique.`);
     }
+    if (activePolicies.has(code)) {
+      throw new TypeError(`${label} policy cannot be both active and available.`);
+    }
     seenPolicies.add(code);
     return {
       code,
@@ -2942,12 +2974,16 @@ function parseHostedRuntimeUsageReferralSnapshot(
         `${label} trialCreditNotice`,
       );
 
-  if (record.active === null) {
-    return { active: null, availablePolicies, trialCreditNotice };
-  }
-  const active = requireObject(record.active, `${label} active`);
+  return { activeMissions, availablePolicies, trialCreditNotice };
+}
+
+function parseHostedRuntimeUsageReferralMissionSnapshot(
+  value: unknown,
+  label: string,
+): HostedRuntimeUsageReferralSnapshot["activeMissions"][number] {
+  const mission = requireObject(value, label);
   assertAllowedObjectKeys(
-    active,
+    mission,
     new Set([
       "destinationKind",
       "expiresAt",
@@ -2955,47 +2991,40 @@ function parseHostedRuntimeUsageReferralSnapshot(
       "rewardLabel",
       "state",
     ]),
-    `${label} active`,
+    label,
   );
   const destinationKind = requireString(
-    active.destinationKind,
-    `${label} active destinationKind`,
+    mission.destinationKind,
+    `${label} destinationKind`,
   );
   if (destinationKind !== "group" && destinationKind !== "personal") {
-    throw new TypeError(`${label} active destinationKind is invalid.`);
+    throw new TypeError(`${label} destinationKind is invalid.`);
   }
-  const state = requireString(active.state, `${label} active state`);
+  const state = requireString(mission.state, `${label} state`);
   if (state !== "armed" && state !== "target_bound") {
-    throw new TypeError(`${label} active state is invalid.`);
+    throw new TypeError(`${label} state is invalid.`);
   }
-  const expiresAt = requireString(
-    active.expiresAt,
-    `${label} active expiresAt`,
-  );
+  const expiresAt = requireString(mission.expiresAt, `${label} expiresAt`);
   const expiresAtDate = new Date(expiresAt);
   if (
     !Number.isFinite(expiresAtDate.getTime())
     || expiresAtDate.toISOString() !== expiresAt
   ) {
-    throw new TypeError(`${label} active expiresAt must be a canonical timestamp.`);
+    throw new TypeError(`${label} expiresAt must be a canonical timestamp.`);
   }
 
   return {
-    active: {
-      destinationKind,
-      expiresAt,
-      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
-        active.policyCode,
-        `${label} active policyCode`,
-      ),
-      rewardLabel: parseHostedRuntimeUsageReferralLabel(
-        active.rewardLabel,
-        `${label} active rewardLabel`,
-      ),
-      state,
-    },
-    availablePolicies,
-    trialCreditNotice,
+    destinationKind,
+    expiresAt,
+    policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+      mission.policyCode,
+      `${label} policyCode`,
+    ),
+    rewardLabel: parseHostedRuntimeUsageReferralLabel(
+      mission.rewardLabel,
+      `${label} rewardLabel`,
+    ),
+    state,
   };
 }
 

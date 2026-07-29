@@ -852,7 +852,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
         description:
-          'Required only for action="arm_usage_referral". Use the exact policyCode from the immediately preceding read_usage_referral result after one exact current sender explicitly chooses it.',
+          'Required for action="arm_usage_referral" or action="cancel_usage_referral". Arm only an exact available policy the current sender explicitly chose; cancel only an exact policy from activeMissions.',
       },
       groupLabel: {
         type: 'string',
@@ -1545,6 +1545,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('cancel_usage_referral'),
+      policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
     })
     .strict(),
   z
@@ -5611,6 +5612,7 @@ function parseGroupArguments(
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'
     || parsed.data.action === 'arm_usage_referral'
+    || parsed.data.action === 'cancel_usage_referral'
   ) {
     return { ok: true, request: parsed.data }
   }
@@ -5752,7 +5754,6 @@ function parseGroupArguments(
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_usage_referral'
-    || parsed.data.action === 'cancel_usage_referral'
     || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'

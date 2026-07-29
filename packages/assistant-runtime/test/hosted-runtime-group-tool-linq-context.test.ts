@@ -102,6 +102,18 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: false,
       },
     });
+
+    await groupTool.request({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "new_person_activation_v1",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "cancel_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "new_person_activation_v1",
+    });
   });
 
   it("denies referral actions on group email where the human sender is not authoritative", async () => {

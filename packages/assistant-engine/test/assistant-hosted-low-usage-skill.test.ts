@@ -132,8 +132,18 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'A recommendation or low-usage warning is not consent',
     )
-    expect(skill).toContain('Merely describing a referral mission is not consent')
-    expect(skill).toContain('one exact current sender chooses one exact returned policy')
+    expect(skill).toContain('Merely describing referral missions is not consent')
+    expect(skill).toContain('an explicit "both" is consent')
+    expect(skill).toContain('Different policies are independent')
+    expect(skill).toContain('one-mission limit')
+    expect(skill).toContain('one compact message')
+    expect(normalizedSkill).toContain('invent operational limitations')
+    expect(normalizedSkill).toContain('still `armed` when the group is created')
+    expect(normalizedSkill).toContain('language respectful and person-first')
+    expect(normalizedSkill).toContain('use dehumanizing labels')
+    expect(normalizedSkill).toContain(
+      'Canceling one policy never cancels or replaces another',
+    )
     expect(normalizedSkill).toContain('Treat returned message counts as approximate')
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
@@ -199,14 +209,14 @@ describe('assistant hosted low-usage skill', () => {
       result: {
         outcome: 'armed',
         referral: {
-          active: {
+          activeMissions: [{
             destinationKind: 'personal',
             expiresAt: '2026-08-03T18:00:00.000Z',
             policyCode: 'active_group_v1',
             rewardLabel:
               'about 140 more messages on the model your Murph is using now',
             state: 'armed',
-          },
+          }],
         },
         status: 'ok',
       },
@@ -249,7 +259,7 @@ describe('assistant hosted low-usage skill', () => {
           result: {
             outcome: 'read',
             referral: {
-              active: null,
+              activeMissions: [],
               availablePolicies: [],
               trialCreditNotice: null,
             },
@@ -259,7 +269,7 @@ describe('assistant hosted low-usage skill', () => {
       ],
     },
     {
-      label: 'an arm followed by a superseding mission',
+      label: 'an arm followed by multiple active missions',
       toolResults: [
         {
           action: 'arm_usage_referral',
@@ -275,14 +285,24 @@ describe('assistant hosted low-usage skill', () => {
           result: {
             outcome: 'read',
             referral: {
-              active: {
-                destinationKind: 'personal',
-                expiresAt: '2026-08-04T18:00:00.000Z',
-                policyCode: 'active_group_v1',
-                rewardLabel:
-                  'about 140 more messages on the model your Murph is using now',
-                state: 'armed',
-              },
+              activeMissions: [
+                {
+                  destinationKind: 'personal',
+                  expiresAt: '2026-08-03T18:00:00.000Z',
+                  policyCode: 'new_person_activation_v1',
+                  rewardLabel:
+                    'about 100 more messages on the model your Murph is using now',
+                  state: 'armed',
+                },
+                {
+                  destinationKind: 'personal',
+                  expiresAt: '2026-08-04T18:00:00.000Z',
+                  policyCode: 'active_group_v1',
+                  rewardLabel:
+                    'about 140 more messages on the model your Murph is using now',
+                  state: 'armed',
+                },
+              ],
               availablePolicies: [],
               trialCreditNotice: null,
             },
@@ -308,14 +328,14 @@ describe('assistant hosted low-usage skill', () => {
           result: {
             outcome: 'read',
             referral: {
-              active: {
+              activeMissions: [{
                 destinationKind: 'personal',
                 expiresAt: '2026-08-05T18:00:00.000Z',
                 policyCode: 'new_person_activation_v1',
                 rewardLabel:
                   'about 100 more messages on the model your Murph is using now',
                 state: 'armed',
-              },
+              }],
               availablePolicies: [],
               trialCreditNotice: null,
             },

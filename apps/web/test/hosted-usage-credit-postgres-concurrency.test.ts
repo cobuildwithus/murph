@@ -1403,7 +1403,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           result: {
             outcome: "read",
             referral: {
-              active: null,
+              activeMissions: [],
               availablePolicies: expect.arrayContaining([
                 expect.objectContaining({
                   code: "new_person_activation_v1",
@@ -1426,11 +1426,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           result: {
             outcome: "armed",
             referral: {
-              active: {
+              activeMissions: [{
                 destinationKind: "personal",
                 policyCode: "new_person_activation_v1",
                 state: "armed",
-              },
+              }],
             },
             status: "ok",
           },
@@ -1444,11 +1444,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           result: {
             outcome: "read",
             referral: {
-              active: {
+              activeMissions: [{
                 destinationKind: "personal",
                 policyCode: "new_person_activation_v1",
                 state: "armed",
-              },
+              }],
             },
             status: "ok",
           },
@@ -1457,11 +1457,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           enabled: true,
           memberId,
           prisma,
-          request: { action: "cancel_usage_referral" },
+          request: {
+            action: "cancel_usage_referral",
+            policyCode: "new_person_activation_v1",
+          },
         })).resolves.toMatchObject({
           result: {
             outcome: "canceled",
-            referral: { active: null },
+            referral: { activeMissions: [] },
             status: "ok",
           },
         });
@@ -2050,6 +2053,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const now = new Date();
+      const sourceConversation = {
+        channel: "linq" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: false,
+      };
 
       try {
         await observer.hostedMember.createMany({
@@ -2140,6 +2148,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             request: {
               action: "read_usage_referral",
               linqSenderHandles: [phoneNumbers[index]!],
+              sourceConversation,
             },
           });
           expect(read).toMatchObject({
@@ -2165,6 +2174,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 action: "arm_usage_referral",
                 linqSenderHandles: [phoneNumbers[index]!],
                 policyCode: "new_person_activation_v1",
+                sourceConversation,
               },
             })
           ),

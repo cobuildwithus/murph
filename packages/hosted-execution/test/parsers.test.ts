@@ -1901,7 +1901,14 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "cancel_usage_referral",
-    })).toEqual({ action: "cancel_usage_referral" });
+      policyCode: "new_person_activation_v1",
+    })).toEqual({
+      action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "cancel_usage_referral",
+    })).toThrow(/policyCode must be a non-empty string/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
       policyCode: "future_policy",
@@ -2617,13 +2624,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         outcome: "read" as const,
         referral: {
-          active: {
+          activeMissions: [{
             destinationKind: "group" as const,
             expiresAt: "2026-08-02T12:00:00.000Z",
             policyCode: "active_group_v1" as const,
             rewardLabel: "$3.50 of Murph usage",
             state: "armed" as const,
-          },
+          }],
           availablePolicies: [{
             code: "new_person_activation_v1" as const,
             requirementsLabel: "Introduce one new person.",
@@ -2635,6 +2642,32 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            response.result.referral.activeMissions[0],
+          ],
+        },
+      },
+    })).toThrow(/activeMissions must have unique policies/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          availablePolicies: [{
+            ...response.result.referral.availablePolicies[0],
+            code: "active_group_v1",
+          }],
+        },
+      },
+    })).toThrow(/policy cannot be both active and available/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "arm_usage_referral",
       result: {
