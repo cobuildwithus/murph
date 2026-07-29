@@ -26,6 +26,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import {
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   isHostedUsageCreditSavedCardPolicyVersion,
   type HostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
@@ -317,6 +318,7 @@ async function resolveHostedUsageCreditSavedCard(input: {
   }
 
   const preferredPaymentMethodIds = new Set<string>();
+  const subscriptionDefaultPaymentMethodIds = new Set<string>();
   const customerDefaultPaymentMethodId = coerceStripeObjectId(
     customer.invoice_settings.default_payment_method,
   );
@@ -349,7 +351,28 @@ async function resolveHostedUsageCreditSavedCard(input: {
       attachedPaymentMethodIds.has(subscriptionPaymentMethodId)
     ) {
       preferredPaymentMethodIds.add(subscriptionPaymentMethodId);
+      subscriptionDefaultPaymentMethodIds.add(subscriptionPaymentMethodId);
     }
+  }
+  if (
+    input.purchase.checkoutRequestPolicyVersion ===
+      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+  ) {
+    if (subscriptionDefaultPaymentMethodIds.size === 1) {
+      return [...subscriptionDefaultPaymentMethodIds][0] ?? null;
+    }
+    if (subscriptionDefaultPaymentMethodIds.size > 1) {
+      return null;
+    }
+    if (
+      customerDefaultPaymentMethodId &&
+      attachedPaymentMethodIds.has(customerDefaultPaymentMethodId)
+    ) {
+      return customerDefaultPaymentMethodId;
+    }
+    return attachedPaymentMethodIds.size === 1
+      ? [...attachedPaymentMethodIds][0] ?? null
+      : null;
   }
   if (preferredPaymentMethodIds.size === 1) {
     return [...preferredPaymentMethodIds][0] ?? null;

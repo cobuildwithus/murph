@@ -723,12 +723,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   one-time Stripe Checkout offers. The same purchase owner supports
   authenticated hosted-group funding while keeping payer and beneficiary
   separate. All three current-policy targets first attempt one unambiguous
-  canonical card already attached to the payer's Stripe Customer, preferring
-  the Customer or nonterminal Subscription default and otherwise requiring the
-  only attached card. Stripe's `allow_redisplay` controls Checkout presentation,
-  not whether the card can fund the payer's explicit top-up. Missing or
-  conflicting defaults stay in Checkout, where Stripe can collect or
-  authenticate a card. Web persists the unconfirmed
+  canonical card already attached to the payer's Stripe Customer. One
+  nonterminal Subscription default outranks the generic Customer default; when
+  no Subscription default exists, the Customer default or only attached card
+  may be used. Multiple Subscription defaults stay in Checkout. Stripe's
+  `allow_redisplay` controls Checkout presentation, not whether the card can
+  fund the payer's explicit top-up. Web persists the unconfirmed
   PaymentIntent on the purchase and then confirms it; only verified cancellation
   may release that binding before Checkout fallback. Only verified Stripe-event
   reconciliation

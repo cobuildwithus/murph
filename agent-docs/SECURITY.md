@@ -195,9 +195,10 @@ Last verified: 2026-07-28
   authored row while retained financial purchase history remains detached.
 - Current-policy saved-card personal, Family, and group funding may select one
   unambiguous card already attached to the authenticated payer's verified
-  Stripe Customer. Murph prefers one consistent Customer or nonterminal
-  Subscription default and otherwise requires exactly one attached method;
-  conflicting defaults or multiple non-default methods stay in Checkout.
+  Stripe Customer. One nonterminal Subscription default outranks the generic
+  Customer default. With no Subscription default, Murph uses the Customer
+  default or requires exactly one attached method; multiple Subscription
+  defaults or multiple non-default methods stay in Checkout.
   Frozen v2 purchases retain the legacy behavior for group targets only,
   frozen v3 purchases retain it for all targets, and v1 retains no saved-card
   path. The browser cannot supply a PaymentMethod. `allow_redisplay` governs
