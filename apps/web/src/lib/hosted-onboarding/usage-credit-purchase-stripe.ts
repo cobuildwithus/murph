@@ -16,6 +16,7 @@ import {
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
   parseHostedUsageCreditCheckoutRequestPolicyVersion,
@@ -212,12 +213,15 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
     ),
     checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
     savePaymentMethod:
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3 ||
       policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
       (
         policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 &&
         isHostedUsageCreditGroupReturnUrl(input.purchase.checkoutCancelUrl) &&
         isHostedUsageCreditGroupReturnUrl(input.purchase.checkoutSuccessUrl)
       ),
+    showPaymentMethodSaveControl:
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
     priceId,
     purchaseId: input.purchase.id,
     stripeCustomerId,
@@ -241,6 +245,7 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
   priceId: string;
   purchaseId: string;
   savePaymentMethod: boolean;
+  showPaymentMethodSaveControl: boolean;
   stripeCustomerId: string;
 }): Stripe.Checkout.SessionCreateParams {
   return {
@@ -258,6 +263,14 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
         ? { setup_future_usage: "off_session" as const }
         : {}),
     },
+    ...(input.showPaymentMethodSaveControl
+      ? {
+          saved_payment_method_options: {
+            allow_redisplay_filters: ["always"] as const,
+            payment_method_save: "enabled" as const,
+          },
+        }
+      : {}),
     success_url: input.checkoutSuccessUrl,
   };
 }
