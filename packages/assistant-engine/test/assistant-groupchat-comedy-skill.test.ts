@@ -260,7 +260,10 @@ describe('assistant group-chat comedy skill', () => {
       'The unprompted lane never overrides Humor 0.',
     )
     expect(normalized).toContain(
-      'unless someone explicitly asks in the current turn for the sarcastic or audio treatment',
+      'disable the sarcastic voice-memo lane and defer to `group-chat` for a warm, plain reply versus silence',
+    )
+    expect(normalized).toContain(
+      'An explicit current-turn request for the sarcastic or audio treatment may override the dial',
     )
     expect(normalized).toContain(
       'The move is sarcastic self-dramatization, not retaliation.',
