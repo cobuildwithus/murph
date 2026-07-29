@@ -23,7 +23,6 @@ jobs:
             packages/assistant-engine/src/assistant-codex/dynamic-tools.ts \
             packages/assistant-engine/test/assistant-tool-description-contracts.test.ts \
             packages/assistant-engine/test/assistant-codex-group-tool.test.ts \
-            packages/assistant-engine/test/group-room-model.test.ts \
             packages/assistant-runtime/src/hosted-runtime/context.ts \
             packages/assistant-runtime/test/hosted-runtime-events.test.ts \
             packages/hosted-execution/src/contracts.ts \
