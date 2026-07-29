@@ -141,6 +141,22 @@ Last verified: 2026-07-28
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq participant add/remove context is a bounded optional sidecar on the
+  existing routed group, not another work owner. Provider-event deduplication
+  and optional staging run in one transaction under chat, owner, then route
+  lock order, so the next ordinary group message cannot overtake a unique
+  change after ledger insertion and projection cleanup cannot deadlock against
+  a labeled append. A unique addition atomically retains the existing anonymous
+  route bit; a removal has no send or wake fallback. Identity and
+  owner-address-book reads happen only on the
+  participant webhook path, never on ordinary message ingress. Optional lookup
+  failure falls back to handle-only context, optional staging failure preserves
+  the addition bit, and duplicate events never restage. Address-book
+  replacement/deletion takes the same owner lock and clears that owner's
+  pending optional group-event buffers, so revoked labels cannot surface later
+  and ordinary message ingress adds no query. Route-account lookup keys also
+  reject Murph's own line when `is_me` is absent. Append and consume retain the
+  existing 500 ms context-crypto bound.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at

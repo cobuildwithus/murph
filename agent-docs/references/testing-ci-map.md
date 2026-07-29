@@ -142,6 +142,22 @@ and captureless prompts. The local Linq tunnel test locks the versioned edit
 subscription without treating local provider traffic as a routine CI
 dependency.
 
+Linq participant-change coverage follows the same provider-to-prompt boundary.
+Shared ingress tests lock the full participant object plus deprecated handle
+fallback. Hosted Web parser tests prove provider-ledger minimization still
+retains no participant identifier; webhook tests prove only unique routed adds
+and removals attempt detailed staging, additions retain their anonymous fallback
+bit, and neither event appends mailbox work, wakes, or sends. Focused context
+tests prove active-route gating, canonical handle normalization, activated
+member label suppression, optional owner-address-book overlay, handle-only
+fallback, chat-locked atomic staging, encrypted route storage, own-line
+rejection, account-bound consumption, address-book replacement/deletion buffer
+clearing, and bounded weak group-event prompt rendering. The existing signed
+hosted-local group-isolation scenario carries a unique addition through Web,
+the encrypted route sidecar, mailbox import, and the next real assistant
+provider request, where both the anonymous fallback and exact handle context
+must be present.
+
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container
 route and reject a foreign container. Cloudflare tests lock the new signed
