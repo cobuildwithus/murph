@@ -1,6 +1,6 @@
 # Prevent provisional speaker-name cache decisions
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -41,3 +41,6 @@ Updated: 2026-07-29
   or misses only for that slice. A 17-handle regression proves overflow is
   absent from miss evidence and resolves normally when requested later.
 - Focused Web proof passes 136 tests and the Web typecheck.
+- Product-experience review returned no findings on the exact pushed
+  remediation head.
+Completed: 2026-07-29
