@@ -4341,6 +4341,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("reuses the production-scoped Linq speaker reader across ordinary warm turns", async () => {
+    const firstInputId = "ain_81818181818181818181818181818181";
+    const secondInputId = "ain_82828282828282828282828282828282";
+    const senderHandle = "+15558880001";
+    const groupRequest = vi.fn(async (
+      request: HostedRuntimeGroupToolRequest,
+    ) => {
+      if (request.action !== "read_participant_display_names") {
+        throw new Error(`Unexpected group action: ${request.action}`);
+      }
+      return {
+        action: "read_participant_display_names" as const,
+        result: {
+          participants: [{
+            displayName: "Warm Speaker",
+            displayNameSource: "profile-name" as const,
+            senderHandle,
+          }],
+          status: "ok" as const,
+        },
+      };
+    });
+    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => ({
+      conversation: {
+        accountId: "linq_identity_warm_speaker",
+        actorId: "linq_participant_warm_speaker",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "linq_hidden_warm_speaker_thread",
+        threadIsDirect: false,
+      },
+      replyTarget: {
+        channel: "linq",
+        messageId: inputId === firstInputId
+          ? "linq_warm_speaker_message_one"
+          : "linq_warm_speaker_message_two",
+        threadId: "linq_warm_speaker_chat",
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: "linq",
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        senderHandle,
+        service: "imessage",
+      },
+    }));
+
+    const runOrdinaryTurn = async (inputId: string) => {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        conversationImportedCount: 1,
+        importedCount: 1,
+        runtimeGroupToolPort: { request: groupRequest },
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+      return await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const reader =
+            executionContext.hosted?.groupParticipantDisplayNameReader;
+          if (!reader) {
+            throw new Error("Expected the production-scoped speaker reader.");
+          }
+          return await reader.read({
+            channel: "linq",
+            senderHandles: [senderHandle],
+          });
+        },
+        turnEnvironment: null,
+      });
+    };
+
+    await expect(runOrdinaryTurn(firstInputId)).resolves.toEqual([{
+      displayName: "Warm Speaker",
+      displayNameSource: "profile-name",
+      senderHandle,
+    }]);
+    await expect(runOrdinaryTurn(secondInputId)).resolves.toEqual([{
+      displayName: "Warm Speaker",
+      displayNameSource: "profile-name",
+      senderHandle,
+    }]);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "read_participant_display_names",
+      linqSenderHandles: [senderHandle],
+    });
+  });
+
   it("scopes the group port through the scheduled group tool factory", async () => {
     const groupRequest = vi.fn(async () => {
       throw new Error("The scheduled scope boundary test must not call the port.");

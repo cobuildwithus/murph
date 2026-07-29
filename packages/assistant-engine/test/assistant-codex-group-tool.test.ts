@@ -31,6 +31,9 @@ import type {
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from "../src/assistant/group-shared-read-limits.ts";
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from "../src/assistant/message-target-selection.ts";
 import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
@@ -183,7 +186,9 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("a changed question conflicts");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="ok" means provider acceptance, not completion');
+      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
+    expect(MURPH_GROUP_TOOL.description)
+      .not.toContain('. status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.description)
@@ -406,7 +411,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("authorizes email-share revocation from one exact accepted group message", async () => {
+  it("selects the request-bearing message_ref from two accepted group senders", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
       message_ref: FRESH_ASSISTANT_INPUT_ID,
@@ -414,15 +419,32 @@ describe("murph.group dynamic tool", () => {
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
     }
+    const earlierParticipant = {
+      assistantInputId: EARLIER_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110002",
+      source: "linq" as const,
+    };
     const participant = {
       assistantInputId: FRESH_ASSISTANT_INPUT_ID,
       senderHandle: "+15551110003",
       source: "linq" as const,
     };
-    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
-      participant,
-      targetInputId: FRESH_ASSISTANT_INPUT_ID,
-    }));
+    const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+      vi.fn(async ({ messageRef }) => {
+        if (messageRef === EARLIER_ASSISTANT_INPUT_ID) {
+          return {
+            participant: earlierParticipant,
+            targetInputId: EARLIER_ASSISTANT_INPUT_ID,
+          };
+        }
+        if (messageRef === FRESH_ASSISTANT_INPUT_ID) {
+          return {
+            participant,
+            targetInputId: FRESH_ASSISTANT_INPUT_ID,
+          };
+        }
+        return null;
+      });
     const groupRequest = vi.fn<GroupToolRequest>(async () => ({
       action: "revoke_own_email_share",
       result: { revokedCount: 1, status: "revoked" },
@@ -2261,7 +2283,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="ok" means provider acceptance, not completion');
+      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)

@@ -157,6 +157,25 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('keeps completed group reads and participant message-ref ownership unambiguous', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(groupPrompt).toContain('`status="ok"` is complete')
+    expect(groupPrompt).toContain(
+      'select the exact server-issued message_ref printed beside the request-bearing message',
+    )
+    expect(groupPrompt).toContain(
+      'the host reloads that message and derives its sender',
+    )
+    expect(groupPrompt).not.toContain(
+      'only the server-selected message reference can authorize participant-scoped effects',
+    )
+  })
+
   it('keeps the group social role active, low-ego, and human-first', () => {
     const groupLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput({
