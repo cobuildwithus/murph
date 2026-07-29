@@ -1,6 +1,6 @@
 # Simplify group newsletter statistics and delivery settlement
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -89,3 +89,4 @@ Updated: 2026-07-29
   empty-stat copy.
 - Documentation drift and the final focused suite pass. Exact-head CI, plan
   closure, and final ReviewGPT remain pending.
+Completed: 2026-07-29
