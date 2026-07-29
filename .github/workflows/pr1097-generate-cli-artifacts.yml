@@ -1,0 +1,34 @@
+name: PR 1097 Generate CLI Artifacts
+
+on:
+  push:
+    branches:
+      - agent/group-challenge-scorecards
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exercise-library:generate && pnpm health-commons:generate
+      - run: pnpm --dir packages/cli gen:config-schema
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1097-cli-generated
+          path: |
+            packages/cli/config.schema.json
+            packages/cli/src/incur.generated.ts
+            packages/cli/src/vault-cli-skill-hash.generated.ts
+          if-no-files-found: error
+          retention-days: 1
