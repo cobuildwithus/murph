@@ -32,7 +32,7 @@ Temporal worker and its idempotent schedule setup from one sibling or absolute
 package directory:
 
 ```bash
-MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-hosted/packages/hosted-orchestrator-temporal \
+MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrator-temporal \
   pnpm dev
 ```
 
