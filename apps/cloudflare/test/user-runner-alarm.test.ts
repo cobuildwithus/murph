@@ -5362,18 +5362,6 @@ function createDirectOnlyRpcMethod<T extends (...args: never[]) => unknown>(
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   onList: (() => void) | null = null;
 
-  async head(key: string): Promise<{ key: string; size: number } | null> {
-    const value = this.objects.get(key);
-    if (value === undefined) {
-      return null;
-    }
-
-    return {
-      key,
-      size: new TextEncoder().encode(value).byteLength,
-    };
-  }
-
   async list(input: {
     cursor?: string;
     limit?: number;

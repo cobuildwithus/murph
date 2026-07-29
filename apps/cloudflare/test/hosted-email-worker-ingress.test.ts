@@ -144,13 +144,6 @@ class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
 }
 
 class BridgeMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
-  async head(key: string): Promise<{ key: string; size: number } | null> {
-    const value = this.objects.get(key);
-    return value === undefined
-      ? null
-      : { key, size: new TextEncoder().encode(value).byteLength };
-  }
-
   async list(input: { prefix?: string } = {}): Promise<{
     objects: Array<{ key: string }>;
     truncated: false;

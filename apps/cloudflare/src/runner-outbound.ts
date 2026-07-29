@@ -2000,11 +2000,11 @@ async function rememberWorkspaceSnapshotPresignedPut(input: {
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const rememberPresignedPut = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "rememberHostedWorkspaceSnapshotPresignedPut",
   );
-  return await rememberPresignedPut({
+  return await stub.rememberHostedWorkspaceSnapshotPresignedPut({
     drainUntil: input.drainUntil,
     expectedSession: input.session,
     expiresAt: input.expiresAt,

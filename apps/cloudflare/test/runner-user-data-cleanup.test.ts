@@ -104,7 +104,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(unrelatedKey, "other-user-private-media");
 
     const result = await deleteHostedRunnerUserData({
-      bucket,
+      buckets: { destination: bucket, source: bucket },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -112,10 +112,13 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
 
-    expect(result.r2).toMatchObject({
-      deletedObjectCount: 1,
-      skippedUserScopedPrefixes: false,
-      supported: true,
+    expect(result).toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 1,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+      },
     });
     expect(bucket.objects.has(stagedMediaKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);

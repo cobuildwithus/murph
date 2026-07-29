@@ -32,6 +32,11 @@ enabled:  Yes
 prefix:   hosted-email/messages/
 action:   Expire objects after 1 days
 
+name:     delete-hosted-private-media-after-24h
+enabled:  Yes
+prefix:   hosted-private-media/images/
+action:   Expire objects after 1 days
+
 name:     delete-hosted-meal-photos-after-31d
 enabled:  Yes
 prefix:   hosted-meal-photos/images/
