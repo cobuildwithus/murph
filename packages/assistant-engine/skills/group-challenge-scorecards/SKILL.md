@@ -146,16 +146,21 @@ because several bounded reads may feed one scorecard.
 Run scoring batches sequentially after the model turn begins:
 
 1. Read the next scoring batch only; never mix diagnostics into it.
-2. If any scope is `not_granted`, immediately handle the exact eligible permission
-   offer from that read and stop before making another shared read. The latest read is
-   the only permission evidence.
-3. Otherwise retain only the normalized component evidence needed for scoring and
+2. If any `not_granted` participant/scope still needs a new eligible permission
+   offer, handle that exact offer immediately and stop before another shared read. The
+   latest read is the only permission evidence.
+3. When every `not_granted` participant/scope in the batch already has an explicit
+   decline or handled offer action on the challenge page, retain `not_granted` as
+   normalized partial coverage and continue; no later action depends on that read's
+   offer evidence.
+4. Otherwise retain only the normalized component evidence needed for scoring and
    continue to the next batch.
-4. Every successful batch must return the same ordered set of current
+5. Every successful batch must return the same ordered set of current
    `participantId` values. If membership differs, do not combine snapshots or publish
    standings; record the run as unverified and try again on a later turn.
-5. Only after every scoring batch is granted may a separate diagnostic-only
-   `device-sync-status.v0` read investigate genuinely missing data.
+6. Only after every scoring batch has been read and no new permission offer is owed may
+   a separate diagnostic-only `device-sync-status.v0` read investigate genuinely
+   missing data.
 
 This keeps the privacy/result-size bound intact and avoids a new multi-metric hosted
 RPC. Never work around it with raw vault-share files or private 1:1 data.

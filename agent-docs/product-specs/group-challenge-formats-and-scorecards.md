@@ -98,7 +98,7 @@ Each component freezes:
 - `window-total` or `daily-additive` settlement.
 
 ```ts
-type GroupChallengeScorecardComponent = {
+type PersistedGroupChallengeComponentRule = {
   id: string;
   label: string;
   quantityUnit: string;
@@ -110,6 +110,11 @@ type GroupChallengeScorecardComponent = {
   settlementMode: "window-total" | "daily-additive";
 };
 ```
+
+The deterministic `score-challenge` payload projects this page-owned rule down to
+`id`, `label`, `quantityUnit`, `points`, `perQuantity`, and optional `maxPoints`.
+Projection scopes, `evaluationRule`, and `settlementMode` remain on the challenge page
+and never cross the arithmetic boundary.
 
 The model owns `evaluationRule`. Useful quantities include total Steps, logged protein
 grams on complete logged days, qualifying workouts after a frozen local-time
@@ -189,15 +194,19 @@ reuse a scope, and several bounded reads may feed one scorecard.
 The required sequence is:
 
 1. Start the model turn and read the first scoring batch only.
-2. When that read proves any exact scoring scope `not_granted`, immediately handle
-   the eligible permission offer from that evidence and stop before another shared
-   read. The latest read remains the only permission evidence.
-3. Otherwise retain only normalized component evidence and read the next batch.
-4. Require every successful batch to return the same ordered current
+2. When that read proves a `not_granted` participant/scope that still needs a new
+   eligible permission offer, handle the exact offer from that evidence and stop before
+   another shared read. The latest read remains the only permission evidence.
+3. When every `not_granted` participant/scope in the batch already has an explicit
+   decline or handled offer action, retain `not_granted` as normalized partial coverage
+   and continue; no later action depends on that read's offer evidence.
+4. Otherwise retain only normalized component evidence and read the next batch.
+5. Require every successful batch to return the same ordered current
    `participantId` set. A changed membership snapshot cannot be combined; the run is
    unverified and publishes no standings.
-5. Only after all scoring batches are granted may a separate diagnostic-only
-   `device-sync-status.v0` read investigate genuinely missing data.
+6. Only after all scoring batches have been read and no new permission offer is owed may
+   a separate diagnostic-only `device-sync-status.v0` read investigate genuinely
+   missing data.
 
 This preserves the existing privacy, authority, and result-size boundary. Raw
 vault-share files and private 1:1 data are never alternate scoring paths.

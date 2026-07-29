@@ -79,7 +79,10 @@ describe('assistant group challenge scorecard guidance', () => {
       'split them into stable batches of at most `ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES` scopes — currently three',
     )
     expect(skill).toContain(
-      'If any scope is `not_granted`, immediately handle the exact eligible permission offer from that read and stop before making another shared read.',
+      'If any `not_granted` participant/scope still needs a new eligible permission offer, handle that exact offer immediately and stop before another shared read.',
+    )
+    expect(skill).toContain(
+      'already has an explicit decline or handled offer action on the challenge page, retain `not_granted` as normalized partial coverage and continue',
     )
     expect(skill).toContain(
       'Every successful batch must return the same ordered set of current `participantId` values.',
