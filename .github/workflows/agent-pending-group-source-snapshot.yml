@@ -1,6 +1,7 @@
 name: Agent Pending Group Source Snapshot
 
 on:
+  pull_request:
   push:
     branches:
       - agent/pending-group-setup
