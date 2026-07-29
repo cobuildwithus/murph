@@ -43,7 +43,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Permission offers | In iMessage/Linq, lead with **Like this message**, state the exact `{{share_scope}}`, and include the customize link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
-| Projection retention | Each Web-owned encrypted health snapshot can carry **the 7 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. |
+| Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
 
 ## Canonical Objects
 
@@ -150,7 +150,11 @@ The parent and children share the occurrence-scoped delivery key. Once the
 outbox accepts the parent, it reports that id to cron immediately. Cron stores
 the id in its existing `delivery_pending` state and stops model work for the
 occurrence even if provider completion, decision validation, or turn
-persistence later fails; the run record retains that post-acceptance error.
+persistence later fails; the run record retains that post-acceptance error. If
+the process stops between durable parent creation and that cron write, the next
+run derives the same parent from the occurrence-scoped outbox key before model
+admission and reconnects it to `delivery_pending`; no repair queue or second
+owner is involved.
 Web marks the parent sent only after it has revalidated the proof and durably
 persisted the recipient fanout intents. The existing deterministic cron
 reconciler then settles the occurrence from that parent state; it never starts
@@ -177,9 +181,12 @@ member/scope result; an explicitly consented device status is derived live
 rather than stored in a snapshot. `buildSharedGroupWeeklyMembers`
 (`packages/query/src/group-weekly.ts`) turns available records into per-member
 summaries over the seven completed local calendar days before the scheduled
-occurrence. Each encrypted health snapshot carries up to seven records per
-projection kind. That bounded projection cannot also prove a complete prior
-calendar week, so the result deliberately omits prior-week averages and deltas.
+occurrence. Each encrypted health snapshot carries up to eight records per
+projection kind: the open local date plus the seven prior completed dates.
+Projection reads use a calendar-date cutoff rather than a rolling-hour cutoff,
+so timezone offset and time of day cannot discard the oldest required date.
+That bounded projection cannot also prove a complete prior calendar week, so
+the result deliberately omits prior-week averages and deltas.
 One shared body; everyone on the thread sees the same digest.
 
 Default content is a selective weekly story, not one repeated metric block per
@@ -334,7 +341,7 @@ the automation and grants.
    `packages/query`; trusted newsletter preparation calls it without
    destination-local share state.
 4. `group-newsletter` skill + one structured newsletter save action over the existing automation port (group-chosen name as title, schedule as cron, delivery tag, scopes and tone in configuration text), including setup questions, ordinary current-chat delivery, announce-before-first-email + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
-5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest seven records per projection kind.
+5. Complete replacement of each Web-owned encrypted health snapshot, bounded to the latest eight records per projection kind (the open local date plus seven prior completed dates).
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
 Everything else is reuse: scheduling, current-chat outbox, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.

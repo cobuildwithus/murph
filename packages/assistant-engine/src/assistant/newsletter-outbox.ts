@@ -154,16 +154,35 @@ export function createAssistantNewsletterOutboxTool(input: {
   }
 }
 
+export async function findAssistantNewsletterParentIntent(input: {
+  authority: HostedRuntimeNewsletterScheduledAuthority
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  const deliveryIdempotencyPrefix =
+    buildNewsletterDeliveryIdempotencyPrefix(input.authority)
+  const parentIntents = (await listAssistantOutboxIntents(input.vault))
+    .filter((intent) =>
+      intent.deliveryIdempotencyKey?.startsWith(deliveryIdempotencyPrefix)
+      && isNewsletterParentIntent(intent)
+    )
+    .sort(compareOutboxIntentCreationOrder)
+  return parentIntents.find(isActiveOutboxIntent)
+    ?? parentIntents.find((intent) => intent.status === 'sent')
+    ?? parentIntents[0]
+    ?? null
+}
+
 function buildNewsletterDeliveryIdempotencyKey(input: {
   authority: HostedRuntimeNewsletterScheduledAuthority
   groupId: string
 }): string {
-  return [
-    'group-newsletter',
-    input.authority.automationId,
-    input.authority.occurrenceAt,
-    input.groupId,
-  ].join(':')
+  return `${buildNewsletterDeliveryIdempotencyPrefix(input.authority)}${input.groupId}`
+}
+
+function buildNewsletterDeliveryIdempotencyPrefix(
+  authority: HostedRuntimeNewsletterScheduledAuthority,
+): string {
+  return `group-newsletter:${authority.automationId}:${authority.occurrenceAt}:`
 }
 
 function newsletterAccepted(

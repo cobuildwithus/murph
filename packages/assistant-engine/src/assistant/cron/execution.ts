@@ -51,6 +51,9 @@ import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
 import {
+  findAssistantNewsletterParentIntent,
+} from '../newsletter-outbox.js'
+import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
 } from '../experiment-support-automations.js'
@@ -522,6 +525,7 @@ export async function executeClaimedAssistantCronJob(
   let outcome: AssistantCronRunOutcome = 'failed'
   let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
+  let newsletterRecoveryAuthorized = false
   let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
   let canonicalSourceSkipReason: string | null = null
   let managedOwnerAuthorization: AssistantCronManagedOwnerAuthorization = {
@@ -549,6 +553,12 @@ export async function executeClaimedAssistantCronJob(
         ) ??
         startedAt
       : claimedJob.state.nextRunAt ?? startedAt
+  const scheduledNewsletterAuthority =
+    resolveAssistantCronScheduledNewsletterAuthority({
+      job: input.job,
+      occurrenceAt,
+      trigger: input.trigger,
+    })
   const yieldCancellation = createAssistantCronBackgroundMaintenanceCancellation({
     job: input.job,
     signal: foregroundPreemption.signal ?? null,
@@ -590,11 +600,24 @@ export async function executeClaimedAssistantCronJob(
         canonicalSourceDisposition = authority.kind
         canonicalSourceSkipReason = authority.reason
       }
+      if (
+        canonicalSourceSkipReason === null
+        && scheduledNewsletterAuthority
+      ) {
+        newsletterRecoveryAuthorized = true
+        pendingDeliveryIntentId = (
+          await findAssistantNewsletterParentIntent({
+            authority: scheduledNewsletterAuthority,
+            vault: input.vault,
+          })
+        )?.intentId ?? null
+      }
     }
 
     if (
       deviceActivityAuthority.error === null &&
-      canonicalSourceSkipReason === null
+      canonicalSourceSkipReason === null &&
+      pendingDeliveryIntentId === null
     ) {
       managedOwnerAuthorization =
         await resolveAssistantCronManagedOwnerAuthorization({
@@ -618,6 +641,7 @@ export async function executeClaimedAssistantCronJob(
       deviceActivityAuthority.error === null &&
       canonicalSourceSkipReason === null &&
       managedOwnerSkipReason === null &&
+      pendingDeliveryIntentId === null &&
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
@@ -663,6 +687,9 @@ export async function executeClaimedAssistantCronJob(
       outcome = 'skipped_gate'
       reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
+    } else if (pendingDeliveryIntentId !== null) {
+      outcome = 'delivery_pending'
+      reason = 'delivery_pending'
     } else if (managedOwnerSkipReason !== null) {
       outcome = 'skipped_gate'
       reason = managedOwnerSkipReason ===
@@ -742,11 +769,7 @@ export async function executeClaimedAssistantCronJob(
             deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
-          scheduledAutomationAuthority: resolveAssistantCronScheduledNewsletterAuthority({
-            job: input.job,
-            occurrenceAt,
-            trigger: input.trigger,
-          }),
+          scheduledAutomationAuthority: scheduledNewsletterAuthority,
           scheduledInvocationAuthority,
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
@@ -986,6 +1009,24 @@ export async function executeClaimedAssistantCronJob(
       }
     }
   } catch (error) {
+    if (
+      pendingDeliveryIntentId === null
+      && newsletterRecoveryAuthorized
+      && scheduledNewsletterAuthority
+    ) {
+      try {
+        pendingDeliveryIntentId = (
+          await findAssistantNewsletterParentIntent({
+            authority: scheduledNewsletterAuthority,
+            vault: input.vault,
+          })
+        )?.intentId ?? null
+      } catch {
+        // Preserve the original failure. A failed recovery read leaves the
+        // occurrence retryable, and the next run checks durable outbox state
+        // before admitting the provider.
+      }
+    }
     const backgroundMaintenanceYielded =
       isAssistantCronBackgroundMaintenanceYieldError(error) ||
       yieldCancellation.yieldRequested()

@@ -108,6 +108,9 @@ set is empty, send a short email without health comparisons. Never mention who
 failed to share, who lacks an email, or who had insufficient data.
 Do not invent a cause for empty stats: say only that no usable completed-day
 stats were returned; never attribute the absence to sync or permissions.
+This composition rule does not block a later conversation from reporting
+authorized current permission or data-availability state. Label that state as
+current, and do not present it as the historical cause of an earlier edition.
 
 ## Turn stats into a story
 
@@ -150,8 +153,9 @@ Never expose dashboard language such as a raw total of active minutes.
   the most workouts, or say someone completed workouts on unobserved days. Its
   completed-day average covers recorded workout days only and omits zero days.
 - Do not claim a prior-week change, comeback, monthly high, or four-week high.
-  The consented seven-record projection supports only the returned
-  seven-completed-day averages.
+  The consented eight-record projection supports the open local date plus the
+  seven completed dates returned for composition; it does not support a
+  complete prior calendar week.
 - For other sources, say "exercise" only when the value represents workouts or
   exercise. Say "movement" only when an explicit semantic owner identifies
   broad movement, and still translate it into hours or a daily average.

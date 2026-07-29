@@ -154,8 +154,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('`vault-cli group weekly')
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')
+    expect(section).toContain('never invent a sync or permission cause')
+    expect(section).toContain('the historical cause is unknown')
     expect(section).toContain(
-      'never attribute the absence to sync or permissions',
+      'permission or data availability as current state, never as the cause',
     )
     expect(section).not.toContain('direct tool evidence')
     expect(section).toContain('never send the first edition immediately')
