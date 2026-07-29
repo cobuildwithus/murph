@@ -259,7 +259,9 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   expect(container.textContent).not.toContain("Continue with email");
 });
 
-test("HostedAuthPanel resumes a phone-less Telegram Privy session without showing phone recovery", async () => {
+test("HostedAuthPanel keeps a phone-less Telegram resume busy while completion is pending", async () => {
+  mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
+
   const privyUser = {
     linkedAccounts: [
       {
@@ -306,6 +308,19 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
       authMethod: "telegram",
     }),
   );
+
+  const finishingButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Finishing..."),
+  ) as HTMLButtonElement | undefined;
+  const usePhoneButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Use phone",
+  ) as HTMLButtonElement | undefined;
+
+  expect(finishingButton).toBeTruthy();
+  expect(finishingButton?.disabled).toBe(true);
+  expect(finishingButton?.getAttribute("aria-busy")).toBe("true");
+  expect(finishingButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(usePhoneButton?.disabled).toBe(true);
 });
 
 test("HostedAuthPanel keeps only one alternate auth method active at a time", async () => {
@@ -418,11 +433,15 @@ test("HostedAuthPanel keeps auth mounted and puts completion progress on the act
   const pendingTelegramButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.includes("Finishing..."),
   ) as HTMLButtonElement | undefined;
+  const pendingEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
 
   expect(pendingTelegramButton).toBeTruthy();
   expect(pendingTelegramButton?.disabled).toBe(true);
   expect(pendingTelegramButton?.getAttribute("aria-busy")).toBe("true");
   expect(pendingTelegramButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(pendingEmailButton?.disabled).toBe(true);
   expect(container.textContent).not.toContain("Setting things up");
   expect(container.textContent).not.toContain("Keep this tab open");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
@@ -449,9 +468,22 @@ test("HostedAuthPanel surfaces shared completion failures and restores the auth 
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
+  const recoveredTelegramButton = Array.from(
+    container.querySelectorAll("button"),
+  ).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const recoveredEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Checkout did not return a redirect URL.");
+  expect(container.textContent).not.toContain("Finishing...");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.sendCodeGated).toBe(false);
+  expect(recoveredTelegramButton?.disabled).toBe(false);
+  expect(recoveredEmailButton?.disabled).toBe(false);
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {

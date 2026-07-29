@@ -78,13 +78,16 @@ Updated: 2026-07-29
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest files for auth panel, auth dialog, email/Telegram buttons,
-    verification-code rendering, and legal consent.
-  - Hosted-web typecheck or the narrowest documented equivalent.
-  - Desktop and mobile `/design` catalog browser checks and screenshots.
-- Expected outcomes:
-  - No standalone finishing notice renders from homepage auth.
-  - The active completion button remains visible, disabled, and busy.
-  - The consent prompt receives completion status directly and does not render a
-    skeleton on the normal homepage path.
+- Passed: nine focused hosted-web Vitest files, 166 tests.
+- Passed: specialist-requested `hosted-auth-panel.test.ts`, 14 tests, including
+  pending locks and post-failure recovery at the panel boundary.
+- Passed: scoped hosted-web ESLint and `pnpm --dir apps/web typecheck:prepared`.
+- Passed: `git diff --check`.
+- Passed: `/design?tab=components` returned HTTP 200 at 1440px and 390px.
+  Rendered proof covers the production Telegram, verification-code, and
+  resumable pending presentations plus combined, health-data-only, and
+  legal-only consent.
+- Passed: exact-head product-experience review returned no findings.
+- Preliminary specialist review accepted the frontend and API design and
+  returned one medium coverage finding. Its test-only patch was inspected,
+  applied, and verified with the requested focused command.
