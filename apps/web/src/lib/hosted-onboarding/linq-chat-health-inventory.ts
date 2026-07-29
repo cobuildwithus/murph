@@ -202,7 +202,7 @@ export function parseHostedLinqChatHealthInventoryRecord(
 function normalizeHostedLinqChatHealthLimit(
   value: number | null | undefined,
 ): number {
-  if (!Number.isInteger(value) || !value || value <= 0) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     return HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT;
   }
   return value;

@@ -1387,6 +1387,7 @@ describe('assistant cron runtime orchestration', () => {
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      deliveryPosture: 'recover',
       target: 'linq_chat_device_activity',
       threadIsDirect: false,
     })
@@ -1419,6 +1420,13 @@ describe('assistant cron runtime orchestration', () => {
       expect.objectContaining({
         assistantTargetOverride: {
           reasoningEffort: 'high',
+        },
+        executionContext: {
+          hosted: expect.objectContaining({
+            dynamicContextPrompts: [expect.stringContaining(
+              'weak recent engagement signals',
+            )],
+          }),
         },
         threadIsDirect: false,
         instructions: 'Ask about the imported run.',
@@ -7219,6 +7227,69 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       }),
     )
+  })
+
+  it('skips a scheduled Linq turn before model work when health blocks the route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-health-blocked-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-health-blocked',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'saved-home-chat',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'linq-health-blocked-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Health-blocked Linq reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      deliveryBlockCode: 'chat_critical',
+      target: 'saved-home-chat',
+      threadIsDirect: true,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-linq-health-blocked',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      error: 'Scheduled Linq delivery skipped by current line or chat health.',
+      outcome: 'skipped_gate',
+      reason: 'linq_health_preflight',
+      status: 'skipped',
+    })
+    expect(result.runErrorCode).toBe('ASSISTANT_LINQ_EGRESS_CHAT_CRITICAL')
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
   it('resolves hosted Linq participant automations to the current home thread', async () => {

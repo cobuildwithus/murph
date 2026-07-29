@@ -451,8 +451,8 @@ export function buildMurphHostedLinqContactCardVcf(input: {
 
 /**
  * Second healthy configured conversation line (excluding the chat's own) for
- * the vCard's `backup` slot. Reads the provider reputation projection
- * maintained by reconciliation; AT_RISK and CRITICAL lines are skipped.
+ * the vCard's `backup` slot. Reads the independent provider service and
+ * reputation projection; FLAGGED, AT_RISK, and CRITICAL lines are skipped.
  * Fails soft to null.
  */
 export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: {
@@ -467,6 +467,7 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
     });
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
+      && line.providerServiceStatus !== "FLAGGED"
       && line.providerReputationStatus !== "AT_RISK"
       && line.providerReputationStatus !== "CRITICAL"
     )?.phoneNumber ?? null;

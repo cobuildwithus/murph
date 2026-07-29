@@ -1362,6 +1362,81 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it("returns recovery posture for an at-risk existing chat without claiming dispatch", async () => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    prisma.hostedLinqChatHealth.findFirst.mockResolvedValueOnce({
+      linqChatLookupKey: createRequiredLinqChatLookupKey("chat-home"),
+      phoneNumberLookupKey: "line-health",
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerStatus: "AT_RISK",
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+    });
+    prisma.hostedLinqLineProviderState.findFirst.mockResolvedValueOnce({
+      lastStatusEventId: null,
+      phoneNumberLookupKey: "line-health",
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+      reputationStatus: "HEALTHY",
+      serviceStatus: "ACTIVE",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      deliveryPosture: "recover",
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed block before the existing provider-dispatch claim", async () => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    prisma.hostedLinqChatHealth.findFirst.mockResolvedValueOnce({
+      linqChatLookupKey: createRequiredLinqChatLookupKey("chat-home"),
+      phoneNumberLookupKey: "line-health",
+      providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+      providerStatus: "OPTED_OUT",
+      providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:health-block",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      deliveryBlockCode: "chat_opted_out",
+      ok: true,
+      threadIsDirect: true,
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx)
+      .not.toHaveBeenCalled();
+  });
+
   it("reports an already-active provider claim without erasing its state", async () => {
     const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
     const prisma = createPrismaStub({
@@ -1509,11 +1584,24 @@ function createPrismaStub(input: {
         ? [buildHostedLinqRouteRow(input.threadRouteContainerMemberId)]
         : []),
     },
+    hostedLinqChatHealth: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "delivery-1" }),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    hostedLinqLine: {
+      findFirst: vi.fn().mockResolvedValue({
+        egressPolicy: "enabled",
+        healthStatus: "healthy",
+        phoneNumberLookupKey: "line-default",
+      }),
+    },
+    hostedLinqLineProviderState: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
   };
   const transaction = vi.fn(async (

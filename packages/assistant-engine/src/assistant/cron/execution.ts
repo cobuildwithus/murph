@@ -12,6 +12,10 @@ import type {
   HostedRuntimeNewsletterScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
+import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from '@murphai/hosted-execution/routes'
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
@@ -36,7 +40,10 @@ import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
 } from '../automation/shared.js'
-import type { AssistantExecutionContext } from '../execution-context.js'
+import {
+  appendAssistantHostedDynamicContextPrompt,
+  type AssistantExecutionContext,
+} from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
   resolveMurphManagedAutomationOwnerScope,
@@ -50,6 +57,9 @@ import {
 import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
+import {
+  buildAssistantLinqDeliveryPosturePrompt,
+} from '../linq-delivery-posture.js'
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
@@ -772,6 +782,7 @@ export async function executeClaimedAssistantCronJob(
           const authorizedDelivery = maintenanceJob
             ? {
                 conversationThreadId: null,
+                deliveryPosture: null,
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
@@ -783,10 +794,17 @@ export async function executeClaimedAssistantCronJob(
                   target: claimedJob.target,
                 })
           const deliveryRoute = authorizedDelivery.route
+          const postureExecutionContext =
+            appendAssistantHostedDynamicContextPrompt({
+              executionContext: automationTurn.executionContext,
+              prompt: buildAssistantLinqDeliveryPosturePrompt(
+                authorizedDelivery.deliveryPosture,
+              ),
+            })
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
-              executionContext: automationTurn.executionContext,
+              executionContext: postureExecutionContext,
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
@@ -1026,6 +1044,11 @@ export async function executeClaimedAssistantCronJob(
       errorCode = error.code
       outcome = 'skipped_gate'
       reason = 'managed_owner_scope_mismatch'
+    } else if (error instanceof AssistantCronLinqHealthPreflightBlockedError) {
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = 'linq_health_preflight'
     } else {
       const yieldedError =
         error instanceof AssistantCronForegroundYieldedError ||
@@ -2327,6 +2350,7 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
   } else {
     authorizedDelivery = {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route: declaredRoute,
     }
@@ -2409,6 +2433,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   target: AssistantCronJob['target']
 }): Promise<{
   conversationThreadId: string | null
+  deliveryPosture: HostedRuntimeLinqDeliveryPosture | null
   externalThreadRouteAuthority:
     AssistantOutboxIntent['externalThreadRouteAuthority']
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
@@ -2417,6 +2442,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route,
     }
@@ -2459,6 +2485,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     }
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: authority,
       route,
     }
@@ -2467,6 +2494,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   if (input.target.channel !== 'linq') {
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route,
     }
@@ -2502,6 +2530,11 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     target,
     targetKind,
   })
+  if (authority.deliveryBlockCode) {
+    throw new AssistantCronLinqHealthPreflightBlockedError(
+      authority.deliveryBlockCode,
+    )
+  }
   const authorizedTarget = normalizeNullableString(authority.target)
   const conversationThreadId = normalizeNullableString(
     authority.conversationThreadId,
@@ -2532,12 +2565,22 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
 
   return {
     conversationThreadId,
+    deliveryPosture: authority.deliveryPosture ?? null,
     externalThreadRouteAuthority: null,
     route: {
       bindingDelivery,
       deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
       threadIsDirect: authority.threadIsDirect,
     },
+  }
+}
+
+class AssistantCronLinqHealthPreflightBlockedError extends VaultCliError {
+  constructor(blockCode: HostedRuntimeLinqDeliveryBlockCode) {
+    super(
+      `ASSISTANT_LINQ_EGRESS_${blockCode.toUpperCase()}`,
+      'Scheduled Linq delivery skipped by current line or chat health.',
+    )
   }
 }
 

@@ -144,13 +144,13 @@ A complete review should inspect:
 
 If a path lacks line-level pacing, recipient reply tracking, or delivery-health suppression, treat that as a deliverability risk even if the copy itself looks fine.
 
-#### Reciprocity Is Everything
+#### Reciprocity Is Continuous
 
-Design your messaging flows to get a reply within the first 3 messages. Apple's TrustKit skips all spam checks once a chat has 3 or more replies from the recipient. This is the single most important thing you can do.
+Design messaging flows to earn genuine replies early, then keep letting current replies set the pace. Historical engagement is useful context, not permanent permission to continue proactive outbound after someone has gone quiet.
 
-- Ask questions. "Hey, is this still a good number for you?" beats "Here's your update." Questions get replies. Replies build trust.
-- Avoid one-way broadcast patterns. If you are sending 50 messages and getting 0 replies, Apple's ML is scoring every one of those as spam-like. Even 1 reply per 10 outbound messages changes the math.
-- If your use case is inherently one-way, such as notifications or alerts, have the recipient reply once to establish the thread. A simple "Reply YES to confirm" at onboarding is enough.
+- Ask natural, relevant questions when an answer would genuinely help the conversation.
+- Avoid one-way broadcast patterns. When replies stop, combine related reminders, slow down, and eventually pause nonessential proactive messages.
+- Do not require ritualized replies such as "YES", "done", or "skip" merely to manufacture engagement.
 
 #### Volume and Pacing
 
@@ -185,11 +185,6 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 - If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.
 - Contact the provider if you suspect a line is flagged. They can check the line health status and help with recovery before it becomes permanent.
 
-#### The 3-Reply Rule
+#### Engagement Can Change
 
-Apple's internal spam engine, TrustKit, has a hardcoded check: if a conversation has 3 or more replies from the recipient, spam evaluation is skipped entirely.
-
-- A conversation with 100 outbound and 3 inbound replies is trusted.
-- A conversation with 5 outbound and 0 replies is evaluated for spam.
-
-Design every conversation flow to earn those 3 replies as early as possible.
+A chat that was once active can become one-way later. Treat Linq's current chat-health status and Murph's current inbound/outbound pattern as live evidence, and never assume that an old reply count permanently clears future automated sends.

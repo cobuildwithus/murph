@@ -41,15 +41,22 @@ export async function ingestHostedLinqProviderEventTx(input: {
   >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
+  const health = input.health ?? input.event.providerHealth ?? {
+    chat: null,
+    line: null,
+  };
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
   let lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,
     prisma: input.prisma,
   });
-  if (!lineLookupKey && input.health?.line) {
+  const healthLinePhoneNumber = health.line?.phoneNumber
+    ?? health.chat?.linePhoneNumber
+    ?? null;
+  if (!lineLookupKey && healthLinePhoneNumber) {
     const line = await upsertHostedLinqLineForPhoneTx({
       observedAt: receivedAt,
-      phoneNumber: input.health.line.phoneNumber,
+      phoneNumber: healthLinePhoneNumber,
       prisma: input.prisma,
       source: "webhook",
     });
@@ -151,25 +158,25 @@ export async function ingestHostedLinqProviderEventTx(input: {
     });
   }
 
-  if (input.health?.line && projectionLineLookupKey) {
+  if (health.line && projectionLineLookupKey) {
     await projectHostedLinqLineProviderStateTx({
-      eventId: input.health.line.eventId,
+      eventId: health.line.eventId,
       observedAt: receivedAt,
       phoneNumberLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
-      providerUpdatedAt: input.health.line.providerUpdatedAt,
-      reputationStatus: input.health.line.reputationStatus,
-      serviceStatus: input.health.line.serviceStatus,
+      providerUpdatedAt: health.line.providerUpdatedAt,
+      reputationStatus: health.line.reputationStatus,
+      serviceStatus: health.line.serviceStatus,
     });
   }
-  if (input.health?.chat) {
+  if (health.chat) {
     await projectHostedLinqChatHealthTx({
-      chatId: input.health.chat.chatId,
+      chatId: health.chat.chatId,
       observedAt: receivedAt,
       phoneNumberLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
-      providerStatus: input.health.chat.providerStatus,
-      providerUpdatedAt: input.health.chat.providerUpdatedAt,
+      providerStatus: health.chat.providerStatus,
+      providerUpdatedAt: health.chat.providerUpdatedAt,
     });
   }
 

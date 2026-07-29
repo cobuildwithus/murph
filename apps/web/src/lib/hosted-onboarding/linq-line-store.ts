@@ -19,7 +19,9 @@ import {
 } from "./linq-provider-health-store";
 import {
   parseHostedLinqLineReputationStatus,
+  parseHostedLinqLineServiceStatus,
   type HostedLinqLineReputationStatus,
+  type HostedLinqLineServiceStatus,
 } from "./linq-provider-status";
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
@@ -45,6 +47,7 @@ export type HostedLinqContactCardLine = {
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
   providerReputationStatus: HostedLinqLineReputationStatus | null;
+  providerServiceStatus: HostedLinqLineServiceStatus | null;
 };
 
 type HostedLinqAssignableHomeLineRow = {
@@ -312,7 +315,8 @@ export async function hasActiveHostedLinqManagedLine(input: {
 
   const line = await input.prisma.hostedLinqLine.findFirst({
     where: {
-      ...buildActiveHostedLinqManagedLineWhere(),
+      configuredAt: { not: null },
+      phoneNumberEncrypted: { not: null },
       phoneNumberLookupKey: {
         in: phoneNumberLookupKeys,
       },
@@ -511,6 +515,7 @@ export async function listHostedLinqContactCardLines(input: {
         select: {
           phoneNumberLookupKey: true,
           reputationStatus: true,
+          serviceStatus: true,
         },
         where: {
           phoneNumberLookupKey: {
@@ -518,22 +523,29 @@ export async function listHostedLinqContactCardLines(input: {
           },
         },
       });
-  const reputationByLine = new Map(
-    states.map((state) => [
-      state.phoneNumberLookupKey,
-      parseHostedLinqLineReputationStatus(state.reputationStatus),
-    ] as const),
+  const stateByLine = new Map(
+    states.map((state) => [state.phoneNumberLookupKey, state] as const),
   );
-  return lines.map((line) => ({
-    ...line,
-    providerReputationStatus:
-      reputationByLine.get(line.phoneNumberLookupKey) ?? null,
-  }));
+  return lines.map((line) => {
+    const state = stateByLine.get(line.phoneNumberLookupKey);
+    return {
+      ...line,
+      providerReputationStatus: parseHostedLinqLineReputationStatus(
+        state?.reputationStatus,
+      ),
+      providerServiceStatus: parseHostedLinqLineServiceStatus(
+        state?.serviceStatus,
+      ),
+    };
+  });
 }
 
 function mapHostedLinqContactCardRows(
   rows: readonly HostedLinqContactCardLineRow[],
-): Array<Omit<HostedLinqContactCardLine, "providerReputationStatus">> {
+): Array<Omit<
+  HostedLinqContactCardLine,
+  "providerReputationStatus" | "providerServiceStatus"
+>> {
   return rows.flatMap((row) => {
     const phoneNumber = normalizePhoneNumber(
       decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),

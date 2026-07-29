@@ -19,6 +19,10 @@ import {
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
+import {
+  parseHostedLinqProviderHealthEvent,
+  type HostedLinqProviderHealthEvent,
+} from "./linq-provider-health-event";
 import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
 
@@ -64,6 +68,7 @@ export type ParsedHostedLinqProviderEvent = {
   phoneNumberLookupKey: string | null;
   phoneNumberRole: HostedLinqProviderEventPhoneRole;
   providerCreatedAt: Date;
+  providerHealth?: HostedLinqProviderHealthEvent;
   providerReason: string | null;
   providerStatus: string | null;
   reactionCustomEmoji: string | null;
@@ -629,6 +634,7 @@ function buildParsedProviderEvent(input: {
     phoneNumberLookupKey,
     phoneNumberRole: input.phoneNumberRole,
     providerCreatedAt,
+    providerHealth: parseHostedLinqProviderHealthEvent(input.event),
     providerReason: normalizeProviderFreeText(input.providerReason),
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
     reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),

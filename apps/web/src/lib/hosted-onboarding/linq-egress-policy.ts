@@ -1,4 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from "@murphai/hosted-execution/routes";
 
 import {
   createHostedPhoneLookupKeyReadCandidates,
@@ -13,14 +17,9 @@ import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqEgressPolicyClient = PrismaClient | Prisma.TransactionClient;
 
-export const HOSTED_LINQ_DELIVERY_POSTURES = [
-  "normal",
-  "cautious",
-  "recover",
-] as const;
-
 export type HostedLinqDeliveryPosture =
-  typeof HOSTED_LINQ_DELIVERY_POSTURES[number];
+  | "normal"
+  | HostedRuntimeLinqDeliveryPosture;
 
 export const HOSTED_LINQ_DELIVERY_SIGNALS = [
   "line_at_risk",
@@ -32,15 +31,7 @@ export const HOSTED_LINQ_DELIVERY_SIGNALS = [
 export type HostedLinqDeliverySignal =
   typeof HOSTED_LINQ_DELIVERY_SIGNALS[number];
 
-export type HostedLinqEgressBlockCode =
-  | "operator_disabled"
-  | "line_flagged"
-  | "line_critical"
-  | "line_at_risk_new_conversation"
-  | "chat_critical"
-  | "chat_opted_out"
-  | "delivery_unhealthy"
-  | "delivery_warning_new_conversation";
+export type HostedLinqEgressBlockCode = HostedRuntimeLinqDeliveryBlockCode;
 
 export type HostedLinqEgressPolicyResult =
   | {

@@ -1627,6 +1627,12 @@ export async function runHostedWorkspaceAssistantPhase(
             authority.targetOverride?.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
+            ...(authority.deliveryBlockCode
+              ? { deliveryBlockCode: authority.deliveryBlockCode }
+              : {}),
+            ...(authority.deliveryPosture
+              ? { deliveryPosture: authority.deliveryPosture }
+              : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

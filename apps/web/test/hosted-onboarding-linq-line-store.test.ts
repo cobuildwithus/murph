@@ -8,6 +8,7 @@ import {
 import {
   assertHostedLinqAssignableHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
+  hasActiveHostedLinqManagedLine,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
@@ -44,9 +45,24 @@ describe("listHostedLinqContactCardLines", () => {
           providerStatus: "ACTIVE",
         }),
       ]);
+    const providerStateFindMany = vi.fn().mockResolvedValue([
+      {
+        phoneNumberLookupKey: "lookup:+15550100001",
+        reputationStatus: "HEALTHY",
+        serviceStatus: "ACTIVE",
+      },
+      {
+        phoneNumberLookupKey: "lookup:+15550100002",
+        reputationStatus: "AT_RISK",
+        serviceStatus: "ACTIVE",
+      },
+    ]);
     const prisma = {
       hostedLinqLine: {
         findMany,
+      },
+      hostedLinqLineProviderState: {
+        findMany: providerStateFindMany,
       },
     } as never;
 
@@ -59,10 +75,14 @@ describe("listHostedLinqContactCardLines", () => {
       {
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
 
@@ -84,6 +104,30 @@ describe("listHostedLinqContactCardLines", () => {
   });
 });
 
+describe("hasActiveHostedLinqManagedLine", () => {
+  it("recognizes configured inbound lines independently of outbound health", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: "lookup:line",
+    });
+
+    await expect(hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: ["lookup:line"],
+      prisma: {
+        hostedLinqLine: { findFirst },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: { in: ["lookup:line"] },
+      },
+    });
+  });
+});
+
 describe("listHostedLinqAssignableHomeLines", () => {
   it("bounds the assignable pool read before decrypting line phones", async () => {
     const proactiveConversationDayUtc = new Date("2026-07-16T00:00:00.000Z");
@@ -93,9 +137,13 @@ describe("listHostedLinqAssignableHomeLines", () => {
         proactiveConversationDayUtc,
       }),
     ]);
+    const providerStateFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       hostedLinqLine: {
         findMany,
+      },
+      hostedLinqLineProviderState: {
+        findMany: providerStateFindMany,
       },
     } as never;
 
@@ -122,6 +170,7 @@ describe("listHostedLinqAssignableHomeLines", () => {
       },
     }));
     expect(findMany).toHaveBeenCalledTimes(1);
+    expect(providerStateFindMany).toHaveBeenCalledOnce();
   });
 
   it("fails closed when the configured assignable pool exceeds the reviewed cap", async () => {
@@ -149,39 +198,42 @@ describe("listHostedLinqAssignableHomeLines", () => {
 });
 
 describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
-  it("passes when at least one configured assignable DB line exists", async () => {
-    const findFirst = vi.fn().mockResolvedValue({
-      phoneNumberLookupKey: "lookup:line",
-    });
+  it("passes when at least one configured provider-eligible line exists", async () => {
     const prisma = {
       hostedLinqLine: {
-        findFirst,
+        findMany: vi.fn().mockResolvedValue([
+          buildAssignableLineRow("+15550100001"),
+        ]),
+      },
+      hostedLinqLineProviderState: {
+        findMany: vi.fn().mockResolvedValue([]),
       },
     } as never;
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).resolves.toBeUndefined();
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .resolves.toBeUndefined();
   });
 
-  it("fails visibly when production cutover would leave the DB line pool empty", async () => {
-    const findFirst = vi.fn().mockResolvedValue(null);
+  it("fails visibly when every configured line is at risk", async () => {
+    const line = buildAssignableLineRow("+15550100001");
     const prisma = {
       hostedLinqLine: {
-        findFirst,
+        findMany: vi.fn().mockResolvedValue([line]),
+      },
+      hostedLinqLineProviderState: {
+        findMany: vi.fn().mockResolvedValue([{
+          phoneNumberLookupKey: line.phoneNumberLookupKey,
+          reputationStatus: "AT_RISK",
+          serviceStatus: "ACTIVE",
+        }]),
       },
     } as never;
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
-      httpStatus: 500,
-    });
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .rejects.toMatchObject({
+        code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+        httpStatus: 500,
+      });
   });
 });
 
