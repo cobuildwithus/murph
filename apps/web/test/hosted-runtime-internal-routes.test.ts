@@ -67,6 +67,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  isHostedVeniceAssistantEnabled: () =>
+    process.env.HOSTED_VENICE_ENABLED === "1",
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
 }));
@@ -174,6 +176,7 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_VENICE_ENABLED;
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
@@ -1612,10 +1615,31 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("omits a stored Venice override while the rollout gate is disabled", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "low",
+      solAvailable: false,
+    });
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+      { method: "GET" },
+    ));
+    const payload = parseHostedWorkspaceReadResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.hostedAssistantProviderOverride).toBeUndefined();
+  });
+
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
       hostedAssistantModelOverride: "gpt-5.6-sol",
+      hostedAssistantProviderOverride: "venice",
       hostedAssistantReasoningEffortOverride: "high",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
@@ -1650,6 +1674,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
         hostedAssistantModelOverride: "gpt-5.6-sol",
+        hostedAssistantProviderOverride: "venice",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
         userId: "member_routes_1",

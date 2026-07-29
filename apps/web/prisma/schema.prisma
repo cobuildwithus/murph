@@ -515,6 +515,7 @@ model HostedMember {
   usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
   usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
   assistantModelPreference       String?                         @map("assistant_model_preference")
+  assistantProviderPreference    String?                         @map("assistant_provider_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantPersona               String?                         @map("assistant_persona")
   assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
