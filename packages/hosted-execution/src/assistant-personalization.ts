@@ -12,12 +12,30 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   type HostedAssistantProductModel,
 } from "./assistant-model.ts";
+import {
+  hostedRuntimePendingGroupSetupInputSchema,
+  hostedRuntimePendingGroupSetupSnapshotSchema,
+  type HostedRuntimePendingGroupSetupInput,
+  type HostedRuntimePendingGroupSetupSnapshot,
+} from "./pending-group-setup.ts";
 
 export const HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH =
   "/api/internal/hosted-execution/assistant-personalization/tool";
 
 export const HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION =
   "update_personality";
+export const HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION = "prepare_next_group";
+export const HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION =
+  "read_pending_group_setup";
+export const HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION =
+  "cancel_pending_group_setup";
+
+export const hostedRuntimePendingGroupSetupUnavailableReasonValues = [
+  "direct_member_required",
+  "imessage_line_unavailable",
+] as const;
+export type HostedRuntimePendingGroupSetupUnavailableReason =
+  (typeof hostedRuntimePendingGroupSetupUnavailableReasonValues)[number];
 
 export type HostedRuntimeAssistantPersonalizationModelToolRequest =
   | { action: "read" }
@@ -25,7 +43,13 @@ export type HostedRuntimeAssistantPersonalizationModelToolRequest =
       action: "update";
       tone?: AssistantTonePreference;
       voice?: AssistantVoiceOptionId;
-    };
+    }
+  | {
+      action: typeof HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION;
+      setup: HostedRuntimePendingGroupSetupInput;
+    }
+  | { action: typeof HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION }
+  | { action: typeof HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION };
 
 export type HostedRuntimeAssistantPersonalityUpdate = Partial<
   Record<AssistantPersonalitySettingId, number | null>
@@ -45,7 +69,6 @@ const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.object({
 export type HostedRuntimeAssistantPersonalizationToolAuthority = z.infer<
   typeof hostedRuntimeAssistantPersonalizationToolAuthoritySchema
 >;
-
 
 export interface HostedRuntimeAssistantPersonalizationSnapshot {
   model: HostedAssistantProductModel;
@@ -84,6 +107,21 @@ export type HostedRuntimeAssistantPersonalityUpdateOutcomes = Partial<
   Record<AssistantPersonalitySettingId, HostedRuntimeAssistantPersonalityUpdateOutcome>
 >;
 
+export type HostedRuntimePendingGroupSetupReadResult =
+  | {
+      setup: HostedRuntimePendingGroupSetupSnapshot;
+      status: "ok";
+    }
+  | {
+      setup: null;
+      status: "none";
+    }
+  | {
+      setup: null;
+      status: "unavailable";
+      unavailableReason: HostedRuntimePendingGroupSetupUnavailableReason;
+    };
+
 export type HostedRuntimeAssistantPersonalizationToolResponse =
   | {
       action: "read";
@@ -99,6 +137,32 @@ export type HostedRuntimeAssistantPersonalizationToolResponse =
         outcomes: HostedRuntimeAssistantPersonalityUpdateOutcomes;
         settings: HostedRuntimeAssistantPersonalitySettings;
       };
+    }
+  | {
+      action: typeof HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION;
+      result:
+        | {
+            setup: HostedRuntimePendingGroupSetupSnapshot;
+            status: "armed";
+          }
+        | {
+            setup: null;
+            status: "unavailable";
+            unavailableReason: HostedRuntimePendingGroupSetupUnavailableReason;
+          };
+    }
+  | {
+      action: typeof HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION;
+      result: HostedRuntimePendingGroupSetupReadResult;
+    }
+  | {
+      action: typeof HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION;
+      result:
+        | { status: "canceled" | "none" }
+        | {
+            status: "unavailable";
+            unavailableReason: HostedRuntimePendingGroupSetupUnavailableReason;
+          };
     };
 
 const hostedRuntimeAssistantPersonalizationReadRequestSchema = z
@@ -131,6 +195,16 @@ export const hostedRuntimeAssistantPersonalizationModelToolRequestSchema = z
   .discriminatedUnion("action", [
     hostedRuntimeAssistantPersonalizationReadRequestSchema,
     hostedRuntimeAssistantPersonalizationUpdateRequestSchema,
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION),
+      setup: hostedRuntimePendingGroupSetupInputSchema,
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION),
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION),
+    }).strict(),
   ])
   .superRefine(requireNonEmptyAssistantPersonalizationUpdate);
 
@@ -158,6 +232,16 @@ export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
     z.object({
       action: z.literal(HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION),
       personality: hostedRuntimeAssistantPersonalityUpdateSchema,
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION),
+      setup: hostedRuntimePendingGroupSetupInputSchema,
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION),
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION),
     }).strict(),
   ])
   .superRefine(requireNonEmptyAssistantPersonalizationUpdate);
@@ -198,6 +282,16 @@ const hostedRuntimeAssistantPersonalityUpdateOutcomesSchema = z
     }
   });
 
+const pendingGroupSetupUnavailableReasonSchema = z.enum(
+  hostedRuntimePendingGroupSetupUnavailableReasonValues,
+);
+
+const pendingGroupSetupUnavailableResultSchema = z.object({
+  setup: z.null(),
+  status: z.literal("unavailable"),
+  unavailableReason: pendingGroupSetupUnavailableReasonSchema,
+}).strict();
+
 export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
   z.discriminatedUnion("action", [
     z.object({
@@ -218,6 +312,37 @@ export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
         outcomes: hostedRuntimeAssistantPersonalityUpdateOutcomesSchema,
         settings: hostedRuntimeAssistantPersonalitySettingsSchema,
       }).strict(),
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION),
+      result: z.union([
+        z.object({
+          setup: hostedRuntimePendingGroupSetupSnapshotSchema,
+          status: z.literal("armed"),
+        }).strict(),
+        pendingGroupSetupUnavailableResultSchema,
+      ]),
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION),
+      result: z.union([
+        z.object({
+          setup: hostedRuntimePendingGroupSetupSnapshotSchema,
+          status: z.literal("ok"),
+        }).strict(),
+        z.object({ setup: z.null(), status: z.literal("none") }).strict(),
+        pendingGroupSetupUnavailableResultSchema,
+      ]),
+    }).strict(),
+    z.object({
+      action: z.literal(HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION),
+      result: z.union([
+        z.object({ status: z.enum(["canceled", "none"]) }).strict(),
+        z.object({
+          status: z.literal("unavailable"),
+          unavailableReason: pendingGroupSetupUnavailableReasonSchema,
+        }).strict(),
+      ]),
     }).strict(),
   ]);
 
