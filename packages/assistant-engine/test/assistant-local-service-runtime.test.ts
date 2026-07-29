@@ -2877,7 +2877,7 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
   )
 })
 
-test('sendAssistantMessageLocal attributes progress after real live steering to the same provider request', async () => {
+test('sendAssistantMessageLocal attributes required progress after real live steering to the same provider request', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -2928,8 +2928,8 @@ test('sendAssistantMessageLocal attributes progress after real live steering to 
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
-  const toolExecutionRequested = createDeferred<void>()
-  const toolExecutionCheckpointed = createDeferred<void>()
+  const requiredProgressRequested = createDeferred<void>()
+  const requiredProgressDelivered = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
   const providerRequestStarted = vi.fn()
   const progressDeliveryDependencies = {
@@ -3023,12 +3023,15 @@ test('sendAssistantMessageLocal attributes progress after real live steering to 
       turnId: 'turn-1',
     })
     providerStarted.resolve()
-    await toolExecutionRequested.promise
-    await providerInput.hostedToolContext?.beforeToolExecution?.()
+    await requiredProgressRequested.promise
     await providerInput.progressDelivery?.send(
       'Checking the live-steered follow up.',
+      {
+        required: true,
+        source: 'system',
+      },
     )
-    toolExecutionCheckpointed.resolve()
+    requiredProgressDelivered.resolve()
     await providerRelease.promise
     releaseLiveTurn?.()
     return {
@@ -3077,17 +3080,17 @@ test('sendAssistantMessageLocal attributes progress after real live steering to 
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
-  toolExecutionRequested.resolve()
-  await toolExecutionCheckpointed.promise
+  requiredProgressRequested.resolve()
+  await requiredProgressDelivered.promise
 
-  const journalBeforeToolEffect = await readAssistantAcceptedTurnInputJournal(
+  const journalAfterRequiredProgress =
+    await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
   )
-  expect(journalBeforeToolEffect?.providerRequests[0]?.acceptedInputIds).toEqual([
-    'initial',
-    hostedInput.inputId,
-  ])
+  expect(
+    journalAfterRequiredProgress?.providerRequests[0]?.acceptedInputIds,
+  ).toEqual(['initial', hostedInput.inputId])
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   expect(progressDeliveryDependencies.sendLinq).toHaveBeenCalledWith(
     expect.objectContaining({

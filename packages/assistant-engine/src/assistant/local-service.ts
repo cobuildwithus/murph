@@ -670,6 +670,9 @@ export async function sendAssistantMessageLocal(
                     )
                   }
                   const sendLinq = dependencies.sendLinq
+                  if (sendLinq) {
+                    await beforeHostedToolExecution()
+                  }
                   const progressDependencies = sendLinq
                     ? {
                         ...dependencies,
