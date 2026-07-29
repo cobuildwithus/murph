@@ -632,15 +632,13 @@ export async function seedHostedLinqFirstContactFallbackLines(
       await prisma.$transaction(async (tx) => {
         const observedAt = new Date();
         await modules.upsertHostedLinqLineForPhoneTx({
-          activeMemberLimit: 0,
           observedAt,
           phoneNumber: input.incomingPhone,
           prisma: tx,
-          providerStatus: "active",
+          providerStatus: "degraded",
           source: "configured",
         });
         await modules.upsertHostedLinqLineForPhoneTx({
-          activeMemberLimit: 100,
           observedAt,
           phoneNumber: input.fallbackPhone,
           prisma: tx,
