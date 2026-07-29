@@ -4933,15 +4933,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const groupJoinCode = "join_instant_start_reply";
     const groupJoinOutreachId = "hgrpjoa_instant_start_reply";
     let createdMemberId: string | null = null;
-    let createdInvite: {
-      channel: string;
-      id: string;
-      instantStartAdmissionEventId: string | null;
-      inviteCode: string;
-      memberId: string;
-      sentAt: Date | null;
-      status: string;
-    } | null = null;
+    const createdInviteState: {
+      current: {
+        channel: string;
+        id: string;
+        instantStartAdmissionEventId: string | null;
+        inviteCode: string;
+        memberId: string;
+        sentAt: Date | null;
+        status: string;
+      } | null;
+    } = { current: null };
     let trialActive = false;
     const hostedMemberCreate = vi.fn(async ({ data }: {
       data: { billingStatus: HostedBillingStatus; id: string };
@@ -4982,14 +4984,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         memberId: string;
       };
     }) => {
-      createdInvite = {
+      createdInviteState.current = {
         ...data,
         instantStartAdmissionEventId:
           data.instantStartAdmissionEventId ?? null,
         sentAt: null,
         status: "pending",
       };
-      return createdInvite;
+      return createdInviteState.current;
     });
     const hostedInviteUpdate = vi.fn(async ({ data }: {
       data: {
@@ -4998,14 +5000,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         sentAt?: Date;
       };
     }) => {
-      if (!createdInvite) {
+      if (!createdInviteState.current) {
         throw new Error("Expected the instant-start invite before reuse.");
       }
-      createdInvite = {
-        ...createdInvite,
+      createdInviteState.current = {
+        ...createdInviteState.current,
         ...data,
       };
-      return createdInvite;
+      return createdInviteState.current;
     });
     const participantPhoneLookupKey = createHostedPhoneLookupKey("+15551234567");
     const linqChatLookupKey = createHostedLinqChatLookupKey("chat_123");
@@ -5080,8 +5082,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedInvite: {
         create: hostedInviteCreate,
-        findFirst: vi.fn(async () => createdInvite),
-        findUnique: vi.fn(async () => createdInvite),
+        findFirst: vi.fn(async () => createdInviteState.current),
+        findUnique: vi.fn(async () => createdInviteState.current),
         update: hostedInviteUpdate,
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -5163,7 +5165,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     });
 
-    const issuedInvite = createdInvite;
+    const issuedInvite = createdInviteState.current;
     if (!issuedInvite) {
       throw new Error("Expected the phone-bound instant-start invite.");
     }
