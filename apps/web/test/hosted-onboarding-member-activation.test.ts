@@ -512,6 +512,64 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
+  it("activates verified-email-only family members without assigning a Linq home line", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.com",
+          lookupKey: "hbidx:email:v1:lookup",
+          verifiedAt: new Date("2026-06-18T12:00:00.000Z"),
+        },
+      },
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+        phoneNumberVerifiedAt: null,
+      },
+      routing: null,
+    });
+    setActivationMemberSnapshot(member);
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: "family-invite:email-only",
+    })).resolves.toMatchObject({
+      activated: true,
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: false,
+        },
+        signupWelcome: null,
+      }),
+      tx: expect.anything(),
+    });
+  });
+
   it("uses caller-prepared roots for family sponsorship without the legacy bridge", async () => {
     const member = makeMemberSnapshot({
       core: {
