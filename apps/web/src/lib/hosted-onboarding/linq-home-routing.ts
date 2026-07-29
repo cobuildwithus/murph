@@ -28,6 +28,7 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
+  readHostedLinqRecentMessageEffectCountsTx,
 } from "./linq-line-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -596,12 +597,20 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
         : 0,
     ]),
   );
+  const recentMessageEffectsByLineLookupKey = input.lines.length > 1
+    ? await readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: input.lines.map((line) => line.phoneNumberLookupKey),
+        now,
+        prisma: input.prisma,
+      })
+    : new Map<string, number>();
   const preferredOrFallbackLine = chooseHostedLinqHomeLine({
     activeMembersByRecipientPhone,
     ignoreDailyNewConversationLimit: true,
     lines: input.lines,
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+    recentMessageEffectsByLineLookupKey,
   });
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
 
@@ -622,6 +631,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+      recentMessageEffectsByLineLookupKey,
     });
     const selectedLine = proactiveLine ?? preferredOrFallbackLine;
     if (!selectedLine) {
@@ -641,6 +651,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+      recentMessageEffectsByLineLookupKey,
     });
     if (!proactiveLine) {
       break;

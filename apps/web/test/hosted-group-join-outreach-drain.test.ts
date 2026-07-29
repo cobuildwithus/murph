@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   markDeliveryFailed: vi.fn(),
   markSkippedDelivery: vi.fn(),
   readParticipantPhone: vi.fn(),
+  readRecentMessageEffectCounts: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -32,8 +33,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliverySendFailedTx: mocks.markDeliveryFailed,
 }));
 
-// Mock only the home-line load counter; chooseHostedLinqSignupWelcomeLine itself
-// runs for real so these tests exercise the shared selection policy.
+// Mock only the load reads; chooseHostedLinqSignupWelcomeLine itself runs for
+// real so these tests exercise the shared selection policy.
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-linq", () => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHomeBindings,
 }));
@@ -41,6 +42,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-linq", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   claimHostedLinqProactiveConversationCapacityTx: mocks.claimLineCapacity,
   listHostedLinqHealthyProactiveLines: mocks.listHealthyLines,
+  readHostedLinqRecentMessageEffectCountsTx: mocks.readRecentMessageEffectCounts,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -112,6 +114,7 @@ describe("hosted group join outreach drain", () => {
     mocks.markDeliveryFailed.mockResolvedValue(undefined);
     mocks.markSkippedDelivery.mockResolvedValue(undefined);
     mocks.readParticipantPhone.mockReturnValue("+15551234567");
+    mocks.readRecentMessageEffectCounts.mockResolvedValue(new Map());
   });
 
   it("sends one paced, link-free, group-specific first outreach", async () => {
@@ -133,6 +136,7 @@ describe("hosted group join outreach drain", () => {
       phoneNumberLookupKey: "line_lookup_1",
       prisma: expect.anything(),
     });
+    expect(mocks.readRecentMessageEffectCounts).not.toHaveBeenCalled();
     expect(mocks.createChat).toHaveBeenCalledTimes(1);
     const send = mocks.createChat.mock.calls[0]?.[0] as {
       message: string;
@@ -544,6 +548,41 @@ describe("hosted group join outreach drain", () => {
       ([call]) => (call as { phoneNumberLookupKey: string }).phoneNumberLookupKey,
     );
     expect(attemptedKeys.filter((key) => key === "line_lookup_a")).toHaveLength(1);
+  });
+
+  it("routes outreach through the line with lower recent message load", async () => {
+    const busyLine = {
+      ...LINE,
+      phoneNumber: "+15550000001",
+      phoneNumberLookupKey: "line_lookup_busy",
+    };
+    const quietLine = {
+      ...LINE,
+      phoneNumber: "+15550000002",
+      phoneNumberLookupKey: "line_lookup_quiet",
+    };
+    mocks.listHealthyLines.mockResolvedValue([busyLine, quietLine]);
+    mocks.readRecentMessageEffectCounts.mockResolvedValue(new Map([
+      [busyLine.phoneNumberLookupKey, 9_000],
+      [quietLine.phoneNumberLookupKey, 100],
+    ]));
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({ kind: "sent", outreachId: "hgrpjoa_opaque" });
+
+    expect(mocks.readRecentMessageEffectCounts).toHaveBeenCalledWith({
+      lineLookupKeys: [
+        busyLine.phoneNumberLookupKey,
+        quietLine.phoneNumberLookupKey,
+      ],
+      now: NOW,
+      prisma: expect.any(Object),
+    });
+    const send = mocks.createChat.mock.calls[0]?.[0] as { from: string } | undefined;
+    expect(send?.from).toBe(quietLine.phoneNumber);
   });
 
   it("retries soon, not next day, when a pinned line leaves the pool and no replacement is free", async () => {

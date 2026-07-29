@@ -11,6 +11,7 @@ import {
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqRecentMessageEffectCountsTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -182,6 +183,90 @@ describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
       code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
       httpStatus: 500,
     });
+  });
+});
+
+describe("readHostedLinqRecentMessageEffectCountsTx", () => {
+  it("reads one bounded trailing-window aggregate from canonical message owners", async () => {
+    const now = new Date("2026-07-29T15:00:00.000Z");
+    const queryRaw = vi.fn().mockResolvedValue([
+      {
+        messageEffectCount: 101n,
+        phoneNumberLookupKey: "lookup:line-1",
+      },
+      {
+        messageEffectCount: 7n,
+        phoneNumberLookupKey: "lookup:line-2",
+      },
+    ]);
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: [
+          "lookup:line-1",
+          "lookup:line-2",
+          "lookup:line-1",
+        ],
+        now,
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).resolves.toEqual(new Map([
+      ["lookup:line-1", 101],
+      ["lookup:line-2", 7],
+    ]));
+
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql).toContain('FROM "hosted_linq_delivery"');
+    expect(query.sql).toContain('"accepted_at" >=');
+    expect(query.sql).toContain('FROM "hosted_linq_provider_event"');
+    expect(query.sql).toContain('"event_type" = \'message.received\'');
+    expect(query.sql).toContain('"direction" = \'inbound\'');
+    expect(query.sql).toContain('"received_at" >=');
+    expect(query.sql).toContain('SUM("message_effect_count")');
+    expect(query.values).toEqual([
+      "lookup:line-1",
+      "lookup:line-2",
+      new Date("2026-07-22T15:00:00.000Z"),
+      now,
+      "lookup:line-1",
+      "lookup:line-2",
+      new Date("2026-07-22T15:00:00.000Z"),
+      now,
+    ]);
+  });
+
+  it("does not query when there are no candidate lines", async () => {
+    const queryRaw = vi.fn();
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: [],
+        now: new Date("2026-07-29T15:00:00.000Z"),
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).resolves.toEqual(new Map());
+
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("fails before querying beyond the reviewed candidate bound", async () => {
+    const queryRaw = vi.fn();
+
+    await expect(
+      readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: Array.from(
+          { length: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1 },
+          (_, index) => `lookup:line-${index}`,
+        ),
+        now: new Date("2026-07-29T15:00:00.000Z"),
+        prisma: { $queryRaw: queryRaw } as never,
+      }),
+    ).rejects.toThrow(/at most 250 candidate line/u);
+
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 });
 

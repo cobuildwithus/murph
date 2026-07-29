@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import {
@@ -21,6 +21,8 @@ import { normalizeNullableString } from "./shared";
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT = 250;
+export const HOSTED_LINQ_RECENT_MESSAGE_LOAD_WINDOW_MS =
+  7 * 24 * 60 * 60 * 1_000;
 
 export type HostedLinqAssignableHomeLine = {
   activeMemberLimit: number | null;
@@ -375,6 +377,70 @@ export async function listHostedLinqHealthyProactiveLines(input: {
   }
 
   return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
+/**
+ * Derive recent load from the deduplicated effect owners. Accepted deliveries
+ * own outbound effects; inbound message events own inbound effects.
+ */
+export async function readHostedLinqRecentMessageEffectCountsTx(input: {
+  lineLookupKeys: readonly string[];
+  now: Date;
+  prisma: HostedLinqLineClient;
+}): Promise<ReadonlyMap<string, number>> {
+  const lineLookupKeys = [...new Set(input.lineLookupKeys)];
+  if (lineLookupKeys.length === 0) {
+    return new Map();
+  }
+  if (lineLookupKeys.length > HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT) {
+    throw new RangeError(
+      `Hosted Linq recent message load requires at most ${HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT} candidate line(s).`,
+    );
+  }
+
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_LINQ_RECENT_MESSAGE_LOAD_WINDOW_MS,
+  );
+  const rows = await input.prisma.$queryRaw<Array<{
+    messageEffectCount: bigint;
+    phoneNumberLookupKey: string;
+  }>>(Prisma.sql`
+    WITH recent_line_counts AS (
+      SELECT
+        "phone_number_lookup_key",
+        COUNT(*)::bigint AS "message_effect_count"
+      FROM "hosted_linq_delivery"
+      WHERE "phone_number_lookup_key" IN (${Prisma.join(lineLookupKeys)})
+        AND "accepted_at" >= ${cutoff}
+        AND "accepted_at" <= ${input.now}
+      GROUP BY "phone_number_lookup_key"
+
+      UNION ALL
+
+      SELECT
+        "phone_number_lookup_key",
+        COUNT(*)::bigint AS "message_effect_count"
+      FROM "hosted_linq_provider_event"
+      WHERE "phone_number_lookup_key" IN (${Prisma.join(lineLookupKeys)})
+        AND "event_type" = 'message.received'
+        AND "direction" = 'inbound'
+        AND "received_at" >= ${cutoff}
+        AND "received_at" <= ${input.now}
+      GROUP BY "phone_number_lookup_key"
+    )
+    SELECT
+      "phone_number_lookup_key" AS "phoneNumberLookupKey",
+      SUM("message_effect_count")::bigint AS "messageEffectCount"
+    FROM recent_line_counts
+    GROUP BY "phone_number_lookup_key"
+  `);
+
+  return new Map(
+    rows.map((row) => [
+      row.phoneNumberLookupKey,
+      Number(row.messageEffectCount),
+    ]),
+  );
 }
 
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {

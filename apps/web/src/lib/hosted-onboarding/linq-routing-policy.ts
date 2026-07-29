@@ -24,6 +24,7 @@ export function chooseHostedLinqHomeLine(input: {
   lines: readonly HostedLinqAssignableHomeLine[];
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
   const dailyCandidates = input.lines.filter((line) =>
@@ -52,6 +53,14 @@ export function chooseHostedLinqHomeLine(input: {
   }
 
   return [...candidates].sort((left, right) => {
+    const leftRecent =
+      input.recentMessageEffectsByLineLookupKey.get(left.phoneNumberLookupKey) ?? 0;
+    const rightRecent =
+      input.recentMessageEffectsByLineLookupKey.get(right.phoneNumberLookupKey) ?? 0;
+    if (leftRecent !== rightRecent) {
+      return leftRecent - rightRecent;
+    }
+
     const leftDaily = input.newAssignmentsByRecipientPhone.get(left.phoneNumber) ?? 0;
     const rightDaily = input.newAssignmentsByRecipientPhone.get(right.phoneNumber) ?? 0;
     if (leftDaily !== rightDaily) {
@@ -77,6 +86,7 @@ export function chooseHostedLinqSignupWelcomeLine(input: {
   lines: readonly HostedLinqAssignableHomeLine[];
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
   preferredRecipientPhone: string | null;
+  recentMessageEffectsByLineLookupKey: ReadonlyMap<string, number>;
 }): HostedLinqAssignableHomeLine | null {
   const selected = chooseHostedLinqHomeLine({
     ...input,
