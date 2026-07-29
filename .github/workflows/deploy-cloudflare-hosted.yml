@@ -542,6 +542,9 @@ jobs:
       HOSTED_ASSISTANT_PROVIDER: ${{ vars.HOSTED_ASSISTANT_PROVIDER }}
       HOSTED_ASSISTANT_REASONING_EFFORT: ${{ vars.HOSTED_ASSISTANT_REASONING_EFFORT }}
       HOSTED_ASSISTANT_SANDBOX: ${{ vars.HOSTED_ASSISTANT_SANDBOX }}
+      HOSTED_VENICE_LUNA_MODEL: ${{ vars.HOSTED_VENICE_LUNA_MODEL }}
+      HOSTED_VENICE_SOL_MODEL: ${{ vars.HOSTED_VENICE_SOL_MODEL }}
+      HOSTED_VENICE_TERRA_MODEL: ${{ vars.HOSTED_VENICE_TERRA_MODEL }}
       MURPH_ELEVENLABS_VOICE_ID: ${{ vars.MURPH_ELEVENLABS_VOICE_ID }}
       MURPH_ELEVENLABS_MODEL_ID: ${{ vars.MURPH_ELEVENLABS_MODEL_ID }}
       XAI_X_SEARCH_MODEL: ${{ vars.XAI_X_SEARCH_MODEL }}
@@ -681,6 +684,7 @@ jobs:
           LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
           MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Prepare deploy artifacts
@@ -725,6 +729,7 @@ jobs:
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
           MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
           OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
@@ -814,6 +819,7 @@ jobs:
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
           MURPH_DATA_API_KEY: ${{ secrets.MURPH_DATA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
           OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}

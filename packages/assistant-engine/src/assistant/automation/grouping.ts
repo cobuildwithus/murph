@@ -9,6 +9,8 @@ import {
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
 
+export const ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX = 50
+
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
   summary: AssistantAutomationInputSummary
@@ -43,6 +45,9 @@ export async function collectAssistantAutoReplyGroup(input: {
     index < input.inputSummaries.length;
     index += 1
   ) {
+    if (items.length >= ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX) {
+      break
+    }
     const candidate = input.inputSummaries[index]
     if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
       break
@@ -119,9 +124,6 @@ export function shouldGroupAdjacentConversationInput(
   first: AssistantAutomationInputSummary,
   candidate: AssistantAutomationInputSummary,
 ): boolean {
-  if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
-    return false
-  }
   // An affirmative reaction is a synthetic trigger with its own target
   // attestation. Keep it in a one-input group so adjacent ordinary messages
   // cannot lend it trust or be suppressed with it.
@@ -131,12 +133,38 @@ export function shouldGroupAdjacentConversationInput(
   ) {
     return false
   }
-  // Native reply targets identify the specific prior assistant message the
-  // input is answering. Mixing them into one group would inject only one
-  // turn context for messages that semantically need different anchors;
-  // split the group at every reply-anchor boundary so each anchored input
-  // gets its own turn with its own context.
+  if (
+    first.groupRoomBatchingEligible ||
+    candidate.groupRoomBatchingEligible
+  ) {
+    return first.groupRoomBatchingEligible &&
+      candidate.groupRoomBatchingEligible &&
+      isSameAuthenticatedGroupRoomBatch(first, candidate)
+  }
+  if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
+    return false
+  }
+  // Outside authenticated group rooms, native reply targets identify the
+  // specific prior assistant message the input is answering. Preserve the
+  // existing boundary so direct inputs keep one turn context per anchor.
   return first.replyToMessageId === candidate.replyToMessageId
+}
+
+function isSameAuthenticatedGroupRoomBatch(
+  first: AssistantAutomationInputSummary,
+  candidate: AssistantAutomationInputSummary,
+): boolean {
+  return (
+    first.source === candidate.source &&
+    first.conversation.source === candidate.conversation.source &&
+    first.conversation.accountId === candidate.conversation.accountId &&
+    first.conversation.threadId === candidate.conversation.threadId &&
+    first.conversation.threadIsDirect === false &&
+    candidate.conversation.threadIsDirect === false &&
+    first.actorIsSelf === candidate.actorIsSelf &&
+    first.deliveryTarget === candidate.deliveryTarget &&
+    first.projectionReady === candidate.projectionReady
+  )
 }
 
 export function shouldGroupAdjacentAssistantInputCandidates(

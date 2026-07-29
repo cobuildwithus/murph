@@ -154,6 +154,32 @@ afterEach(async () => {
   );
 });
 
+test("hosted Codex runtime config writes Venice Responses config without secret values", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      VENICE_API_KEY: "signed-venice-egress-credential",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "venice",
+  );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model = "gpt-5\.6-terra"$/mu);
+  assert.match(config, /^model_provider = "venice"$/mu);
+  assert.match(config, /\[model_providers\."venice"\]/u);
+  assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
+  assert.match(config, /env_key = "VENICE_API_KEY"/u);
+  assert.match(config, /wire_api = "responses"/u);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(config, /signed-venice-egress-credential/u);
+});
+
 test("hosted Codex runtime config writes OpenAI Responses config without secret values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
@@ -235,6 +261,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
   assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
+  assert.match(
+    config,
+    /\[features\.current_time_reminder\]\nenabled = true\nclock_source = "system"\ndelivery_mode = "after_user_or_tool_output"\nreminder_interval_seconds = 60/u,
+  );
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
@@ -887,6 +917,15 @@ testHostedCodexAuthE2e(
           .slice(0, fixedRequestCount)
           .some((request) => /hello hosted auth regression/u.test(request)),
       );
+      const currentTimeReminders = requests
+        .slice(0, fixedRequestCount)
+        .flatMap(
+          (request) =>
+            request.match(
+              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+            ) ?? [],
+        );
+      assert.equal(currentTimeReminders.length, 1);
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -1437,6 +1476,12 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[features]",
       "plugins = false",
       "memories = true",
+      "",
+      "[features.current_time_reminder]",
+      "enabled = true",
+      'clock_source = "system"',
+      'delivery_mode = "after_user_or_tool_output"',
+      "reminder_interval_seconds = 60",
       "",
       "# This table owns enablement and the proactive per-turn mode/tool hints.",
       "# A CLI boolean override would replace the table and silently drop them.",

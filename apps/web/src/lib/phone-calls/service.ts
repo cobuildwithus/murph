@@ -8,6 +8,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedPhoneCallBrief,
+  HostedPhoneCallGroupRequester,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -111,6 +112,7 @@ type HostedPhoneCallNotificationDestinationResolver = (input: {
 }) => Promise<HostedAssistantNotificationDestination>;
 
 type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
+  groupRequester: HostedPhoneCallGroupRequester | null;
   inboundMailboxItemIds: readonly string[];
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   signal?: AbortSignal;
@@ -119,6 +121,7 @@ type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
+  groupRequester?: HostedPhoneCallGroupRequester;
   groupRequesterActivationAsserter?: HostedGroupPhoneCallRequesterActivationAsserter;
   inboundMailboxItemIds?: readonly string[];
   memberId: string;
@@ -162,6 +165,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     signal: input.signal,
   });
   input.signal.throwIfAborted();
+  let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
   if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
     const routeAuthority = notificationDestination.externalThreadRouteAuthority;
     if (!routeAuthority) {
@@ -172,11 +176,16 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     const assertGroupRequesterActivation =
       input.groupRequesterActivationAsserter
       ?? assertHostedGroupPhoneCallRequesterHasOwnMurph;
-    await assertGroupRequesterActivation({
+    const authorityInput = {
+      groupRequester: input.groupRequester ?? null,
       inboundMailboxItemIds: input.inboundMailboxItemIds ?? [],
       routeAuthority,
       signal: input.signal,
-    });
+    };
+    await assertGroupRequesterActivation(authorityInput);
+    reassertGroupRequesterAuthority = async () => {
+      await assertGroupRequesterActivation(authorityInput);
+    };
     input.signal.throwIfAborted();
   }
   const brief = normalizeHostedPhoneCallBriefForConversation({
@@ -309,6 +318,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
     try {
+      input.signal.throwIfAborted();
+      await reassertGroupRequesterAuthority?.();
       input.signal.throwIfAborted();
     } catch (error) {
       throw markPhoneCallRuntimeNoActiveEffect(error);

@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 Status: Implemented
 
@@ -92,13 +92,14 @@ the assistant-engine model boundary removes it and exposes only
 `participantId`, the consented display name, bounded `currentTurnHandles`, and
 requested projections.
 
-Interactive Linq group turns are actor-scoped. Import derives the blinded
-`actorId` from the same trimmed Linq sender value stored for the prompt;
-initial batching splits when that actor changes, and both pre-provider and live
-admission stop at a foreign group actor. Attribution authority therefore stays
-bound to the scanner-selected durable operation contexts instead of being
-widened by active steering. A later message from another participant remains
-pending for its own model turn.
+Interactive Linq group turns are room-scoped for batching while attribution
+remains message-scoped. Import derives blinded `actorId` and prompt sender
+evidence from the authenticated Linq sender, but an exact-successor burst may
+batch or steer across actor changes when the authenticated room, route,
+account, audience, projection, and reaction boundaries remain stable. Each
+admitted message keeps its own opaque ref and sender evidence; active steering
+therefore adds no whole-turn participant authority. Participant-specific
+effects must resolve the exact accepted message that requested them.
 
 When the model invokes `read_shared`—and only then—the runtime adds the bounded,
 deduplicated route-authorized iMessage handles from that operation scope. The

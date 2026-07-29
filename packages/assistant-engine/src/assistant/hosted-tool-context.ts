@@ -5,6 +5,10 @@ import type {
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeNewsletterScheduledAuthority,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+} from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
@@ -118,6 +122,7 @@ export interface AssistantHostedToolContext {
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
+    provider: string | null
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
@@ -331,6 +336,10 @@ export function createAssistantHostedToolContext(input: {
       const session = readDeliveryContext().session
       return {
         model: session.providerOptions.model ?? null,
+        provider:
+          session.providerOptions.modelProvider === HOSTED_ASSISTANT_VENICE_PROVIDER
+            ? HOSTED_ASSISTANT_VENICE_PROVIDER
+            : HOSTED_ASSISTANT_DEFAULT_PROVIDER,
         reasoningEffort: session.providerOptions.reasoningEffort ?? null,
       }
     },
