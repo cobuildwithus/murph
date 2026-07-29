@@ -27,7 +27,6 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
@@ -124,7 +123,6 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
@@ -144,8 +142,8 @@ export interface AssistantProviderTurn {
   permissions?: string | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
+  requireHostedPrivateImageDelivery?: boolean | null
   runtimeWorkspaceRoots?: readonly string[] | null
-  requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {

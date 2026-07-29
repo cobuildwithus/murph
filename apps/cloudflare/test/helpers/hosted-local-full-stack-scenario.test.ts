@@ -170,6 +170,24 @@ it("allows an explicitly named fault-injection scenario to use interventions", a
   expect(harness.assertNoInterventions).not.toHaveBeenCalled();
 });
 
+it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+  const scenario = await startScenario();
+  try {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "info",
+        }),
+      }),
+    );
+  } finally {
+    await scenario.stop();
+  }
+});
+
 function createScenarioHarness(input: {
   assertNoInterventions?: () => void;
   completionStatuses?: HostedRunnerStatusResponse[];

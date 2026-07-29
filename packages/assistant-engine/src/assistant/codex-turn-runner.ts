@@ -527,9 +527,6 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
-        generatedImageUploader: nativeCapabilitiesRestrictedTurn
-          ? null
-          : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext: nativeCapabilitiesRestrictedTurn
@@ -589,12 +586,12 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch: nativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+        requireHostedPrivateImageDelivery:
+          !nativeCapabilitiesRestrictedTurn &&
+          Boolean(executionPlan.executionContext?.hosted),
         runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
-        requireGeneratedImageUploader: nativeCapabilitiesRestrictedTurn
-          ? false
-          : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
         resume: attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,

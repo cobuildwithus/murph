@@ -193,9 +193,11 @@ export const assistantQuarantineArtifactKindValues = [
 
 export const assistantResponseMediaKindValues = [
   'image',
+  'vault_image',
   'voice_memo',
   'vault_file',
 ] as const
+export const assistantVaultImageMaxBytes = 10 * 1024 * 1024
 export const assistantVaultFileMaxBytes = 100 * 1024 * 1024
 export const assistantVoiceMemoSpeechOutputFormat = 'mp3_44100_128' as const
 export const assistantVoiceMemoMusicModelId = 'music_v2' as const
@@ -368,6 +370,35 @@ const assistantImageResponseMediaSchema = z
   })
   .strict()
 
+const assistantVaultImageResponseMediaSchema = z
+  .object({
+    kind: z.literal('vault_image'),
+    ref: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1024)
+      .refine(
+        (value) => isNormalizedAssistantVaultFileRef(value),
+        'Assistant vault image refs must be normalized vault-relative paths.',
+      ),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    filename: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .refine(
+        (value) => !/[\\/\u0000-\u001F\u007F]/u.test(value),
+        'Assistant vault image names must not contain path separators or control characters.',
+      ),
+    contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    sizeBytes: z.number().int().positive().max(assistantVaultImageMaxBytes),
+    alt: z.string().trim().min(1).max(500).nullable().default(null),
+    source: z.string().trim().min(1).max(200).nullable().default(null),
+  })
+  .strict()
+
 export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -454,6 +485,7 @@ const assistantVaultFileResponseMediaSchema = z
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
+  assistantVaultImageResponseMediaSchema,
   assistantVoiceMemoResponseMediaSchema,
   assistantVaultFileResponseMediaSchema,
 ])
@@ -1665,6 +1697,10 @@ export type AssistantVoiceMemoTransport = z.infer<
 >
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
+>
+export type AssistantVaultImageResponseMedia = Extract<
+  AssistantResponseMedia,
+  { kind: 'vault_image' }
 >
 export type AssistantVaultFileResponseMedia = Extract<
   AssistantResponseMedia,

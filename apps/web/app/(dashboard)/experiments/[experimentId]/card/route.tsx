@@ -8,17 +8,27 @@ import {
   fraunces600FontPath,
 } from "../../../../font-files";
 import {
-  decodeExperimentCardData,
   EXPERIMENT_CARD_MAX_SIGNALS,
-  EXPERIMENT_CARD_PARAM,
+  parseExperimentCardData,
   type ExperimentCardChart,
   type ExperimentCardData,
   type ExperimentCardSignal,
 } from "@/src/lib/experiments/share-card";
+import {
+  requireActiveHostedAppSessionFromRequest,
+} from "@/src/lib/hosted-onboarding/app-session";
+import {
+  assertHostedOnboardingMutationOrigin,
+} from "@/src/lib/hosted-onboarding/csrf";
+import {
+  readHostedOnboardingJsonObject,
+  withJsonError,
+} from "@/src/lib/hosted-onboarding/http";
 
 export const dynamic = "force-dynamic";
 
 const SIZE = { width: 1200, height: 780 };
+const MAX_CARD_REQUEST_BYTES = 64 * 1024;
 const CONTENT_WIDTH = SIZE.width - 128;
 const LOGO_HEIGHT = 52;
 const LOGO_WIDTH = Math.round((LOGO_HEIGHT * 197) / 44); // logo.svg viewBox is 197×44
@@ -41,12 +51,25 @@ const SENTIMENT_STYLE: Record<string, { text: string; chip: string }> = {
   neutral: { text: "#827C6C", chip: "rgba(130,124,108,0.14)" },
 };
 
-export async function GET(request: Request): Promise<Response> {
-  const { searchParams } = new URL(request.url);
-  const data = decodeExperimentCardData(searchParams.get(EXPERIMENT_CARD_PARAM));
+export async function GET(): Promise<Response> {
+  return new Response("URL-encoded experiment cards are no longer available.", {
+    headers: { "Cache-Control": "private, no-store" },
+    status: 410,
+  });
+}
 
+export const POST = withJsonError(async (request: Request): Promise<Response> => {
+  assertHostedOnboardingMutationOrigin(request);
+  await requireActiveHostedAppSessionFromRequest(request);
+  const data = parseExperimentCardData(
+    await readHostedOnboardingJsonObject(request, {
+      limitBytes: MAX_CARD_REQUEST_BYTES,
+      tooLargeErrorCode: "EXPERIMENT_CARD_BODY_TOO_LARGE",
+      tooLargeErrorMessage: "Card data is too large.",
+    }),
+  );
   if (!data) {
-    return new Response("Invalid or missing card data.", { status: 400 });
+    return invalidCardResponse(400);
   }
 
   const [fraunces400, fraunces600, dmSans400, logoSrc] = await Promise.all([
@@ -66,9 +89,15 @@ export async function GET(request: Request): Promise<Response> {
       { name: "DM Sans", data: dmSans400, weight: 400 },
     ],
     headers: {
-      // The snapshot is baked into the URL, so each URL renders deterministically.
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, no-store",
     },
+  });
+});
+
+function invalidCardResponse(status: 400): Response {
+  return new Response("Invalid or missing card data.", {
+    headers: { "Cache-Control": "private, no-store" },
+    status,
   });
 }
 

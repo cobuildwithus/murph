@@ -1079,6 +1079,93 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
+  "https://murph-hosted.cobuildwithus.workers.dev";
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
+  "/private-media/v1/";
+const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
+
+export function isHostedRuntimePrivateImageDeliveryUrl(
+  url: URL,
+  expectedOrigin = HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+): boolean {
+  if (isLegacyHostedRuntimePrivateImageDeliveryUrl(url)) {
+    return true;
+  }
+  let normalizedExpectedOrigin: string;
+  try {
+    const parsedExpectedOrigin = new URL(expectedOrigin);
+    if (
+      parsedExpectedOrigin.username
+      || parsedExpectedOrigin.password
+      || parsedExpectedOrigin.pathname !== "/"
+      || parsedExpectedOrigin.search
+      || parsedExpectedOrigin.hash
+    ) {
+      return false;
+    }
+    normalizedExpectedOrigin = parsedExpectedOrigin.origin;
+  } catch {
+    return false;
+  }
+  if (
+    url.origin !== normalizedExpectedOrigin
+    || url.username
+    || url.password
+    || url.hash
+    || !HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN.test(url.pathname)
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 1
+    || entries.filter(([key]) => key === "exp").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt));
+}
+
+function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  if (
+    url.protocol !== "https:"
+    || url.hostname !== "imagedelivery.net"
+    || url.port
+    || url.username
+    || url.password
+    || url.hash
+    || pathSegments.length < 3
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (entries.length === 0) {
+    const pathAndSuffix = url.href.slice(url.origin.length);
+    return /^\/[A-Za-z0-9_-]{1,256}\/[A-Za-z0-9_-]{1,256}\/public$/u
+      .test(pathAndSuffix);
+  }
+  if (
+    entries.length !== 2
+    || entries.filter(([key]) => key === "exp").length !== 1
+    || entries.filter(([key]) => key === "sig").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  const signature = url.searchParams.get("sig");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt))
+    && signature !== null
+    && /^[0-9a-f]{64}$/u.test(signature);
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority

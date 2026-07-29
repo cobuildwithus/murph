@@ -79,6 +79,18 @@ type HostedLocalAssistantProviderHeldTextResponse = {
   text: string;
 };
 
+export interface HostedLocalAssistantProviderRequestContext {
+  requestBody: string;
+  requestBodyJson: unknown;
+  requestMatchText: string;
+}
+
+type HostedLocalAssistantProviderRequestDerivedResponse = {
+  deriveResponse(
+    input: HostedLocalAssistantProviderRequestContext,
+  ): HostedLocalAssistantProviderFunctionCallResponse | string;
+};
+
 export type HostedLocalAssistantProviderScriptedResponse =
   | HostedLocalAssistantProviderScriptedResponsePayload
   | ({
@@ -88,7 +100,8 @@ export type HostedLocalAssistantProviderScriptedResponse =
 type HostedLocalAssistantProviderScriptedResponsePayload =
   | string
   | HostedLocalAssistantProviderFunctionCallResponse
-  | HostedLocalAssistantProviderHeldTextResponse;
+  | HostedLocalAssistantProviderHeldTextResponse
+  | HostedLocalAssistantProviderRequestDerivedResponse;
 
 export interface HostedLocalAssistantProviderResponseScopeOptions {
   matchInputContains?: string | readonly string[] | null;
@@ -143,6 +156,25 @@ export function buildAssistantProviderMurphToolCall(
       arguments: toolArguments,
       name: tool,
       namespace: "murph",
+    },
+  };
+}
+
+export function buildAssistantProviderRequestDerivedMurphToolCall(
+  tool: string,
+  deriveArguments: (
+    input: HostedLocalAssistantProviderRequestContext,
+  ) => Record<string, unknown>,
+): HostedLocalAssistantProviderScriptedResponse {
+  return {
+    deriveResponse(input) {
+      return {
+        functionCall: {
+          arguments: deriveArguments(input),
+          name: tool,
+          namespace: "murph",
+        },
+      };
     },
   };
 }
@@ -565,9 +597,13 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
 
 async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
+  requestContext: HostedLocalAssistantProviderRequestContext,
 ): Promise<string | HostedLocalAssistantProviderFunctionCallResponse> {
   if (typeof scriptedResponse === "string" || "functionCall" in scriptedResponse) {
     return scriptedResponse;
+  }
+  if ("deriveResponse" in scriptedResponse) {
+    return scriptedResponse.deriveResponse(requestContext);
   }
 
   scriptedResponse.onResponseStarted?.();
@@ -920,7 +956,14 @@ export async function startAssistantProviderStubServer(input: {
       }
 
       const preparedScriptedResponse =
-        await prepareAssistantProviderScriptedResponse(scriptedResponse);
+        await prepareAssistantProviderScriptedResponse(scriptedResponse, {
+          requestBody: body,
+          requestBodyJson: bodyJson,
+          requestMatchText: buildAssistantProviderRequestMatchText({
+            body,
+            bodyJson,
+          }),
+        });
 
       if (typeof preparedScriptedResponse !== "string") {
         const functionCallItem = buildAssistantProviderFunctionCallItem({

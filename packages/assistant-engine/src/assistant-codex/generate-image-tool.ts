@@ -17,10 +17,8 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
-import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
 import type {
   AssistantProviderUsageDraft,
@@ -57,9 +55,6 @@ export interface GenerateImageToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
-  // A specific runtime issue for the assistant runtime's existing issue owner to
-  // record off-path (e.g. an upload failure); populated only on failure.
-  runtimeIssue?: AssistantRuntimeIssueInput
   savedCaptureId?: string | null
   savedImageRef?: string | null
   usageDraft?: AssistantProviderUsageDraft | null
@@ -109,11 +104,10 @@ export async function executeGenerateImageTool(input: {
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   persistGeneratedImageCapture?: (<T>(write: () => Promise<T>) => Promise<T>) | null
   providerRequestOrdinal: number
-  requireHostedGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
@@ -124,18 +118,17 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
-  if (
-    input.requireHostedGeneratedImageUploader === true &&
-    !input.hostedGeneratedImageUploader
-  ) {
+  const referenceImageRefs = input.args.referenceImageRefs ?? []
+  const vaultRoot = normalizeNullableString(input.vaultRoot)
+  const requireHostedPrivateImageDelivery =
+    input.requireHostedPrivateImageDelivery === true
+  if (requireHostedPrivateImageDelivery && !vaultRoot) {
     return {
       rpcSuccess: false,
-      rpcText: 'hosted image upload is not available for this turn',
+      rpcText: 'hosted private image delivery requires the owning vault',
     }
   }
 
-  const referenceImageRefs = input.args.referenceImageRefs ?? []
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
   if (
     referenceImageRefs.length > 0 &&
     !vaultRoot &&
@@ -325,38 +318,37 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
-  try {
-    if (input.hostedGeneratedImageUploader) {
-      const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
-        alt: input.args.alt ?? 'Generated image',
-        bytes: generatedImageBytes,
-        contentType: generatedImageContentType(input.args.outputFormat),
-        filename: generatedImageFilename(input.args.outputFormat),
-        metadata: {
-          model: OPENAI_IMAGE_GENERATION_MODEL,
-          promptHash,
-          ...(referenceImages.length > 0
-            ? {
-                referenceImageCount: String(referenceImages.length),
-                referenceImageSetHash: hashReferenceImageSet(referenceImages),
-              }
-            : {}),
-          schema: 'murph.generated-image.v1',
-        },
-        source: OPENAI_IMAGE_GENERATION_MODEL,
-      })
+  if (requireHostedPrivateImageDelivery) {
+    if (!savedCapture) {
       return {
-        responseMedia: [media],
-        rpcSuccess: true,
-        rpcText: savedCapture
-          ? `generated image attached to the final response and saved to the vault as ${savedCapture.imageRef}`
-          : 'generated image attached to the final response',
-        savedCaptureId: savedCapture?.captureId ?? null,
-        savedImageRef: savedCapture?.imageRef ?? null,
+        rpcSuccess: false,
+        rpcText: 'image generated but private vault capture failed',
         usageDraft,
       }
     }
+    return {
+      responseMedia: [
+        {
+          alt: input.args.alt ?? 'Generated image',
+          contentType: generatedImageContentType(input.args.outputFormat),
+          filename: path.posix.basename(savedCapture.imageRef),
+          kind: 'vault_image',
+          ref: savedCapture.imageRef,
+          sha256: createHash('sha256').update(generatedImageBytes).digest('hex'),
+          sizeBytes: generatedImageBytes.byteLength,
+          source: OPENAI_IMAGE_GENERATION_MODEL,
+        },
+      ],
+      rpcSuccess: true,
+      rpcText:
+        `generated image attached privately and saved to the vault as ${savedCapture.imageRef}`,
+      savedCaptureId: savedCapture.captureId,
+      savedImageRef: savedCapture.imageRef,
+      usageDraft,
+    }
+  }
 
+  try {
     const localPath = await writeLocalGeneratedImage({
       bytes: generatedImageBytes,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
@@ -371,49 +363,13 @@ export async function executeGenerateImageTool(input: {
       savedImageRef: savedCapture?.imageRef ?? null,
       usageDraft,
     }
-  } catch (error) {
-    if (!input.hostedGeneratedImageUploader) {
-      return {
-        rpcSuccess: false,
-        rpcText: 'image generated but local save failed',
-        usageDraft,
-      }
-    }
+  } catch {
     return {
       rpcSuccess: false,
-      rpcText: 'image generated but upload failed',
-      runtimeIssue: buildGeneratedImageUploadIssue(error),
+      rpcText: 'image generated but local save failed',
       usageDraft,
     }
   }
-}
-
-function buildGeneratedImageUploadIssue(error: unknown): AssistantRuntimeIssueInput {
-  const status = readGeneratedImageUploadErrorStatus(error)
-  return {
-    component: 'assistant.generated-image',
-    details: {
-      failureKind: status === null ? 'thrown' : 'http_status',
-      provider: 'cloudflare_images',
-      ...(status === null ? {} : { status }),
-    },
-    errorCode: 'GENERATED_IMAGE_UPLOAD_FAILED',
-    issueKind: 'tool_error',
-    operation: 'generated_image_upload',
-    phase: 'tool_call',
-    severity: 'warning',
-    summary: 'Generated image upload to Cloudflare Images failed.',
-  }
-}
-
-function readGeneratedImageUploadErrorStatus(error: unknown): number | null {
-  if (error && typeof error === 'object' && 'status' in error) {
-    const status = (error as { status?: unknown }).status
-    if (typeof status === 'number' && Number.isInteger(status)) {
-      return status
-    }
-  }
-  return null
 }
 
 function hasVaultReferenceImageRef(refs: readonly string[]): boolean {

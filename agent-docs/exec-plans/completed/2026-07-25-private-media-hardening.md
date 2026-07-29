@@ -1,0 +1,85 @@
+Goal (incl. success criteria):
+- Make private member-generated images private by default across canonical capture storage, durable assistant response media, hosted retries, and final Linq/Telegram delivery.
+- Remove data-bearing public experiment-card URLs and fail closed on group-avatar and automated progress-card paths that currently require public URLs.
+- Success means private bytes survive checkpoint/restart without a public URL representation, are hash/size/type verified before provider dispatch, reach Linq and Telegram through provider-native byte uploads, and every retired public route fails closed.
+
+Constraints/Assumptions:
+- Treat the supplied patch as behavioral intent, not overwrite authority.
+- Start from the supplied exact base commit, then reconcile with current `origin/main` before final verification.
+- Preserve existing intentionally public catalog/exercise images.
+- Preserve user-critical generated-image delivery through Linq and Telegram; text fallback remains valid only where the existing response-media contract already supports it.
+- Do not introduce another media service, queue, persisted state owner, or Cloudflare-specific private-media abstraction.
+- Keep private media, health values, local paths, credentials, and direct identifiers out of logs, review artifacts, fixtures, docs, and PR text.
+
+Key decisions:
+- Add one shared `vault_image` response-media variant whose descriptor binds a normalized vault-relative ref to SHA-256, byte count, filename, MIME type, and bounded display metadata.
+- Keep canonical generated image bytes in capture-owned vault storage and defer byte loading until the final channel boundary.
+- Reuse Linq's existing attachment upload and Telegram's existing multipart delivery model.
+- Preload and verify private media before recording provider-dispatch start so retry state cannot bless changed bytes.
+- Tombstone legacy public upload/card endpoints instead of retaining a second private/public representation.
+- Remove model-visible group-avatar generation until the provider supports a genuinely private ingestion lifecycle.
+
+State:
+- Implementation is stable on current `origin/main`; focused, full owner, direct hosted delivery, product-experience, preliminary specialist, and parent final-review proof are green. The final ReviewGPT gate remains; canonical acceptance is blocked by one untouched current-`main` Web type error, and PR design proof is blocked by the unavailable prescribed screenshot-upload credential.
+
+Done:
+- Read the required repository workflow, architecture, product, security, reliability, and completion guidance.
+- Confirmed the supplied base commit exists locally.
+- Inspected the coordination ledger and identified overlap with generated-media E2E, media-catalog deletion, and experiment-lifecycle work.
+- Confirmed the primary checkout is unsafe for task edits and created a dedicated worktree through the repository helper.
+- Applied the supplied patch against its exact base, repaired malformed patch hunks, and reconciled the result onto current `origin/main`.
+- Added and verified the shared `vault_image` contract, vault byte verifier, durable side-effect persistence, callback preverification, Linq attachment delivery, Telegram multipart delivery, and hosted generated-image capture path.
+- Tombstoned the public generated-image upload and experiment-card URL routes; removed group-avatar generation from the model-visible action schema; changed scheduled experiment summaries to private text/optional voice.
+- Reworked explicit browser result sharing to an authenticated same-origin POST with a private no-store PNG response, native File sharing/download, loading/retry states, and real production-component design studies.
+- Updated the affected architecture, security, reliability, capture, experiment, group-chat, Cloudflare deployment, and test-owner documentation.
+- Regenerated the CLI command metadata through the supported repository generator after the source-only generator entrypoint proved unavailable without workspace builds.
+- Passed focused contract, channel, callback, CLI, Cloudflare, Web, automation, and typecheck coverage.
+- Passed the full assistant-engine owner suite: 173 files passed, one explicitly skipped; 2,666 tests passed and five explicitly skipped.
+- Passed `pnpm hosted-local e2e codex-image-media-delivery`: both public catalog URL delivery and private generated-image vault capture, Linq attachment upload/send, and next-turn reference reuse completed.
+- The first complete `pnpm test:diff` rerun passed every preflight, affected typecheck, assistant-engine test, and assistant CLI test before one untouched assistant-runtime clinical-records preemption test timing-flaked; its exact isolated rerun passed.
+- Added the required design-catalog component and section registrations. The mandated browser runtime exposed no installed target, so desktop/mobile rendered captures remain unavailable.
+- Attempted the required Claude Fable UI double-check; it stopped at explicit usage-credit exhaustion, so policy forbids an Opus fallback.
+- The first product-experience review found that native Share could appear before a shareable PNG existed, lose transient activation while awaiting preparation, silently fall back to download, and hide non-dismissal failures.
+- Corrected that journey: Share now appears only when the actual prepared PNG passes `navigator.canShare({ files })`, invokes the share sheet synchronously from the ready state, and presents inline recovery for technical failures while leaving user dismissal quiet.
+- Added ready, preparing, preview-recovery, and native-share-recovery design studies plus focused unsupported-capability, preview-failure, share-rejection, and request-cancellation tests.
+- Removed synchronous effect-owned UI resets by keying the private-card request session to its input and owning object-URL creation/revocation at the resolved-file boundary; scoped Web lint and all 12 affected Web tests pass.
+- The current Web typecheck reaches an unchanged `origin/main` error in `apps/web/src/lib/hosted-routing/thread-route-store.ts:170`; the task diff does not touch that file.
+- The required product-experience re-review returned `NO FINDINGS`; remaining material proof gaps are the full Telegram orchestration path and real interruption/restart or mutated-artifact orchestration path.
+- Added the ready-but-download-only catalog branch requested by the re-review and captured redacted desktop and mobile design-catalog evidence for ready, unsupported, preparing, preview-recovery, and native-share-recovery states through the repository Playwright runtime.
+- Opened draft PR #966 and completed the exact-head preliminary `completion-specialists` ReviewGPT pass with all prompt, frontend, and coverage lenses. It returned three accepted findings and no patch artifact: announce preview failure to assistive technology, prove retry and quiet dismissal transitions, and merge a duplicated OpenClaw progress-command rule.
+- Added `role="status"` to private preview preparation and failure, extended the component proof through failure → retry → ready plus quiet `AbortError` dismissal, and merged the progress-command instruction while preserving scheduled due gating. Scoped Web lint and six component tests pass; the OpenClaw focused canonical owner lane passes.
+- The reviewer-requested Web `test:diff` was attempted but remained queued behind unrelated shared-host verification; the session-owned waiter was stopped, and the required final canonical run remains pending.
+- The accessibility product re-review found that retry completion still lacked an announcement. Replaced conditional status nodes with one persistent atomic polite region whose text transitions through preparing, unavailable, and ready; the retry proof now asserts the ready announcement and the focused Web lane remains green.
+- The final accessibility rerun found and resolved one capability-copy mismatch: ready now announces Share plus Download only when native file sharing is supported, and announces Download alone otherwise. The final narrow product-experience verdict is `NO FINDINGS`.
+- Rebased cleanly onto the latest `origin/main`, updated PR #966 with all preliminary finding dispositions and the current change shape, and completed the parent final review across descriptor parsing, vault verification, provider-entry ordering, Linq/Telegram delivery, generated capture ownership, fail-closed legacy routes, group-avatar gating, experiment automation, and browser sharing with no additional accepted finding.
+- The final explicit-owner `pnpm test:diff` passed all affected package typechecks and package suites, including 2,669 assistant-engine tests, 1,862 assistant-runtime tests, 1,082 CLI tests, 407 hosted-execution tests, and all dependent owners. App verification then stopped at the unchanged latest-`origin/main` Web error `apps/web/src/lib/hosted-routing/thread-route-store.ts:170` (`length` on `never`); this branch changes neither that file nor the Prisma schema.
+- `pnpm verify:acceptance` reproduced the same untouched current-`main` Web type error after all preceding workspace package typechecks passed; the acceptance dispatcher stopped there before its later stages.
+- PR CI passed the private-media Codex/provider-egress hosted scenario, every other hosted scenario except one pre-existing snapshot-publication fallback case, release package/app verification, repo hygiene, and host support. The snapshot fallback rerun reproduced its post-rejection clean-publication timeout; the exact current-`main` workflow independently fails the same test with the same timeout, proving it is not introduced by this branch.
+- The frontend design gate correctly rejected local-only evidence paths. Repository policy requires Cloudflare Images-hosted desktop/mobile screenshots and explicitly requires reporting a missing local upload credential instead of committing screenshot binaries or using another host.
+- The final local Cloudflare app wrapper could not acquire the shared-host slot behind unrelated repository verification and its session-owned waiter was stopped. Exact-head CI release-app verification is green, and the focused local Cloudflare typecheck, node, and Worker suites passed.
+
+Now:
+- Close the active execution plan and publish its final exact head.
+
+Next:
+- Close this plan with `scripts/finish-task`, push the final head, then run final ReviewGPT concurrently with CI and prove merge readiness against current `main`, subject to the recorded external/base blockers.
+
+Open questions (UNCONFIRMED if needed):
+- Whether current Linq group-avatar APIs will later expose provider-native byte upload; the current patch deliberately retains fail-closed behavior until that capability exists.
+
+Working set (files/ids/commands):
+- `packages/operator-config/src/assistant-cli-contracts.ts`
+- `packages/assistant-engine/src/assistant/{response-media.ts,channels/**,vault-file-send.ts}`
+- `packages/assistant-engine/src/assistant-codex/{generate-image-tool.ts,dynamic-tools.ts}`
+- `packages/hosted-execution/src/side-effects.ts`
+- `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`
+- `apps/cloudflare/src/{hosted-provider-effects.ts,runner-outbound/generated-images.ts}`
+- `apps/web/src/lib/experiments/share-card.ts`
+- `apps/web/app/(dashboard)/experiments/**`
+- `packages/cli/src/commands/experiment.ts`
+- focused tests, hosted-local E2E, design catalog, and current owner docs
+- `pnpm test:diff ...`
+- `pnpm verify:acceptance`
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25
