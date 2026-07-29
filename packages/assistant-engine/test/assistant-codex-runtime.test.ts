@@ -4276,16 +4276,28 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-warm-identity-1-1',
     })
 
+    const restrictedThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.enable_mcp_apps': false,
+      'features.multi_agent': false,
+      'features.multi_agent_v2': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.standalone_web_search': false,
+      'features.tool_suggest': false,
+      'features.web_search_request': false,
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+      web_search: 'disabled',
+    } as const
+
     await expect(executeCodexAppServerTurn({
       ...baseInput,
       dynamicTools: [],
       ephemeral: true,
       prompt: 'restricted notification turn',
-      threadConfig: {
-        'features.shell_tool': false,
-        'features.web_search_request': false,
-        web_search: 'disabled',
-      },
+      threadConfig: restrictedThreadConfig,
     })).resolves.toMatchObject({
       sessionId: 'thread-warm-identity-1-2',
     })
@@ -4296,15 +4308,12 @@ describe('assistant codex runtime', () => {
       (message) => message.method === 'thread/start',
     )
     expect(threadStarts).toHaveLength(2)
-    expect(asRecord(threadStarts[1]?.params)).toMatchObject({
-      config: {
-        'features.shell_tool': false,
-        'features.web_search_request': false,
-        web_search: 'disabled',
-      },
+    const restrictedThreadStart = asRecord(threadStarts[1]?.params)
+    expect(restrictedThreadStart).toMatchObject({
       dynamicTools: [],
       ephemeral: true,
     })
+    expect(restrictedThreadStart?.config).toEqual(restrictedThreadConfig)
     expect(process.kill).not.toHaveBeenCalled()
   })
 

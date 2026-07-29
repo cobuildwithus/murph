@@ -1,8 +1,9 @@
 # Collapse creative wake runtime
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
+Completed: 2026-07-29
 
 ## Goal
 
@@ -70,8 +71,25 @@ Updated: 2026-07-29
 
 ## Verification
 
-- Commands to run: focused assistant-engine Vitest suites, assistant-engine
-  typecheck, privacy/diff inspection, product-experience review, preliminary
-  specialist ReviewGPT, exact-head GitHub Actions, and final ReviewGPT.
-- Expected outcomes: one warm process identity, ephemeral restricted
-  notification threads, successful signed song upload, no unrelated failures.
+- Focused assistant-engine proof passed: 431 tests across notification
+  planning/runtime, media generation, provider transport, and App Server
+  lifecycle.
+- After preliminary ReviewGPT identified a coverage-only gap, the complete
+  thirteen-setting deny object was asserted at provider assembly and
+  `thread/start`; the requested 304-test focused suite and assistant-engine
+  typecheck passed.
+- Direct runtime proof uses one App Server process for an ordinary turn and a
+  restricted ephemeral turn, sends the complete deny config on the latter, and
+  does not terminate the process.
+- Direct media proof generates the song, creates the Linq attachment, and
+  completes the validated signed `PUT` through the existing application public
+  transport.
+- Diff, privacy, and operative-document inspections passed. No
+  `voiceMemoUploadFetch` reference or current notification one-shot claim
+  remains.
+- Product-experience review returned `NO FINDINGS`. Parent final review found no
+  remaining correctness, scope, architecture, or proof issue.
+- The final archived-plan commit is the candidate for exact-head GitHub Actions
+  and the final ReviewGPT gate. A live post-deploy sponsorship remains the
+  cross-runtime native-audio proof.
+Completed: 2026-07-29

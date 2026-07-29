@@ -11,6 +11,22 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
+const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
+
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
@@ -667,15 +683,9 @@ describe('Codex model catalog', () => {
       'features.shell_tool=true',
       'features.apps=true',
     ])
-    expect(providerInput?.codexThreadConfig).toMatchObject({
-      'features.apps': false,
-      'features.browser_use': false,
-      'features.multi_agent': false,
-      'features.plugins': false,
-      'features.shell_tool': false,
-      'features.web_search_request': false,
-      web_search: 'disabled',
-    })
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+    )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
       groupConversation: false,
@@ -809,15 +819,9 @@ describe('Codex model catalog', () => {
       'features.shell_tool=true',
       'features.apps=true',
     ])
-    expect(providerInput?.codexThreadConfig).toMatchObject({
-      'features.apps': false,
-      'features.browser_use': false,
-      'features.multi_agent': false,
-      'features.plugins': false,
-      'features.shell_tool': false,
-      'features.web_search_request': false,
-      web_search: 'disabled',
-    })
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+    )
     expect(providerInput).toMatchObject({
       dynamicTools: [MURPH_GENERATE_SONG_TOOL],
       environments: [],
