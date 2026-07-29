@@ -107,6 +107,36 @@ describe("assistant iMessage contact tool", () => {
       "No Murph iMessage number was assigned. The member can continue using Telegram and ask again later. Never guess or invent a phone number, and do not promise when one will become available.",
     );
   });
+
+  it("does not claim assignment status when the request cannot be confirmed", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {},
+        namespace: "murph",
+        tool: "imessage_contact",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an iMessage contact dynamic tool request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: buildHostedToolContext(vi.fn(async () => {
+        throw new Error("response lost");
+      })),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "The iMessage contact request could not be confirmed. Do not guess or invent a number. Tell the member they can continue using Telegram and ask again later, without promising timing.",
+    );
+  });
 });
 
 function buildHostedToolContext(

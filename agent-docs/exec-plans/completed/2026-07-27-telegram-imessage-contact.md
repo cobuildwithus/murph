@@ -1,8 +1,8 @@
 # Give Telegram Murph its iMessage contact number
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-29
 
 ## Goal
 
@@ -82,8 +82,9 @@ Updated: 2026-07-27
 2. [x] Carry the assigned Murph number through the existing optional contract.
 3. [x] Add current-input-bound, atomic read-or-assign behavior.
 4. [x] Run focused and canonical verification.
-5. [ ] Complete required specialist and final cross-cutting review.
-6. [ ] Commit, push, open the PR, and close this plan.
+5. [x] Complete the required specialist pass and parent final review; the
+   final PR gate follows plan closure.
+6. [x] Commit, push, open the PR, and close this plan.
 
 ## Verification
 
@@ -144,3 +145,22 @@ Updated: 2026-07-27
 - Product-experience review initially requested a safe unavailable contract
   and real concurrent proof. Both were implemented; its remediation review
   returned `PURPOSE_VERDICT: PASS` and `NO FINDINGS`.
+- The preliminary ReviewGPT specialist pass inspected exact pushed commit
+  `9dfb76a79d2093b28de8f0322925d0f87f1044d3`. Four findings were accepted:
+  make transport-failure guidance uncertainty-safe, prove the signed-member
+  route composition, prove the complete planner exposure gate, and prove both
+  exhausted and unassignable pool results avoid persistence.
+- The resulting focused proof passed 68 Assistant Engine tests and 10 Web
+  route/service tests. All added test and evaluation-style strings are
+  English.
+- The post-remediation canonical `pnpm test:diff ...` passed in one prepared
+  run: 2,759 Assistant Engine tests, 1,896 Assistant Runtime tests, 1,083 CLI
+  tests, 6,876 Web tests, 2,014 Cloudflare Node tests, 2 Cloudflare Workers
+  tests, package boundaries, typechecks, lint with zero errors, Web dev smoke,
+  and the production Web build.
+- Parent final review found no remaining accepted issue. The request parser is
+  strict and accepts only the current assistant input id; Web obtains member
+  authority from the signed callback, validates a current direct Telegram
+  wake, locks and rereads durable routing, and reaches the pool only for
+  `none` authority.
+Completed: 2026-07-29

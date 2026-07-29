@@ -240,6 +240,27 @@ describe("hosted iMessage contact tool", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["capacity_exhausted", "unassignable"] as const)(
+    "returns unavailable without persisting when the line pool is %s",
+    async (kind) => {
+      mocks.readHostedMemberRoutingState.mockResolvedValue({
+        linqRecipientPhone: null,
+      });
+      mocks.reserveHostedLinqHomeLineFromPoolTx.mockResolvedValue({ kind });
+
+      await expect(handleHostedRuntimeIMessageContactTool({
+        memberId: "member_telegram",
+        request: { assistantInputId: ASSISTANT_INPUT_ID },
+      })).resolves.toEqual({
+        phoneNumber: null,
+        status: "unavailable",
+      });
+
+      expect(mocks.reserveHostedLinqHomeLineFromPoolTx).toHaveBeenCalledOnce();
+      expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not claim another line while pending route authority exists", async () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue({
       linqRecipientPhone: null,

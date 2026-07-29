@@ -3286,7 +3286,10 @@ async function executeIMessageContactTool(input: {
     }
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'iMessage contact could not be assigned')
+    return toolTextResult(
+      false,
+      'The iMessage contact request could not be confirmed. Do not guess or invent a number. Tell the member they can continue using Telegram and ask again later, without promising timing.',
+    )
   }
 }
 
