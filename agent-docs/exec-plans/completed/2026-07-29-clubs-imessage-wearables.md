@@ -39,9 +39,23 @@ supported challenge scoring current without organizer spreadsheets.
 
 ## Evidence
 
-- Focused Clubs component/page tests.
-- `pnpm test:frontend-design-proof`.
-- Canonical Web verification selected by the verification matrix.
-- Desktop and mobile screenshots from the Clubs design study.
-- Required product-experience, preliminary specialist, parent, and Claude UI
-  review evidence.
+- Focused Clubs and shared-phone tests passed, including direct default/after
+  result ordering and decorative-composer semantics.
+- `pnpm test:frontend-design-proof` passed, as did the exact PR-body/catalog
+  checker and the 320/375/390/768/1280 overflow scenarios.
+- `pnpm test:diff ...` passed with the full Web test, typecheck, lint, dev-smoke,
+  and production-build lane; `pnpm verify:acceptance` passed.
+- Desktop and mobile screenshots from the Clubs design study were uploaded and
+  linked in PR #1105.
+- Product-experience review's supported-source qualifier finding was resolved.
+  Preliminary ReviewGPT's keyboard-focus and ordering-coverage findings were
+  resolved; its test-only patch was inspected before application. Parent final
+  review found no unresolved product or implementation issue.
+- The Claude UI check was attempted with Fable but could not run because the
+  account reported explicit usage-credit exhaustion.
+- The separate final ReviewGPT gate is exempt because this is static marketing
+  content/presentation with no workflow, state, data, authority, or
+  product-critical-flow change.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
