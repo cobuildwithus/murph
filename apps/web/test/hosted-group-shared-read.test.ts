@@ -421,7 +421,7 @@ describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () 
 });
 
 describe("workouts.v0 snapshot bounds", () => {
-  it("keeps the maximum parser-valid seven-day workout snapshot within its byte limit", () => {
+  it("keeps the maximum parser-valid eight-date workout snapshot within its byte limit", () => {
     // This finite in-range value exercises the longest JSON number spelling used
     // by the bounded duration field rather than relying only on integer minutes.
     const maximumWidthMinutes = 0.0000030024105450300988;
@@ -463,7 +463,7 @@ describe("workouts.v0 snapshot bounds", () => {
     const encoder = new TextEncoder();
 
     const snapshotBytes = encoder.encode(serialized).byteLength;
-    expect(snapshotBytes).toBe(16_067);
+    expect(snapshotBytes).toBe(18_352);
     expect(snapshotBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
     );
