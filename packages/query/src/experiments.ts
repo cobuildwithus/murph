@@ -447,6 +447,10 @@ export function analyzeExperimentOutcome(
     primary,
     primaryOutcome,
   });
+  const structuredReview = buildStructuredReviewResult(
+    primaryOutcome,
+    outcomeEvidence,
+  );
 
   const result = safeParseContract(experimentOutcomeSchema, {
     schemaVersion: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
@@ -477,7 +481,7 @@ export function analyzeExperimentOutcome(
     commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
     effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
     metricResults,
-    structuredReview: buildStructuredReviewResult(primaryOutcome, outcomeEvidence),
+    ...(structuredReview === undefined ? {} : { structuredReview }),
     outcomeId: `${context.frontmatter.experimentId}-outcome-${context.asOf}`,
     protocolRef: context.frontmatter.protocolRef ?? null,
     windows: buildWindowSummary(context.frontmatter),
