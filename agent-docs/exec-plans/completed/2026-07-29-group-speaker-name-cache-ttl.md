@@ -1,6 +1,6 @@
 # Extend group speaker-name cache lifetimes
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -85,3 +85,4 @@ Updated: 2026-07-29
 - The focused real-model group-call command is locally blocked because
   `OPENAI_API_KEY` is absent. The test parses and typechecks; exact-head CI or a
   configured real-model lane owns execution.
+Completed: 2026-07-29
