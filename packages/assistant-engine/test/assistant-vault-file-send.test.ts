@@ -461,7 +461,10 @@ describe('assistant vault-file send', () => {
       'rerun the trusted command',
     )
     expect(result.finalActionPatch).toEqual({ kind: 'reply-required' })
-    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.responseMediaPatch).toEqual({
+      media: [],
+      op: 'replace',
+    })
   })
 
   it('leaves ordinary vault-file permissions unchanged', async () => {

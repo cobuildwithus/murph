@@ -2727,7 +2727,17 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
-      return toolTextResult(false, 'invalid response media arguments')
+      return {
+        ...toolTextResult(
+          false,
+          'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+        ),
+        finalActionPatch: { kind: 'reply-required' },
+        responseMediaPatch: {
+          media: [],
+          op: 'replace',
+        },
+      }
     case 'invalid-send-vault-file-arguments':
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
@@ -2748,6 +2758,10 @@ export async function executeMurphDynamicToolRequest(input: {
             'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
           ),
           finalActionPatch: { kind: 'reply-required' },
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
         }
       }
       return {

@@ -3475,9 +3475,26 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
   }
 
-  const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
+  const canApplyNoReplyPatch = (
+    deliveryContextOrdinal: number,
+    options: {
+      allowSameContextReplyRequired?: boolean
+    } = {},
+  ): boolean => {
     const trailingSteerCandidateOrdinal =
       trailingSteerCandidate?.deliveryContextOrdinal
+    if (
+      finalActionPatches.some((entry) =>
+        entry.patch.kind === 'reply-required' &&
+        entry.deliveryContextOrdinal <= deliveryContextOrdinal &&
+        !(
+          options.allowSameContextReplyRequired === true &&
+          entry.deliveryContextOrdinal === deliveryContextOrdinal
+        )
+      )
+    ) {
+      return false
+    }
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
@@ -3540,12 +3557,11 @@ async function runCodexAppServerTurnOnProcess(
       reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
       return true
     }
-    if (patch.owner !== 'vault-file' && existingPatch?.kind === 'reply-required') {
-      return false
-    }
     if (
       (computerToolsLockedAfterUserPause ||
-        !canApplyNoReplyPatch(deliveryContextOrdinal))
+        !canApplyNoReplyPatch(deliveryContextOrdinal, {
+          allowSameContextReplyRequired: patch.owner === 'vault-file',
+        }))
     ) {
       return false
     }
@@ -5087,6 +5103,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'invalid-response-media-arguments' ||
     request.kind === 'send-vault-file' ||
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
@@ -5101,6 +5118,7 @@ function isResponseMediaDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'attach-response-media' ||
+    request.kind === 'invalid-response-media-arguments' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||
     request.kind === 'generate-voice-memo' ||

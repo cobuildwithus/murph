@@ -668,11 +668,16 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       contentItems: [
         {
           type: 'inputText',
-          text: 'invalid response media arguments',
+          text:
+            'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
         },
       ],
     })
-    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.finalActionPatch).toEqual({ kind: 'reply-required' })
+    expect(result.responseMediaPatch).toEqual({
+      media: [],
+      op: 'replace',
+    })
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
   })

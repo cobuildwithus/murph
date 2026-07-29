@@ -375,6 +375,14 @@ describe("hosted local Codex image media delivery e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("attach_response_media", {
         media: [{
+          alt: "Earlier response image",
+          kind: "image",
+          source: "hosted-local-codex-earlier-response-image",
+          url: assistantMediaUrl,
+        }],
+      }),
+      buildAssistantProviderMurphToolCall("attach_response_media", {
+        media: [{
           alt: "Unavailable private progress image",
           contentType: "image/png",
           filename: "missing-progress.png",

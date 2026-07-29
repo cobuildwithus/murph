@@ -1191,7 +1191,8 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid response media arguments',
+                  text:
+                    'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
                 },
               ],
             },
@@ -1337,14 +1338,7 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
       responseDeliveryContextOrdinal: 0,
-      responseMedia: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/assistant/cat.png',
-          alt: 'A cat image',
-          source: 'cat-catalog-item',
-        },
-      ],
+      responseMedia: [],
       providerActionCount: 1,
       rolloutRelativePath,
       sessionId: threadId,
@@ -19351,6 +19345,194 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('This final text should be delivered.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('clears earlier response media when a later private replacement cannot be prepared', async () => {
+    const earlierMedia = {
+      alt: 'Earlier response image',
+      kind: 'image' as const,
+      source: 'earlier-response-image',
+      url: 'https://cdn.example.test/assistant/earlier-response.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First request',
+      }),
+      {
+        expectedText: '1 response image attached',
+        id: 101,
+        kind: 'attach-response-media',
+        media: [earlierMedia],
+      },
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Replace that image',
+      }),
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 102,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable replacement image',
+          contentType: 'image/png',
+          filename: 'missing-replacement.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-replacement.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-replacement',
+        }],
+      },
+      completedItemEvent({
+        id: 'assistant-private-media-recovery',
+        type: 'assistant_message',
+        message: 'That replacement image is unavailable.',
+      }),
+    ])
+
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalMessage).toBe('That replacement image is unavailable.')
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('requires a visible reply after malformed response media arguments', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'Send the image',
+      }),
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+        id: 103,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete.png',
+        }],
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+        id: 104,
+        kind: 'finish-without-reply',
+      },
+      completedItemEvent({
+        id: 'assistant-invalid-media-recovery',
+        type: 'assistant_message',
+        message: 'That requested image is unavailable.',
+      }),
+    ])
+
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('That requested image is unavailable.')
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('keeps an earlier private-media reply obligation across a later steer', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'Send the image',
+      }),
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 105,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable private image',
+          contentType: 'image/png',
+          filename: 'missing.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-private-image',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Are you still there?',
+      }),
+      {
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+        id: 106,
+        kind: 'finish-without-reply',
+      },
+      completedItemEvent({
+        id: 'assistant-steered-private-media-recovery',
+        type: 'assistant_message',
+        message: 'I am here, but that image is unavailable.',
+      }),
+    ])
+
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      'I am here, but that image is unavailable.',
+    )
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('lets an approved vault-file send close its own same-context reply requirement', async () => {
+    const sendVaultFile = vi.fn()
+      .mockResolvedValueOnce({
+        filename: 'report.pdf',
+        status: 'denied' as const,
+      })
+      .mockResolvedValueOnce({
+        filename: 'report.pdf',
+        status: 'approved' as const,
+      })
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedSuccess: false,
+        expectedText: 'vault-file delivery was denied',
+        id: 107,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+      {
+        expectedText: JSON.stringify({
+          filename: 'report.pdf',
+          note:
+            'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
+          status: 'approved',
+        }),
+        id: 108,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+      completedItemEvent({
+        id: 'assistant-approved-vault-file',
+        type: 'assistant_message',
+        message: 'This companion reply should not be delivered.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+    })
+
+    expect(sendVaultFile).toHaveBeenCalledTimes(2)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
   })
 
   it('keeps a different generated-file request replyable while a prior send is active', async () => {
