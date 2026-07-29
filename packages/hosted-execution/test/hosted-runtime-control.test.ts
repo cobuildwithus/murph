@@ -1223,7 +1223,7 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
-        milestone: "first_codex_text_observed",
+        milestone: "progress_update_accepted",
         runtimeAttemptId: "attempt_1",
         source: "linq",
         type: "assistant_milestone",
@@ -1232,6 +1232,25 @@ describe("hosted runtime control contracts", () => {
       event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.500Z",
+        milestone: "progress_update_accepted",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
+        milestone: "first_codex_text_observed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.600Z",
         milestone: "first_codex_text_observed",
         runtimeAttemptId: "attempt_1",
         source: "linq",

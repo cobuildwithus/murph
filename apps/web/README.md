@@ -661,9 +661,16 @@ Hosted onboarding extras:
   and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
   shared operational configuration; the latency path never sends through or
   falls back to Linq/iMessage. The monitor uses the fixed 30-second product
-  boundary, sends one email per continuous incident, suppresses sends from 11
-  PM through 7 AM operator-local time, and adds up to ten minutes of stable
-  wake/retry jitter. Provider attempts therefore stay at least ten minutes
+  boundary for the first accepted user-visible response: either a progress
+  update or the final reply. Completed grouped traces count once by their
+  shared Linq delivery, and traces for one in-flight provider request count
+  once while unresolved. Progress accepted before 30 seconds suppresses that
+  turn; progress at or after the boundary remains alertable. The monitor sends
+  no alert for scheduled automation turns, including Flex-tier turns, because
+  they do not own a user-ingress reply trace. The monitor sends one email per
+  continuous incident, suppresses sends from 11 PM through 7 AM
+  operator-local time, and adds up to ten minutes of stable wake/retry jitter.
+  Provider attempts therefore stay at least ten minutes
   apart and spread across more than one five-minute cron tick. A fresh health
   and operator-time recheck before provider admission makes no attempt-state
   change when latency recovered or quiet hours began. Only the exact

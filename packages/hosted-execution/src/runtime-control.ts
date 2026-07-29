@@ -1816,6 +1816,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_request_started",
   "linq_typing_accepted",
+  "progress_update_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
@@ -1932,6 +1933,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   assistant?: {
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
+    progressUpdateAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
@@ -2062,6 +2064,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
+    "progressUpdateAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
