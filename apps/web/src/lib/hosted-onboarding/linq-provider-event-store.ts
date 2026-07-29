@@ -301,7 +301,7 @@ function buildHostedLinqAlertSubject(
 
 function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify({
-    actionTaken: "recorded_only_no_routing_failover",
+    actionTaken: "health_projection_updated_egress_policy_evaluated_at_send",
     deliveryStatus: event.deliveryStatus,
     eventIdSuffix: toHostedOnboardingLogIdSuffix(event.eventId),
     eventType: event.eventType,
@@ -311,6 +311,8 @@ function buildHostedLinqAlertDetailsJson(event: ParsedHostedLinqProviderEvent): 
     phoneNumberRole: event.phoneNumberRole,
     providerCreatedAt: event.providerCreatedAt.toISOString(),
     providerReason: event.providerReason,
+    providerReputationStatus: event.providerHealth?.line?.reputationStatus ?? null,
+    providerServiceStatus: event.providerHealth?.line?.serviceStatus ?? null,
     providerStatus: event.providerStatus,
     service: event.service,
   })) as Prisma.InputJsonValue;
