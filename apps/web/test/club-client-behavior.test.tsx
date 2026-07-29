@@ -12,15 +12,18 @@ vi.mock("@/src/components/homepage/phone-mock", async () => {
     PhoneMock: ({
       messages,
       result,
+      resultPlacement,
     }: {
       messages: ReadonlyArray<{ text: string }>;
       result?: { eyebrow: string };
+      resultPlacement?: "after" | "before";
     }) =>
       createMockElement(
         "div",
         {
           "data-phone-message-count": String(messages.length),
           "data-phone-result": result?.eyebrow ?? "",
+          "data-phone-result-placement": resultPlacement ?? "before",
         },
         messages.map((message) => message.text).join(" "),
       ),
@@ -105,6 +108,7 @@ describe("clubs client behavior", () => {
       expect(phone.getAttribute("data-phone-result")).toBe(
         "ATL moves together",
       );
+      expect(phone.getAttribute("data-phone-result-placement")).toBe("after");
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
@@ -114,6 +118,7 @@ describe("clubs client behavior", () => {
       expect(phone.getAttribute("data-phone-result")).toBe(
         "ATL moves together",
       );
+      expect(phone.getAttribute("data-phone-result-placement")).toBe("after");
     } finally {
       await rendered.cleanup();
     }

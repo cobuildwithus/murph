@@ -5,6 +5,7 @@ export function ClubsPageStudy() {
   return (
     <div
       className="-mx-5 scroll-mt-20 overflow-hidden sm:-mx-8 lg:-mx-12"
+      data-design-state="clubs-imessage-wearables"
       data-design-study="clubs-marketing-page"
       id="clubs-marketing-page-study"
       inert
