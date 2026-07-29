@@ -1,8 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
-import { createHostedPhoneLookupKey } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
 import {
   projectHostedLinqChatHealthTx,
 } from "./linq-provider-health-store";
@@ -40,13 +40,30 @@ export async function syncHostedLinqChatHealthInventory(input: {
     signal: input.signal,
   });
   const observedAt = input.observedAt ?? new Date();
-  let syncedCount = 0;
+  const lineLookupKeyByPhone = new Map<string, string>();
+  const linePhoneNumbers = [...new Set(
+    inventory.chats
+      .map((chat) => chat.linePhoneNumber)
+      .filter((phoneNumber): phoneNumber is string => phoneNumber !== null),
+  )];
+  for (const phoneNumber of linePhoneNumbers) {
+    const line = await upsertHostedLinqLineForPhoneTx({
+      observedAt,
+      phoneNumber,
+      prisma: input.prisma,
+      source: "provider",
+    });
+    lineLookupKeyByPhone.set(phoneNumber, line.phoneNumberLookupKey);
+  }
 
+  let syncedCount = 0;
   for (const chat of inventory.chats) {
     const projected = await projectHostedLinqChatHealthTx({
       chatId: chat.chatId,
       observedAt,
-      phoneNumberLookupKey: createHostedPhoneLookupKey(chat.linePhoneNumber),
+      phoneNumberLookupKey: chat.linePhoneNumber
+        ? lineLookupKeyByPhone.get(chat.linePhoneNumber) ?? null
+        : null,
       prisma: input.prisma,
       providerStatus: chat.providerStatus,
       providerUpdatedAt: chat.providerUpdatedAt,
