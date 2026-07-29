@@ -246,6 +246,48 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
+  it('turns low-stakes Murph-targeted heckling into one sarcastic voice memo', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'Murph-targeted heckling is a voice-welcome, privacy-safe comedy lane',
+    )
+    expect(normalized).toContain(
+      'one short `murph.generate_voice_memo` even when nobody explicitly requested audio',
+    )
+    expect(normalized).toContain(
+      'The move is sarcastic self-dramatization, not retaliation.',
+    )
+    expect(normalized).toContain(
+      'Do not scold the sender, label the room as bullying, sound genuinely hurt, or insult a person back.',
+    )
+    expect(normalized).toContain(
+      'Never repeat a slur or sensitive content.',
+    )
+    expect(normalized).toContain(
+      'Attach it and leave the final response text empty.',
+    )
+    expect(normalized).toContain(
+      'Use the configured room voice unless a member explicitly requests a roster voice.',
+    )
+    expect(normalized).toContain(
+      'Distinguish heckling from a participation boundary.',
+    )
+    expect(normalized).toContain(
+      'an actual request to stop, a correction that Murph interrupted, or a closed human-owned beat still follows `group-chat` and gets silence',
+    )
+    expect(normalized).toContain(
+      'Treat several rapid jabs as one beat, send at most one memo',
+    )
+    expect(normalized).toContain(
+      'Use the faster voice-memo lane for a passing heckle or mock apology demand.',
+    )
+    expect(normalized).toContain(
+      'Reserve a song for a sustained, room-wide on-the-hook moment',
+    )
+  })
+
   it('defaults comedy songs to country without freezing the genre', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalizedComedy = comedy.replace(/\s+/gu, ' ')
