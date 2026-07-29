@@ -2473,10 +2473,19 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Scope boundary:')
     expect(prompt).toContain(
-      'Casual conversation and quick general-knowledge answers are part of being good company.',
+      'make shared decisions, plan ordinary life and leisure',
     )
     expect(prompt).toContain(
-      'Producing work output is not: decline requests to write, review, or debug code, or to produce work, school, or professional deliverables, in one plain sentence without lecturing; tool availability does not expand scope.',
+      'Classify the request by its purpose, not by whether it needs research or produces a plan.',
+    )
+    expect(prompt).toContain(
+      'Ordinary shared-life help is in scope: research public options, compare choices, plan travel or outings, build an itinerary, and coordinate or carry out group logistics with available group-safe tools.',
+    )
+    expect(prompt).toContain(
+      'A plan, comparison, or reservation for the room is not a work deliverable.',
+    )
+    expect(prompt).toContain(
+      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable, in one plain sentence without lecturing; tool availability does not expand scope.',
     )
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
@@ -2594,6 +2603,14 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain('Email replies can converse about this group')
+    expect(prompt).toContain('help plan from public information')
+    expect(prompt).toContain('or authorize a phone call')
+    expect(prompt).toContain(
+      'Do not offer or attempt a phone call from group email.',
+    )
+    expect(prompt).toContain(
+      'Continue the exact call preview and confirmation in the authenticated Linq or Telegram group chat.',
+    )
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
     expect(prompt).toContain("change this room's Murph style")
     expect(prompt).toContain('In group email, do not use the CLI or shell')
@@ -2662,7 +2679,13 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Conversation scope: unverified external audience.')
     expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
     expect(prompt).toContain(
-      'Casual and general-knowledge questions are fine; decline producing work output such as writing, reviewing, or debugging code, or work, school, or professional deliverables.',
+      'Casual conversation, general knowledge, and ordinary personal or shared-life planning from public information are fine.',
+    )
+    expect(prompt).toContain(
+      'Classify the request by its purpose, not by whether it needs research or produces a plan: a comparison, itinerary, or other ordinary-life plan is not a work deliverable.',
+    )
+    expect(prompt).toContain(
+      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable; tool availability does not expand scope.',
     )
     expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
     expect(prompt).not.toContain('Conversation scope: hosted group chat.')

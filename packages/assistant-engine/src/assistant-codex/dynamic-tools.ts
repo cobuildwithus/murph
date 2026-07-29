@@ -206,6 +206,7 @@ import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
+  resolvePhoneCallRequesterInboundMailboxItemIds,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
@@ -2933,13 +2934,31 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope: requestKeyScope.conversationScope,
         })
+        if (requestKeyScope.conversationScope === 'group') {
+          const confirmationInputId =
+            input.request.confirmationMessageRef
+          const previewAuthority = confirmationInputId
+            ? await hostedToolContext
+              .currentGroupPhoneCallPreviewAuthority?.({
+                brief,
+                confirmationInputId,
+              })
+            : null
+          if (!previewAuthority) {
+            return toolTextResult(
+              false,
+              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
+            )
+          }
+        }
         const result = await phoneCalls.start({
           brief,
           ...(requestKeyScope.conversationScope === 'group'
             ? {
-                inboundMailboxItemIds: [
-                  ...requestKeyScope.inboundMailboxItemIds,
-                ],
+                inboundMailboxItemIds:
+                  resolvePhoneCallRequesterInboundMailboxItemIds(
+                    requestKeyScope,
+                  ),
               }
             : {}),
           originSessionId: requestKeyScope.originSessionId,
