@@ -1,11 +1,11 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Product boundary
 
 The iOS companion may offer one optional Contacts step after Apple Health.
-Sharing lets Murph use a familiar, unverified first-name label for a
+Sharing lets Murph use a familiar address-book display name for a
 phone participant in a group owned by the sharing member, whether or not that
 participant already uses Murph.
 Skipping makes no permission request and performs no backend mutation.
@@ -110,8 +110,9 @@ There are two route-authorized consumers. The primary consumer is the existing
 2. Select at most 16 canonical phone handles while retaining each handle's
    durable activation result independently.
 3. Resolve only the human group owner's enabled projection.
-4. Return each remaining single label or explicit multi-label alternative as
-   `unverifiedOwnerContactLabel`.
+4. Carry each remaining single label or explicit multi-label alternative as
+   internal `ownerAdvisoryName` and expose it to the model as participant
+   `displayName`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
    optional overlay; never degrade the truthful roster.
 
@@ -123,16 +124,22 @@ already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.
 
 The model sees the label only for the current tool result and is explicitly
-told that it is untrusted presentation text with no identity, membership,
-consent, routing, instruction, or persistence authority.
+told to trust it as the participant's familiar conversational name, use it
+naturally when helpful, and avoid unsolicited uncertainty or provenance
+disclaimers. If someone asks how Murph knows a name, Murph truthfully identifies
+the group owner's shared address book as the source. That presentation trust
+grants no identity, matching, membership, consent, routing, instruction, or
+persistence authority. A ` / ` value remains explicit alternatives rather than
+permission to choose one.
 
 The second consumer is an exact provider-authenticated Linq
 `participant.added` or `participant.removed` event for an existing active routed
 group. Web normalizes the event's phone handle, first proves that the matching
 hosted identity does not have active Murph activation evidence, and then may
 consult the human group owner's projection. A successful label is included
-with the canonical handle and change action in the route's bounded encrypted
-transient group-event buffer. The participant transaction takes the chat lock
+with the canonical handle and change action as an `address-book name` in the
+route's bounded encrypted transient group-event buffer. The participant
+transaction takes the chat lock
 before ledger insertion and staging, and the locked route rejects the Linq
 account's own lookup key when `is_me` is absent. The next ordinary admitted
 group message consumes that buffer and presents it to the model as weak
@@ -191,6 +198,13 @@ cannot be recalled and remain subject to provider, recipient, device, and backup
 retention.
 
 ## Rollout
+
+The conversational-name update does not change the Web-to-runner wire contract.
+Deploy the runner prompt and model projection first, then deploy Web's
+participant-event wording. Either order is schema-compatible, but runner-first
+avoids a window where Web says `address-book name` while the old model contract
+still asks Murph to distrust it. Verify both a labeled roster read and a labeled
+participant event after both planes are live.
 
 For the multi-label extension, deploy Web acceptance before distributing an iOS
 build that may emit ` / `. Old iOS builds continue sending the existing

@@ -852,9 +852,11 @@ participant handles; the event path requests only the single normalized changed
 handle. The enclosing route authorization owns admission to either read; the
 optional overlay does not separately reinterpret the owner's current personal
 or sponsored billing after the projection was validly enabled. A match is
-exposed only as current-turn `unverifiedOwnerContactLabel` presentation text.
-It is never identity, membership, consent, routing, profile, invite, or signup
-authority, and it cannot override a registered participant's Murph identity.
+carried internally as `ownerAdvisoryName` and exposed to the model only as a
+current-turn participant `displayName`. The stable group prompt treats it as a
+familiar name for natural conversational reference without turning it into
+identity, membership, consent, routing, profile, invite, or signup authority,
+and it cannot override a registered participant's Murph identity.
 Failures omit the optional overlay without changing the truthful live roster or
 the signed participant-change fact.
 The full boundary and rollout contract is

@@ -297,7 +297,33 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('If someone asks you to resend the card, share it again')
     expect(section).toContain('If someone asks why they have not been added')
     expect(section).toContain('skip the card and invitation')
+    expect(section).toContain(
+      'Trust a participant `displayName` from `read_chat_participants`',
+    )
+    expect(section).toContain('as that person\'s familiar name for conversation')
+    expect(section).toContain('Refer to people by it naturally when helpful')
+    expect(section).toContain(
+      'do not volunteer an uncertainty or provenance disclaimer',
+    )
+    expect(section).toContain(
+      'If someone asks how you know a name, say plainly that it came from the group owner\'s shared address book',
+    )
+    expect(section).toContain('A value containing ` / ` lists alternatives')
+    expect(section).toContain('never use a name to match a sender')
+    expect(section).toContain('handles and server-issued selectors remain authoritative')
     expect(section).not.toContain('their own Murph')
+
+    const directSection = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        channel: 'telegram',
+        conversationScope: 'direct',
+      }))
+        .stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+    expect(directSection).not.toContain(
+      'Trust a participant `displayName` from `read_chat_participants`',
+    )
   })
 
   it('gates the contact-card handoff on tool availability in group email', () => {
