@@ -16,19 +16,19 @@ describe("assistant plan usage tool", () => {
       "current private hosted plan",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "explicit plan, usage, billing request",
+      "explicit plan, usage, billing",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
       "trusted low-usage context",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "This is read-only",
+      "Read-only",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "overall AI-usage projection",
+      "AI-usage",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "expose no allowance/credit-source split",
+      "without credit-source splits",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).not.toContain(
       "included/purchased",

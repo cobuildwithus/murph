@@ -75,6 +75,48 @@ describe("hosted billing plan quotes", () => {
 
   it.each([
     {
+      appliedState: {
+        ...STATE,
+        currentBillingPlanCode: "launch_monthly",
+      },
+      name: "immediate upgrade",
+      targetPlanCode: "launch_monthly" as const,
+      timing: "immediate" as const,
+    },
+    {
+      appliedState: {
+        ...STATE,
+        scheduledBillingEffectiveAt: STATE.currentPeriodEnd,
+        scheduledBillingPlanCode: "launch_monthly",
+      },
+      name: "period-end switch",
+      targetPlanCode: "launch_monthly" as const,
+      timing: "period_end" as const,
+    },
+  ])("accepts an expired $name quote after that exact change is applied", ({
+    appliedState,
+    targetPlanCode,
+    timing,
+  }) => {
+    const quote = createHostedBillingPlanQuote({
+      memberId: "member_quote",
+      now: NOW,
+      state: STATE,
+      targetPlanCode,
+      timing,
+    });
+
+    expect(verifyHostedBillingPlanQuote({
+      memberId: "member_quote",
+      now: new Date("2026-07-27T12:30:00.000Z"),
+      quoteId: quote.quoteId,
+      state: appliedState,
+      targetPlanCode,
+    })).toBe(timing);
+  });
+
+  it.each([
+    {
       name: "another member",
       verify: (quoteId: string) => verifyHostedBillingPlanQuote({
         memberId: "member_other",

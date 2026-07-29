@@ -751,6 +751,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      includeSubscriptionActionQuote: true,
       memberId: "member_123",
       prisma: mocks.prisma,
     });

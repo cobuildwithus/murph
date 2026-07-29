@@ -47,11 +47,21 @@ describe("hosted plan usage production gate integration", () => {
       }) as never,
       publicBaseUrl: "https://example.test",
     })).resolves.toEqual({
+      availablePlans: [
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       generatedAt: NOW.toISOString(),
       reason: "trial_conversion_pending",
+      recommendedPlanCode: "launch_monthly",
       recommendedAction: {
-        kind: "start_pulse",
+        kind: "change_plan",
         label: "Start Pulse now ($8/month)",
+        targetPlanCode: "launch_monthly",
         url: "https://example.test/settings#subscription",
       },
       status: "unavailable",
@@ -98,6 +108,9 @@ function buildPrisma(input: {
 }) {
   return {
     hostedAccountGroupMembership: {
+      findFirst: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
       findFirst: vi.fn(async () => null),
     },
     hostedMember: {

@@ -238,6 +238,98 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      currentPlanCode: "launch_monthly" as const,
+      expectedTiming: "period_end" as const,
+      label: "Switch to Group ($3.50/month)",
+      requestedTargetPlanCode: "launch_group_monthly" as const,
+    },
+    {
+      currentPlanCode: "launch_group_monthly" as const,
+      expectedTiming: "immediate" as const,
+      label: "Upgrade to Edge ($20/month)",
+      requestedTargetPlanCode: "launch_edge_monthly" as const,
+    },
+  ])(
+    "quotes the explicit paid $currentPlanCode to $requestedTargetPlanCode choice without an advertised catalog",
+    async ({
+      currentPlanCode,
+      expectedTiming,
+      label,
+      requestedTargetPlanCode,
+    }) => {
+      mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: currentPlanCode,
+        currentCheckoutOffer: "standard",
+        currentPeriodEnd: PERIOD_END,
+        hasStripeCustomerId: true,
+        hasStripeSubscriptionId: true,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      });
+      mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+        allowanceSource: "direct_paid_member_plan",
+        billingPlanCode: currentPlanCode,
+        remainingUsdMicros: 9_000_000n,
+        spentUsdMicros: 1_000_000n,
+      }));
+
+      const result = await readHostedPersonalAiUsageStatus({
+        includeSubscriptionActionQuote: true,
+        memberId: "member_usage_explicit_paid_choice",
+        now: NOW,
+        prisma: buildPrisma(null, true) as never,
+        publicBaseUrl: null,
+        subscriptionActionTargetPlanCode: requestedTargetPlanCode,
+      });
+
+      expect(result).toMatchObject({
+        subscriptionActionQuote: {
+          action: "change_plan",
+          label,
+          targetPlanCode: requestedTargetPlanCode,
+          timing: expectedTiming,
+        },
+      });
+      expect(result).not.toHaveProperty("availablePlans");
+    },
+  );
+
+  it("keeps Pulse as the default paid recommendation from Group", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_group_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: PERIOD_END,
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_group_monthly",
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 10_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_group_default",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      recommendedAction: {
+        kind: "change_plan",
+        targetPlanCode: "launch_monthly",
+      },
+    });
+  });
+
   it("does not quote a second paid plan change while one is scheduled", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
       currentBillingPhase: "paid",
@@ -885,7 +977,10 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
 });
 
-function buildPrisma(firstUsageAt: Date | null) {
+function buildPrisma(
+  firstUsageAt: Date | null,
+  hasConfirmedGroupMembership = false,
+) {
   return {
     hostedAiUsage: {
       findFirst: vi.fn(async () => firstUsageAt
@@ -893,7 +988,8 @@ function buildPrisma(firstUsageAt: Date | null) {
         : null),
     },
     hostedGroupMember: {
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async () =>
+        hasConfirmedGroupMembership ? { id: "hgm_confirmed" } : null),
     },
   };
 }

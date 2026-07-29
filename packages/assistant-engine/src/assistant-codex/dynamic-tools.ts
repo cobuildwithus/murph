@@ -518,7 +518,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, overall AI-usage projection, available plans, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. Omit targetPlanCode for the recommendation; use a plan from the latest availablePlans for another choice. This is read-only: percentages and forecasts cover all available usage and expose no allowance/credit-source split; a recommendation or quote is not consent or a billing action.',
+    'Read current private hosted plan, AI-usage, recommendation and signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; act only on matching quote. availablePlans is only the trial list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -527,7 +527,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
         type: 'string',
         enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
         description:
-          'Optional plan from the latest availablePlans result to quote instead of the server recommendation.',
+          'Optional exact user-named plan to quote instead of the server recommendation.',
       },
     },
   },
@@ -549,45 +549,26 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
   description:
-    'Apply exactly one private hosted subscription action explicitly confirmed by the current user in this turn. Quoted actions require a current matching plan_usage quote; copy its targetPlanCode and quoteId. A different action requires new eligible user input. A scheduled result includes the authoritative effectiveAt; describe the current plan and future plan separately. Only payment_required includes paymentUrl; completed, pending, scheduled, and no_action_required do not prove a payment method.',
+    'Apply one signed private hosted plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with the exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
   inputSchema: {
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['change_plan'],
-          },
-          targetPlanCode: {
-            type: 'string',
-            enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
-          },
-          quoteId: {
-            type: 'string',
-            minLength: 1,
-            maxLength: 1024,
-          },
-        },
-        required: ['action', 'targetPlanCode', 'quoteId'],
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['change_plan'],
       },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: [
-              'continue_pulse',
-              'start_pulse_now',
-              'upgrade_edge',
-            ],
-          },
-        },
-        required: ['action'],
+      targetPlanCode: {
+        type: 'string',
+        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
       },
-    ],
+      quoteId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+      },
+    },
+    required: ['action', 'targetPlanCode', 'quoteId'],
   },
 } as const
 

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import type { HostedPlanUsageAvailableStatus } from "@murphai/hosted-execution/plan-usage";
+import type {
+  HostedPlanUsageAvailableStatus,
+  HostedPlanUsageSubscriptionActionQuote,
+} from "@murphai/hosted-execution/plan-usage";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, test, vi } from "vitest";
@@ -35,6 +38,27 @@ function buildUsageStatus(
     status: "active",
     usedPercent: 35,
     ...overrides,
+  };
+}
+
+function buildSubscriptionActionQuote(input: {
+  label: string;
+  targetPlanCode: HostedPlanUsageSubscriptionActionQuote["targetPlanCode"];
+  timing: HostedPlanUsageSubscriptionActionQuote["timing"];
+}): HostedPlanUsageSubscriptionActionQuote {
+  const monthlyPriceUsdCents = input.targetPlanCode === "launch_group_monthly"
+    ? 350
+    : input.targetPlanCode === "launch_monthly"
+      ? 800
+      : 2_000;
+  return {
+    action: "change_plan",
+    expiresAt: "2026-07-10T12:10:00.000Z",
+    label: input.label,
+    monthlyPriceUsdCents,
+    quoteId: `quote_${input.targetPlanCode}_${input.timing}`,
+    targetPlanCode: input.targetPlanCode,
+    timing: input.timing,
   };
 }
 
@@ -835,6 +859,220 @@ describe("HostedBillingSettings", () => {
     assert.match(ineligibleStartMarkup, /Start Pulse from usage/);
     assert.match(eligibleUpgradeMarkup, /Upgrade from usage/);
     assert.match(ineligibleUpgradeMarkup, /Upgrade from usage/);
+  });
+
+  test("keeps an active trial on the server-selected trial-end path", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          accessKind: "trial",
+          periodKind: "trial",
+          planName: "Pulse Trial",
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Keep Pulse from usage",
+            targetPlanCode: "launch_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Keep Pulse from usage",
+            targetPlanCode: "launch_monthly",
+            timing: "at_trial_end",
+          }),
+        }),
+      },
+    ));
+
+    const actionButton = findButtonByText(
+      rendered.window.document,
+      "Keep Pulse from usage",
+      rendered.window,
+    );
+    await act(async () => {
+      actionButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your current trial continues/,
+    );
+
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Keep Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(
+      mocks.requestHostedTrialPlanStartPaid.mock.calls[0]?.[0],
+      {
+        targetPlanCode: "launch_monthly",
+        timing: "at_trial_end",
+      },
+    );
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    await rendered.cleanup();
+  });
+
+  test("uses the immediate paid endpoint selected by the usage status", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          planCode: "launch_group_monthly",
+          planName: "Group",
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Start Pulse now from usage",
+            targetPlanCode: "launch_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Start Pulse now from usage",
+            targetPlanCode: "launch_monthly",
+            timing: "immediate",
+          }),
+        }),
+      },
+    ));
+
+    const actionButton = findButtonByText(
+      rendered.window.document,
+      "Start Pulse now from usage",
+      rendered.window,
+    );
+    await act(async () => {
+      actionButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Confirm upgrade",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      payload: {
+        targetPlanCode: "launch_monthly",
+      },
+      url: "/api/settings/billing/upgrade-plan",
+    });
+    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
+    await rendered.cleanup();
+  });
+
+  test("uses the period-end paid endpoint selected by the usage status", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_group_monthly",
+      status: "scheduled",
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            timing: "period_end",
+          }),
+        }),
+      },
+    ));
+
+    const actionButton = findButtonByText(
+      rendered.window.document,
+      "Choose Group next month from usage",
+      rendered.window,
+    );
+    await act(async () => {
+      actionButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /current plan continues through Aug 1, 2026/,
+    );
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Confirm switch",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      payload: {
+        targetPlanCode: "launch_group_monthly",
+      },
+      url: "/api/settings/billing/switch-plan",
+    });
+    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
+    await rendered.cleanup();
+  });
+
+  test("suppresses a plan change when the signed quote targets another plan", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        usageStatus: buildUsageStatus({
+          recommendedAction: {
+            kind: "change_plan",
+            label: "Choose Group next month from usage",
+            targetPlanCode: "launch_group_monthly",
+            url: "https://example.test/settings#subscription",
+          },
+          subscriptionActionQuote: buildSubscriptionActionQuote({
+            label: "Keep Pulse",
+            targetPlanCode: "launch_monthly",
+            timing: "period_end",
+          }),
+        }),
+      },
+    ));
+
+    assert.doesNotMatch(markup, /Choose Group next month from usage/);
   });
 
   test("shows the Pulse trial start action inline for Pulse trial members", async () => {

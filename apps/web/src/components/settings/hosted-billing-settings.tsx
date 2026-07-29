@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
-import type { HostedPlanUsageStatus } from "@murphai/hosted-execution/plan-usage";
+import type {
+  HostedPlanUsageRecommendedAction,
+  HostedPlanUsageStatus,
+  HostedPlanUsageSubscriptionActionQuote,
+} from "@murphai/hosted-execution/plan-usage";
 
 import { Button } from "@/src/components/ui/button";
 import { Progress } from "@/src/components/ui/progress";
@@ -10,7 +14,6 @@ import {
   HOSTED_PULSE_TRIAL_OFFER,
   formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
-  getHostedDirectBillingPlanRank,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
@@ -39,6 +42,20 @@ const GROUP_FEATURES = [
   "Private Murph chat",
   "Lighter included AI usage",
 ];
+
+function getAuthorizedPlanChangeTiming(
+  status: HostedPlanUsageStatus,
+  action: Extract<
+    HostedPlanUsageRecommendedAction,
+    { kind: "change_plan" }
+  >,
+): HostedPlanUsageSubscriptionActionQuote["timing"] | null {
+  const quote = status.subscriptionActionQuote;
+  return quote?.action === "change_plan"
+    && quote.targetPlanCode === action.targetPlanCode
+    ? quote.timing
+    : null;
+}
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -414,8 +431,12 @@ function PlanUsageBand(props: {
     }
 
     const action = status.recommendedAction;
+    const actionTiming = action?.kind === "change_plan"
+      ? getAuthorizedPlanChangeTiming(status, action)
+      : null;
     const quotedTrialPlanCode =
       action?.kind === "change_plan"
+      && actionTiming === "now"
       && (
         action.targetPlanCode === "launch_group_monthly"
         || action.targetPlanCode === "launch_monthly"
@@ -474,6 +495,9 @@ function PlanUsageBand(props: {
     ? `Trial ends ${periodEndLabel}`
     : `Resets ${periodEndLabel}`;
   const action = status.recommendedAction;
+  const actionTiming = action?.kind === "change_plan"
+    ? getAuthorizedPlanChangeTiming(status, action)
+    : null;
   const forecast = status.forecast
     ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
@@ -537,18 +561,34 @@ function PlanUsageBand(props: {
             && !props.pulseTrialBillingContinuationPending ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
         ) : action?.kind === "change_plan" ? (
-          <HostedPlanChangeButton
-            currentPeriodEnd={status.periodEnd}
-            mode={
-              getHostedDirectBillingPlanRank(action.targetPlanCode) >
-              getHostedDirectBillingPlanRank(status.planCode)
-                ? "upgrade"
-                : "schedule"
-            }
-            targetPlanCode={action.targetPlanCode}
-          >
-            {action.label}
-          </HostedPlanChangeButton>
+          (actionTiming === "now" || actionTiming === "at_trial_end")
+          && (
+            action.targetPlanCode === "launch_group_monthly"
+            || action.targetPlanCode === "launch_monthly"
+          ) ? (
+            <StartPaidPulseButton
+              targetPlanCode={action.targetPlanCode}
+              timing={actionTiming}
+            >
+              {action.label}
+            </StartPaidPulseButton>
+          ) : actionTiming === "immediate" ? (
+            <HostedPlanChangeButton
+              currentPeriodEnd={status.periodEnd}
+              mode="upgrade"
+              targetPlanCode={action.targetPlanCode}
+            >
+              {action.label}
+            </HostedPlanChangeButton>
+          ) : actionTiming === "period_end" ? (
+            <HostedPlanChangeButton
+              currentPeriodEnd={status.periodEnd}
+              mode="schedule"
+              targetPlanCode={action.targetPlanCode}
+            >
+              {action.label}
+            </HostedPlanChangeButton>
+          ) : null
         ) : action?.kind === "upgrade_edge" ? (
           <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
         ) : null}

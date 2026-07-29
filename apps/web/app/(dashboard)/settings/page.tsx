@@ -571,6 +571,7 @@ async function readSettingsPageData(input: {
       prisma,
     });
   const usageStatus = await readHostedPersonalAiUsageStatus({
+    includeSubscriptionActionQuote: true,
     memberId,
     prisma,
   });

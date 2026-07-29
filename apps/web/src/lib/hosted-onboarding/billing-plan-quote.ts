@@ -130,18 +130,52 @@ export function verifyHostedBillingPlanQuote(input: {
 }): HostedBillingPlanQuoteTiming {
   const payload = parseHostedBillingPlanQuote(input.quoteId);
   const definition = getHostedBillingPlanDefinition(input.targetPlanCode);
+  const matchesAppliedState = isHostedBillingPlanQuoteApplied({
+    payload,
+    state: input.state,
+  });
 
   if (
-    payload.expiresAtMs <= input.now.getTime()
-    || payload.memberBinding !== createMemberBinding(input.memberId)
+    payload.memberBinding !== createMemberBinding(input.memberId)
     || payload.monthlyPriceUsdCents !== definition.recurringAmountUsdCents
-    || payload.stateFingerprint !== createStateFingerprint(input.state)
     || payload.targetPlanCode !== input.targetPlanCode
+    || (
+      payload.stateFingerprint !== createStateFingerprint(input.state)
+      && !matchesAppliedState
+    )
+    || (
+      payload.expiresAtMs <= input.now.getTime()
+      && !matchesAppliedState
+    )
   ) {
     throw buildHostedBillingPlanQuoteStaleError();
   }
 
   return payload.timing;
+}
+
+function isHostedBillingPlanQuoteApplied(input: {
+  payload: HostedBillingPlanQuotePayload;
+  state: HostedBillingPlanQuoteState;
+}): boolean {
+  if (
+    !input.state.hasStripeCustomerId
+    || !input.state.hasStripeSubscriptionId
+  ) {
+    return false;
+  }
+
+  if (
+    input.payload.timing === "immediate"
+    || input.payload.timing === "now"
+  ) {
+    return input.state.billingStatus === "active"
+      && input.state.currentBillingPhase === "paid"
+      && input.state.currentBillingPlanCode === input.payload.targetPlanCode;
+  }
+
+  return input.state.scheduledBillingEffectiveAt !== null
+    && input.state.scheduledBillingPlanCode === input.payload.targetPlanCode;
 }
 
 function parseHostedBillingPlanQuote(

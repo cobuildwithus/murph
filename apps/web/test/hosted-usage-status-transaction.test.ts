@@ -15,6 +15,9 @@ describe("hosted usage status transaction reads", () => {
   it("serializes the action quote graph on an interactive transaction client", async () => {
     const queryGuard = createSingleQueryGuard();
     const prisma = {
+      hostedGroupMember: {
+        findFirst: () => queryGuard.run(async () => null),
+      },
       hostedAiUsage: {
         findFirst: () => queryGuard.run(async () => null),
       },
@@ -46,7 +49,7 @@ describe("hosted usage status transaction reads", () => {
       publicBaseUrl: "https://example.test",
     })).resolves.toMatchObject({
       recommendedAction: {
-        kind: "start_pulse",
+        kind: "change_plan",
       },
       status: "active",
       usedPercent: 90,

@@ -24,7 +24,7 @@ describe("assistant subscription tool", () => {
     "continue_pulse",
     "start_pulse_now",
     "upgrade_edge",
-  ] as const)("accepts the closed %s action", (action) => {
+  ] as const)("keeps legacy %s parsing only for backend compatibility", (action) => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -36,6 +36,21 @@ describe("assistant subscription tool", () => {
       kind: "subscription",
       request: { action },
     });
+  });
+
+  it("exposes only signed change_plan to the model", () => {
+    expect(MURPH_SUBSCRIPTION_TOOL.inputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        action: {
+          enum: ["change_plan"],
+        },
+      },
+      required: ["action", "targetPlanCode", "quoteId"],
+      type: "object",
+    });
+    expect(JSON.stringify(MURPH_SUBSCRIPTION_TOOL.inputSchema))
+      .not.toMatch(/continue_pulse|start_pulse_now|upgrade_edge/u);
   });
 
   it("keeps input authority out of model arguments", () => {
@@ -201,12 +216,10 @@ describe("assistant subscription tool", () => {
 
     expect(contract.length).toBeLessThanOrEqual(640);
     expect(contract).toContain("explicitly confirmed by the current user in this turn");
-    expect(contract).toContain("A different action requires new eligible user input");
-    expect(contract).toContain("scheduled result includes the authoritative effectiveAt");
+    expect(contract).toContain("a different target requires new eligible user input");
+    expect(contract).toContain("scheduled result includes authoritative effectiveAt");
     expect(contract).toContain("Only payment_required includes paymentUrl");
-    expect(contract).toContain(
-      "completed, pending, scheduled, and no_action_required do not prove a payment method",
-    );
+    expect(contract).toContain("other results do not prove a payment method");
   });
 });
 
