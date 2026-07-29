@@ -9,6 +9,7 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -88,6 +89,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
@@ -303,6 +305,129 @@ const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   { label: "Telegram", value: "telegram" },
 ];
 
+const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
+  {
+    category: "Nutrition",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-earlier-evening-meals",
+    image: "/design-assets/hero-01.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Jun 2 – Jun 22",
+      day: 21,
+      metrics: [
+        {
+          current: "54.7 bpm",
+          delta: "-2.1 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "93.8 percent",
+          delta: "+1.4 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+      ],
+    },
+    searchText: "design earlier evening meals",
+    startedOn: "2026-06-02",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Earlier Evening Meals",
+  },
+  {
+    category: "Recovery",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-consistent-wake-time",
+    image: "/design-assets/hero-02.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "May 8 – May 28",
+      day: 21,
+      metrics: [
+        {
+          current: "91.3 percent",
+          delta: "+2.3 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+        {
+          current: "105 min",
+          delta: "+14 min",
+          label: "Deep sleep",
+          sentiment: "positive",
+        },
+        {
+          current: "57.9 ms",
+          delta: "+0.8 ms",
+          label: "HRV RMSSD",
+          sentiment: "neutral",
+        },
+        {
+          current: "57 min",
+          delta: "+9 min",
+          label: "Sleep latency",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design consistent wake time",
+    startedOn: "2026-05-08",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Consistent Wake Time",
+  },
+  {
+    category: "Movement",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-easy-aerobic-base",
+    image: "/design-assets/hero-03.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Apr 12 – May 3",
+      day: 22,
+      metrics: [
+        {
+          current: "49.8 bpm",
+          delta: "-3.2 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "61.4 ms",
+          delta: "+4.6 ms",
+          label: "HRV RMSSD",
+          sentiment: "positive",
+        },
+        {
+          current: "89.1 percent",
+          delta: "-0.5 percent",
+          label: "Sleep efficiency",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design easy aerobic base",
+    startedOn: "2026-04-12",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Easy Aerobic Base",
+  },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -334,6 +459,20 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Home experiment history cards">
+          <div
+            className="grid items-start gap-5 lg:grid-cols-3"
+            data-design-home-experiment-history-cards
+            inert
+          >
+            {DESIGN_HOME_HISTORY_CARDS.map((card) => (
+              <HomeExperimentCard key={card.id} card={card} variant="history" />
+            ))}
+          </div>
+        </Section>
 
         <Separator />
 

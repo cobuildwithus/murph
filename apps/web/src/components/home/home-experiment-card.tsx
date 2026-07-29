@@ -21,7 +21,7 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
     <article
       className={cn(
         "group flex flex-col rounded-xl border border-border/70 bg-card/70 transition-colors",
-        variant === "history" ? "h-fit p-4" : "h-full min-h-[240px] p-5",
+        variant === "history" ? "h-fit p-5" : "h-full min-h-[240px] p-5",
         card.href ? "hover:border-primary/35 hover:bg-card" : "",
       )}
       data-home-experiment-card
@@ -32,10 +32,7 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             {card.category}
           </p>
-          <h3 className={cn(
-            "mt-1 text-balance font-serif font-semibold leading-tight text-foreground",
-            variant === "history" ? "text-lg" : "text-xl",
-          )}>
+          <h3 className="mt-1 text-balance font-serif text-xl font-semibold leading-tight text-foreground">
             {card.title}
           </h3>
         </div>
@@ -61,14 +58,14 @@ export function HomeExperimentCard({ card, variant }: HomeExperimentCardProps) {
 
       <div className={cn(
         "flex flex-1 items-center border-t border-border/60",
-        variant === "history" ? "mt-3 pt-3" : "mt-5 pt-5",
+        variant === "history" ? "mt-4 pt-4" : "mt-5 pt-5",
       )}>
         <ExperimentDataVisual card={card} variant={variant} />
       </div>
 
       <footer className={cn(
         "flex items-center justify-between gap-4 text-[11px] text-muted-foreground",
-        variant === "history" ? "mt-3" : "mt-5",
+        variant === "history" ? "mt-4" : "mt-5",
       )}>
         <span className="inline-flex min-w-0 items-center gap-1.5 tabular-nums">
           {variant === "history" && card.privateBadgeLabel ? (
@@ -150,28 +147,61 @@ function ExperimentDataVisual({ card, variant }: HomeExperimentCardProps) {
 }
 
 function ExperimentResults({ metrics }: { metrics: ExperimentRunCardMetric[] }) {
-  return (
-    <div className="grid w-full grid-cols-2 gap-x-4 gap-y-3">
-      {metrics.map((metric, index) => {
-        const sentimentLabel = resolveMetricSentimentLabel(metric);
+  const [primaryMetric, ...supportingMetrics] = metrics;
 
-        return (
-          <div key={`${metric.label}:${index}`} className="min-w-0">
-            <p className="font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
-              {metric.label}
-            </p>
-            <p className={cn(
-              "mt-1 font-serif text-xl font-semibold leading-none tabular-nums",
-              resolveMetricTone(metric),
-            )}>
-              {metric.delta || metric.current}
-              {sentimentLabel ? (
-                <span className="sr-only">{sentimentLabel}</span>
-              ) : null}
-            </p>
-          </div>
-        );
-      })}
+  if (!primaryMetric) {
+    return null;
+  }
+
+  const primarySentimentLabel = resolveMetricSentimentLabel(primaryMetric);
+
+  return (
+    <div className="w-full" data-home-experiment-results>
+      <div data-home-experiment-primary-result>
+        <p className="font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
+          {primaryMetric.label}
+        </p>
+        <p className={cn(
+          "mt-1.5 font-serif text-3xl font-semibold leading-none tabular-nums",
+          resolveMetricTone(primaryMetric),
+        )}>
+          {primaryMetric.delta || primaryMetric.current}
+          {primarySentimentLabel ? (
+            <span className="sr-only">{primarySentimentLabel}</span>
+          ) : null}
+        </p>
+      </div>
+
+      {supportingMetrics.length > 0 ? (
+        <dl
+          className="mt-4 divide-y divide-border/60 border-y border-border/60"
+          data-home-experiment-supporting-results
+        >
+          {supportingMetrics.map((metric, index) => {
+            const sentimentLabel = resolveMetricSentimentLabel(metric);
+
+            return (
+              <div
+                key={`${metric.label}:${index}`}
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4 py-2.5"
+              >
+                <dt className="min-w-0 truncate font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
+                  {metric.label}
+                </dt>
+                <dd className={cn(
+                  "shrink-0 font-serif text-lg font-semibold leading-none tabular-nums",
+                  resolveMetricTone(metric),
+                )}>
+                  {metric.delta || metric.current}
+                  {sentimentLabel ? (
+                    <span className="sr-only">{sentimentLabel}</span>
+                  ) : null}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      ) : null}
     </div>
   );
 }

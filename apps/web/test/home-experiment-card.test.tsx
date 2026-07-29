@@ -48,17 +48,20 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
     markup,
     /Sleep efficiency[\s\S]*Deep sleep[\s\S]*HRV RMSSD[\s\S]*Resting heart rate/,
   );
+  assert.match(markup, /data-home-experiment-results="true"/);
+  assert.match(markup, /data-home-experiment-primary-result="true"/);
+  assert.match(markup, /data-home-experiment-supporting-results="true"/);
   assert.match(
     markup,
     /Sleep efficiency<\/p><p class="[^"]*text-amber-700[^"]*">-0\.7 percent<span class="sr-only">, unfavorable<\/span><\/p>/,
   );
   assert.match(
     markup,
-    /Deep sleep<\/p><p class="[^"]*text-primary[^"]*">\+20\.4 min<span class="sr-only">, favorable<\/span><\/p>/,
+    /Deep sleep<\/dt><dd class="[^"]*text-primary[^"]*">\+20\.4 min<span class="sr-only">, favorable<\/span><\/dd>/,
   );
   assert.match(
     markup,
-    /HRV RMSSD<\/p><p class="[^"]*text-foreground[^"]*">\+0\.6 ms<\/p>/,
+    /HRV RMSSD<\/dt><dd class="[^"]*text-foreground[^"]*">\+0\.6 ms<\/dd>/,
   );
   assert.doesNotMatch(markup, /Baseline/);
   assert.doesNotMatch(markup, /Latest/);
@@ -77,6 +80,7 @@ test("HomeExperimentCard shows the member's result instead of protocol imagery a
   assert.doesNotMatch(markup, />View</);
   assert.doesNotMatch(markup, /h-full/);
   assert.doesNotMatch(markup, /min-h-\[240px\]/);
+  assert.match(markup, /h-fit p-5/);
   assert.doesNotMatch(markup, /<img/);
   assert.doesNotMatch(markup, /Protocol preview copy that should stay hidden/);
 });
@@ -93,6 +97,29 @@ test("HomeExperimentCard preserves a non-redundant history status", async () => 
   }));
 
   assert.match(markup, />Review due</);
+});
+
+test("HomeExperimentCard omits the supporting ledger for a single result", async () => {
+  const { HomeExperimentCard } = await import(
+    "@/src/components/home/home-experiment-card"
+  );
+  const card = resultCard();
+  if (!card.runSummary) {
+    throw new Error("Expected the result-card fixture to have a run summary.");
+  }
+  card.runSummary = {
+    ...card.runSummary,
+    metrics: card.runSummary.metrics.slice(0, 1),
+  };
+  const markup = renderToStaticMarkup(createElement(HomeExperimentCard, {
+    card,
+    variant: "history",
+  }));
+
+  assert.match(markup, /data-home-experiment-primary-result="true"/);
+  assert.doesNotMatch(markup, /data-home-experiment-supporting-results/);
+  assert.match(markup, /-0\.7 percent/);
+  assert.doesNotMatch(markup, /Deep sleep/);
 });
 
 test("HomeExperimentCard does not hide a source Done status", async () => {
