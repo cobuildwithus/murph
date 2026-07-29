@@ -941,6 +941,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "create_join_link",
       joinLink: {
+        useCurrentChatName: true,
+      },
+    })).toEqual({
+      action: "create_join_link",
+      joinLink: {
+        displayName: null,
+        kind: null,
+        requestedVaultShareProjectionKinds: null,
+        requestedVaultShareProjectionScopes: null,
+        useCurrentChatName: true,
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "create_join_link",
+      joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
         requestedVaultShareProjectionScopes: [
@@ -1003,6 +1018,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "post_join_offer",
       joinOffer: {
         messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        useCurrentChatName: true,
       },
     })).toEqual({
       action: "post_join_offer",
@@ -1011,6 +1027,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
         projectionKinds: null,
         projectionScopes: null,
+        useCurrentChatName: true,
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -1188,6 +1205,12 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/must not be blank/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { useCurrentChatName: "yes" },
+      })
+    ).toThrow(/useCurrentChatName/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
         joinOffer: { intro: "Like this to join us." },
       })
@@ -1222,6 +1245,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinOffer: { projectionScopes: [{ projectionKind: "profile-name.v0" }] },
       })
     ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { useCurrentChatName: 1 },
+      })
+    ).toThrow(/useCurrentChatName/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",

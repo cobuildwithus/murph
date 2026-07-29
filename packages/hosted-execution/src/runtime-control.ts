@@ -1054,6 +1054,11 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
   // Closed over the individually selectable scopes: the membership-implied
   // profile-name.v0 share is never requestable through a join link.
   requestedVaultShareProjectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+  /**
+   * The model may request the current route's provider title, but Web resolves
+   * both values and accepts neither from model input.
+   */
+  useCurrentChatName?: boolean;
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
@@ -1069,6 +1074,11 @@ export interface HostedRuntimeGroupPostJoinOfferRequest {
   // Closed over the individually selectable scopes; the offer always includes
   // the membership-implied profile-name.v0 share in its deterministic copy.
   projectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+  /**
+   * The model may request the current route's provider title, but Web resolves
+   * both values and accepts neither from model input.
+   */
+  useCurrentChatName?: boolean;
 }
 
 export interface HostedRuntimeGroupUpdateDisplayNameRequest {

@@ -1482,7 +1482,13 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
+    new Set([
+      "displayName",
+      "messageTemplate",
+      "projectionKinds",
+      "projectionScopes",
+      "useCurrentChatName",
+    ]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
   const displayName = parseHostedRuntimeGroupDisplayName(
@@ -1505,6 +1511,14 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionScopes",
     ),
+    ...(record.useCurrentChatName === undefined
+      ? {}
+      : {
+          useCurrentChatName: requireBoolean(
+            record.useCurrentChatName,
+            "Hosted runtime group tool post_join_offer useCurrentChatName",
+          ),
+        }),
   };
 }
 
@@ -1697,6 +1711,7 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       "kind",
       "requestedVaultShareProjectionKinds",
       "requestedVaultShareProjectionScopes",
+      "useCurrentChatName",
     ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
@@ -1721,6 +1736,14 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
     ),
+    ...(record.useCurrentChatName === undefined
+      ? {}
+      : {
+          useCurrentChatName: requireBoolean(
+            record.useCurrentChatName,
+            "Hosted runtime group tool create_join_link useCurrentChatName",
+          ),
+        }),
   };
 }
 

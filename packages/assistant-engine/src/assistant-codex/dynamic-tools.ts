@@ -851,6 +851,11 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and then tries to store the same hosted group label; optional for action="create_join_link" or action="post_join_offer" only when it is the name the group chose.',
       },
+      useCurrentChatName: {
+        type: 'boolean',
+        description:
+          'Optional only for action="create_join_link" or action="post_join_offer". Set true during new-group setup only when the room supplied no name. Web resolves the current provider title and route without accepting either from model input; an explicit displayName takes precedence.',
+      },
       membershipId: {
         type: 'string',
         minLength: 1,
@@ -1598,6 +1603,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .array(groupVaultShareProjectionScopeSchema)
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
+      useCurrentChatName: z.boolean().optional(),
     })
     .strict(),
   z
@@ -1619,6 +1625,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .array(groupVaultShareProjectionScopeSchema)
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
+      useCurrentChatName: z.boolean().optional(),
     })
     .strict(),
 ])
@@ -5503,6 +5510,9 @@ function parseGroupArguments(
               parsed.data.requestedVaultShareProjectionScopes,
           }
         : {}),
+      ...(parsed.data.useCurrentChatName !== undefined
+        ? { useCurrentChatName: parsed.data.useCurrentChatName }
+        : {}),
     }
     return {
       ok: true,
@@ -5608,6 +5618,9 @@ function parseGroupArguments(
       messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
       ...(parsed.data.projectionScopes !== undefined
         ? { projectionScopes: parsed.data.projectionScopes }
+        : {}),
+      ...(parsed.data.useCurrentChatName !== undefined
+        ? { useCurrentChatName: parsed.data.useCurrentChatName }
         : {}),
     }
     return {

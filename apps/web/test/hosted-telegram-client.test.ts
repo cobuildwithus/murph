@@ -8,10 +8,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   answerHostedTelegramCallbackQueryBestEffort,
+  getHostedTelegramGroupTitle,
   sendHostedTelegramTextMessage,
 } from "@/src/lib/hosted-onboarding/telegram-client";
 
-describe("sendHostedTelegramTextMessage", () => {
+describe("hosted Telegram client", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -51,6 +52,74 @@ describe("sendHostedTelegramTextMessage", () => {
         message_id: 17,
       },
       text: "Try setup again.",
+    });
+  });
+
+  it("reads the current group title from the base chat", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      result: {
+        id: -42,
+        title: "Weekend Warriors",
+        type: "supergroup",
+      },
+    }), { status: 200 }));
+
+    await expect(getHostedTelegramGroupTitle({
+      threadId: "-42:topic:7",
+    })).resolves.toBe("Weekend Warriors");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.telegram.org/bottelegram-token/getChat");
+    expect(JSON.parse(String(request.body))).toEqual({
+      chat_id: "-42",
+    });
+  });
+
+  it("returns no title when Telegram has none", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      result: {
+        id: -42,
+        type: "group",
+      },
+    }), { status: 200 }));
+
+    await expect(getHostedTelegramGroupTitle({
+      threadId: "-42",
+    })).resolves.toBeNull();
+  });
+
+  it("rejects a direct-chat metadata response", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      result: {
+        first_name: "Someone",
+        id: 42,
+        type: "private",
+      },
+    }), { status: 200 }));
+
+    await expect(getHostedTelegramGroupTitle({
+      threadId: "-42",
+    })).rejects.toMatchObject({
+      code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
+      retryable: true,
+    });
+  });
+
+  it("rejects an oversized metadata response", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", {
+      headers: { "content-length": String(64 * 1024 + 1) },
+      status: 200,
+    }));
+
+    await expect(getHostedTelegramGroupTitle({
+      threadId: "-42",
+    })).rejects.toMatchObject({
+      code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
+      retryable: true,
     });
   });
 

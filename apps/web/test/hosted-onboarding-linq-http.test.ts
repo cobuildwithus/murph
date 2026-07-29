@@ -124,11 +124,14 @@ describe("getHostedLinqChatSummary", () => {
     Reflect.deleteProperty(globalThis, "fetch");
   });
 
-  it("reads top-level canonical group directness from the chat endpoint", async () => {
+  it("reads top-level canonical group metadata from the chat endpoint", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
-      return createJsonResponse(createCanonicalLinqChat(true), 200);
+      return createJsonResponse({
+        ...createCanonicalLinqChat(true),
+        display_name: "Weekend Warriors",
+      }, 200);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -136,6 +139,7 @@ describe("getHostedLinqChatSummary", () => {
       chatId: "chat_123",
       timeoutMs: 1_500,
     })).resolves.toEqual({
+      displayName: "Weekend Warriors",
       handles: [
         {
           handle: "+15550000000",
@@ -188,6 +192,7 @@ describe("getHostedLinqChatSummary", () => {
       chatId: "chat_123",
       timeoutMs: 1_500,
     })).resolves.toEqual({
+      displayName: null,
       handles: [],
       isGroup: null,
     });

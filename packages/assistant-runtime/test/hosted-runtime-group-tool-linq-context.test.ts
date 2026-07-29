@@ -284,6 +284,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         messageTemplate:
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
+        useCurrentChatName: true,
       },
     });
     expect(request).toHaveBeenLastCalledWith({
@@ -292,6 +293,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         messageTemplate:
           "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
         projectionKinds: ["sleep-times.v0"],
+        useCurrentChatName: true,
       },
       linqThread: {
         authority: ROUTE_AUTHORITY,

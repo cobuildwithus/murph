@@ -124,6 +124,8 @@ describe("murph.group dynamic tool", () => {
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.useCurrentChatName.type)
+      .toBe("boolean");
     const [
       fixedScopeSchema,
       minutesScopeSchema,
@@ -2177,6 +2179,44 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: { action: "create_join_link" },
     });
+  });
+
+  it("forwards current-chat naming intent only on creation actions", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      useCurrentChatName: true,
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "create_join_link",
+        joinLink: { useCurrentChatName: true },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+      useCurrentChatName: true,
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+          projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+          useCurrentChatName: true,
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_current",
+      useCurrentChatName: true,
+    }))?.kind).toBe("invalid-group-arguments");
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      useCurrentChatName: "yes",
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("keeps displayName optional on post_join_offer", () => {

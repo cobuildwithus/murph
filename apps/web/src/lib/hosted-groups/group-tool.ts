@@ -36,6 +36,7 @@ import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-acti
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   getHostedLinqChatHandles,
+  getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
@@ -55,11 +56,15 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import { getHostedTelegramGroupTitle } from "../hosted-onboarding/telegram-client";
 import {
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
+import {
+  resolveHostedAssistantNotificationDestination,
+} from "../hosted-routing/assistant-notification-destination";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
@@ -792,6 +797,14 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
 
   const prisma = getPrisma();
   const now = new Date();
+  const resolvedDisplayName = await resolveHostedRuntimeGroupCreationDisplayName({
+    displayName: input.joinLink?.displayName,
+    memberId: input.memberId,
+    useCurrentChatName: input.joinLink?.useCurrentChatName === true,
+  });
+  if ("unavailableReason" in resolvedDisplayName) {
+    return unavailable(resolvedDisplayName.unavailableReason);
+  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -809,7 +822,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
-      displayName: input.joinLink?.displayName ?? null,
+      displayName: resolvedDisplayName.displayName,
       kind: input.joinLink?.kind ?? null,
       now,
       requestedVaultShareProjectionScopes,
@@ -1007,6 +1020,15 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
+  const resolvedDisplayName = await resolveHostedRuntimeGroupCreationDisplayName({
+    displayName: input.joinOffer?.displayName,
+    linqChatId: authorized.chatId,
+    memberId: input.memberId,
+    useCurrentChatName: input.joinOffer?.useCurrentChatName === true,
+  });
+  if ("unavailableReason" in resolvedDisplayName) {
+    return unavailable(resolvedDisplayName.unavailableReason);
+  }
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.joinOffer?.projectionScopes
       ?? input.joinOffer?.projectionKinds
@@ -1023,7 +1045,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
-      displayName: input.joinOffer?.displayName ?? null,
+      displayName: resolvedDisplayName.displayName,
       now,
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
@@ -1308,6 +1330,107 @@ function normalizeHostedGroupDisplayName(value: string): string | null {
     return null;
   }
   return normalized;
+}
+
+type HostedRuntimeGroupCreationDisplayNameResolution =
+  | { displayName: string | null }
+  | { unavailableReason: string };
+
+async function resolveHostedRuntimeGroupCreationDisplayName(input: {
+  displayName?: string | null;
+  linqChatId?: string;
+  memberId: string;
+  useCurrentChatName: boolean;
+}): Promise<HostedRuntimeGroupCreationDisplayNameResolution> {
+  if (input.displayName !== undefined && input.displayName !== null) {
+    return { displayName: input.displayName };
+  }
+  if (!input.useCurrentChatName) {
+    return { displayName: null };
+  }
+
+  const prisma = getPrisma();
+  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (ownerAccess.status !== "ok") {
+    return { unavailableReason: ownerAccess.unavailableReason };
+  }
+
+  let providerDisplayName: string | null;
+  try {
+    if (input.linqChatId) {
+      providerDisplayName = await readHostedLinqExplicitGroupDisplayName(
+        input.linqChatId,
+      );
+    } else {
+      const destination = await resolveHostedAssistantNotificationDestination({
+        memberId: input.memberId,
+        prisma,
+      });
+      const authority = destination?.conversationShape === "thread-container"
+        ? destination.externalThreadRouteAuthority
+        : null;
+      if (!authority) {
+        return { displayName: null };
+      }
+      providerDisplayName = authority.channel === "linq"
+        ? await readHostedLinqExplicitGroupDisplayName(authority.threadId)
+        : await getHostedTelegramGroupTitle({ threadId: authority.threadId });
+    }
+  } catch {
+    return { displayName: null };
+  }
+
+  return {
+    displayName: providerDisplayName
+      ? normalizeHostedGroupDisplayName(providerDisplayName)
+      : null,
+  };
+}
+
+async function readHostedLinqExplicitGroupDisplayName(
+  chatId: string,
+): Promise<string | null> {
+  const chat = await getHostedLinqChatSummary({ chatId });
+  if (chat.isGroup !== true) {
+    return null;
+  }
+  const displayName = chat.displayName
+    ? normalizeHostedGroupDisplayName(chat.displayName)
+    : null;
+  if (!displayName) {
+    return null;
+  }
+
+  // Linq defaults display_name to a comma-separated list of handles. Suppress
+  // every current SDK variant so phone numbers and emails never become the
+  // hosted group label.
+  const normalizeHandles = (handles: readonly string[]) =>
+    handles
+      .map((handle) => handle.trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join("\0");
+  const displayNameKey = normalizeHandles(displayName.split(","));
+  const activeHandles = chat.handles.filter(
+    ({ status }) => status !== "left" && status !== "removed",
+  );
+  const candidateHandleSets = [
+    chat.handles,
+    activeHandles,
+    chat.handles.filter(({ isMe }) => !isMe),
+    activeHandles.filter(({ isMe }) => !isMe),
+  ];
+
+  return displayNameKey
+      && candidateHandleSets.some((handles) =>
+        handles.length > 0
+        && normalizeHandles(handles.map(({ handle }) => handle)) === displayNameKey
+      )
+    ? null
+    : displayName;
 }
 
 function renderHostedGroupJoinOfferScopeSentence(
