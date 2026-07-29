@@ -279,8 +279,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   persistence and 30-day pruning, concrete connection thresholds, two-failure
   collection hysteresis, failed-scrape incident preservation, recovery reset,
   global 30-minute wall-time provider-attempt pacing across incident recovery,
-  actual-check-time and rotated evidence-bearing copy, exact body/idempotency
-  reuse after an ambiguous Linq send, transactional rollback before direct
+  current actual-check-time and rotated evidence-bearing recurrence copy,
+  no stale fenced gauge page after recovery, exact body/idempotency reuse after
+  an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the
   attempt fence and retained across clean samples, health-suppressed recovery,
   documented formatted/deprecated Linq inventory shapes with duplicate and

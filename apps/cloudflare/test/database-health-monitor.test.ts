@@ -108,18 +108,27 @@ describe("database health monitor", () => {
   });
 
   it("pages at most every 30 minutes and rotates evidence-bearing copy", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    });
     const harness = createMonitorHarness({
-      metricsBody: buildMetricsBody({
-        branchId: BRANCH_ID,
-        clientWaitSeconds: 8,
-      }),
+      readMetricsBody: () => metricsBody,
     });
 
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
       .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+    });
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + 10 * 60 * 1_000),
     ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 12,
+    });
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
@@ -137,6 +146,39 @@ describe("database health monitor", () => {
     expect(first).not.toHaveProperty("from");
     expect(second.message.parts[0]?.value).not.toBe(first.message.parts[0]?.value);
     expect(second.message.idempotency_key).not.toBe(first.message.idempotency_key);
+    expect(second.message.parts[0]?.value).toContain("PgBouncer wait 12s");
+    expect(second.message.parts[0]?.value).toContain("Checked 00:35 UTC");
+  });
+
+  it("does not send a fenced gauge recurrence after recovery", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState().pendingAlertMessage).toBeNull();
+
+    metricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "healthy" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "healthy" });
+
+    expect(harness.linqRequests).toHaveLength(1);
   });
 
   it("keeps the 30-minute attempt fence across recovery and a new incident", async () => {

@@ -239,12 +239,26 @@ export class DatabaseHealthMonitor {
 
     if (sample.conditions.length > 0) {
       let alertState = this.store.readAlertState();
-      if (!alertState.incidentOpen) {
+      const isNewIncident = !alertState.incidentOpen;
+      if (isNewIncident) {
         alertState = this.store.openIncident();
       }
+      const hasDirectConnectionError = sample.conditions.some(
+        (condition) =>
+          condition.kind === "direct_migration_admission_failures",
+      );
+      const attemptFenceOpen =
+        alertState.lastAlertAttemptedAtMs === null
+        || (
+          input.checkedAtMs - alertState.lastAlertAttemptedAtMs
+          >= DATABASE_HEALTH_ALERT_INTERVAL_MS
+        );
       if (
-        !alertState.pendingAlertIdempotencyKey
-        || !alertState.pendingAlertMessage
+        (
+          !alertState.pendingAlertIdempotencyKey
+          || !alertState.pendingAlertMessage
+        )
+        && (isNewIncident || hasDirectConnectionError || attemptFenceOpen)
       ) {
         const nextAlertSequence = alertState.alertSequence + 1;
         const pendingState = this.store.createPendingAlert({
@@ -328,9 +342,11 @@ export class DatabaseHealthMonitor {
     let idempotencyKey = alertState.pendingAlertIdempotencyKey;
     let message = alertState.pendingAlertMessage;
     if (!idempotencyKey || !message) {
-      throw new Error(
-        "Database health unsafe sample is missing durable alert admission.",
-      );
+      return {
+        conditions: input.conditions,
+        outcome: "alert_deferred",
+        sampleStatus: input.sampleStatus,
+      };
     }
 
     this.store.recordAlertAttempt(attemptedAtMs);

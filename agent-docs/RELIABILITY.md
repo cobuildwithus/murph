@@ -44,13 +44,16 @@ Last verified: 2026-07-27
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
   required-metric absence must recur on two consecutive runs before paging.
-  An unsafe sample without an existing pending page admits its exact body and
-  idempotency key in the same synchronous SQLite transaction that persists the
-  sample and advances any direct-error counter baseline. A pending page is
-  processed or deferred before a later clean sample can close the incident;
-  only an acknowledged provider response clears it. Once no pending page
-  remains, the first healthy sample closes the incident without a recovery
-  message. Provider entry is globally fenced by the persisted last-attempt
+  A newly opened incident or one-shot direct migration admission failure admits
+  its exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances any direct-error counter baseline.
+  An acknowledged incident's replayable gauge or monitoring recurrence does
+  not admit stale evidence while the attempt fence is closed; once the fence
+  opens, a still-unsafe current sample admits the recurrence, while recovery
+  closes the incident without another page. An already pending page is
+  processed or deferred before a later clean sample can close the incident,
+  and only an acknowledged provider response clears it. Provider entry is
+  globally fenced by the persisted last-attempt
   timestamp, so neither a new incident, recurrence, retry, nor worker restart
   can attempt Linq more often than once every 30 minutes. The attempt time is
   actual wall time, not the Cron slot, and is written before network egress.
@@ -62,8 +65,8 @@ Last verified: 2026-07-27
   Healthy delivery uses Linq's no-`from` auto-selection route. A
   transport-ambiguous or rejected send keeps the exact persisted body and Linq
   idempotency key for the next eligible attempt; acknowledged recurrences
-  advance the alert sequence and choose another fixed opening while rebuilding
-  current metric evidence. Message variation must remain contextual and
+  advance the alert sequence and choose another fixed opening from current
+  metric evidence. Message variation must remain contextual and
   deterministic, never random padding. Database pages intentionally have no
   quiet hours.
 - Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.

@@ -751,9 +751,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page one
   preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
   bounded state maps, error-counter baselines, failure codes, and alert
-  admission state. Unsafe alert admission and sample/baseline persistence share
-  one synchronous SQLite transaction, and acknowledged Linq entry is the only
-  operation that clears a pending page. SQLite contains no connection URL,
+  admission state. First-incident and non-replayable direct-error alert
+  admission shares one synchronous SQLite transaction with sample/baseline
+  persistence; acknowledged replayable recurrence is admitted only from the
+  current sample once the attempt fence opens. Acknowledged Linq entry is the
+  only operation that clears a pending page. SQLite contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
