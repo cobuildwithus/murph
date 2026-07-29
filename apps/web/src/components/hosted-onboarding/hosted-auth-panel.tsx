@@ -93,7 +93,7 @@ export function HostedAuthPanel({
     !codeSent && primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
-  const authCompletionPending = completion.completingMethod !== null;
+  const authJourneyActive = completion.activeMethod !== null;
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
@@ -216,7 +216,7 @@ export function HostedAuthPanel({
       {showResumableAuthState ? (
         <HostedResumableAuthState
           auth={resumableAuth}
-          disabled={authCompletionPending}
+          disabled={authJourneyActive}
           pending={completion.completingMethod === resumableAuth.method}
           onContinue={handleContinueResumableAuth}
           onSignOut={handleSignOutResumableAuth}
@@ -224,7 +224,12 @@ export function HostedAuthPanel({
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
           inviteCode={inviteCode}
-          interactionGated={authCompletionPending}
+          interactionGated={
+            completion.activeMethod !== null
+            && completion.activeMethod !== "phone"
+          }
+          onAuthCancel={() => completion.cancelAuth("phone")}
+          onAuthStart={() => completion.beginAuth("phone")}
           onAuthenticated={handlePhoneAuthenticated}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}
@@ -239,9 +244,15 @@ export function HostedAuthPanel({
         <HostedEmailAuthButton
           active
           completionPending={completion.completingMethod === "email"}
-          disabled={authCompletionPending}
+          disabled={
+            completion.activeMethod !== null
+            && completion.activeMethod !== "email"
+          }
+          onAuthCancel={() => completion.cancelAuth("email")}
+          onAuthStart={() => completion.beginAuth("email")}
           onAuthenticated={completion.completeAuth}
           onActivate={() => {}}
+          onCodeEntryChange={setCodeSent}
           inline
         />
       ) : null}
@@ -258,7 +269,12 @@ export function HostedAuthPanel({
               <HostedTelegramAuthButton
                 active={telegramActive}
                 completionPending={completion.completingMethod === "telegram"}
-                disabled={authCompletionPending}
+                disabled={
+                  completion.activeMethod !== null
+                  && completion.activeMethod !== "telegram"
+                }
+                onAuthCancel={() => completion.cancelAuth("telegram")}
+                onAuthStart={() => completion.beginAuth("telegram")}
                 onAuthenticated={completion.completeAuth}
                 onActivate={() => {
                   setPrimaryMethod("phone");
@@ -271,18 +287,24 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
-                  disabled={authCompletionPending}
+                  disabled={
+                    completion.activeMethod !== null
+                    && completion.activeMethod !== "email"
+                  }
+                  onAuthCancel={() => completion.cancelAuth("email")}
+                  onAuthStart={() => completion.beginAuth("email")}
                   onAuthenticated={completion.completeAuth}
                   onActivate={() => {
                     setPrimaryMethod("email");
                     setTelegramActive(false);
                     setTelegramNotice(null);
                   }}
+                  onCodeEntryChange={setCodeSent}
                 />
               ) : (
                 <HostedInlineAuthButton
                   active={false}
-                  disabled={authCompletionPending}
+                  disabled={authJourneyActive}
                   icon={<PhoneIcon className="h-5 w-5" />}
                   onClick={() => {
                     setPrimaryMethod("phone");

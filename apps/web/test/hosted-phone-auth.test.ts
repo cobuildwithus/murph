@@ -1895,6 +1895,7 @@ describe("HostedPhoneAuth", () => {
 
   it("keeps the phone resume action mounted and busy while shared completion runs", async () => {
     const completion = createDeferred<void>();
+    const onAuthStart = vi.fn(() => true);
     const onAuthenticated = vi.fn(() => completion.promise);
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -1918,6 +1919,7 @@ describe("HostedPhoneAuth", () => {
     );
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedPhoneAuth, {
+        onAuthStart,
         onAuthenticated,
       }),
     );
@@ -1943,7 +1945,13 @@ describe("HostedPhoneAuth", () => {
           | HTMLButtonElement
           | undefined;
 
+      expect(onAuthStart).toHaveBeenCalledTimes(1);
       expect(onAuthenticated).toHaveBeenCalledWith({ authMethod: "phone" });
+      expect(
+        onAuthStart.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      ).toBeLessThan(
+        onAuthenticated.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
       assert.ok(pendingButton);
       assert.equal(pendingButton.disabled, true);
       assert.equal(pendingButton.getAttribute("aria-busy"), "true");
@@ -1951,6 +1959,19 @@ describe("HostedPhoneAuth", () => {
       assert.equal(alternateButton?.disabled, true);
       assert.equal(container.querySelector("[data-murph-pulse-loader]"), null);
       assert.doesNotMatch(container.textContent ?? "", /Finishing setup/);
+
+      completion.resolve();
+      await act(async () => {
+        await completion.promise;
+      });
+
+      const handedOffButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("Finishing...")) as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(handedOffButton);
+      assert.equal(handedOffButton.disabled, true);
+      assert.equal(handedOffButton.getAttribute("aria-busy"), "true");
     } finally {
       completion.resolve();
       await act(async () => {
@@ -2686,6 +2707,7 @@ describe("HostedPhoneAuth", () => {
   it("keeps the verified phone action mounted while shared completion runs", async () => {
     vi.resetModules();
     const completion = createDeferred<void>();
+    const onAuthStart = vi.fn(() => true);
     const onAuthenticated = vi.fn(() => completion.promise);
     let privyAuthenticated = false;
     let privyUser: { linkedAccounts?: unknown } | null = null;
@@ -2785,6 +2807,7 @@ describe("HostedPhoneAuth", () => {
       const [, setRenderVersion] = React.useState(0);
       rerenderHarness = () => setRenderVersion((version) => version + 1);
       return React.createElement(HostedPhoneAuth, {
+        onAuthStart,
         onAuthenticated,
       });
     }
@@ -2819,7 +2842,18 @@ describe("HostedPhoneAuth", () => {
           | HTMLButtonElement
           | undefined;
 
+      expect(onAuthStart).toHaveBeenCalledTimes(2);
+      expect(
+        onAuthStart.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      ).toBeLessThan(
+        mocks.sendCode.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
       expect(mocks.loginWithCode).toHaveBeenCalledWith({ code: "123456" });
+      expect(
+        onAuthStart.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+      ).toBeLessThan(
+        mocks.loginWithCode.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
       expect(onAuthenticated).toHaveBeenCalledWith({ authMethod: "phone" });
       assert.ok(container.querySelector("[data-code-flow='mounted']"));
       assert.ok(pendingButton);
@@ -2827,6 +2861,19 @@ describe("HostedPhoneAuth", () => {
       assert.equal(pendingButton.getAttribute("aria-busy"), "true");
       assert.equal(container.querySelector("[data-murph-pulse-loader]"), null);
       assert.doesNotMatch(container.textContent ?? "", /Finishing setup/);
+
+      completion.resolve();
+      await act(async () => {
+        await completion.promise;
+      });
+
+      const handedOffButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Finishing...") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(handedOffButton);
+      assert.equal(handedOffButton.disabled, true);
+      assert.equal(handedOffButton.getAttribute("aria-busy"), "true");
     } finally {
       completion.resolve();
       await act(async () => {
@@ -2842,6 +2889,7 @@ describe("HostedPhoneAuth", () => {
   it("discards a late SMS send result after another auth method gates phone interactions", async () => {
     vi.resetModules();
     const smsSend = createDeferred<void>();
+    const onAuthStart = vi.fn(() => true);
     const onCodeSent = vi.fn();
     interface FlowProps {
       activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
@@ -2877,6 +2925,7 @@ describe("HostedPhoneAuth", () => {
       gatePhoneInteractions = () => setInteractionGated(true);
       return React.createElement(HostedPhoneAuth, {
         interactionGated,
+        onAuthStart,
         onCodeSent,
       });
     }
@@ -2895,7 +2944,13 @@ describe("HostedPhoneAuth", () => {
         await Promise.resolve();
       });
 
+      expect(onAuthStart).toHaveBeenCalledTimes(1);
       expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+      expect(
+        onAuthStart.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      ).toBeLessThan(
+        mocks.sendCode.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
 
       await act(async () => {
         gatePhoneInteractions?.();

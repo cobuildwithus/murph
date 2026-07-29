@@ -52,6 +52,8 @@ interface HostedPhoneAuthControllerInput {
   inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
   interactionGated?: boolean;
+  onAuthCancel?: () => void;
+  onAuthStart?: () => boolean;
   onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
@@ -67,6 +69,8 @@ export function useHostedPhoneAuthController({
   inviteCode,
   intent = "auth",
   interactionGated = false,
+  onAuthCancel,
+  onAuthStart,
   onAuthenticated,
   onCodeSent,
   onCompleted,
@@ -99,7 +103,6 @@ export function useHostedPhoneAuthController({
   const lastAutoSubmittedCodeRef = useRef<string | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
   const phoneCodeSendInFlightRef = useRef(false);
-  const delegatedFinalizationInFlightRef = useRef(false);
   const interactionGatedRef = useRef(interactionGated);
   interactionGatedRef.current = interactionGated;
 
@@ -330,7 +333,11 @@ export function useHostedPhoneAuthController({
       resetAuthenticatedSessionRestart?: boolean;
     } = {},
   ) {
-    if (interactionGatedRef.current || phoneCodeSendInFlightRef.current) {
+    if (
+      interactionGatedRef.current
+      || phoneCodeSendInFlightRef.current
+      || (onAuthStart && !onAuthStart())
+    ) {
       return;
     }
 
@@ -350,6 +357,7 @@ export function useHostedPhoneAuthController({
           }
         },
         onError: (error) => {
+          onAuthCancel?.();
           setErrorMessage(
             toErrorMessage(error, "We could not send a verification code."),
           );
@@ -374,7 +382,10 @@ export function useHostedPhoneAuthController({
       }
     }
 
-    if (interactionGatedRef.current) return;
+    if (interactionGatedRef.current) {
+      onAuthCancel?.();
+      return;
+    }
 
     setCode("");
     setPhoneVerificationAttempt(
@@ -421,12 +432,21 @@ export function useHostedPhoneAuthController({
       return;
     }
 
+    if (onAuthStart && !onAuthStart()) {
+      return;
+    }
+
     setPendingAction("verify-code");
+    let preservePendingAction = false;
 
     try {
       await loginWithCode({ code: submittedCode });
-      await runHostedPrivyFinalization(intent === "link" ? "continue" : "verify-code");
+      await runHostedPrivyFinalization(
+        intent === "link" ? "continue" : "verify-code",
+      );
+      preservePendingAction = intent !== "link" && onAuthenticated !== undefined;
     } catch (error) {
+      onAuthCancel?.();
       if (disableSignup) {
         setErrorMessage("We could not verify that code.");
         return;
@@ -441,20 +461,26 @@ export function useHostedPhoneAuthController({
 
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
     } finally {
-      if (finalizationStateRef.current === "idle") {
+      if (!preservePendingAction && finalizationStateRef.current === "idle") {
         setPendingAction(null);
       }
     }
   }
 
   async function handleContinueAuthenticated() {
-    if (interactionGatedRef.current) return;
+    if (
+      interactionGatedRef.current
+      || (onAuthStart && !onAuthStart())
+    ) {
+      return;
+    }
 
     setErrorMessage(null);
 
     try {
       await runHostedPrivyFinalization("continue");
     } catch (error) {
+      onAuthCancel?.();
       if (isHostedPrivyAccountConflictError(error)) {
         transitionToAuthenticatedSessionRestart();
         return;
@@ -488,6 +514,7 @@ export function useHostedPhoneAuthController({
       run: async () => {
         await logout();
         await onSignOut?.();
+        onAuthCancel?.();
         resetPhoneAuthFlow();
         setPhoneCountryCode(initialPhoneCountryCode);
         setPhoneNumber("");
@@ -498,6 +525,7 @@ export function useHostedPhoneAuthController({
 
   function handleResetPhoneAuthFlow() {
     if (interactionGatedRef.current) return;
+    onAuthCancel?.();
     resetPhoneAuthFlow();
   }
 
@@ -510,15 +538,12 @@ export function useHostedPhoneAuthController({
     action: "continue" | "verify-code",
   ) {
     if (intent !== "link" && onAuthenticated) {
-      if (delegatedFinalizationInFlightRef.current) return;
-
-      delegatedFinalizationInFlightRef.current = true;
       setPendingAction(action);
       try {
         await onAuthenticated({ authMethod: "phone" });
-      } finally {
-        delegatedFinalizationInFlightRef.current = false;
+      } catch (error) {
         setPendingAction(null);
+        throw error;
       }
       return;
     }

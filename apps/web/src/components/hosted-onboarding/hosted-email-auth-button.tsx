@@ -28,7 +28,10 @@ export function HostedEmailAuthButton({
   initialEmailAddress = null,
   lockedEmailAddress = null,
   onActivate = () => undefined,
+  onAuthCancel,
+  onAuthStart,
   onAuthenticated,
+  onCodeEntryChange,
 }: {
   active?: boolean;
   completionPending?: boolean;
@@ -38,7 +41,10 @@ export function HostedEmailAuthButton({
   initialEmailAddress?: string | null;
   lockedEmailAddress?: string | null;
   onActivate?: () => void;
+  onAuthCancel?: () => void;
+  onAuthStart?: () => boolean;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
+  onCodeEntryChange?: (active: boolean) => void;
 }) {
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
   const { ready } = usePrivy();
@@ -89,11 +95,17 @@ export function HostedEmailAuthButton({
       return;
     }
 
+    if (onAuthStart && !onAuthStart()) {
+      return;
+    }
+
     try {
       await sendEmailCode(nextEmailAddress);
       setPendingEmailAddress(nextEmailAddress);
+      onCodeEntryChange?.(true);
       clearCode();
     } catch (error) {
+      onAuthCancel?.();
       setErrorMessage(
         toErrorMessage(
           error,
@@ -176,9 +188,11 @@ export function HostedEmailAuthButton({
   }
 
   function handleUseAnotherEmail() {
+    onAuthCancel?.();
     clearCode();
     setErrorMessage(null);
     setPendingEmailAddress(null);
+    onCodeEntryChange?.(false);
   }
 
   const changeEmailDialog = lockedEmail ? (

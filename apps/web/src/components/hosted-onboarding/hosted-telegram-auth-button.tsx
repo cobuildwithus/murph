@@ -17,6 +17,8 @@ export function HostedTelegramAuthButton({
   completionPending = false,
   disableSignup = false,
   disabled = false,
+  onAuthCancel,
+  onAuthStart,
   onActivate,
   onAuthenticated,
   onNoticeChange,
@@ -25,6 +27,8 @@ export function HostedTelegramAuthButton({
   completionPending?: boolean;
   disableSignup?: boolean;
   disabled?: boolean;
+  onAuthCancel?: () => void;
+  onAuthStart?: () => boolean;
   onActivate: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
@@ -35,12 +39,17 @@ export function HostedTelegramAuthButton({
   const loading = state.status === "loading";
 
   async function handleClick() {
+    if (onAuthStart && !onAuthStart()) {
+      return;
+    }
+
     onActivate();
     onNoticeChange?.(null);
 
     try {
       await login(disableSignup ? { disableSignup: true } : undefined);
     } catch (error) {
+      onAuthCancel?.();
       onNoticeChange?.(describeTelegramAuthError(error));
       return;
     }
