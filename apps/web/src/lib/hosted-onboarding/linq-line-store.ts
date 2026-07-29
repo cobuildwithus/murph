@@ -40,6 +40,15 @@ export type HostedLinqContactCardLine = {
   providerStatus: string | null;
 };
 
+export type HostedLinqManagedLineState = {
+  configured: boolean;
+  egressPolicy: string;
+  hasEncryptedPhoneNumber: boolean;
+  healthStatus: string;
+  phoneNumberLookupKey: string;
+  providerStatus: string | null;
+};
+
 type HostedLinqAssignableHomeLineRow = {
   activeMemberLimit: number | null;
   assignmentWeight: number;
@@ -337,6 +346,74 @@ export async function hasActiveHostedLinqManagedLine(input: {
   return line !== null;
 }
 
+export async function readHostedLinqManagedLineState(input: {
+  phoneNumberLookupKeys: readonly string[];
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqManagedLineState | null> {
+  const phoneNumberLookupKeys = [...input.phoneNumberLookupKeys];
+  if (phoneNumberLookupKeys.length === 0) {
+    return null;
+  }
+
+  const rows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      phoneNumberLookupKey: {
+        in: phoneNumberLookupKeys,
+      },
+    },
+    select: {
+      configuredAt: true,
+      egressPolicy: true,
+      healthStatus: true,
+      phoneNumberEncrypted: true,
+      phoneNumberLookupKey: true,
+      providerStatus: true,
+    },
+  });
+  const rowsByLookupKey = new Map(
+    rows.map((row) => [row.phoneNumberLookupKey, row]),
+  );
+  const row = phoneNumberLookupKeys
+    .map((lookupKey) => rowsByLookupKey.get(lookupKey))
+    .find((candidate): candidate is (typeof rows)[number] =>
+      candidate !== undefined
+    );
+  if (!row) {
+    return null;
+  }
+
+  return {
+    configured: row.configuredAt !== null,
+    egressPolicy: row.egressPolicy,
+    hasEncryptedPhoneNumber: row.phoneNumberEncrypted !== null,
+    healthStatus: row.healthStatus,
+    phoneNumberLookupKey: row.phoneNumberLookupKey,
+    providerStatus: row.providerStatus,
+  };
+}
+
+export function isHostedLinqManagedLineExactAtRisk(
+  line: HostedLinqManagedLineState | null,
+): boolean {
+  if (!line || !isHostedLinqManagedLineStructurallyUsable(line)) {
+    return false;
+  }
+
+  const normalized = line.providerStatus?.trim().toLowerCase() ?? "";
+  return normalized === "at_risk" || normalized === "at-risk";
+}
+
+export function isHostedLinqManagedLineHardBlocked(
+  line: HostedLinqManagedLineState | null,
+): boolean {
+  if (!line || !isHostedLinqManagedLineStructurallyUsable(line)) {
+    return false;
+  }
+
+  return line.healthStatus === "unhealthy"
+    || classifyHostedLinqProviderStatus(line.providerStatus) === "unhealthy";
+}
+
 export async function listHostedLinqHealthyProactiveLines(input: {
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqAssignableHomeLine[]> {
@@ -449,6 +526,14 @@ function buildActiveHostedLinqManagedLineWhere(): Prisma.HostedLinqLineWhereInpu
     healthStatus: { in: ["healthy", "unknown"] },
     phoneNumberEncrypted: { not: null },
   };
+}
+
+export function isHostedLinqManagedLineStructurallyUsable(
+  line: HostedLinqManagedLineState,
+): boolean {
+  return line.configured
+    && line.egressPolicy === "enabled"
+    && line.hasEncryptedPhoneNumber;
 }
 
 function mapHostedLinqAssignableHomeLineRows(
@@ -864,7 +949,7 @@ function buildSameTimestampStatusProjectionWhere(
   ];
 }
 
-function classifyHostedLinqProviderStatus(value: string | null): string {
+export function classifyHostedLinqProviderStatus(value: string | null): string {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (["active", "healthy", "ok", "ready"].includes(normalized)) {
     return "healthy";

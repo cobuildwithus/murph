@@ -85,6 +85,7 @@ import {
   buildConversationHomeRedirectResponse,
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
+  buildGroupLineRecoveryResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
@@ -92,11 +93,13 @@ import {
   HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
   hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
+  isHostedLinqIMessageService,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
   type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
+  type HostedLinqHomeLineAuthority,
   readHostedLinqHomeLineAuthority,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineFromPoolTx,
@@ -105,8 +108,23 @@ import {
 import {
   claimHostedLinqProactiveConversationCapacityTx,
   hasActiveHostedLinqManagedLine,
+  isHostedLinqManagedLineExactAtRisk,
+  isHostedLinqManagedLineHardBlocked,
+  listHostedLinqHealthyProactiveLines,
+  readHostedLinqManagedLineState,
+  type HostedLinqAssignableHomeLine,
+  type HostedLinqManagedLineState,
 } from "./linq-line-store";
-import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
+import {
+  chooseHostedLinqSignupWelcomeLine,
+  resolveHostedLinqSignupWelcomeDailyLimit,
+} from "./linq-routing-policy";
+import {
+  buildHostedLinqGroupLineRecoveryEffectId,
+} from "./linq-group-line-recovery";
+import {
+  readHostedLinqDeliveryProviderDispatchIntentTx,
+} from "./linq-delivery-store";
 import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
@@ -159,7 +177,10 @@ import {
   bindArmedHostedUsageReferralToNewContainerTx,
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
-import type { HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
@@ -2419,8 +2440,11 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
+  | "recipient-line-hard-blocked"
   | "recipient-line-authority-unresolved"
   | "recipient-line-unmanaged"
+  | "recipient-line-unavailable"
+  | "recipient-line-recovery-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
   | "sender-inactive";
@@ -2450,9 +2474,10 @@ async function planHostedLinqGroupChatWebhook(input: {
   const ignored = (
     reason: HostedLinqNewGroupAdmissionIgnoreReason,
     existingMemberMatch: HostedLinqExistingMemberMatch = "none",
+    responseReason = "group-chat",
   ) =>
     logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("group-chat"),
+      buildIgnoredLinqWebhookPlan(responseReason),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         existingMemberMatch,
         reason,
@@ -2512,11 +2537,72 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("sender-inactive", senderIdentityMatch);
   }
 
-  if (!(await hasActiveHostedLinqManagedLine({
+  const activeManagedLine = await hasActiveHostedLinqManagedLine({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
     prisma: input.prisma,
-  }))) {
-    return ignored("recipient-line-unmanaged", senderIdentityMatch);
+  });
+  if (!activeManagedLine) {
+    const lineState = await readHostedLinqManagedLineState({
+      phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
+      prisma: input.prisma,
+    });
+    if (!lineState) {
+      return ignored(
+        "recipient-line-unmanaged",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
+    await lockHostedMemberRow(input.prisma, sender.id);
+    if (
+      !(await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    ) {
+      return ignored("sender-inactive", senderIdentityMatch);
+    }
+    const senderAuthority = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: sender.id,
+        prisma: input.prisma,
+      }),
+    );
+    if (!isHostedLinqAssignedAtRiskGroupAdmissionAllowed({
+      authority: senderAuthority,
+      incomingRecipientPhone,
+      lineState,
+    })) {
+      if (isHostedLinqManagedLineHardBlocked(lineState)) {
+        const recoveryPlan = await planHostedLinqHardBlockedGroupLineRecovery({
+          context: input.context,
+          event: input.event,
+          memberId: sender.id,
+          prisma: input.prisma,
+        });
+        if (recoveryPlan) {
+          return logHostedLinqWebhookPlannerDecisionAndReturn(
+            recoveryPlan,
+            buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+              existingMemberMatch: senderIdentityMatch,
+              reason: "recipient-line-hard-blocked",
+              routeStage: "new-group-recovery-private",
+            }),
+          );
+        }
+        return ignored(
+          "recipient-line-recovery-unavailable",
+          senderIdentityMatch,
+          "group-chat-line-unavailable",
+        );
+      }
+
+      return ignored(
+        "recipient-line-unavailable",
+        senderIdentityMatch,
+        "group-chat-line-unavailable",
+      );
+    }
   }
 
   let createdContainerMemberId: string | null = null;
@@ -2589,6 +2675,117 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
 
   return plan;
+}
+
+function isHostedLinqAssignedAtRiskGroupAdmissionAllowed(input: {
+  authority: HostedLinqHomeLineAuthority;
+  incomingRecipientPhone: string;
+  lineState: HostedLinqManagedLineState;
+}): boolean {
+  if (!isHostedLinqManagedLineExactAtRisk(input.lineState)) {
+    return false;
+  }
+
+  return input.authority.kind !== "none"
+    && input.authority.recipientPhone === input.incomingRecipientPhone;
+}
+
+async function planHostedLinqHardBlockedGroupLineRecovery(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const { messageEvent, occurredAt, participantContact, summary } =
+    input.context;
+  if (
+    participantContact?.kind !== "phone"
+    || !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
+    return null;
+  }
+
+  const memberPhone = normalizePhoneNumber(participantContact.value);
+  if (!memberPhone) {
+    return null;
+  }
+
+  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+    chatId: summary.chatId,
+    memberId: input.memberId,
+    sourceEventId: input.event.event_id,
+  });
+  const existingIntent = await readHostedLinqDeliveryProviderDispatchIntentTx({
+    idempotencyKey: effectId,
+    prisma: input.prisma,
+  });
+  const line = await claimHostedLinqGroupLineRecoverySenderTx({
+    now: new Date(occurredAt),
+    pinnedLineLookupKey: existingIntent?.phoneNumberLookupKey ?? null,
+    prisma: input.prisma,
+  });
+  if (!line) {
+    return null;
+  }
+
+  return buildGroupLineRecoveryResponse({
+    assignedPhone: line.phoneNumber,
+    groupChatId: summary.chatId,
+    memberId: input.memberId,
+    memberPhone,
+    occurredAt,
+    sourceEventId: input.event.event_id,
+  });
+}
+
+async function claimHostedLinqGroupLineRecoverySenderTx(input: {
+  now: Date;
+  pinnedLineLookupKey: string | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqAssignableHomeLine | null> {
+  const healthyLines = await listHostedLinqHealthyProactiveLines({
+    prisma: input.prisma,
+  });
+  if (input.pinnedLineLookupKey) {
+    return healthyLines.find((line) =>
+      line.phoneNumberLookupKey === input.pinnedLineLookupKey
+    ) ?? null;
+  }
+
+  const dayUtc = startOfUtcDay(input.now);
+  const newAssignmentsByRecipientPhone = new Map(
+    healthyLines.map((line) => [
+      line.phoneNumber,
+      line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
+        ? line.proactiveConversationCount ?? 0
+        : 0,
+    ]),
+  );
+  const activeMembersByRecipientPhone = new Map<string, number>();
+  for (let attempt = 0; attempt < healthyLines.length; attempt += 1) {
+    const line = chooseHostedLinqSignupWelcomeLine({
+      activeMembersByRecipientPhone,
+      lines: healthyLines,
+      newAssignmentsByRecipientPhone,
+      preferredRecipientPhone: null,
+    });
+    if (!line) {
+      return null;
+    }
+
+    const limit = resolveHostedLinqSignupWelcomeDailyLimit(line);
+    if (await claimHostedLinqProactiveConversationCapacityTx({
+      dayUtc,
+      limit,
+      phoneNumberLookupKey: line.phoneNumberLookupKey,
+      prisma: input.prisma,
+    })) {
+      return line;
+    }
+    newAssignmentsByRecipientPhone.set(line.phoneNumber, limit);
+  }
+
+  return null;
 }
 
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {

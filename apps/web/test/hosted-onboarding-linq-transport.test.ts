@@ -169,6 +169,9 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
+  buildHostedLinqGroupLineRecoveryMessage,
+} from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
+import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
 } from "@/src/lib/hosted-onboarding/webhook-transport";
@@ -568,6 +571,7 @@ describe("hosted Linq webhook transport", () => {
       id: "hld_persisted_group_reply",
       groupJoinOutreachId: "hgrpjoa-a",
       groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+      phoneNumberLookupKey: null,
       providerCorrelated: false,
       sourceRef: effect.effectId,
     });
@@ -631,6 +635,7 @@ describe("hosted Linq webhook transport", () => {
         id: "hld_persisted_group_reply",
         groupJoinOutreachId: "hgrpjoa-a",
         groupJoinReplyOccurredAt: new Date("2026-03-26T12:00:00.000Z"),
+        phoneNumberLookupKey: null,
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
       });
@@ -2094,6 +2099,64 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("creates group-line recovery chats with the sender rendered as the backup number", async () => {
+    const recoveryPhone = "+15550100042";
+    const memberPhone = "+15551234567";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: recoveryPhone,
+      groupChatId: "chat-group-1",
+      memberId: "member-1",
+      memberPhone,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-group-line-recovery",
+      template: "group_line_recovery",
+    });
+    const expectedMessage = buildHostedLinqGroupLineRecoveryMessage({
+      backupPhoneNumber: recoveryPhone,
+      seed: effect.effectId,
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: effect.effectId,
+      phoneNumber: recoveryPhone,
+      prisma,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event-group-line-recovery",
+      status: "attempted",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    }));
+    expect(createHostedLinqChat).toHaveBeenCalledWith({
+      from: recoveryPhone,
+      idempotencyKey: effect.effectId,
+      message: expectedMessage,
+      signal: undefined,
+      to: [memberPhone],
+    });
+    expect(countOccurrences(expectedMessage, recoveryPhone)).toBe(1);
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not release usage-period sent markers when AI usage quota delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -2799,6 +2862,10 @@ function createInviteSignupPrismaFixture(
       operation: (prisma: typeof transactionClient) => Promise<unknown>,
     ) => operation(transactionClient)),
   };
+}
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
 }
 
 const HOME_REDIRECT_TEST_KEYRING_ENTRIES = {

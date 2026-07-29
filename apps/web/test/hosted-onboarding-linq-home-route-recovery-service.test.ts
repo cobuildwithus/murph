@@ -154,3 +154,102 @@ describe("Linq home-route recovery inside the canonical webhook owner", () => {
     expect(mocks.planHostedLinqPermanentHomeRouteRecovery).not.toHaveBeenCalled();
   });
 });
+
+describe("Linq group-line recovery inside the canonical webhook owner", () => {
+  const event = {
+    data: {
+      chat: { id: "chat_group_recovery", is_group: true },
+      message: {
+        id: "message_group_recovery",
+        parts: [{ text: "intro", type: "text" }],
+      },
+    },
+    event_id: "linq:event:group-recovery",
+    event_type: "message.received",
+  };
+  const sideEffect = {
+    effectId: "linq-group-line-recovery:reclaimable",
+    payload: {
+      assignedRecipientPhone: "+15550100042",
+      memberPhone: "+15551230000",
+      template: "group_line_recovery",
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(buildPrismaStub());
+    mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue(event);
+    mocks.resolveHostedLinqPlanningEvent.mockResolvedValue(event);
+    mocks.planHostedOnboardingLinqWebhook.mockResolvedValue({
+      desiredSideEffects: [sideEffect],
+      response: { ok: true, reason: "sent-group-line-recovery" },
+    });
+    mocks.planHostedLinqPermanentHomeRouteRecovery.mockResolvedValue(null);
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue({
+      sentCount: 1,
+      skipped: [],
+    });
+  });
+
+  it("fails retryably when the private recovery delivery is still in flight", async () => {
+    const retryAt = new Date("2026-07-29T12:15:00.000Z");
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue({
+      sentCount: 0,
+      skipped: [{
+        effectId: sideEffect.effectId,
+        reason: "notice_in_flight",
+        retryAt,
+        template: "group_line_recovery",
+      }],
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+      httpStatus: 503,
+      retryable: true,
+    });
+  });
+
+  it("reports unavailable instead of sent when recovery target authorization is lost", async () => {
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue({
+      sentCount: 0,
+      skipped: [{
+        effectId: sideEffect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+  });
+
+  it("returns sent when the stale recovery claim is reclaimed and dispatched", async () => {
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-group-line-recovery",
+    });
+
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sideEffects: [sideEffect],
+      }),
+    );
+  });
+});

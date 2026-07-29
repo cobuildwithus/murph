@@ -22,6 +22,9 @@ import {
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+} from "./linq-group-line-recovery";
+import {
   compareHostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
 } from "./linq-provider-event-progress";
@@ -321,6 +324,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   id: string;
   groupJoinOutreachId: string | null;
   groupJoinReplyOccurredAt: Date | null;
+  phoneNumberLookupKey: string | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
 } | null> {
@@ -340,6 +344,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
       id: true,
       lastReceiptAt: true,
       messageLookupKey: true,
+      phoneNumberLookupKey: true,
       sourceRef: true,
       status: true,
     },
@@ -349,6 +354,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
         id: delivery.id,
         groupJoinOutreachId: delivery.groupJoinOutreachId,
         groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
+        phoneNumberLookupKey: delivery.phoneNumberLookupKey,
         providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
         sourceRef: delivery.sourceRef,
       }
@@ -1874,7 +1880,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       )
     )
     || (
-      isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+      isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
       && (
         input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
         || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
@@ -1895,7 +1901,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     return {
       claimed: false,
       id: input.delivery.id,
-      ...(isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+      ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
     };
@@ -2203,6 +2209,13 @@ function isHostedLinqInviteSignupDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return template === "invite_signup" || template === "invite_signup_fallback";
+}
+
+function isHostedLinqPinnedTargetDeliveryTemplate(
+  template: string | null | undefined,
+): boolean {
+  return isHostedLinqInviteSignupDeliveryTemplate(template)
+    || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
 }
 
 function assertHostedLinqDeliveryGroupJoinContext(input: {

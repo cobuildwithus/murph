@@ -209,6 +209,33 @@ export function buildFallbackSignupLinkResponse(input: {
   });
 }
 
+export function buildGroupLineRecoveryResponse(input: {
+  assignedPhone: string;
+  groupChatId: string;
+  memberId: string;
+  memberPhone: string;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        assignedRecipientPhone: input.assignedPhone,
+        groupChatId: input.groupChatId,
+        memberId: input.memberId,
+        memberPhone: input.memberPhone,
+        occurredAt: input.occurredAt,
+        sourceEventId: input.sourceEventId,
+        template: "group_line_recovery",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "sent-group-line-recovery",
+    },
+  });
+}
+
 export function buildFamilyInviteAcceptedResponse(input: {
   chatId: string;
   memberId: string;
