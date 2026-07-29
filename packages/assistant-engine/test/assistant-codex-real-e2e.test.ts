@@ -298,6 +298,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     'delivers a group call preview in one turn and calls only after a later exact confirmation',
     async () => {
       const config = await resolveRealCodexE2eConfig()
+      const previewMessageRef = `ain_${'1'.repeat(32)}`
+      const confirmationMessageRef = `ain_${'2'.repeat(32)}`
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-group-phone-call-e2e-'),
       )
@@ -335,14 +337,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const preview = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
+            `Message ref: ${previewMessageRef}`,
             'Sender: participant-a',
-            'Sender name: Sam',
+            'Profile name (display only): "Sam"',
             'Prepare one public restaurant call for this room.',
             'The request is an outdoor table for six on August 15, 2026 at 7:00 p.m. America/New_York time at +12025550123.',
             'The caller name would be Sam. A deposit is acceptable only up to $50 and only if refundable until 24 hours before the reservation.',
             'Share only that caller name and those room-visible reservation details.',
             'I am not confirming the call yet. Deliver the exact call preview and wait for a later confirmation message. Do not call now.',
-          ].join(' '),
+          ].join('\n\n'),
         })
         const previewActions = readCapabilityRoutingActions(preview.jsonEvents)
         const previewToolCalls = previewActions.filter((action) =>
@@ -366,12 +369,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const confirmed = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
+            `Message ref: ${confirmationMessageRef}`,
             'Sender: participant-a',
-            'Sender name: Sam',
+            'Profile name (display only): "Sam"',
             'I am the same current requester.',
             'I explicitly confirm the exact call preview you delivered in the prior turn, including the restaurant destination, August 15, 2026 at 7:00 p.m. America/New_York time, outdoor table for six, refundable deposit ceiling of $50, and 24-hour cancellation boundary.',
             'I explicitly approve using my caller name Sam and sharing only that name and the room-visible reservation details. Place exactly one call now with no transfer.',
-          ].join(' '),
+          ].join('\n\n'),
           resumeSessionId: preview.sessionId,
         })
         const confirmedActions = readCapabilityRoutingActions(
@@ -409,6 +413,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'phone-calls skill read before the real call',
         ).toBe(true)
+        expect(toolCall.argumentsValue.message_ref).toBe(
+          confirmationMessageRef,
+        )
         expect(toolCall.argumentsValue).toMatchObject({
           allowTransferToUser: false,
           callerName: 'Sam',

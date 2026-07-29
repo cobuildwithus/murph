@@ -374,6 +374,7 @@ function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: 
     if (
       input.senderMemberId !== undefined
       || input.telegramMessage.from
+      || input.telegramMessage.senderDisplayName
       || input.telegramMessage.senderUsername
     ) {
       throw new TypeError(
