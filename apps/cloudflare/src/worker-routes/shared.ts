@@ -27,10 +27,17 @@ import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
+import type {
+  HostedPrivateMediaPublishInput,
+  HostedPrivateMediaPublishResult,
+} from "../private-media.ts";
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
+  publishHostedPrivateMedia(
+    input: HostedPrivateMediaPublishInput,
+  ): Promise<HostedPrivateMediaPublishResult>;
   ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
       commandTimeoutMs?: number;

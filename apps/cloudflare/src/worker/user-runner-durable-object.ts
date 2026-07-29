@@ -47,6 +47,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.deleteHostedUserData(userId);
   }
 
+  async publishHostedPrivateMedia(
+    input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
+  ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {
+    return this.runner.publishHostedPrivateMedia(input);
+  }
+
   async runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse> {
     return this.runner.runnerStatus(input);
   }

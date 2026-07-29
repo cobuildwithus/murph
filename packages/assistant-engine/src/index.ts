@@ -35,6 +35,9 @@ export type {
   AssistantHostedGroupSharedRecord,
   AssistantHostedImageGenerationLauncher,
   AssistantHostedImageGenerationResult,
+  AssistantHostedPrivateImageUrlPublishInput,
+  AssistantHostedPrivateImageUrlPublisher,
+  AssistantPrivateImageContentType,
 } from './assistant/execution-context.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,

@@ -15,6 +15,13 @@ care. Murph should neither dominate the room nor collapse into an addressed-only
 help desk. Its spontaneous timing, callbacks, and occasional surprise are part
 of the value.
 
+Group-avatar mutation remains available without making member or generated
+images public. Murph preflights the current Linq chat authority, resolves or
+generates the canonical bytes in the member vault, and asks the Worker to
+upload them to Cloudflare Images with signed delivery required. Only the
+short-lived signed URL crosses Linq's URL-only avatar boundary; it is never
+shown to the model or stored as Murph media.
+
 ## Working psychological model
 
 This is an operating model derived from observed group behavior, not a claim

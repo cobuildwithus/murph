@@ -3714,8 +3714,9 @@ exit 1
     expect(verifyResult.status).not.toBe(0)
     expect(verifyResult.stdout).toBe('')
     expect(verifyResult.stderr).toContain(
-      `Expected release version --json, but manifest packages are on ${cliPackageJson.version}.`,
+      'Expected release version must match',
     )
+    expect(verifyResult.stderr).toContain('Received: --json')
 
     const packMissingValue = runNodeScript(
       'scripts/pack-publishables.mjs',

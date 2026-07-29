@@ -17422,6 +17422,26 @@ describe("hosted workspace runtime entrypoint", () => {
     const imageGenerationLauncherRef: {
       current: AssistantHostedImageGenerationLauncher | null;
     } = { current: null };
+    const firstPrivateMedia = {
+      alt: "Generated sunrise",
+      contentType: "image/webp" as const,
+      filename: "generated-sunrise.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/2026/04/generated-sunrise.webp",
+      sha256: "a".repeat(64),
+      sizeBytes: 12,
+      source: "gpt-image-2",
+    };
+    const secondPrivateMedia = {
+      alt: "Generated moonrise",
+      contentType: "image/webp" as const,
+      filename: "generated-moonrise.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/2026/04/generated-moonrise.webp",
+      sha256: "b".repeat(64),
+      sizeBytes: 14,
+      source: "gpt-image-2",
+    };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -17550,14 +17570,9 @@ describe("hosted workspace runtime entrypoint", () => {
                     async run() {
                       imageProviderInvocationCount += 1;
                       return {
-                        media: {
-                          alt: "Generated sunrise",
-                          kind: "image",
-                          source: "gpt-image-2",
-                          url: "https://imagedelivery.net/account/retry-first/public",
-                        },
+                        media: firstPrivateMedia,
                         runtimeIssue: null,
-                        savedImageRef: null,
+                        savedImageRef: firstPrivateMedia.ref,
                       };
                     },
                   }),
@@ -17588,14 +17603,9 @@ describe("hosted workspace runtime entrypoint", () => {
                     async run() {
                       imageProviderInvocationCount += 1;
                       return {
-                        media: {
-                          alt: "Generated moonrise",
-                          kind: "image",
-                          source: "gpt-image-2",
-                          url: "https://imagedelivery.net/account/retry-second/public",
-                        },
+                        media: secondPrivateMedia,
                         runtimeIssue: null,
-                        savedImageRef: null,
+                        savedImageRef: secondPrivateMedia.ref,
                       };
                     },
                   }),
@@ -17617,14 +17627,9 @@ describe("hosted workspace runtime entrypoint", () => {
                     async run() {
                       imageProviderInvocationCount += 1;
                       return {
-                        media: {
-                          alt: "Generated moonrise",
-                          kind: "image",
-                          source: "gpt-image-2",
-                          url: "https://imagedelivery.net/account/retry-second/public",
-                        },
+                        media: secondPrivateMedia,
                         runtimeIssue: null,
-                        savedImageRef: null,
+                        savedImageRef: secondPrivateMedia.ref,
                       };
                     },
                   }),
@@ -17649,12 +17654,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   dedupeToken: `image-delivery:${assistantInputId}`,
                   explicitTarget: "chat_image_evidence_retry",
                   identityId: "participant_image_evidence_retry",
-                  media: [{
-                    alt: "Generated sunrise",
-                    kind: "image",
-                    source: "gpt-image-2",
-                    url: "https://imagedelivery.net/account/retry-first/public",
-                  }],
+                  media: [firstPrivateMedia],
                   message: "",
                   sessionId: "session_image_evidence_retry",
                   threadId: "thread_image_evidence_retry",
@@ -17767,6 +17767,8 @@ describe("hosted workspace runtime entrypoint", () => {
           : null,
         "murph.hosted-image-completion.v1",
       );
+      assert.match(completion?.content.text ?? "", /"kind":"vault_image"/u);
+      assert.doesNotMatch(completion?.content.text ?? "", /"kind":"image"/u);
       assert.deepEqual(pendingAtEnd, []);
       const firstCompletionEnqueueCalls =
         mocks.enqueueHostedPendingAssistantInputId.mock.calls

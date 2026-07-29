@@ -142,6 +142,17 @@ scheduled-reminder scenario adds the production-path proof: a real group
 newsletter invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
+Private assistant-image coverage is also owner-split. Shared contract tests
+accept only bounded `vault_image` descriptors; assistant-engine tests prove
+canonical generated-image captures plus path, hash, byte-count, filename, MIME,
+and image-signature verification; assistant-runtime tests prove verification
+finishes before provider dispatch; Linq and Telegram adapter tests prove
+attachment-id and rebuilt multipart delivery. Cloudflare Worker tests lock the
+legacy upload route to `410 Gone`. The hosted-local Codex image-media scenario
+generates through the real app-server tool relay, persists the vault capture,
+delivers a Linq attachment id, and reuses the same capture on retry without a
+public image URL.
+
 Managed group automation coverage is likewise owner-split. Assistant-engine
 reconciliation tests prove default member ownership, explicit group ownership,
 custom unscoped compatibility, and paused wrong-owner archival. Claimed-cron
