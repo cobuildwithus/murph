@@ -4,8 +4,36 @@ import { act, createElement, type ReactNode } from "react";
 import { test, vi } from "vitest";
 
 vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
-    open ? createElement("div", null, children) : null,
+  Dialog: ({
+    children,
+    disablePointerDismissal,
+    onOpenChange,
+    open,
+  }: {
+    children: ReactNode;
+    disablePointerDismissal?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    open: boolean;
+  }) =>
+    open
+      ? createElement(
+          "div",
+          {
+            "data-pointer-dismissal-disabled": String(
+              disablePointerDismissal ?? false,
+            ),
+          },
+          createElement(
+            "button",
+            {
+              onClick: () => onOpenChange?.(false),
+              type: "button",
+            },
+            "Dismiss dialog",
+          ),
+          children,
+        )
+      : null,
   DialogContent: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
   DialogDescription: ({ children }: { children: ReactNode }) =>
@@ -72,6 +100,94 @@ test.each([
     }
   },
 );
+
+test("keeps the dialog open when a recording is in progress", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture, {
+      contactAction: null,
+    }),
+  );
+  const trackStop = vi.fn();
+
+  class FakeMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+
+    mimeType = "audio/webm";
+    state: RecordingState = "inactive";
+    private readonly listeners = new Map<string, EventListener[]>();
+
+    addEventListener(type: string, listener: EventListener) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      this.state = "inactive";
+      for (const listener of this.listeners.get("stop") ?? []) {
+        listener(new Event("stop"));
+      }
+    }
+  }
+
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+  try {
+    const mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: trackStop }],
+      }),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const bodyText = rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /Finish recording/, bodyText);
+    const dialog = rendered.window.document.querySelector(
+      "[data-pointer-dismissal-disabled]",
+    );
+    assert.equal(
+      dialog?.getAttribute("data-pointer-dismissal-disabled"),
+      "true",
+    );
+    await clickButton(rendered.window, "Dismiss dialog");
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Recording/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Finish recording/,
+    );
+  } finally {
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+    }
+    await rendered.cleanup();
+  }
+});
 
 async function clickButton(
   window: Window & typeof globalThis,

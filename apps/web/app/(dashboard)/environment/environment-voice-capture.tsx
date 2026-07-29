@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   CircleStop,
   Download,
   Mic,
+  Pause,
+  Play,
   Send,
 } from "lucide-react";
 
@@ -21,6 +23,12 @@ import {
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const MAX_RECORDING_MS = 3 * 60 * 1_000;
+const AUDIO_METER_BAR_COUNT = 12;
+const AUDIO_NOISE_FLOOR = 0.025;
+const RESTING_AUDIO_LEVELS = Array.from(
+  { length: AUDIO_METER_BAR_COUNT },
+  () => 0,
+);
 
 const VOICE_TOPICS = [
   {
@@ -71,12 +79,118 @@ export function EnvironmentVoiceCapture({
   const [topicIndex, setTopicIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [recordingFile, setRecordingFile] = useState<File | null>(null);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [audioLevels, setAudioLevels] = useState(RESTING_AUDIO_LEVELS);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewElapsedMs, setPreviewElapsedMs] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
   const autoFinishRef = useRef<(() => void) | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioFrameRef = useRef<number | null>(null);
+  const recordingUrlRef = useRef<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const clearRecordingPreview = useCallback(() => {
+    previewAudioRef.current?.pause();
+    if (recordingUrlRef.current) {
+      URL.revokeObjectURL(recordingUrlRef.current);
+      recordingUrlRef.current = null;
+    }
+    setRecordingUrl(null);
+    setPreviewPlaying(false);
+    setPreviewElapsedMs(0);
+  }, []);
+
+  const stopAudioMeter = useCallback(() => {
+    if (audioFrameRef.current !== null) {
+      window.cancelAnimationFrame(audioFrameRef.current);
+      audioFrameRef.current = null;
+    }
+    audioSourceRef.current?.disconnect();
+    audioSourceRef.current = null;
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== "closed") {
+      void audioContext.close().catch(() => undefined);
+    }
+    setAudioLevels(RESTING_AUDIO_LEVELS);
+  }, []);
+
+  const startAudioMeter = useCallback(
+    (stream: MediaStream) => {
+      stopAudioMeter();
+      if (typeof AudioContext === "undefined") {
+        return;
+      }
+
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+      audioContextRef.current = audioContext;
+      audioSourceRef.current = source;
+      if (audioContext.state === "suspended") {
+        void audioContext.resume().catch(() => undefined);
+      }
+
+      const frequencies = new Uint8Array(analyser.frequencyBinCount);
+      const timeDomain = new Uint8Array(analyser.fftSize);
+      let lastRenderedAt = 0;
+      let smoothedVoiceLevel = 0;
+      const updateLevels = (renderedAt: number) => {
+        if (renderedAt - lastRenderedAt >= 50) {
+          analyser.getByteTimeDomainData(timeDomain);
+          analyser.getByteFrequencyData(frequencies);
+          let squareSum = 0;
+          for (const sample of timeDomain) {
+            const normalizedSample = (sample - 128) / 128;
+            squareSum += normalizedSample * normalizedSample;
+          }
+          const rootMeanSquare = Math.sqrt(squareSum / timeDomain.length);
+          const gatedVoiceLevel = Math.max(
+            0,
+            Math.min(
+              1,
+              (rootMeanSquare - AUDIO_NOISE_FLOOR) / 0.14,
+            ),
+          );
+          const smoothing =
+            gatedVoiceLevel > smoothedVoiceLevel ? 0.55 : 0.18;
+          smoothedVoiceLevel +=
+            (gatedVoiceLevel - smoothedVoiceLevel) * smoothing;
+          if (smoothedVoiceLevel < 0.025) {
+            smoothedVoiceLevel = 0;
+          }
+          setAudioLevels(
+            RESTING_AUDIO_LEVELS.map((_, index) => {
+              const frequencyIndex = Math.min(
+                frequencies.length - 1,
+                index + 1,
+              );
+              const frequencyLevel =
+                (frequencies[frequencyIndex] ?? 0) / 255;
+              return Math.min(
+                1,
+                smoothedVoiceLevel *
+                  (0.4 + Math.max(0, frequencyLevel - 0.05) * 1.4),
+              );
+            }),
+          );
+          lastRenderedAt = renderedAt;
+        }
+        audioFrameRef.current = window.requestAnimationFrame(updateLevels);
+      };
+      audioFrameRef.current = window.requestAnimationFrame(updateLevels);
+    },
+    [stopAudioMeter],
+  );
 
   useEffect(() => {
     if (state !== "recording") {
@@ -98,8 +212,10 @@ export function EnvironmentVoiceCapture({
     () => () => {
       recorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopAudioMeter();
+      clearRecordingPreview();
     },
-    [],
+    [clearRecordingPreview, stopAudioMeter],
   );
 
   const reset = () => {
@@ -107,6 +223,8 @@ export function EnvironmentVoiceCapture({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     chunksRef.current = [];
+    stopAudioMeter();
+    clearRecordingPreview();
     setState("idle");
     setTopicIndex(0);
     setElapsedMs(0);
@@ -135,6 +253,7 @@ export function EnvironmentVoiceCapture({
       streamRef.current = stream;
       recorderRef.current = recorder;
       chunksRef.current = [];
+      startAudioMeter(stream);
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
           chunksRef.current.push(event.data);
@@ -159,6 +278,8 @@ export function EnvironmentVoiceCapture({
     recorderRef.current = null;
     streamRef.current = null;
     chunksRef.current = [];
+    stopAudioMeter();
+    clearRecordingPreview();
     setState("idle");
     setTopicIndex(0);
     setElapsedMs(0);
@@ -177,8 +298,10 @@ export function EnvironmentVoiceCapture({
       recorder.addEventListener(
         "stop",
         () => {
-          const mimeType =
+          const recorderMimeType =
             recorder.mimeType || chunksRef.current[0]?.type || "audio/webm";
+          const mimeType =
+            recorderMimeType.split(";", 1)[0]?.trim() || "audio/webm";
           const extension = mimeType.includes("mp4") ? "m4a" : "webm";
           resolve(
             new File(chunksRef.current, `murph-environment.${extension}`, {
@@ -194,6 +317,11 @@ export function EnvironmentVoiceCapture({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     recorderRef.current = null;
+    stopAudioMeter();
+    clearRecordingPreview();
+    const previewUrl = URL.createObjectURL(file);
+    recordingUrlRef.current = previewUrl;
+    setRecordingUrl(previewUrl);
     setRecordingFile(file);
     setState("ready");
     return file;
@@ -210,39 +338,50 @@ export function EnvironmentVoiceCapture({
           text: "Please extract the clear facts from this voice memo and save them to my Habitat record. Skip anything uncertain.",
         });
         setState("ready");
-        setNotice(
-          "The share sheet closed. If you did not choose Murph, open it again or download the recording.",
-        );
+        setNotice("Your recording was shared.");
         return;
       }
 
-      downloadRecording(file);
       setState("ready");
       setNotice(
-        "The recording was downloaded. Open Murph and attach it as a voice message.",
+        "This browser cannot send the recording directly. Download it, then attach it in your Murph chat.",
       );
     } catch (error) {
       setState("ready");
       if (isShareDismissal(error)) {
         setNotice("The recording is still ready whenever you want to send it.");
       } else {
-        setNotice(
-          "The share sheet did not open. Download the recording and attach it in your Murph chat.",
-        );
+        setNotice(shareFailureNotice(error));
       }
     }
   };
 
-  const finishRecording = async (shareAfterStop: boolean) => {
-    const file = await stopRecording();
-    if (file && shareAfterStop) {
-      await shareRecording(file);
+  const finishRecording = async () => {
+    await stopRecording();
+  };
+
+  const toggleRecordingPreview = async () => {
+    const audio = previewAudioRef.current;
+    if (!audio) {
+      return;
+    }
+    setNotice(null);
+    if (!audio.paused) {
+      audio.pause();
+      setPreviewPlaying(false);
+      return;
+    }
+    try {
+      await audio.play();
+      setPreviewPlaying(true);
+    } catch {
+      setNotice("Murph could not play this recording in the browser.");
     }
   };
 
   useEffect(() => {
     autoFinishRef.current = () => {
-      void finishRecording(false);
+      void finishRecording();
     };
   });
 
@@ -258,6 +397,8 @@ export function EnvironmentVoiceCapture({
 
   const topic = VOICE_TOPICS[topicIndex];
   const elapsedLabel = formatElapsed(elapsedMs);
+  const canSendRecording =
+    recordingFile !== null && canShareRecording(recordingFile);
 
   return (
     <>
@@ -270,16 +411,31 @@ export function EnvironmentVoiceCapture({
         {triggerLabel}
       </Button>
 
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        onOpenChange={onOpenChange}
+        disablePointerDismissal={state === "recording"}
+      >
         <DialogContent
           className="flex max-h-[calc(100dvh-1rem)] min-h-[min(700px,calc(100dvh-1rem))] flex-col overflow-y-auto p-0 sm:max-h-[calc(100dvh-3rem)] sm:min-h-[min(620px,calc(100dvh-3rem))] sm:max-w-4xl sm:overflow-hidden"
           showCloseButton={state !== "recording"}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              setTopicIndex((index) => Math.max(0, index - 1));
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              setTopicIndex((index) =>
+                Math.min(VOICE_TOPICS.length - 1, index + 1),
+              );
+            }
+          }}
         >
           <DialogHeader className="border-b border-border px-6 py-5 pr-12">
             <DialogTitle>Walk Murph through your home</DialogTitle>
-            <DialogDescription>
-              One recording, five topics, no form. Speak naturally and move on
-              when you have said enough.
+            <DialogDescription className="sr-only">
+              Record one voice memo while moving through five short home topics.
             </DialogDescription>
           </DialogHeader>
 
@@ -291,17 +447,12 @@ export function EnvironmentVoiceCapture({
                     className="hidden size-6 shrink-0 text-primary lg:block"
                     aria-hidden="true"
                   />
-                  <h2 className="text-balance font-serif text-xl font-semibold tracking-[-0.02em] text-foreground lg:mt-5 lg:text-2xl">
-                    About two minutes is enough
+                  <h2 className="text-balance font-serif text-xl font-semibold tracking-[-0.02em] text-foreground lg:mt-5">
+                    Ready when you are
                   </h2>
                   <p className="mt-2 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm lg:mt-3">
-                    <span className="lg:hidden">
-                      Preview the topics, then start when you are ready.
-                    </span>
-                    <span className="hidden lg:inline">
-                      Use the arrows to preview each topic. Murph will save
-                      clear facts and leave uncertain details alone.
-                    </span>
+                    Preview the topics with the arrows, then record one
+                    continuous memo.
                   </p>
                   <Button
                     className="mt-4 self-start lg:mt-6"
@@ -333,49 +484,159 @@ export function EnvironmentVoiceCapture({
                       / 3:00
                     </span>
                   </p>
-                  <p className="mt-5 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm">
-                    Speak naturally. Move between topics whenever you have said
-                    enough.
-                  </p>
+                  {state === "recording" ? (
+                    <AudioActivityMeter levels={audioLevels} />
+                  ) : null}
 
                   <div className="mt-6 lg:mt-auto">
                     {state === "recording" ? (
-                      <div className="flex flex-col items-start gap-2">
+                      <div className="flex min-w-0 flex-col items-stretch gap-2">
                         <Button
                           type="button"
                           size="lg"
-                          onClick={() => void finishRecording(true)}
+                          className="w-full min-w-0"
+                          onClick={() => void finishRecording()}
                         >
                           <CircleStop
                             data-icon="inline-start"
                             aria-hidden="true"
                           />
-                          Finish and choose Murph
+                          Finish recording
                         </Button>
                         <Button
                           type="button"
                           variant="ghost"
                           onClick={cancelRecording}
                         >
-                          Cancel recording
+                          Discard recording
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        type="button"
-                        size="lg"
-                        disabled={!recordingFile || state === "sending"}
-                        onClick={() =>
-                          recordingFile
-                            ? void shareRecording(recordingFile)
-                            : undefined
-                        }
-                      >
-                        <Send data-icon="inline-start" aria-hidden="true" />
-                        {state === "sending"
-                          ? "Opening share sheet…"
-                          : "Choose Murph"}
-                      </Button>
+                      <>
+                        {recordingUrl ? (
+                          <div>
+                            <audio
+                              ref={previewAudioRef}
+                              src={recordingUrl}
+                              preload="metadata"
+                              onEnded={() => {
+                                setPreviewPlaying(false);
+                                setPreviewElapsedMs(0);
+                                if (previewAudioRef.current) {
+                                  previewAudioRef.current.currentTime = 0;
+                                }
+                              }}
+                              onPause={() => setPreviewPlaying(false)}
+                              onTimeUpdate={(event) =>
+                                setPreviewElapsedMs(
+                                  event.currentTarget.currentTime * 1_000,
+                                )
+                              }
+                            >
+                            </audio>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full min-w-0 justify-start"
+                              onClick={() => void toggleRecordingPreview()}
+                            >
+                              {previewPlaying ? (
+                                <Pause
+                                  data-icon="inline-start"
+                                  aria-hidden="true"
+                                />
+                              ) : (
+                                <Play
+                                  data-icon="inline-start"
+                                  aria-hidden="true"
+                                />
+                              )}
+                              {previewPlaying ? "Pause preview" : "Play preview"}
+                              <span className="ml-auto font-mono text-xs font-normal tabular-nums text-muted-foreground">
+                                {formatElapsed(previewElapsedMs)} /{" "}
+                                {elapsedLabel}
+                              </span>
+                            </Button>
+                            <div
+                              className="mt-2 h-1 overflow-hidden rounded-full bg-secondary"
+                              aria-hidden="true"
+                            >
+                              <span
+                                className="block h-full rounded-full bg-primary transition-[width] duration-100"
+                                style={{
+                                  width: `${Math.min(
+                                    100,
+                                    elapsedMs > 0
+                                      ? (previewElapsedMs / elapsedMs) * 100
+                                      : 0,
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {canSendRecording ? (
+                          <Button
+                            type="button"
+                            size="lg"
+                            className="mt-4 w-full min-w-0"
+                            disabled={!recordingFile || state === "sending"}
+                            onClick={() =>
+                              recordingFile
+                                ? void shareRecording(recordingFile)
+                                : undefined
+                            }
+                          >
+                            <Send data-icon="inline-start" aria-hidden="true" />
+                            {state === "sending"
+                              ? "Sending…"
+                              : "Send to Murph"}
+                          </Button>
+                        ) : (
+                          <div className="mt-4">
+                            <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                              This browser cannot attach the recording to your
+                              Murph chat directly yet.
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={!recordingFile}
+                                onClick={() =>
+                                  recordingFile
+                                    ? downloadRecording(recordingFile)
+                                    : undefined
+                                }
+                              >
+                                <Download
+                                  data-icon="inline-start"
+                                  aria-hidden="true"
+                                />
+                                Download
+                              </Button>
+                              {contactAction ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  render={
+                                    <a
+                                      href={contactAction.href}
+                                      target={contactAction.target}
+                                      rel={contactAction.rel}
+                                    />
+                                  }
+                                  nativeButton={false}
+                                >
+                                  Open Murph
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </>
@@ -387,7 +648,7 @@ export function EnvironmentVoiceCapture({
                   role="status"
                 >
                   <p>{notice}</p>
-                  {recordingFile ? (
+                  {recordingFile && canSendRecording ? (
                     <div className="mt-3 flex flex-wrap gap-3">
                       <Button
                         type="button"
@@ -451,6 +712,7 @@ export function EnvironmentVoiceCapture({
                     variant="outline"
                     disabled={topicIndex === 0}
                     aria-label="Previous topic"
+                    aria-keyshortcuts="ArrowLeft"
                     onClick={() => setTopicIndex((index) => index - 1)}
                   >
                     <ChevronLeft aria-hidden="true" />
@@ -461,6 +723,7 @@ export function EnvironmentVoiceCapture({
                     variant="outline"
                     disabled={topicIndex === VOICE_TOPICS.length - 1}
                     aria-label="Next topic"
+                    aria-keyshortcuts="ArrowRight"
                     onClick={() => setTopicIndex((index) => index + 1)}
                   >
                     <ChevronRight aria-hidden="true" />
@@ -518,22 +781,56 @@ function preferredMimeType(): string | undefined {
   return undefined;
 }
 
-export function microphoneAccessNotice(error: unknown): string {
-  const errorName =
-    error !== null &&
-    typeof error === "object" &&
-    "name" in error &&
-    typeof error.name === "string"
-      ? error.name
-      : null;
+function AudioActivityMeter({ levels }: { levels: readonly number[] }) {
+  return (
+    <div className="mt-5">
+      <div
+        className="flex h-10 items-center gap-1 rounded-lg border border-border bg-background/60 px-3"
+        aria-hidden="true"
+      >
+        {levels.map((level, index) => (
+          <span
+            key={index}
+            className="w-1 flex-1 rounded-full bg-primary transition-[height,opacity] duration-75"
+            style={{
+              height: `${Math.max(3, Math.round(level * 30))}px`,
+              opacity: level === 0 ? 0.35 : 1,
+            }}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Microphone active
+      </p>
+    </div>
+  );
+}
 
-  if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+function canShareRecording(file: File): boolean {
+  if (
+    typeof navigator === "undefined" ||
+    !navigator.share ||
+    !navigator.canShare
+  ) {
+    return false;
+  }
+  try {
+    return navigator.canShare({ files: [file] });
+  } catch {
+    return false;
+  }
+}
+
+export function microphoneAccessNotice(error: unknown): string {
+  const name = errorName(error);
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
     return "Microphone access is blocked for this site. Allow it in your browser's site settings, then try again — or send Murph a voice memo in your usual chat.";
   }
-  if (errorName === "NotFoundError") {
+  if (name === "NotFoundError") {
     return "No microphone was found. Connect one, then try again — or send Murph a voice memo in your usual chat.";
   }
-  if (errorName === "NotReadableError" || errorName === "AbortError") {
+  if (name === "NotReadableError" || name === "AbortError") {
     return "The microphone is unavailable, possibly because another app is using it. Close the other app and try again — or send Murph a voice memo in your usual chat.";
   }
   return "Murph could not access the microphone. Try again or send a voice memo in your usual chat.";
@@ -559,5 +856,28 @@ function downloadRecording(file: File): void {
 }
 
 function isShareDismissal(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return errorName(error) === "AbortError";
+}
+
+function shareFailureNotice(error: unknown): string {
+  const name = errorName(error);
+  if (name === "NotAllowedError") {
+    return "Chrome blocked the sharing window. Try again, or download the recording and attach it in your Murph chat.";
+  }
+  if (name === "InvalidStateError") {
+    return "Another sharing window is already open. Close it, then try again.";
+  }
+  if (name === "TypeError") {
+    return "Chrome cannot share this audio format. Download the recording and attach it in your Murph chat.";
+  }
+  return "Chrome could not open the sharing window. Your recording is still safe here.";
+}
+
+function errorName(error: unknown): string | null {
+  return error !== null &&
+    typeof error === "object" &&
+    "name" in error &&
+    typeof error.name === "string"
+    ? error.name
+    : null;
 }

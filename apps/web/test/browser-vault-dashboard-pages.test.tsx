@@ -244,7 +244,7 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
   assert.match(markup, /See how your home supports your sleep, air and focus/);
   assert.match(markup, /Start the 2-minute walkthrough/);
   assert.match(markup, /Prefer typing\? Use chat/);
-  assert.match(markup, /send it to Murph/);
+  assert.match(markup, /Murph will turn the clear details/);
   assert.match(markup, /Your report will cover/);
   assert.match(
     markup,

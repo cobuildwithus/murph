@@ -169,14 +169,13 @@ export function EnvironmentEmptyState({
           </p>
           <h2
             id="environment-empty-title"
-            className="mt-7 max-w-[18ch] text-balance font-serif text-4xl font-semibold tracking-[-0.03em] text-foreground sm:text-5xl"
+            className="mt-7 max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
           >
             See how your home supports your sleep, air and focus.
           </h2>
           <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
-            Record a two-minute tour of your home and send it to Murph. The
-            clear details will build your personal grade and a short list of
-            things worth checking.
+            Record a two-minute home tour. Murph will turn the clear details
+            into your first personal report.
           </p>
 
           <div className="mt-8 flex flex-col items-start gap-4">
