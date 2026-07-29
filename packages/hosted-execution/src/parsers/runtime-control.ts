@@ -114,6 +114,8 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedRuntimeIMessageContactToolRequest,
+  type HostedRuntimeIMessageContactToolResponse,
   type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
@@ -1245,6 +1247,7 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (
     action === "read_current"
+    || action === "read_chat_name"
     || action === "read_usage"
     || action === "list_memberships"
   ) {
@@ -2328,6 +2331,71 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_chat_name") {
+    const label = "Hosted runtime group tool read_chat_name response result";
+    const result = requireObject(record.result, label);
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_chat_name response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status"]),
+        `${label} ok`,
+      );
+      const displayName = parseHostedRuntimeGroupDisplayName(
+        result.displayName,
+        "Hosted runtime group tool read_chat_name displayName",
+      );
+      if (displayName === null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name ok displayName must be present.",
+        );
+      }
+      return { action, result: { displayName, status } };
+    }
+    if (status === "none") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status"]),
+        `${label} none`,
+      );
+      if (result.displayName !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name none displayName must be null.",
+        );
+      }
+      return { action, result: { displayName: null, status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status", "unavailableReason"]),
+        `${label} unavailable`,
+      );
+      if (result.displayName !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name unavailable displayName must be null.",
+        );
+      }
+      return {
+        action,
+        result: {
+          displayName: null,
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            "Hosted runtime group tool read_chat_name unavailableReason",
+          ),
+        },
+      };
+    }
+    throw new TypeError(
+      "Hosted runtime group tool read_chat_name response status is invalid.",
+    );
   }
 
   if (action === "read_usage") {
@@ -3797,6 +3865,87 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     action,
     invite,
   };
+}
+
+export function parseHostedRuntimeIMessageContactToolRequest(
+  value: unknown,
+): HostedRuntimeIMessageContactToolRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime iMessage contact tool request",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["assistantInputId"]),
+    "Hosted runtime iMessage contact tool request",
+  );
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted runtime iMessage contact tool assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool assistantInputId is invalid.",
+    );
+  }
+  return { assistantInputId };
+}
+
+export function parseHostedRuntimeIMessageContactToolResponse(
+  value: unknown,
+): HostedRuntimeIMessageContactToolResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime iMessage contact tool response",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["phoneNumber", "status", "verifiedSenderPhoneHint"]),
+    "Hosted runtime iMessage contact tool response",
+  );
+  const status = requireString(
+    record.status,
+    "Hosted runtime iMessage contact tool response status",
+  );
+  if (status === "identity_required" || status === "unavailable") {
+    if (
+      record.phoneNumber !== null
+      || record.verifiedSenderPhoneHint !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime iMessage contact response without a number requires null phoneNumber and verifiedSenderPhoneHint.",
+      );
+    }
+    return {
+      phoneNumber: null,
+      status,
+      verifiedSenderPhoneHint: null,
+    };
+  }
+  if (status !== "assigned" && status !== "existing") {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response status is invalid.",
+    );
+  }
+  const phoneNumber = requireString(
+    record.phoneNumber,
+    "Hosted runtime iMessage contact tool response phoneNumber",
+  );
+  if (!/^\+[1-9][0-9]{7,14}$/u.test(phoneNumber)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response phoneNumber is invalid.",
+    );
+  }
+  const verifiedSenderPhoneHint = requireString(
+    record.verifiedSenderPhoneHint,
+    "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint",
+  );
+  if (!/^\*{3} [0-9]{4}$/u.test(verifiedSenderPhoneHint)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint is invalid.",
+    );
+  }
+  return { phoneNumber, status, verifiedSenderPhoneHint };
 }
 
 export function parseHostedRuntimeAssistantConfigurationToolRequest(
@@ -5743,8 +5892,37 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
           recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
             .map((entry) => parseHostedRuntimeLogEntry(entry)),
         }),
+    ...(record.r2Cutover === undefined
+      ? {}
+      : { r2Cutover: parseHostedRunnerR2CutoverStatus(record.r2Cutover) }),
     userId: requireString(record.userId, "Hosted runner status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+function parseHostedRunnerR2CutoverStatus(
+  value: unknown,
+): NonNullable<HostedRunnerStatusResponse["r2Cutover"]> {
+  const record = requireObject(value, "Hosted runner status response r2Cutover");
+  const phase = requireString(
+    record.phase,
+    "Hosted runner status response r2Cutover.phase",
+  );
+  if (phase !== "source_active" && phase !== "destination_active") {
+    throw new TypeError(
+      "Hosted runner status response r2Cutover.phase must be source_active or destination_active.",
+    );
+  }
+  return {
+    coexisting: requireBoolean(
+      record.coexisting,
+      "Hosted runner status response r2Cutover.coexisting",
+    ),
+    phase,
+    protocolVersion: requireString(
+      record.protocolVersion,
+      "Hosted runner status response r2Cutover.protocolVersion",
+    ),
   };
 }
 

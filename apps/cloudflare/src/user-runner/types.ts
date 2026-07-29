@@ -35,6 +35,7 @@ export interface DurableObjectStorageLike {
   put<T>(key: string, value: T): Promise<void>;
   setAlarm(scheduledTime: number | Date): Promise<void>;
   sql?: DurableObjectSqlStorageLike;
+  transactionSync?<T>(callback: () => T): T;
 }
 
 export interface DurableObjectStateLike {

@@ -261,6 +261,18 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.notEqual(event.sourceRef.itemId, item.item.id);
+    const hydratedInputs = await createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    }).listInputCandidates({
+      sourceId: "linq",
+    });
+    assert.equal(
+      hydratedInputs.inputs[0]?.event.hostedMailboxItemId,
+      item.item.id,
+    );
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);

@@ -9,6 +9,9 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
+import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -81,6 +84,7 @@ import {
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
   executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
 import {
   createAssistantProductFeedbackRecorder,
@@ -4627,6 +4631,133 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-process-1',
       turnId: 'turn-process-1',
     })
+  })
+
+  it('runs member-read check-ins through the real provider validator as fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-read-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-member-read-home-',
+    )
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_250
+      children.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              instructionSources: [],
+              runtimeWorkspaceRoots: [workingDirectory],
+              thread: {
+                id: 'thread-member-read-checkin',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-read-checkin',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-member-read-checkin',
+                message:
+                  '{"kind":"skip","privateSummary":"No useful check-in now."}',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-read-checkin',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+      return child
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        approvalPolicy: 'never',
+        codexHome,
+        provider: 'codex-cli',
+        sandbox: 'read-only',
+      },
+      turn: {
+        conversationHistoryMessages: [
+          {
+            content: 'I want to make weekday lunches easier.',
+            role: 'user',
+          },
+          {
+            content: 'We can keep that practical and low pressure.',
+            role: 'assistant',
+          },
+        ],
+        developerInstructions: 'Immutable member-read check-in policy.',
+        dynamicTools: [],
+        permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+        processLifetime: 'one-shot',
+        prompt: 'Offer one truthful, low-pressure choice point.',
+        providerThreadEphemeral: true,
+        resume: null,
+        runtimeWorkspaceRoots: [workingDirectory],
+        workingDirectory,
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(children).toHaveLength(1)
+    const child = requireMockChildProcess(children[0] ?? null)
+    const written = readWrittenRpcMessages(child)
+    expect(written.some((message) => message.method === 'thread/resume')).toBe(
+      false,
+    )
+    expect(written.filter((message) => message.method === 'thread/start')).toHaveLength(
+      1,
+    )
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      dynamicTools: [],
+      ephemeral: true,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+    })
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'turn/start')).params,
+    )).toMatchObject({
+      input: expect.any(Array),
+    })
+    expect(child.signalCode).toBe('SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
   })
 
   it('fails closed before turn start when permission attestation drifts', async () => {
