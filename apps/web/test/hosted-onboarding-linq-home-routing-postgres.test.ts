@@ -5,13 +5,24 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import {
+  buildHostedExecutionLinqConversationMessageWake,
+} from "@murphai/hosted-execution";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
-import { appendHostedMailboxItemTx } from "@/src/lib/hosted-mailbox/store";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  appendHostedMailboxEnvelopeWithSourceMessageTx,
+  appendHostedMailboxItemTx,
+  readHostedMailboxSourceConversationEntriesTx,
+} from "@/src/lib/hosted-mailbox/store";
+import {
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
@@ -113,6 +124,365 @@ async function waitForBlockedBackend(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it("serializes concurrent edit lineage reads on the blind source key", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const sourceMessageLookupKey =
+        `test:linq-message-source:${randomUUID()}`;
+      const ownerLocked = createDeferred();
+      const contenderPid = createDeferred<number>();
+      const releaseOwner = createDeferred();
+      let ownerTransaction: Promise<void> | null = null;
+      let contenderTransaction: Promise<void> | null = null;
+
+      try {
+        ownerTransaction = owner.$transaction(async (tx) => {
+          await expect(readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: [sourceMessageLookupKey],
+            tx,
+          })).resolves.toEqual([]);
+          ownerLocked.resolve();
+          await releaseOwner.promise;
+        }, transactionOptions);
+        await Promise.race([
+          ownerLocked.promise,
+          ownerTransaction.then(() => {
+            throw new Error(
+              "Edit lineage owner completed before holding its source lock.",
+            );
+          }),
+        ]);
+
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          await expect(readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: [sourceMessageLookupKey],
+            tx,
+          })).resolves.toEqual([]);
+        }, transactionOptions);
+        const pid = await Promise.race([
+          contenderPid.promise,
+          contenderTransaction.then(() => {
+            throw new Error(
+              "Edit lineage contender completed before exposing its backend.",
+            );
+          }),
+        ]);
+        await waitForBlockedBackend({
+          observer,
+          pid,
+        });
+
+        releaseOwner.resolve();
+        await expect(
+          Promise.all([ownerTransaction, contenderTransaction]),
+        ).resolves.toEqual([undefined, undefined]);
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled(
+          [ownerTransaction, contenderTransaction].filter(
+            (transaction): transaction is Promise<void> =>
+              transaction !== null,
+          ),
+        );
+        await disconnectClients([observer, owner, contender]);
+      }
+    });
+
+    it("retries an edit that races an uncommitted ordinary source append", async () => {
+      const original = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const edit = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_edit_race_${randomUUID()}`;
+      const messageId = `message_edit_race_${randomUUID()}`;
+      const sourceMessageLookupKey = requireString(
+        createHostedLinqMessageLookupKey(messageId),
+      );
+      const sourceMessageLookupKeyReadCandidates =
+        createHostedLinqMessageLookupKeyReadCandidates(messageId);
+      const accountLookupKey = requireString(
+        createHostedPhoneLookupKey("+15550000000"),
+      );
+      const contactLookupKey = requireString(
+        createHostedPhoneLookupKey("+15551112222"),
+      );
+      const originalAppended = createDeferred<string>();
+      const releaseOriginal = createDeferred();
+      let memberCreated = false;
+      let originalTransaction: Promise<string> | null = null;
+
+      try {
+        await original.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        memberCreated = true;
+
+        originalTransaction = original.$transaction(async (tx) => {
+          const originalWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: `event_edit_race_${randomUUID()}`,
+              linqMessage: {
+                chatId: `chat_edit_race_${randomUUID()}`,
+                from: "+15551112222",
+                isFromMe: false,
+                messageId,
+                parts: [{ type: "text", value: "Original wording" }],
+                service: "iMessage",
+                threadIsDirect: true,
+              },
+              occurredAt: new Date().toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const appended =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: originalWake,
+              sourceMessageLookupKey,
+              tx,
+            });
+          originalAppended.resolve(appended.item.id);
+          await releaseOriginal.promise;
+          return appended.item.id;
+        }, transactionOptions);
+
+        const originalItemId = await Promise.race([
+          originalAppended.promise,
+          originalTransaction.then(() => {
+            throw new Error(
+              "Original source append completed before exposing its uncommitted row.",
+            );
+          }),
+        ]);
+        await expect(edit.$transaction(async (tx) =>
+          readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          }), transactionOptions)).resolves.toEqual([]);
+
+        releaseOriginal.resolve();
+        await expect(originalTransaction).resolves.toBe(originalItemId);
+
+        await expect(edit.$transaction(async (tx) =>
+          readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          }), transactionOptions)).resolves.toMatchObject([{
+          contentAvailable: true,
+          itemId: originalItemId,
+          userId: memberId,
+          wake: {
+            message: {
+              linqMessage: {
+                messageId,
+              },
+            },
+          },
+        }]);
+      } finally {
+        releaseOriginal.resolve();
+        if (originalTransaction) {
+          await Promise.allSettled([originalTransaction]);
+        }
+        if (memberCreated) {
+          await original.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([original, edit]);
+      }
+    });
+
+    it("round-trips original and correction lineage through the production mailbox store", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_edit_lineage_${randomUUID()}`;
+      const messageId = `message_edit_lineage_${randomUUID()}`;
+      const originalEventId = `event_edit_original_${randomUUID()}`;
+      const correctionEventId = `event_edit_correction_${randomUUID()}`;
+      const sourceMessageLookupKey = requireString(
+        createHostedLinqMessageLookupKey(messageId),
+      );
+      const sourceMessageLookupKeyReadCandidates =
+        createHostedLinqMessageLookupKeyReadCandidates(messageId);
+      const accountLookupKey = requireString(
+        createHostedPhoneLookupKey("+15550000000"),
+      );
+      const contactLookupKey = requireString(
+        createHostedPhoneLookupKey("+15551112222"),
+      );
+      const originalOccurredAt = new Date();
+      const correctionOccurredAt =
+        new Date(originalOccurredAt.getTime() + 1);
+      let memberCreated = false;
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        memberCreated = true;
+
+        await prisma.$transaction(async (tx) => {
+          const originalWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: originalEventId,
+              linqMessage: {
+                chatId: `chat_edit_lineage_${randomUUID()}`,
+                from: "+15551112222",
+                isFromMe: false,
+                messageId,
+                parts: [{ type: "text", value: "Original wording" }],
+                service: "iMessage",
+                threadIsDirect: true,
+              },
+              occurredAt: originalOccurredAt.toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const originalAppend =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: originalWake,
+              sourceMessageLookupKey,
+              tx,
+            });
+          expect(originalAppend.inserted).toBe(true);
+
+          await expect(readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys:
+              sourceMessageLookupKeyReadCandidates,
+            tx,
+          })).resolves.toMatchObject([{
+            contentAvailable: true,
+            itemId: originalAppend.item.id,
+            userId: memberId,
+            wake: {
+              eventId: originalEventId,
+              message: {
+                linqMessage: {
+                  messageId,
+                  parts: [{ type: "text", value: "Original wording" }],
+                },
+              },
+            },
+          }]);
+
+          const correctionWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: correctionEventId,
+              linqMessage: {
+                ...originalWake.message.linqMessage,
+                editedSourceInputId:
+                  "ain_11111111111111111111111111111111",
+                editedTextPartIndex: 0,
+                parts: [{ type: "text", value: "Corrected wording" }],
+              },
+              occurredAt: correctionOccurredAt.toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const correctionAppend =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: correctionWake,
+              sourceMessageLookupKey,
+              tx,
+            });
+          expect(correctionAppend.inserted).toBe(true);
+
+          const acceptedLineage =
+            await readHostedMailboxSourceConversationEntriesTx({
+              sourceMessageLookupKeys:
+                sourceMessageLookupKeyReadCandidates,
+              tx,
+            });
+          expect(acceptedLineage.map((entry) => ({
+            contentAvailable: entry.contentAvailable,
+            editedTextPartIndex:
+              entry.wake?.message.channel === "linq"
+                ? entry.wake.message.linqMessage.editedTextPartIndex
+                : undefined,
+            eventId: entry.wake?.eventId,
+            itemId: entry.itemId,
+            text: entry.wake?.message.channel === "linq"
+              ? entry.wake.message.linqMessage.parts.find(
+                  (part) => part.type === "text",
+                )?.value
+              : undefined,
+          }))).toEqual([
+            {
+              contentAvailable: true,
+              editedTextPartIndex: undefined,
+              eventId: originalEventId,
+              itemId: originalAppend.item.id,
+              text: "Original wording",
+            },
+            {
+              contentAvailable: true,
+              editedTextPartIndex: 0,
+              eventId: correctionEventId,
+              itemId: correctionAppend.item.id,
+              text: "Corrected wording",
+            },
+          ]);
+
+          await tx.hostedMailboxPayload.deleteMany({
+            where: { mailboxItemId: originalAppend.item.id },
+          });
+          await tx.hostedMailboxItem.update({
+            data: {
+              contentRetiredAt: new Date(),
+              payloadInlineCiphertext: null,
+              payloadRef: null,
+              retentionDisposition: "test-content-retired",
+            },
+            where: { id: originalAppend.item.id },
+          });
+
+          const retiredLineage =
+            await readHostedMailboxSourceConversationEntriesTx({
+              sourceMessageLookupKeys:
+                sourceMessageLookupKeyReadCandidates,
+              tx,
+            });
+          expect(retiredLineage.map((entry) => ({
+            contentAvailable: entry.contentAvailable,
+            eventId: entry.wake?.eventId ?? null,
+            itemId: entry.itemId,
+          }))).toEqual([
+            {
+              contentAvailable: false,
+              eventId: null,
+              itemId: originalAppend.item.id,
+            },
+            {
+              contentAvailable: true,
+              eventId: correctionEventId,
+              itemId: correctionAppend.item.id,
+            },
+          ]);
+        }, transactionOptions);
+      } finally {
+        if (memberCreated) {
+          await prisma.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([prisma]);
+      }
+    });
+
     it("admits only one concurrent claim for the final daily slot", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });

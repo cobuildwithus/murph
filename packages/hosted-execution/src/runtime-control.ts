@@ -1308,6 +1308,7 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "read_chat_name" }
   | { action: "read_usage" }
   | {
       action: "read_participant_display_names";
@@ -1406,6 +1407,17 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_chat_name";
+      result:
+        | { displayName: string; status: "ok" }
+        | { displayName: null; status: "none" }
+        | {
+            displayName: null;
+            status: "unavailable";
+            unavailableReason: string;
+          };
     }
   | {
       action: "read_usage";

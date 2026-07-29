@@ -2478,6 +2478,11 @@ describe("parseHostedRuntimeGroupTool", () => {
 
   it("parses chat-scoped requests with and without the runtime-injected linqThread", () => {
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_chat_name",
+    })).toEqual({
+      action: "read_chat_name",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "read_chat_participants",
     })).toEqual({
       action: "read_chat_participants",
@@ -2559,6 +2564,65 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses bounded read_chat_name responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_name",
+      result: {
+        displayName: "Weekend Warriors",
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: "Weekend Warriors",
+        status: "ok",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "none",
+      },
+    })).toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "none",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    })).toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "ok",
+      },
+    })).toThrow(/must be present/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_name",
+      result: {
+        displayName: "Weekend Warriors",
+        status: "none",
+      },
+    })).toThrow(/must be null/u);
   });
 
   it("parses read_chat_participants responses and caps the participant list", () => {

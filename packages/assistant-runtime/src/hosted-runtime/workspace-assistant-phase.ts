@@ -16,6 +16,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupToolSelfOptOutContext,
+  type HostedRuntimeProductFeedbackRecord,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -474,6 +476,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       return {
         action: request.action,
         result: { group: null, status: "unavailable", unavailableReason },
+      };
+    case "read_chat_name":
+      return {
+        action: request.action,
+        result: { displayName: null, status: "unavailable", unavailableReason },
       };
     case "read_chat_participants":
       return {
@@ -1435,6 +1442,10 @@ export async function runHostedWorkspaceAssistantPhase(
     resolveHostedClinicalRecordsConnectLinkTool(input.runtime.platform.clinicalRecordsPort);
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
+  const productFeedbackCandidates = new Map<
+    string,
+    HostedRuntimeProductFeedbackRecord
+  >();
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
@@ -1532,7 +1543,18 @@ export async function runHostedWorkspaceAssistantPhase(
           ? { imageGenerationLauncher: input.imageGenerationLauncher }
           : {}),
         ...(input.runtime.platform.productFeedbackPort
-          ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
+          ? {
+              productFeedbackCandidateSink: {
+                acceptProductFeedbackCandidate(
+                  feedback: HostedRuntimeProductFeedbackRecord,
+                ) {
+                  productFeedbackCandidates.set(
+                    feedback.idempotencyKey,
+                    feedback,
+                  );
+                },
+              },
+            }
           : {}),
         memberId: input.request.userId,
         createScheduledGroupTools: ({ channel, target, threadIsDirect }) =>
@@ -1770,6 +1792,7 @@ export async function runHostedWorkspaceAssistantPhase(
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
+      productFeedbackCandidates.clear();
       const automationLaneStartedAt = Date.now();
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
@@ -1864,6 +1887,12 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       return {
         ...assistantMetrics,
+        ...(productFeedbackCandidates.size === 0
+          ? {}
+          : {
+              assistantAutomationProductFeedbackCandidates:
+                [...productFeedbackCandidates.values()],
+            }),
         ...(assistantAutomationRedactedLogEntries.length === 0
           ? {}
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
@@ -5642,6 +5671,14 @@ async function drainHostedPostCheckpointDelivery(input: {
         wake: input.wake,
       })
     : [];
+  await recordHostedProductFeedbackAfterMemberDelivery({
+    candidates:
+      input.assistantMetrics?.assistantAutomationProductFeedbackCandidates ?? [],
+    currentTurnDeliveryIntentIds:
+      input.assistantMetrics?.assistantAutomationCurrentTurnDeliveryIntentIds ?? [],
+    outcomes,
+    port: input.input.runtime.platform.productFeedbackPort ?? null,
+  });
   if (backgroundDeliveryDrainYielded) {
     await recordHostedProviderCleanupAfterDelivery({
       idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
@@ -5743,6 +5780,30 @@ async function drainHostedPostCheckpointDelivery(input: {
       nextWakeAt: postNextWakeAt,
     },
   };
+}
+
+async function recordHostedProductFeedbackAfterMemberDelivery(input: {
+  candidates: readonly HostedRuntimeProductFeedbackRecord[];
+  currentTurnDeliveryIntentIds: readonly string[];
+  outcomes: readonly HostedAssistantDeliveryOutcome[];
+  port: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"];
+}): Promise<void> {
+  if (
+    !input.port
+    || input.candidates.length === 0
+    || !input.outcomes.some((outcome) =>
+      outcome.deliveryStatus === "sent"
+      && input.currentTurnDeliveryIntentIds.includes(outcome.effectId)
+    )
+  ) {
+    return;
+  }
+
+  await Promise.allSettled(
+    input.candidates.map((candidate) =>
+      input.port?.recordProductFeedback(candidate)
+    ),
+  );
 }
 
 async function yieldHostedBackgroundPostCheckpointDrain(

@@ -2143,6 +2143,67 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupRunningBit, undefined);
   });
 
+  test("projects trusted Linq correction metadata separately from replacement text", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-edit-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_linq_edit_001",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:edit-contact",
+        linqMessage: {
+          chatId: "chat_edit",
+          editedSourceInputId: "ain_11111111111111111111111111111111",
+          editedTextPartIndex: 0,
+          from: "+15551110000",
+          isFromMe: false,
+          messageId: "msg_edit",
+          parts: [{ type: "text", value: "corrected wording" }],
+          replyToMessageId: "msg_edit",
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "hbidx:phone:v1:edit-contact",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_linq_edit_001",
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_linq_edit_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+    assert.ok(event);
+    assert.equal(event.content.text, "corrected wording");
+    assert.equal(event.sourceMetadata?.kind, "linq");
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.editedSourceInputId
+        : undefined,
+      "ain_11111111111111111111111111111111",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.editedTextPartIndex
+        : undefined,
+      0,
+    );
+  });
+
   test("records hosted attachment evidence after successful inbox projection", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-evidence-"));
     tempRoots.push(parentRoot);
