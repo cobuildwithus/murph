@@ -1,6 +1,6 @@
 # Reuse explicitly saved cards for usage top-ups
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -78,7 +78,16 @@ Updated: 2026-07-29
   test-mode Session accepted the v4 off-session setup, explicit save control,
   and `always` redisplay filter before its test objects were retired; local
   product-experience review returned `NO FINDINGS`.
+- Preliminary `completion-specialists` ReviewGPT returned one accepted coverage
+  finding: explicitly prove the v4 multiple-reusable-card default branch and
+  frozen v3 legacy selection. Its same-thread test-only patch was inspected,
+  passed `git apply --check`, and was applied deliberately. The focused service
+  suite then passed 132 tests and prepared web typecheck passed again.
+- Parent final review re-read the complete source, test, and contract diff after
+  that remediation and found no remaining implementation or proof gap. The
+  final exact-head ReviewGPT and GitHub CI gates follow plan archival.
 - Operator direction: after the local shared-host lane exhausted its ten-minute
   admission window, the user asked to skip the remaining local/remote
   acceptance work and use GitHub CI as the verification gate. The queued
   one-shot Testbox was stopped before execution.
+Completed: 2026-07-29
