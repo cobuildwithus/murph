@@ -1,6 +1,6 @@
 # Publish the July 28-29 changelog
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -56,7 +56,9 @@ Updated: 2026-07-29
   rather than publishing a duplicate entry.
 - Refreshed `origin/main` again after final local verification and folded the
   direct-launch Clubs presentation into that same stable item, removing stale
-  pilot and early-access language.
+  pilot and early-access language. The companion checklist label now says
+  `Start a club challenge`; focused tests and refreshed July 29 desktop/mobile
+  proof passed after that one-line presentation correction.
 - Rebased the task commit onto the current root snapshot after `main` history
   changed, then added the newly merged Telegram-to-iMessage contact handoff to
   the same July 29 edition.
@@ -92,3 +94,4 @@ Updated: 2026-07-29
 - Exact-head CI was retried unchanged after the Codex image-media E2E observed
   two sends but timed out while waiting for the third with the hosted runtime
   still in flight; no changed file reaches that runtime path.
+Completed: 2026-07-29

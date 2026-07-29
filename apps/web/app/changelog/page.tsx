@@ -66,7 +66,7 @@ const VISUALS: Record<string, ReactNode> = {
   ),
   "clubs-challenge-pilot-page": (
     <ChecklistMock
-      label="Plan a club pilot"
+      label="Start a club challenge"
       items={[
         { label: "Runs in iMessage", done: true },
         { label: "Supported wearable inputs", done: true },
