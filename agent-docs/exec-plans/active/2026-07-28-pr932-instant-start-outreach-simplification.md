@@ -44,7 +44,7 @@ Updated: 2026-07-28
 1. [x] Trace the landed instant-start feature and prove its interaction with PR 932.
 2. [x] Ask ReviewGPT for a bounded patch covering compatibility, a 100+ opener bank, tests, and justified deletion.
 3. [x] Inspect the returned patch and implement only verified, proportional changes.
-4. [ ] Run focused proof, product review, preliminary specialists, parent review, canonical verification, and acceptance.
+4. [x] Run focused proof, product review, preliminary specialists, parent review, canonical verification, and acceptance.
 5. [ ] Close the plan, push the final head, complete ReviewGPT/CI/mergeability gates, and leave PR 932 open.
 
 ## Decisions
@@ -53,12 +53,28 @@ Updated: 2026-07-28
 - Treat ReviewGPT output as untrusted implementation intent; every production hunk must be checked against the real owner boundary before application.
 - Keep the group-outreach reply as one deterministic group-link response rather than also appending it to the assistant mailbox. ReviewGPT's proposed early-return deletion would create a second response path and contradict the durable group-outreach contract.
 - Retain the outreach store, drain, transport, locks, and two-stage membership checks. The landed instant-start path owns admission and activation, but none of those PR-specific correlation, pacing, provider, or web-join-race responsibilities.
+- Accept the preliminary specialist's test-only finding that the authenticated
+  join-page seam did not prove the phone-bound invite reached the accept form.
+  The production handoff was already correct; the focused page test now binds
+  the exact query invite without changing runtime behavior.
 
 ## Verification
 
 - Focused Linq dispatcher, webhook idempotency, outreach drain, transport, and store: 285 passed.
 - Exact opener-bank plus instant-start/group-recovery recheck: 184 passed.
 - Prepared Web typecheck passed.
+- Default-profile Web typecheck passed after correcting the combined test's
+  callback-owned invite capture for clean CI checkouts.
 - Isolated PostgreSQL reply-recovery and membership-race proof: 14 passed.
 - Agent docs drift passed.
 - Product-experience review: PASS after replacing topic-specific prompts and binding the exact issued invite URL.
+- Preliminary completion specialists: one accepted test-only coverage finding;
+  the focused join-page suite passed 13 tests after remediation.
+- Canonical `pnpm test:diff apps/web`: 7,291 passed, 220 skipped; typecheck,
+  lint with zero errors, smoke, and production build passed.
+- Parent final review: no unresolved accepted findings after tracing the shared
+  admission/enrollment owner, group-origin recovery, and both membership
+  suppression boundaries.
+- Canonical `pnpm verify:acceptance`: passed all workspace typecheck, package
+  coverage, Web/Cloudflare app verification, production-build, artifact, and
+  package-boundary lanes.
