@@ -7,6 +7,7 @@ import {
 import {
   ensureHostedLinqLineForProviderEventTx,
   projectHostedLinqLineForProviderEventTx,
+  upsertHostedLinqLineForPhoneTx,
 } from "./linq-line-store";
 import {
   createHostedLinqProviderEventLookupKey,
@@ -15,6 +16,11 @@ import {
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
+import {
+  projectHostedLinqChatHealthTx,
+  projectHostedLinqLineProviderStateTx,
+} from "./linq-provider-health-store";
+import type { HostedLinqProviderHealthEvent } from "./linq-provider-health-event";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -23,6 +29,7 @@ type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
+  health?: HostedLinqProviderHealthEvent | null;
   prisma: HostedLinqProviderEventClient;
   receivedAt?: Date;
 }): Promise<{
@@ -35,10 +42,19 @@ export async function ingestHostedLinqProviderEventTx(input: {
 }> {
   const receivedAt = input.receivedAt ?? new Date();
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
-  const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
+  let lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,
     prisma: input.prisma,
   });
+  if (!lineLookupKey && input.health?.line) {
+    const line = await upsertHostedLinqLineForPhoneTx({
+      observedAt: receivedAt,
+      phoneNumber: input.health.line.phoneNumber,
+      prisma: input.prisma,
+      source: "webhook",
+    });
+    lineLookupKey = line.phoneNumberLookupKey;
+  }
   const created = await input.prisma.hostedLinqProviderEvent.createMany({
     data: {
       apiVersion: input.event.apiVersion,
@@ -121,13 +137,39 @@ export async function ingestHostedLinqProviderEventTx(input: {
     ?? deliveryReceipt.phoneNumberLookupKey
     ?? outboundEchoDelivery?.phoneNumberLookupKey
     ?? null;
-  // Delivery/line projections are monotonic derived state. The provider-event
-  // ledger remains the duplicate gate for event-scoped alerting below.
-  if (!staleDeliveryReceipt && !outboundEchoDelivery?.runtimeOwned) {
+  // Delivery projections remain Murph-observed state. Linq's line service and
+  // reputation snapshot is projected independently below.
+  if (
+    input.event.eventType !== "phone_number.status_updated"
+    && !staleDeliveryReceipt
+    && !outboundEchoDelivery?.runtimeOwned
+  ) {
     await projectHostedLinqLineForProviderEventTx({
       event: input.event,
       lineLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
+    });
+  }
+
+  if (input.health?.line && projectionLineLookupKey) {
+    await projectHostedLinqLineProviderStateTx({
+      eventId: input.health.line.eventId,
+      observedAt: receivedAt,
+      phoneNumberLookupKey: projectionLineLookupKey,
+      prisma: input.prisma,
+      providerUpdatedAt: input.health.line.providerUpdatedAt,
+      reputationStatus: input.health.line.reputationStatus,
+      serviceStatus: input.health.line.serviceStatus,
+    });
+  }
+  if (input.health?.chat) {
+    await projectHostedLinqChatHealthTx({
+      chatId: input.health.chat.chatId,
+      observedAt: receivedAt,
+      phoneNumberLookupKey: projectionLineLookupKey,
+      prisma: input.prisma,
+      providerStatus: input.health.chat.providerStatus,
+      providerUpdatedAt: input.health.chat.providerUpdatedAt,
     });
   }
 
