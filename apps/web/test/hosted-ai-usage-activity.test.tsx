@@ -51,7 +51,7 @@ beforeEach(() => {
         }
       : {
           requirementsLabel:
-            "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+            "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
           title: "Bring someone new to Murph",
         }
   );

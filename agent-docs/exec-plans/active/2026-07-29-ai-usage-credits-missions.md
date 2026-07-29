@@ -98,6 +98,11 @@ Updated: 2026-07-29
 - The Murph handoff asks a neutral question about available missions. Opening
   the handoff does not arm a mission; the existing exact policy selection
   remains the consent boundary.
+- Direct journey feedback showed that the selected new-person mission was
+  expanded into a setup checklist for the referrer. The canonical display copy
+  now states the introduction and completion outcome, while the ordinary group
+  first-reply flow owns newcomer consent and setup. Qualification, attribution,
+  reward, and deadline behavior remain unchanged.
 
 ## Verification
 

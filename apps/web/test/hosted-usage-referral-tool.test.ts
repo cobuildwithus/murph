@@ -147,6 +147,8 @@ describe("hosted usage referral tool", () => {
           availablePolicies: [
             {
               code: "new_person_activation_v1",
+              requirementsLabel:
+                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 100 more messages on the model your Murph is using now",
             },
@@ -181,6 +183,8 @@ describe("hosted usage referral tool", () => {
           availablePolicies: [
             {
               code: "new_person_activation_v1",
+              requirementsLabel:
+                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 50 more messages on the model your Murph is using now",
             },

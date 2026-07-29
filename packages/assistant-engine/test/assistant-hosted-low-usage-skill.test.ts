@@ -162,6 +162,18 @@ describe('assistant hosted low-usage skill', () => {
       'Start a fresh group and make it genuinely active, with multiple people actually talking.',
     )
     expect(normalizedSkill).toContain(
+      'Give the referrer only the group-opening goal',
+    )
+    expect(normalizedSkill).toContain(
+      'The ordinary first-reply group setup flow owns the rest',
+    )
+    expect(normalizedSkill).toContain(
+      'confirm the handoff in one short sentence',
+    )
+    expect(normalizedSkill).not.toContain(
+      'After arming that mission, explain the reciprocal setup path',
+    )
+    expect(normalizedSkill).toContain(
       'introduce me to your mom and I can bring this group roughly another 50 messages',
     )
     expect(normalizedSkill).toContain('Murph is the butt of the joke')

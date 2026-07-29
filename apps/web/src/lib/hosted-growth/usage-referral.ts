@@ -111,7 +111,7 @@ const POLICIES = {
       terra: 100,
     },
     requirementsLabel:
-      "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+      "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     title: "Bring someone new to Murph",
   },

@@ -113,7 +113,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
-        "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
       rewardLabel: "$2.00",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
@@ -158,7 +158,7 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
       destinationLabel: "your Murph",
       id: "design-mission-disabled-history",
       requirementsLabel:
-        "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
       rewardLabel: "$2.00",
       selectedLabel: "Jul 10, 2026",
       status: "completed",

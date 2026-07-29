@@ -91,7 +91,7 @@ describe("hosted usage referral policy", () => {
   it("shares display copy and outstanding semantics with read-only projections", () => {
     expect(getHostedUsageReferralPolicyDisplay("new_person_activation_v1")).toEqual({
       requirementsLabel:
-        "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
       title: "Bring someone new to Murph",
     });
     expect(getHostedUsageReferralPolicyDisplay("active_group_v1")).toEqual({
