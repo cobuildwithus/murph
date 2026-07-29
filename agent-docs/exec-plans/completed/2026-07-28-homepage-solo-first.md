@@ -1,8 +1,8 @@
 # Restore the solo-first homepage hero
 
-Status: active
+Status: completed
 Created: 2026-07-28
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 ## Goal
 
@@ -114,8 +114,12 @@ Updated: 2026-07-28
 - Focused Vitest: 3 files, 14 tests passed after specialist remediation and
   product follow-up.
 - Frontend design-proof guard: 10 tests passed.
-- Canonical diff verification passed on the initial exact pushed head; rerun on
-  the final remediation head before handoff.
+- Canonical diff verification passed on the final merged head: 559 web test
+  files passed, 16 skipped; 7,322 tests passed, 220 skipped; TypeScript, lint
+  with warnings only, dev smoke, and the production build passed.
+- Full remote acceptance passed on the remediation tree through the bounded
+  Blacksmith Testbox lane, including workspace typecheck, package and app
+  verification, coverage, and the production build.
 - Browser proof:
   - Solo-first and group-second states verified at desktop and mobile widths.
   - Private topic return from the group, order-card, and bloodwork-card states
@@ -130,4 +134,9 @@ Updated: 2026-07-28
     intercept it.
   - Keyboard order reaches the CTA and message field before topic controls;
     focused topic motion pauses and shows a visible focus ring.
-- Final ReviewGPT, exact-head CI, and mergeability proof remain before closure.
+- Parent final review found no unresolved correctness, privacy, accessibility,
+  or architecture issue.
+- The branch includes current `origin/main`, and the non-mutating merge-tree
+  proof passed. Final ReviewGPT and exact-head CI start from the pushed plan-
+  closure commit, as required by the PR-lane workflow.
+Completed: 2026-07-29
