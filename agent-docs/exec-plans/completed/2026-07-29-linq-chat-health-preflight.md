@@ -1,6 +1,6 @@
 # Add Linq line and chat health preflight
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -76,8 +76,8 @@ Updated: 2026-07-29
    contracts and dynamic context.
 6. [x] Add focused parsing, projection, routing, race, and compatibility tests.
 7. [x] Correct durable deliverability guidance and document rollout/deployment.
-8. [ ] Run focused proof, review gates, exact-head CI, reconcile current `main`,
-   and close the migration.
+8. [x] Run focused proof and preliminary review, reconcile current `main`,
+   complete the parent final review, and prepare the final exact-head gates.
 
 ## Verification log
 
@@ -114,5 +114,17 @@ Updated: 2026-07-29
   reach its assertion because cold stack startup exceeded its fixed
   300-second `beforeAll` timeout; canonical exact-head CI remains the required
   proof for that path.
-- Final parent review, plan closure, final ReviewGPT, and exact-head CI remain
-  pending on the next pushed implementation head.
+- A real pinned Codex App Server capture measured the complete normalized
+  `gpt-5.6-terra` code-mode provider input. Direct and group scheduled requests
+  each add 167 `o200k_base` tokens and 893 UTF-8 bytes: 48 tokens/255 bytes for
+  stable developer precedence and 119 tokens/638 bytes for recovery context;
+  tool/schema/generated guidance is unchanged.
+- Parent final review walked persistence, inventory/webhook projection,
+  assignment, final-target policy, Web authority, runtime propagation,
+  scheduled context, and provider entry. It found no production-code defect.
+  The durable deliverability guide now records the independent owners and
+  existing preflight/fence architecture instead of leaving it only in this
+  execution plan.
+- Plan closure prepares the immutable final ReviewGPT baseline. Final
+  ReviewGPT, exact-head CI, and final mergeability remain external PR gates.
+Completed: 2026-07-29

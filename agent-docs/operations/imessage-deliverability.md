@@ -181,6 +181,19 @@ Design messaging flows to earn genuine replies early, then keep letting current 
 - Do not re-engage cold contacts who have not replied in 30 or more days with bulk messages. Apple tracks recipient engagement per chat: a thread with 50 sent and 0 replies is a red flag.
 #### Monitoring Your Line Health
 
+- Keep three provider/local facts independent: Linq line service
+  (`ACTIVE`/`FLAGGED`), Linq line reputation
+  (`HEALTHY`/`AT_RISK`/`CRITICAL`), and Murph-observed delivery health from
+  receipts and failures. A successful receipt must not erase provider
+  reputation, and a provider warning must not masquerade as a local failure.
+- Keep Linq chat health as a content-free latest-state projection keyed by the
+  blinded chat identifier. Webhooks are the fast path; bounded inventory
+  reconciliation repairs missed or silence-driven changes without calling Linq
+  from a routing transaction.
+- Existing routes remain sticky on `AT_RISK`; new assignments avoid those
+  lines. Scheduled turns may receive only a closed cautious/recovery posture,
+  while the existing Web egress authority rechecks hard blocks immediately
+  before the existing provider-dispatch fence.
 - Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.
 - If you see delivery failures spike on a line, reduce volume immediately. Do not keep sending; you are making it worse.
 - If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.
