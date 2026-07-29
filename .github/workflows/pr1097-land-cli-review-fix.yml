@@ -69,24 +69,24 @@ jobs:
               raise SystemExit(f'assistant schema import anchor count: {manifest.count(query_import)}')
           manifest = manifest.replace(query_import, assistant_import)
 
-          leaf_anchor = """    leafCommands: [
-              {
-                path: ['knowledge', 'upsert'],
-          """
-          leaf_replacement = """    leafCommands: [
-              {
-                path: ['knowledge', 'score-challenge'],
-                description: knowledgeChallengeScoreCommandDescription,
-                hint:
-                  'Pass --input @file.json or -. The body contains only the frozen format, additive scorecard, and explicit normalized participant-component observations.',
-                output: groupChallengeScoreResultSchema,
-              },
-              {
-                path: ['knowledge', 'upsert'],
-          """
-          if manifest.count(leaf_anchor) != 1:
-              raise SystemExit(f'knowledge leaf anchor count: {manifest.count(leaf_anchor)}')
-          manifest_path.write_text(manifest.replace(leaf_anchor, leaf_replacement))
+          manifest_lines = manifest.splitlines()
+          upsert_path_index = next(
+              index for index, line in enumerate(manifest_lines)
+              if "path: ['knowledge', 'upsert']" in line
+          )
+          entry_start = upsert_path_index - 1
+          path_indent = manifest_lines[upsert_path_index][:len(manifest_lines[upsert_path_index]) - len(manifest_lines[upsert_path_index].lstrip())]
+          entry_indent = manifest_lines[entry_start][:len(manifest_lines[entry_start]) - len(manifest_lines[entry_start].lstrip())]
+          manifest_lines[entry_start:entry_start] = [
+              f'{entry_indent}{{',
+              f"{path_indent}path: ['knowledge', 'score-challenge'],",
+              f'{path_indent}description: knowledgeChallengeScoreCommandDescription,',
+              f'{path_indent}hint:',
+              f"{path_indent}  'Pass --input @file.json or -. The body contains only the frozen format, additive scorecard, and explicit normalized participant-component observations.',",
+              f'{path_indent}output: groupChallengeScoreResultSchema,',
+              f'{entry_indent}}},',
+          ]
+          manifest_path.write_text('\n'.join(manifest_lines) + '\n')
 
           index_path = Path('agent-docs/index.md')
           index_lines = index_path.read_text().splitlines()
