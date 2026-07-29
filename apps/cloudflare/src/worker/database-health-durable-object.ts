@@ -16,11 +16,7 @@ export class DatabaseHealthDurableObject extends DurableObject {
     environment: DatabaseHealthMonitorEnvironment,
   ) {
     super(state as never, environment as never);
-    const sql = state.storage.sql;
-    if (!sql) {
-      throw new Error("Database health Durable Object requires SQLite storage.");
-    }
-    this.monitor = new DatabaseHealthMonitor(sql, environment);
+    this.monitor = new DatabaseHealthMonitor(state.storage, environment);
   }
 
   async runScheduledCheck(input?: {

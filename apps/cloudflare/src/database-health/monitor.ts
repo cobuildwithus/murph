@@ -5,6 +5,7 @@ import {
   evaluateDatabaseMetricSnapshot,
   parsePlanetScaleDatabaseMetrics,
   type DatabaseHealthCondition,
+  type DatabaseMetricSnapshot,
 } from "./metrics.js";
 import {
   DatabaseHealthStore,
@@ -75,6 +76,25 @@ interface PlanetScaleDiscoveryGroup {
   targets: readonly string[];
 }
 
+interface DatabaseHealthTransactionalStorage {
+  sql?: DurableObjectSqlStorageLike;
+  transactionSync?<T>(callback: () => T): T;
+}
+
+type DatabaseHealthCollectedSample =
+  | {
+    conditions: DatabaseHealthCondition[];
+    directConnectionErrorDelta: number;
+    snapshot: DatabaseMetricSnapshot;
+    status: "ok";
+  }
+  | {
+    conditions: DatabaseHealthCondition[];
+    failureCode: DatabaseHealthFailureCode;
+    failures: number;
+    status: "failed";
+  };
+
 type DatabaseHealthFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -90,15 +110,26 @@ type DatabaseHealthFailureCode =
 export class DatabaseHealthMonitor {
   private readonly config: DatabaseHealthMonitorConfig;
   private readonly store: DatabaseHealthStore;
+  private readonly transactionSync: (callback: () => void) => void;
 
   constructor(
-    sql: DurableObjectSqlStorageLike,
+    storage: DatabaseHealthTransactionalStorage,
     environment: DatabaseHealthMonitorEnvironment,
     private readonly fetchImplementation: DatabaseHealthFetch = fetch,
     private readonly nowImplementation: () => number = Date.now,
   ) {
     this.config = readDatabaseHealthMonitorConfig(environment);
+    const sql = storage.sql;
+    const transactionSync = storage.transactionSync;
+    if (!sql || !transactionSync) {
+      throw new Error(
+        "Database health monitor requires transactional SQLite storage.",
+      );
+    }
     this.store = new DatabaseHealthStore(sql);
+    this.transactionSync = (callback) => {
+      transactionSync.call(storage, callback);
+    };
   }
 
   async runScheduledCheck(
@@ -117,11 +148,18 @@ export class DatabaseHealthMonitor {
     }
 
     try {
-      const sample = await this.collectAndStoreSample(observedAtMs);
+      const sample = await this.collectSample();
       const checkedAtMs = normalizeObservedAtMs(this.nowImplementation());
-      this.store.pruneSamples(
-        observedAtMs - DATABASE_HEALTH_SAMPLE_RETENTION_MS,
-      );
+      this.transactionSync(() => {
+        this.persistSampleAndAlertAdmission({
+          checkedAtMs,
+          observedAtMs,
+          sample,
+        });
+        this.store.pruneSamples(
+          observedAtMs - DATABASE_HEALTH_SAMPLE_RETENTION_MS,
+        );
+      });
       return await this.handleAlertState({
         checkedAtMs,
         conditions: sample.conditions,
@@ -140,10 +178,7 @@ export class DatabaseHealthMonitor {
     return this.store.readAlertState();
   }
 
-  private async collectAndStoreSample(observedAtMs: number): Promise<{
-    conditions: DatabaseHealthCondition[];
-    status: "failed" | "ok";
-  }> {
+  private async collectSample(): Promise<DatabaseHealthCollectedSample> {
     try {
       const metricsBody = await fetchPlanetScaleMetrics({
         config: this.config,
@@ -162,14 +197,12 @@ export class DatabaseHealthMonitor {
         snapshot,
         directConnectionErrorDelta,
       );
-      this.store.setConsecutiveScrapeFailures(0);
-      this.store.recordSuccessfulSample({
+      return {
         conditions,
         directConnectionErrorDelta,
-        observedAtMs,
         snapshot,
-      });
-      return { conditions, status: "ok" };
+        status: "ok",
+      };
     } catch (error) {
       const failureCode = classifyDatabaseHealthFailure(error);
       const priorFailures =
@@ -179,17 +212,75 @@ export class DatabaseHealthMonitor {
         failures >= MONITORING_FAILURE_ALERT_COUNT
           ? [{ failures, kind: "monitoring_unavailable" }]
           : [];
-      this.store.setConsecutiveScrapeFailures(failures);
-      this.store.recordFailedSample({
-        conditions,
-        failureCode,
-        observedAtMs,
-      });
       console.warn("Database health metrics collection failed.", {
         failureCode,
         failures,
       });
-      return { conditions, status: "failed" };
+      return {
+        conditions,
+        failureCode,
+        failures,
+        status: "failed",
+      };
+    }
+  }
+
+  private persistSampleAndAlertAdmission(input: {
+    checkedAtMs: number;
+    observedAtMs: number;
+    sample: DatabaseHealthCollectedSample;
+  }): void {
+    const { sample } = input;
+    if (sample.status === "ok") {
+      this.store.setConsecutiveScrapeFailures(0);
+    } else {
+      this.store.setConsecutiveScrapeFailures(sample.failures);
+    }
+
+    if (sample.conditions.length > 0) {
+      let alertState = this.store.readAlertState();
+      if (!alertState.incidentOpen) {
+        alertState = this.store.openIncident();
+      }
+      if (
+        !alertState.pendingAlertIdempotencyKey
+        || !alertState.pendingAlertMessage
+      ) {
+        const nextAlertSequence = alertState.alertSequence + 1;
+        const pendingState = this.store.createPendingAlert({
+          idempotencyKey: buildDatabaseAlertIdempotencyKey({
+            alertSequence: nextAlertSequence,
+            incidentSequence: alertState.incidentSequence,
+          }),
+          message: buildDatabaseAlertMessage({
+            alertSequence: nextAlertSequence,
+            checkedAtMs: input.checkedAtMs,
+            conditions: sample.conditions,
+            incidentSequence: alertState.incidentSequence,
+          }),
+        });
+        if (
+          !pendingState.pendingAlertIdempotencyKey
+          || !pendingState.pendingAlertMessage
+        ) {
+          throw new Error("Database health pending alert was not persisted.");
+        }
+      }
+    }
+
+    if (sample.status === "ok") {
+      this.store.recordSuccessfulSample({
+        conditions: sample.conditions,
+        directConnectionErrorDelta: sample.directConnectionErrorDelta,
+        observedAtMs: input.observedAtMs,
+        snapshot: sample.snapshot,
+      });
+    } else {
+      this.store.recordFailedSample({
+        conditions: sample.conditions,
+        failureCode: sample.failureCode,
+        observedAtMs: input.observedAtMs,
+      });
     }
   }
 
@@ -198,10 +289,14 @@ export class DatabaseHealthMonitor {
     conditions: DatabaseHealthCondition[];
     sampleStatus: "failed" | "ok";
   }): Promise<DatabaseHealthMonitorResult> {
-    if (input.conditions.length === 0) {
+    let alertState = this.store.readAlertState();
+    const hasPendingAlert =
+      alertState.pendingAlertIdempotencyKey !== null
+      && alertState.pendingAlertMessage !== null;
+    if (input.conditions.length === 0 && !hasPendingAlert) {
       if (
         input.sampleStatus === "ok"
-        && this.store.readAlertState().incidentOpen
+        && alertState.incidentOpen
       ) {
         this.store.closeIncident();
       }
@@ -212,7 +307,6 @@ export class DatabaseHealthMonitor {
       };
     }
 
-    let alertState = this.store.readAlertState();
     if (!alertState.incidentOpen) {
       alertState = this.store.openIncident();
     }
@@ -234,26 +328,9 @@ export class DatabaseHealthMonitor {
     let idempotencyKey = alertState.pendingAlertIdempotencyKey;
     let message = alertState.pendingAlertMessage;
     if (!idempotencyKey || !message) {
-      const nextAlertSequence = alertState.alertSequence + 1;
-      idempotencyKey = buildDatabaseAlertIdempotencyKey({
-        alertSequence: nextAlertSequence,
-        incidentSequence: alertState.incidentSequence,
-      });
-      message = buildDatabaseAlertMessage({
-        alertSequence: nextAlertSequence,
-        checkedAtMs: input.checkedAtMs,
-        conditions: input.conditions,
-        incidentSequence: alertState.incidentSequence,
-      });
-      alertState = this.store.createPendingAlert({
-        idempotencyKey,
-        message,
-      });
-      idempotencyKey = alertState.pendingAlertIdempotencyKey;
-      message = alertState.pendingAlertMessage;
-      if (!idempotencyKey || !message) {
-        throw new Error("Database health pending alert was not persisted.");
-      }
+      throw new Error(
+        "Database health unsafe sample is missing durable alert admission.",
+      );
     }
 
     this.store.recordAlertAttempt(attemptedAtMs);
@@ -267,6 +344,12 @@ export class DatabaseHealthMonitor {
         message,
       });
       this.store.recordAlertSuccess();
+      if (
+        input.sampleStatus === "ok"
+        && input.conditions.length === 0
+      ) {
+        this.store.closeIncident();
+      }
       return {
         conditions: input.conditions,
         outcome: "alert_sent",
@@ -619,14 +702,19 @@ function resolveHealthyLinqDestination(input: {
   const currentLines = phoneNumbersValue.phone_numbers.filter(
     (candidate) =>
       isObjectRecord(candidate)
-      && candidate.phone_number === sender,
+      && normalizeLinqPhoneNumber(candidate.phone_number) === sender,
   );
   const currentLine = currentLines[0];
+  const reputation = isObjectRecord(currentLine?.reputation)
+    ? currentLine.reputation
+    : null;
+  const reputationStatus =
+    normalizeLinqHealthStatus(reputation?.status)
+    ?? normalizeLinqHealthStatus(currentLine?.health_status);
   if (
     currentLines.length !== 1
     || !isObjectRecord(currentLine)
-    || !isObjectRecord(currentLine.reputation)
-    || currentLine.reputation.status !== "HEALTHY"
+    || reputationStatus !== "HEALTHY"
   ) {
     throw new LinqDatabaseAlertError("linq_health_suppressed");
   }
@@ -843,6 +931,30 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function isE164PhoneNumber(value: unknown): value is string {
   return typeof value === "string" && /^\+[1-9]\d{7,14}$/.test(value);
+}
+
+function normalizeLinqPhoneNumber(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const compact = normalized.replace(/[\s().-]+/gu, "");
+  const prefixed = compact.startsWith("00") ? `+${compact.slice(2)}` : compact;
+  if (/^\+[1-9]\d{6,14}$/u.test(prefixed)) {
+    return prefixed;
+  }
+  return /^[1-9]\d{6,14}$/u.test(prefixed) ? `+${prefixed}` : null;
+}
+
+function normalizeLinqHealthStatus(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized || null;
 }
 
 class DatabaseHealthFetchError extends Error {

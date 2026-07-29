@@ -230,6 +230,112 @@ describe("database health monitor", () => {
     },
   );
 
+  it.each([
+    {
+      label: "a formatted provider phone",
+      phoneNumbersBody: {
+        phone_numbers: [
+          {
+            phone_number: "+1 (202) 555-0122",
+            reputation: {
+              status: "HEALTHY",
+            },
+          },
+        ],
+      },
+    },
+    {
+      label: "the documented top-level health alias",
+      phoneNumbersBody: {
+        phone_numbers: [
+          {
+            health_status: "HEALTHY",
+            phone_number: "+12025550122",
+            reputation: {
+              status: null,
+            },
+          },
+        ],
+      },
+    },
+  ])(
+    "accepts Linq inventory with $label",
+    async ({ phoneNumbersBody }) => {
+      const harness = createMonitorHarness({
+        linqPhoneNumbersBody: phoneNumbersBody,
+        metricsBody: buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds: 8,
+        }),
+      });
+
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+        .toMatchObject({ outcome: "alert_sent" });
+      expect(harness.linqRequests).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    {
+      label: "duplicate matching lines",
+      phoneNumbersBody: {
+        phone_numbers: [
+          {
+            phone_number: "+12025550122",
+            reputation: {
+              status: "HEALTHY",
+            },
+          },
+          {
+            health_status: "HEALTHY",
+            phone_number: "+1 (202) 555-0122",
+          },
+        ],
+      },
+    },
+    {
+      label: "a malformed line phone",
+      phoneNumbersBody: {
+        phone_numbers: [
+          {
+            phone_number: "not-a-phone",
+            reputation: {
+              status: "HEALTHY",
+            },
+          },
+        ],
+      },
+    },
+    {
+      label: "a mismatched line phone",
+      phoneNumbersBody: {
+        phone_numbers: [
+          {
+            phone_number: "+12025550999",
+            reputation: {
+              status: "HEALTHY",
+            },
+          },
+        ],
+      },
+    },
+  ])(
+    "suppresses the message post for $label",
+    async ({ phoneNumbersBody }) => {
+      const harness = createMonitorHarness({
+        linqPhoneNumbersBody: phoneNumbersBody,
+        metricsBody: buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds: 8,
+        }),
+      });
+
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+        .toMatchObject({ outcome: "alert_failed" });
+      expect(harness.linqRequests).toEqual([]);
+    },
+  );
+
   it("fails closed when Linq delivery health cannot be determined", async () => {
     const harness = createMonitorHarness({
       linqHealthResponses: [
@@ -376,7 +482,7 @@ describe("database health monitor", () => {
     expect(harness.linqRequests).toHaveLength(1);
   });
 
-  it("does not treat one failed scrape as recovery from an open incident", async () => {
+  it("retains an admitted page across failed and healthy samples until delivery", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
       clientWaitSeconds: 8,
@@ -398,7 +504,7 @@ describe("database health monitor", () => {
       harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
     ).resolves.toMatchObject({
       conditions: [],
-      outcome: "healthy",
+      outcome: "alert_deferred",
       sampleStatus: "failed",
     });
 
@@ -410,12 +516,28 @@ describe("database health monitor", () => {
     });
 
     metricsBody = buildMetricsBody({ branchId: BRANCH_ID });
-    await harness.runScheduledCheck(FIVE_MINUTES_MS * 3);
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      incidentOpen: true,
+      pendingAlertIdempotencyKey:
+        pendingBeforeFailure.pendingAlertIdempotencyKey,
+      pendingAlertMessage: pendingBeforeFailure.pendingAlertMessage,
+    });
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
     expect(harness.monitor.readAlertState()).toMatchObject({
       incidentOpen: false,
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });
+    expect(harness.linqRequests).toHaveLength(2);
+    expect(await readLinqRequestBody(harness.linqRequests[1])).toEqual(
+      await readLinqRequestBody(harness.linqRequests[0]),
+    );
   });
 
   it("detects direct migration admission failures from positive 5432 counter deltas", async () => {
@@ -447,6 +569,149 @@ describe("database health monitor", () => {
     expect(
       (await readLinqRequestBody(harness.linqRequests[0])).message.parts[0]?.value,
     ).toContain("2 direct migration connection errors");
+  });
+
+  it("delivers a one-sample direct error admitted inside the attempt fence", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        {
+          count: 2,
+          kind: "direct_migration_admission_failures",
+        },
+      ],
+      outcome: "alert_deferred",
+    });
+    const pendingAlert = harness.monitor.readAlertState();
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({
+      conditions: [],
+      outcome: "alert_deferred",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      conditions: [],
+      outcome: "alert_sent",
+    });
+
+    expect(harness.linqRequests).toHaveLength(2);
+    const deliveredBody = await readLinqRequestBody(harness.linqRequests[1]);
+    expect(deliveredBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(deliveredBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+    expect(deliveredBody.message.parts[0]?.value)
+      .toContain("2 direct migration connection errors");
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
+  it("retains a direct-error page suppressed by Linq health after recovery", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => new Response(null, { status: 503 }),
+      ],
+      readMetricsBody: () => metricsBody,
+    });
+
+    await harness.runScheduledCheck(FIVE_MINUTES_MS);
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_failed" });
+    const pendingAlert = harness.monitor.readAlertState();
+    expect(harness.linqRequests).toEqual([]);
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({
+      conditions: [],
+      outcome: "alert_deferred",
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({
+      conditions: [],
+      outcome: "alert_sent",
+    });
+
+    expect(harness.linqRequests).toHaveLength(1);
+    const deliveredBody = await readLinqRequestBody(harness.linqRequests[0]);
+    expect(deliveredBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(deliveredBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+  });
+
+  it("re-evaluates a direct error after alert admission and sample persistence roll back", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await harness.runScheduledCheck(FIVE_MINUTES_MS);
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    harness.failBeforeNextSuccessfulSamplePersist();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).rejects.toThrow("Injected successful sample persistence failure.");
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+    expect(harness.monitor.readRecentSamples()).toHaveLength(1);
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({
+      conditions: [
+        {
+          count: 2,
+          kind: "direct_migration_admission_failures",
+        },
+      ],
+      outcome: "alert_sent",
+    });
+    expect(harness.linqRequests).toHaveLength(1);
   });
 
   it.each(POSTGRES_STATE_ALERT_CASES)(
@@ -542,12 +807,27 @@ function createMonitorHarness(input: {
   linqChatHealthStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY" | "OPTED_OUT";
   linqHealthResponses?: Array<() => Response | Promise<Response>>;
   linqLineReputationStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY";
+  linqPhoneNumbersBody?: unknown;
   linqResponses?: Array<() => Response | Promise<Response>>;
   metricsBody?: string;
   readMetricsBody?: () => string;
   serviceDiscoveryResponses?: Array<() => Response | Promise<Response>>;
 } = {}) {
-  const sql = createTestSqlStorage();
+  let failBeforeSuccessfulSamplePersist = false;
+  const sql = createTestSqlStorage({
+    beforeExec(query) {
+      if (
+        failBeforeSuccessfulSamplePersist
+        && query.trimStart().startsWith(
+          "INSERT INTO database_health_samples",
+        )
+        && query.includes("VALUES (?, 'ok'")
+      ) {
+        failBeforeSuccessfulSamplePersist = false;
+        throw new Error("Injected successful sample persistence failure.");
+      }
+    },
+  });
   const linqHealthRequests: Request[] = [];
   const linqRequests: Request[] = [];
   const planetScaleRequests: Request[] = [];
@@ -588,9 +868,12 @@ function createMonitorHarness(input: {
           return await next();
         }
         if (url.pathname.endsWith("/phone_numbers")) {
-          return Response.json(createHealthyLinqPhoneNumbersBody(
-            input.linqLineReputationStatus,
-          ));
+          return Response.json(
+            input.linqPhoneNumbersBody
+              ?? createHealthyLinqPhoneNumbersBody(
+                input.linqLineReputationStatus,
+              ),
+          );
         }
         return Response.json({
           ...createLinqChatResponseBody(),
@@ -615,7 +898,12 @@ function createMonitorHarness(input: {
   };
   const createMonitor = () =>
     new DatabaseHealthMonitor(
-      sql,
+      {
+        sql,
+        transactionSync<T>(callback: () => T): T {
+          return sql.transactionSync(callback);
+        },
+      },
       environment,
       fetchImplementation,
       () => nowMs,
@@ -623,6 +911,9 @@ function createMonitorHarness(input: {
   let monitor = createMonitor();
 
   return {
+    failBeforeNextSuccessfulSamplePersist() {
+      failBeforeSuccessfulSamplePersist = true;
+    },
     fetchImplementation,
     linqHealthRequests,
     linqRequests,

@@ -68,12 +68,8 @@ export class VitestDatabaseHealthDurableObject
     environment: DatabaseHealthMonitorEnvironment,
   ) {
     super(state, environment);
-    const sql = state.storage.sql;
-    if (!sql) {
-      throw new Error("Database health test Durable Object requires SQLite.");
-    }
     this.testMonitor = new DatabaseHealthMonitor(
-      sql,
+      state.storage,
       environment,
       handleDatabaseHealthEgress,
     );

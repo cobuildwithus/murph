@@ -52,8 +52,10 @@ Last verified: 2026-07-28
   timeouts and byte caps, and reduce responses to allowlisted connection
   metrics before persistence. Before Linq message egress, the dedicated sender
   reads the configured direct chat and current line reputation, requires both
-  to be healthy, derives its sole external phone recipient in memory, and
-  persists or logs none of that provider response. It then uses Linq's
+  to be healthy, canonicalizes only the documented phone-number formatting,
+  accepts the current nested reputation status plus the documented deprecated
+  top-level health-status alias, derives its sole external phone recipient in
+  memory, and persists or logs none of that provider response. It then uses Linq's
   no-`from` auto-selection endpoint so a line that becomes flagged after
   preflight can fail over; no model, runner, request, or stored state can select
   another recipient.

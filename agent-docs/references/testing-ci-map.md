@@ -280,10 +280,14 @@ not enter evidence; and attachment-only input fails closed before provider work.
   collection hysteresis, failed-scrape incident preservation, recovery reset,
   global 30-minute wall-time provider-attempt pacing across incident recovery,
   actual-check-time and rotated evidence-bearing copy, exact body/idempotency
-  reuse after an ambiguous Linq send, zero message POSTs for unhealthy or
-  indeterminate chat/line health, healthy auto-selected Linq delivery,
-  discovery-only PlanetScale service authorization plus bounded signed scrape
-  parameters, unsafe discovered-target rejection, and singleton cron dispatch.
+  reuse after an ambiguous Linq send, transactional rollback before direct
+  counter-baseline advancement, one-sample direct errors admitted inside the
+  attempt fence and retained across clean samples, health-suppressed recovery,
+  documented formatted/deprecated Linq inventory shapes with duplicate and
+  mismatch rejection, zero message POSTs for unhealthy or indeterminate
+  chat/line health, healthy auto-selected Linq delivery, discovery-only
+  PlanetScale service authorization plus bounded signed scrape parameters,
+  unsafe discovered-target rejection, and singleton cron dispatch.
   The deploy-automation test keeps the five-minute trigger, v4 SQLite class
   migration, Durable Object binding, required vars/secrets, checked-in scaffold,
   and generated Wrangler config aligned.

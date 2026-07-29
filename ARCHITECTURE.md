@@ -751,9 +751,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page one
   preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
   bounded state maps, error-counter baselines, failure codes, and alert
-  admission state; it contains no connection URL, credential, query, member
-  identifier, phone number, or raw response. This is operational monitoring
-  history, never health truth, routing authority, or a product control plane.
+  admission state. Unsafe alert admission and sample/baseline persistence share
+  one synchronous SQLite transaction, and acknowledged Linq entry is the only
+  operation that clears a pending page. SQLite contains no connection URL,
+  credential, query, member identifier, phone number, or raw response. This is
+  operational monitoring history, never health truth, routing authority, or a
+  product control plane.
   The Web-owned reply-latency monitor remains a separate Resend-email incident
   owner and never falls back to this Linq path.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner

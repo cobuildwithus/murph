@@ -44,7 +44,12 @@ Last verified: 2026-07-27
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
   Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
   required-metric absence must recur on two consecutive runs before paging.
-  The first healthy sample after an incident closes it without a recovery
+  An unsafe sample without an existing pending page admits its exact body and
+  idempotency key in the same synchronous SQLite transaction that persists the
+  sample and advances any direct-error counter baseline. A pending page is
+  processed or deferred before a later clean sample can close the incident;
+  only an acknowledged provider response clears it. Once no pending page
+  remains, the first healthy sample closes the incident without a recovery
   message. Provider entry is globally fenced by the persisted last-attempt
   timestamp, so neither a new incident, recurrence, retry, nor worker restart
   can attempt Linq more often than once every 30 minutes. The attempt time is
