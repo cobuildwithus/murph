@@ -566,7 +566,10 @@ sends two to four short sentences with one easy question or skips quietly.
 Missing or messy data is not failure, and praise requires specific evidence.
 The scheduled turn does not create or change goals, plans, experiments,
 regimens, memories, or automations; normal conversation owns any change after
-the member replies.
+the member replies. That boundary is immutable rather than relying on editable
+task wording: this exact managed identity suspends ordinary save/ingestion
+guidance, removes hosted mutation tools and external network access, and keeps
+only read access to the current private vault.
 
 If live Linq authority replaces an older personal route with the member's
 current home chat, that same authority supplies the raw delivery target and its

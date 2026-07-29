@@ -53,6 +53,10 @@ Updated: 2026-07-28
 - When live Linq authority moves a personal route to the current home thread,
   carry the authority-owned privacy-blinded conversation locator separately
   from the raw provider target and use both views of that same thread.
+- Enforce the no-mutation boundary above editable task text for this exact
+  identity: retain current conversation and vault reads, but remove hosted
+  dynamic mutation tools, external network access, generated memories, and
+  filesystem writes for the scheduled occurrence.
 
 ## Verification
 
@@ -93,3 +97,13 @@ Updated: 2026-07-28
   across all affected packages and apps, including 181 Assistant Engine files,
   80 Assistant Runtime files, 559 Web files plus lint/dev-smoke/production
   build, and 112 Cloudflare Node/Workers files.
+- Preliminary prompt/coverage ReviewGPT accepted two findings: editable
+  no-mutation text could lose to ordinary developer-level save guidance, and
+  the changed-target/missing-locator retry branch lacked direct proof. The
+  exact identity now installs an immutable developer/system policy and hosted
+  member-read permission profile while keeping the vault-readable shell; a
+  tabled cron regression proves the missing locator fails before notification
+  and retains retry state.
+- Post-remediation focused proof: 234 Assistant Engine planning/runner/cron
+  tests and 40 hosted Codex-config tests passed; Assistant Engine, Assistant
+  Runtime, and Hosted Execution typechecks passed.

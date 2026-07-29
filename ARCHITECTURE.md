@@ -124,9 +124,12 @@ onboarding schedules it 21 local-calendar days after completion; maintenance
 gives older eligible members one future same-weekday catch-up and keeps the
 installed occurrence stable. A claimed occurrence revalidates canonical
 onboarding state, then uses the ordinary scheduled-turn planner, current direct
-conversation, and normal authorized vault tools. The automation asks one
-low-pressure question or skips, and it does not change goals, plans, memories,
-experiments, or automations before the member replies.
+conversation, and a vault-readable shell. Its exact immutable identity adds one
+developer-level read-only policy, removes hosted dynamic mutation tools and
+external network access, and selects a filesystem-read permission profile; the
+ordinary save and ingestion rules are suspended only for this occurrence. The
+automation asks one low-pressure question or skips, and it cannot change goals,
+plans, memories, experiments, or automations before the member replies.
 
 No built-in member-facing group social automation currently ships. The removed
 Sunday superlatives ID remains only as a permanent retirement tombstone:

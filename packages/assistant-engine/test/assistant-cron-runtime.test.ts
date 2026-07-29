@@ -7277,19 +7277,34 @@ describe('assistant cron runtime orchestration', () => {
     expect(executionContext.hosted?.groupPermissionOfferTool).toBeUndefined()
   })
 
-  it('records a retryable cron failure when Linq route authority fails before notification', async () => {
+  it.each([
+    'resolver_failure',
+    'changed_target_without_locator',
+  ] as const)(
+    'records a retryable cron failure when Linq route authority fails before notification: %s',
+    async (failureKind) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-linq-authority-failure-',
     )
-    const resolveScheduledLinqRoute = vi.fn().mockRejectedValue(
-      new VaultCliError(
-        'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
-        'Linq route authority is temporarily unavailable.',
-        { retryable: true },
-      ),
-    )
+    const expectedError =
+      failureKind === 'resolver_failure'
+        ? 'Linq route authority is temporarily unavailable.'
+        : 'Hosted Linq route changes require a matching conversation locator.'
+    const resolveScheduledLinqRoute =
+      failureKind === 'resolver_failure'
+        ? vi.fn().mockRejectedValue(
+            new VaultCliError(
+              'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+              expectedError,
+              { retryable: true },
+            ),
+          )
+        : vi.fn().mockResolvedValue({
+            target: 'current-home-chat',
+            threadIsDirect: true,
+          })
     const createScheduledGroupTools = vi.fn()
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-authority-failure',
@@ -7353,7 +7368,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(result.removedAfterRun).toBe(false)
     expect(result.run).toMatchObject({
-      error: 'Linq route authority is temporarily unavailable.',
+      error: expectedError,
       outcome: 'failed',
       reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       status: 'failed',
@@ -7383,7 +7398,8 @@ describe('assistant cron runtime orchestration', () => {
         }),
       }),
     ])
-  })
+    },
+  )
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {
     vi.useFakeTimers()
