@@ -1945,6 +1945,19 @@ export async function sendAssistantMessageLocal(
               : null,
         })
         turnInputController.complete(result)
+        const productFeedbackCandidate =
+          providerResult.productFeedbackCandidate ?? null
+        const productFeedbackCandidateSink =
+          executionContext?.hosted?.productFeedbackCandidateSink ?? null
+        if (productFeedbackCandidate && productFeedbackCandidateSink) {
+          try {
+            productFeedbackCandidateSink.acceptProductFeedbackCandidate(
+              productFeedbackCandidate,
+            )
+          } catch {
+            // Optional feedback cannot affect the completed assistant turn.
+          }
+        }
         return result
       } catch (error) {
         activeTurnInputController?.fail(error)

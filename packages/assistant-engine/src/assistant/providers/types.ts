@@ -41,6 +41,9 @@ import type {
 import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+} from '@murphai/hosted-execution/runtime-control'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -241,6 +244,7 @@ export interface AssistantProviderTurnExecutionResult {
   // completion order. Delivered ahead of `response` because Codex frontends
   // render every completed agent message.
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
+  productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
   /** Accepted-input ordinal whose delivery context owns the final response presentation. */
   responseDeliveryContextOrdinal: number
   /** Accepted input selected as the native target for this response, if any. */

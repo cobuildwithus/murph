@@ -285,6 +285,30 @@ not enter evidence; and attachment-only input fails closed before provider work.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
+  covers the independent PlanetScale/Linq database-health plane. The tests
+  prove strict metric normalization and required-series failure, positive
+  direct-port counter deltas with reset/new-series suppression, SQLite sample
+  persistence and 30-day pruning, concrete connection thresholds, two-failure
+  collection hysteresis, failed-scrape incident preservation, recovery reset,
+  global 30-minute wall-time provider-attempt pacing across incident recovery,
+  current actual-check-time and rotated evidence-bearing recurrence copy,
+  no stale fenced gauge page after recovery, exact body/idempotency reuse after
+  an ambiguous Linq send, transactional rollback before direct
+  counter-baseline advancement, one-sample direct errors admitted inside the
+  attempt fence and retained across clean samples, mixed inside-fence pages
+  limited to direct-error evidence, full current mixed evidence when no older
+  pending obligation owns the open boundary, and later direct-error evidence
+  retained behind an older health-suppressed page across baseline advancement,
+  recovery, provider pacing, and monitor restarts,
+  documented formatted/deprecated Linq inventory shapes with duplicate and
+  mismatch rejection, zero message POSTs for unhealthy or indeterminate
+  chat/line health, healthy auto-selected Linq delivery, discovery-only
+  PlanetScale service authorization plus bounded signed scrape parameters,
+  unsafe discovered-target rejection, and singleton cron dispatch.
+  The deploy-automation test keeps the five-minute trigger, v4 SQLite class
+  migration, Durable Object binding, required vars/secrets, checked-in scaffold,
+  and generated Wrangler config aligned.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - That matrix starts from the hosted-local harness's intentional `prisma db
   push` schema. The usage-credit PostgreSQL suite therefore applies the exact

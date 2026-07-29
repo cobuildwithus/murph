@@ -394,6 +394,8 @@ export async function executeCodexAssistantTurnAttempt(
     rawEvents: result.jsonEvents,
     serviceTier: input.serviceTier ?? null,
   })
+  const productFeedbackCandidate =
+    input.productFeedbackRecorder?.readProductFeedback() ?? null
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
@@ -427,6 +429,11 @@ export async function executeCodexAssistantTurnAttempt(
           ? { targetInputId: segment.targetInputId }
           : {}),
       })),
+      ...(productFeedbackCandidate
+        ? {
+            productFeedbackCandidate,
+          }
+        : {}),
       responseMedia: result.responseMedia,
       responseCard: result.responseCard,
       stderr: result.stderr,

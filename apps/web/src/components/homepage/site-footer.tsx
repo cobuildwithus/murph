@@ -30,6 +30,7 @@ function XIcon() {
 
 const footerLinks = {
   murph: [
+    { label: "Clubs", href: "/clubs", external: false },
     { label: "Changelog", href: "/changelog", external: false },
     { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
