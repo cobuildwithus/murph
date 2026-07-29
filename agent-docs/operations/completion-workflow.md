@@ -182,6 +182,16 @@ Required:
   why the change is necessary and name the regression proof. If none exist,
   write `None`. Do not hide a cross-cutting behavior change inside the ordinary
   file summary.
+- **Hot reply path impact.** State whether the PR changes the
+  `Foreground Reply Critical Path` defined in
+  `docs/contracts/00-invariants.md`: durable acceptance of a current
+  conversation message through provider start and durable reply handoff. If it
+  does not, write `Not applicable` and give the reason. If it does, list every
+  database call, network or provider call, and other awaited operation added or
+  moved onto that path. For each call, state its count at the maximum admitted
+  cardinality, whether it runs serially or in parallel, its timeout, retry, and
+  fallback behavior, and its expected or measured latency. Include before/after
+  call counts and focused trace, benchmark, or deterministic call-count proof.
 - **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
   `applicable` or `not applicable` with one short reason each. For coverage,
   name the canonical coverage-bearing command and current outcome. For
