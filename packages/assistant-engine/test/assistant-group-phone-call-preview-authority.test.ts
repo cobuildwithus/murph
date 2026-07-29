@@ -221,7 +221,6 @@ describe('group phone-call preview authority', () => {
       vault: context.vaultRoot,
     })).resolves.toEqual({
       assistantInputId: confirmationInputId,
-      inboundMailboxItemId: 'exact-confirmation-mailbox-item',
     })
   })
 

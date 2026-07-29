@@ -2413,7 +2413,6 @@ describe('assistant Codex turn planning', () => {
       phoneCalls: { start: vi.fn() },
       currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
         assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
-        inboundMailboxItemId: 'group-phone-confirmation',
       })),
       subscriptionTool: { request: vi.fn() },
     }
@@ -2838,7 +2837,6 @@ describe('assistant Codex turn planning', () => {
         ...createHostedToolContext(),
         currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
           assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
-          inboundMailboxItemId: 'group-phone-confirmation',
         })),
         phoneCalls: { start: vi.fn() },
       },

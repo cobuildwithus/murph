@@ -322,22 +322,18 @@ describe("assistant phone calls", () => {
       ...BASE_SCOPE,
       acceptedInputIds: [
         "earlier_group_input",
-        "late_group_cancellation_input",
+        GROUP_CONFIRMATION_REF,
       ],
       inboundMailboxItemIds: [
         "earlier_group_mailbox_item",
-        "late_group_cancellation_mailbox_item",
+        GROUP_CONFIRMATION_MAILBOX_ITEM_ID,
       ],
       conversationScope: "group" as const,
       originSessionId: "session_group_phone_call",
     };
     const expectedRequestKey = createPhoneCallRequestKey({
       brief: effectiveBrief,
-      scope: {
-        ...phoneCallScope,
-        acceptedInputIds: [GROUP_CONFIRMATION_REF],
-        inboundMailboxItemIds: [GROUP_CONFIRMATION_MAILBOX_ITEM_ID],
-      },
+      scope: phoneCallScope,
     });
     const start = vi.fn(async () => ({
       phoneCallId: "hpc_group",
@@ -360,7 +356,6 @@ describe("assistant phone calls", () => {
       hostedToolContext: createHostedToolContext({
         currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
           assistantInputId: GROUP_CONFIRMATION_REF,
-          inboundMailboxItemId: GROUP_CONFIRMATION_MAILBOX_ITEM_ID,
         })),
         currentUserActionScope: () => phoneCallScope,
         phoneCalls: { start },

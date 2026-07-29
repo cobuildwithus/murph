@@ -18,7 +18,6 @@ export const ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE =
 
 export interface AssistantGroupPhoneCallPreviewAuthority {
   assistantInputId: string
-  inboundMailboxItemId: string
 }
 
 export async function hasDeliveredAssistantGroupPhoneCallPreview(input: {
@@ -112,7 +111,6 @@ export async function resolveDeliveredAssistantGroupPhoneCallPreviewAuthority(
   )
   if (
     answeredInputIds.size === 0
-    || answeredInputIds.has(confirmationInput.sourceRef.itemId)
     || latestPreviewTurn.some((intent) => {
       const sentAtMs = intent.sentAt ? Date.parse(intent.sentAt) : Number.NaN
       return intent.status !== 'sent'
@@ -135,7 +133,6 @@ export async function resolveDeliveredAssistantGroupPhoneCallPreviewAuthority(
 
   return {
     assistantInputId: confirmationInputId,
-    inboundMailboxItemId: confirmationInput.sourceRef.itemId,
   }
 }
 

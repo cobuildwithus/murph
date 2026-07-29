@@ -2926,7 +2926,6 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope: requestKeyScope.conversationScope,
         })
-        let effectiveRequestKeyScope = requestKeyScope
         if (requestKeyScope.conversationScope === 'group') {
           const confirmationInputId =
             input.request.confirmationMessageRef
@@ -2943,11 +2942,6 @@ export async function executeMurphDynamicToolRequest(input: {
               'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
             )
           }
-          effectiveRequestKeyScope = {
-            ...requestKeyScope,
-            acceptedInputIds: [previewAuthority.assistantInputId],
-            inboundMailboxItemIds: [previewAuthority.inboundMailboxItemId],
-          }
         }
         const result = await phoneCalls.start({
           brief,
@@ -2955,14 +2949,14 @@ export async function executeMurphDynamicToolRequest(input: {
             ? {
                 inboundMailboxItemIds:
                   resolvePhoneCallRequesterInboundMailboxItemIds(
-                    effectiveRequestKeyScope,
+                    requestKeyScope,
                   ),
               }
             : {}),
           originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief,
-            scope: effectiveRequestKeyScope,
+            scope: requestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,
