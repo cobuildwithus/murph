@@ -10,8 +10,6 @@ import {
 import {
   readHostedLinqChatHealth,
   readHostedLinqLineProviderState,
-  type HostedLinqChatHealthSnapshot,
-  type HostedLinqLineProviderStateSnapshot,
 } from "./linq-provider-health-store";
 import { normalizePhoneNumber } from "./phone";
 
@@ -44,17 +42,12 @@ export type HostedLinqEgressPolicyResult =
       kind: "block";
     };
 
-export type HostedLinqResolvedEgressPolicy = {
-  healthObservedAt: string | null;
-  policy: HostedLinqEgressPolicyResult;
-};
-
 export async function resolveHostedLinqEgressPolicyForRuntime(input: {
   fromPhoneNumber?: string | null;
   prisma: HostedLinqEgressPolicyClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<HostedLinqResolvedEgressPolicy> {
+}): Promise<HostedLinqEgressPolicyResult> {
   const targetKind = input.targetKind?.trim() ?? "";
   const newConversation = targetKind === "participant";
   const chatHealth = newConversation
@@ -91,20 +84,14 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
     }),
   ]);
 
-  return {
-    healthObservedAt: latestHostedLinqHealthObservedAt({
-      chatHealth,
-      lineProviderState,
-    }),
-    policy: evaluateHostedLinqEgressPolicy({
-      chatHealthStatus: chatHealth?.providerStatus ?? null,
-      lineDeliveryHealthStatus: line?.healthStatus ?? null,
-      lineEgressPolicy: line?.egressPolicy ?? null,
-      lineReputationStatus: lineProviderState?.reputationStatus ?? null,
-      lineServiceStatus: lineProviderState?.serviceStatus ?? null,
-      newConversation,
-    }),
-  };
+  return evaluateHostedLinqEgressPolicy({
+    chatHealthStatus: chatHealth?.providerStatus ?? null,
+    lineDeliveryHealthStatus: line?.healthStatus ?? null,
+    lineEgressPolicy: line?.egressPolicy ?? null,
+    lineReputationStatus: lineProviderState?.reputationStatus ?? null,
+    lineServiceStatus: lineProviderState?.serviceStatus ?? null,
+    newConversation,
+  });
 }
 
 export function evaluateHostedLinqEgressPolicy(input: {
@@ -173,20 +160,6 @@ export function evaluateHostedLinqEgressPolicy(input: {
         : "normal",
     signals,
   };
-}
-
-function latestHostedLinqHealthObservedAt(input: {
-  chatHealth: HostedLinqChatHealthSnapshot | null;
-  lineProviderState: HostedLinqLineProviderStateSnapshot | null;
-}): string | null {
-  const values = [
-    input.chatHealth?.providerObservedAt,
-    input.lineProviderState?.providerObservedAt,
-  ].filter((value): value is Date => value instanceof Date);
-  if (values.length === 0) {
-    return null;
-  }
-  return new Date(Math.max(...values.map((value) => value.getTime()))).toISOString();
 }
 
 function normalizePolicyToken(value: unknown): string {
