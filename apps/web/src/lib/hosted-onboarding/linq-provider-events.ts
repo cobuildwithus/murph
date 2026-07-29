@@ -10,6 +10,7 @@ import {
 import {
   type HostedLinqWebhookEvent,
   type HostedLinqMessageReceivedEvent,
+  requireHostedLinqMessageEditedEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqRecipientPhoneNumber,
 } from "./linq";
@@ -22,6 +23,7 @@ import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString, sha256Hex } from "../primitives";
 
 export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
+  "message.edited",
   "message.received",
   "message.sent",
   "message.delivered",
@@ -120,6 +122,13 @@ export function parseHostedLinqProviderEvent(input: {
     });
   }
 
+  if (event.event_type === "message.edited") {
+    return parseHostedLinqMessageEditedProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
   if (event.event_type === "reaction.added" || event.event_type === "reaction.removed") {
     return parseHostedLinqReactionProviderEvent({
       event,
@@ -137,6 +146,43 @@ export function parseHostedLinqProviderEvent(input: {
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
+  });
+}
+
+function parseHostedLinqMessageEditedProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const editEvent = requireHostedLinqMessageEditedEvent(input.event);
+  const lineHandle = editEvent.data.chat.owner_handle ?? null;
+  const linePhoneNumber = normalizePhoneNumber(lineHandle?.handle);
+
+  return buildParsedProviderEvent({
+    chatId: editEvent.data.chat.id,
+    deliveryStatus: null,
+    direction: editEvent.data.direction,
+    event: input.event,
+    extraction: {
+      chatIdPresent: true,
+      extractionStrategy: "message.edited-normalized",
+      messageIdPresent: true,
+      partIndexPresent: true,
+      phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+      servicePresent: Boolean(lineHandle?.service),
+    },
+    failureCode: null,
+    failureReason: null,
+    messageId: editEvent.data.id,
+    phoneNumber: linePhoneNumber,
+    phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+    providerCreatedAt: new Date(editEvent.data.edited_at),
+    providerReason: null,
+    providerStatus: null,
+    rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
+    service: normalizeNullableString(lineHandle?.service),
   });
 }
 

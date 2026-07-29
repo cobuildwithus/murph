@@ -7,6 +7,55 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
 describe("parseHostedLinqProviderEvent", () => {
+  it("parses message.edited telemetry without retaining replacement text", () => {
+    const event = buildGenericEvent({
+      eventType: "message.edited",
+      data: {
+        chat: {
+          id: "chat_edit",
+          is_group: false,
+          owner_handle: {
+            handle: "+15550000000",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
+        direction: "inbound",
+        edited_at: "2026-07-28T18:00:01.000Z",
+        id: "msg_edit",
+        part: {
+          index: 0,
+          text: "private corrected text",
+        },
+        sender_handle: {
+          handle: "+15551234567",
+          is_me: false,
+          service: "iMessage",
+        },
+      },
+    });
+    const parsed = parseHostedLinqProviderEvent({
+      event,
+      rawBody: JSON.stringify(event),
+    });
+
+    expect(parsed).toMatchObject({
+      direction: "inbound",
+      eventType: "message.edited",
+      linqChatId: "chat_edit",
+      linqMessageId: "msg_edit",
+      phoneNumberRole: "line",
+      providerCreatedAt: new Date("2026-07-28T18:00:01.000Z"),
+      service: "iMessage",
+    });
+    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain(
+      "private corrected text",
+    );
+    expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain(
+      "private corrected text",
+    );
+  });
+
   it("parses message.received telemetry without retaining message text", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildMessageReceivedEvent({
