@@ -32,3 +32,23 @@ checks.
   and malformed-correction boundaries.
 - Run the focused Assistant Engine suite, typecheck, canonical diff, final
   ReviewGPT correction round, and exact-head CI.
+
+## Result
+
+- Root cause was the shared adjacency selector applying the direct native-reply
+  anchor boundary before the existing trusted-correction exception.
+- The selector now receives only the live context's accepted input IDs and
+  bypasses that anchor comparison only for a structurally complete Linq edit
+  targeting one exact accepted input. The existing admission gate revalidates
+  the same link.
+- Ordinary native replies, malformed edit metadata, older-message corrections,
+  authenticated group batching, and participant authority are unchanged.
+- Assistant Engine typecheck passed. Local Vitest execution was blocked after
+  suite load by shared-host contention, but the exact previously failing
+  `Release package coverage (assistant)` CI shard passed on the pushed
+  implementation head.
+- Final ReviewGPT packaging and PR-body publication remain blocked by the local
+  GitHub CLI credential returning HTTP 401; SSH push access remains available.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
