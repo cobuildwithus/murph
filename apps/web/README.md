@@ -630,8 +630,10 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target; assignments remain available when every line reaches it
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only while an
+  older rollback build may still populate the deprecated
+  `HostedLinqLine.activeMemberLimit` column; current weighted assignment does
+  not read it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -957,9 +959,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   cron visibly. The latency path has no Linq/iMessage fallback.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
-- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target rather than a hard admission limit.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
+  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only for an
+  older rollback build; current weighted assignment does not read it.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -1040,6 +1042,36 @@ backfill or dual-write as needed, switch application reads/writes in a later
 deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
+
+The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
+`HostedThreadRoute.accountLookupKey` and its index; old application code remains
+compatible if the build fails after migration. Once the replacement build is
+live, a count-and-decrypt dry run may begin. Before applying, prove the
+production alias points at the replacement build, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
+the alias again. Then repeat bounded projection batches until readiness:
+
+```bash
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
+```
+
+The command decrypts only through the existing thread-delivery-route owner,
+emits aggregate counts only, and updates rows with an optimistic authority
+check. Do not run `--apply` before the final alias proof and prior-function
+drain, do not treat a dry-run as readiness, and do not drop the legacy
+`HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
+assignment and deployment contract is in
+`docs/hosted-linq-db-home-lines-migration.md`.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a

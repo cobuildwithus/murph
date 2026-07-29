@@ -1013,6 +1013,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       throw new Error("Expected current Telegram thread route lookup keys.");
     }
     const routeRow: {
+      accountLookupKey: string | null;
       channel: "telegram";
       containerMemberId: string;
       deliveryRouteEncrypted: string | null;
@@ -1020,6 +1021,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       threadIdentityLookupKey: string;
       threadLookupKey: string;
     } = {
+      accountLookupKey: null,
       channel: "telegram",
       containerMemberId,
       deliveryRouteEncrypted: "corrupt-delivery-route",
@@ -1032,12 +1034,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       data,
     }: {
       data: {
+        accountLookupKey: string;
         deliveryRouteEncrypted: string;
         pendingGroupReactionContextEncrypted?: string | null;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
       };
     }) => {
+      routeRow.accountLookupKey = data.accountLookupKey;
       routeRow.deliveryRouteEncrypted = data.deliveryRouteEncrypted;
       routeRow.threadIdentityLookupKey = data.threadIdentityLookupKey;
       routeRow.threadLookupKey = data.threadLookupKey;
@@ -1106,6 +1110,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
     expect(hostedThreadRouteUpdate).toHaveBeenCalledTimes(1);
+    expect(routeRow.accountLookupKey).toBe(
+      HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+    );
     expect(routeRow.deliveryRouteEncrypted).toMatch(/^hsb-test:/u);
     await expect(openHostedThreadDeliveryRoute({
       channel: "telegram",

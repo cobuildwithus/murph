@@ -61,6 +61,36 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-line-planning-load", () => ({
+  readHostedLinqLinePlanningLoadSnapshot: vi.fn(async (input: {
+    lines: ReadonlyArray<{ phoneNumber: string }>;
+    now: Date;
+    prisma: unknown;
+  }) => {
+    const directCounts =
+      await mocks.countHostedMemberHomeLinqBindingsByRecipientPhone({
+        now: input.now,
+        prisma: input.prisma,
+        recipientPhones: input.lines.map((line) => line.phoneNumber),
+      });
+    return {
+      byRecipientPhone: new Map(input.lines.map((line) => {
+        const activeDirectMemberCount = directCounts.get(line.phoneNumber) ?? 0;
+        return [
+          line.phoneNumber,
+          {
+            activeDirectMemberCount,
+            plannedMessages: activeDirectMemberCount * 10,
+            provisionedGroupThreadCount: 0,
+          },
+        ] as const;
+      })),
+      projectionCoverageComplete: true,
+      unprojectedGroupThreadCount: 0,
+    };
+  }),
+}));
+
 import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -156,7 +186,7 @@ describe("hosted Linq line rehome ops", () => {
     }
   });
 
-  it("reads an overview with authority, line hints, lookup keys, and active counts only", async () => {
+  it("reads an overview with authority, line hints, and weighted planning load only", async () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
       new Map([
         [LINE_A.phoneNumber, 7],
@@ -171,14 +201,18 @@ describe("hosted Linq line rehome ops", () => {
     expect(overview).toMatchObject({
       assignableTargetLines: [
         {
-          activeMemberCount: 7,
+          activeDirectMemberCount: 7,
+          plannedMessages: 70,
           phoneNumberHint: "*** 0001",
           phoneNumberLookupKey: LINE_A.phoneNumberLookupKey,
+          provisionedGroupThreadCount: 0,
         },
         {
-          activeMemberCount: 2,
+          activeDirectMemberCount: 2,
+          plannedMessages: 20,
           phoneNumberHint: "*** 0002",
           phoneNumberLookupKey: LINE_B.phoneNumberLookupKey,
+          provisionedGroupThreadCount: 0,
         },
       ],
       currentRouting: {
@@ -191,6 +225,10 @@ describe("hosted Linq line rehome ops", () => {
       member: {
         id: MEMBER_ID,
         suspendedAt: null,
+      },
+      planningProjection: {
+        complete: true,
+        unprojectedGroupThreadCount: 0,
       },
     });
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
@@ -420,10 +458,8 @@ describe("hosted Linq line rehome ops", () => {
     });
   }
 
-  it("treats the active-member target as advisory", async () => {
-    const cappedLine = buildLine("+15550100003", {
-      activeMemberLimit: 1,
-    });
+  it("does not apply automatic planning placement to a manual rehome", async () => {
+    const cappedLine = buildLine("+15550100003");
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([cappedLine]);
 
     await expect(
@@ -624,7 +660,6 @@ describe("hosted Linq line rehome ops", () => {
 function buildLine(
   phoneNumber: string,
   overrides: Partial<{
-    activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
     proactiveConversationCount: number | null;
@@ -637,7 +672,6 @@ function buildLine(
   }
 
   return {
-    activeMemberLimit: overrides.activeMemberLimit ?? null,
     assignmentWeight: overrides.assignmentWeight ?? 100,
     maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
     phoneNumber,
