@@ -87,6 +87,11 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     };
   }
 
+  const initialRoomContextMarkdown = pendingSetupClaim.kind === "claimed"
+    ? buildInitialHostedGroupRoomModelMarkdown(
+        pendingSetupClaim.setup.setup.roomContextMarkdown,
+      )
+    : null;
   let ensure: HostedThreadContainerRouteEnsureResult;
   try {
     ensure = await ensureHostedThreadContainerRouteTx({
@@ -95,6 +100,9 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
         ? { accountLookupKeys: input.accountLookupKeys }
         : {}),
       channel: "linq",
+      ...(initialRoomContextMarkdown
+        ? { initialGroupRoomModelMarkdown: initialRoomContextMarkdown }
+        : {}),
       mailboxDedupeKey: input.mailboxDedupeKey,
       occurredAt: input.occurredAt,
       ownerMemberId,
@@ -151,7 +159,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   return {
     ensure,
     initialRoomContextMarkdown: pendingSetupApplied
-      ? pendingSetupClaim.setup.setup.roomContextMarkdown ?? null
+      ? initialRoomContextMarkdown
       : null,
     kind: "ensured",
     ownerMemberId,
@@ -166,4 +174,11 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     pendingSetupApplied,
     pendingSetupResolution: pendingSetupClaim.reason,
   };
+}
+
+function buildInitialHostedGroupRoomModelMarkdown(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value);
+  return normalized ? `## Explicit setup\n\n${normalized}` : null;
 }
