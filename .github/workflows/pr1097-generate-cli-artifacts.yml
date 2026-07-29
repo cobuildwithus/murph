@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.ref }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
@@ -23,12 +23,15 @@ jobs:
       - run: pnpm exercise-library:generate && pnpm health-commons:generate
       - run: pnpm build
       - run: pnpm --dir packages/cli gen:config-schema
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pr1097-cli-generated
-          path: |
-            packages/cli/config.schema.json
-            packages/cli/src/incur.generated.ts
+      - name: Commit generated artifacts and remove this one-use workflow
+        run: |
+          rm .github/workflows/pr1097-generate-cli-artifacts.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/pr1097-generate-cli-artifacts.yml \
+            packages/cli/config.schema.json \
+            packages/cli/src/incur.generated.ts \
             packages/cli/src/vault-cli-skill-hash.generated.ts
-          if-no-files-found: error
-          retention-days: 1
+          git commit -m "Regenerate CLI artifacts for challenge scoring"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
