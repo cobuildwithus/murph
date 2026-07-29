@@ -81,6 +81,11 @@ import {
   type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantResponseCardJsonSchema,
+  assistantResponseCardSchema,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
@@ -351,6 +356,21 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
       },
     },
     required: ['media'],
+  },
+} as const
+
+export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
+  namespace: 'murph',
+  name: 'attach_response_card',
+  description:
+    'Attach one structured presentation card to the current final assistant response in a private direct conversation. The runtime renders the durable message and delivery fallback. It does not send directly and cannot be combined with response media.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: assistantResponseCardJsonSchema,
+    },
+    required: ['card'],
   },
 } as const
 
@@ -1201,6 +1221,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_DEVICE_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1266,6 +1287,7 @@ export interface MurphDynamicToolAvailability {
   messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
+  responseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -1295,6 +1317,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
+    [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
@@ -1355,6 +1378,12 @@ export function listMurphDynamicToolNames(): string[] {
 }
 
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
+
+const attachResponseCardArgumentsSchema = z
+  .object({
+    card: assistantResponseCardSchema,
+  })
+  .strict()
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -1920,6 +1949,7 @@ export interface MurphDynamicToolExecutionResult {
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
+  responseCardPatch?: { card: AssistantResponseCard }
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
   // runtime's existing issue owner (e.g. a generated-media delivery failure).
@@ -1993,6 +2023,10 @@ export type MurphDynamicToolRequest =
       media: AssistantResponseMedia[]
     }
   | {
+      kind: 'attach-response-card'
+      card: AssistantResponseCard
+    }
+  | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
       toolCallId?: string
@@ -2062,6 +2096,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-finish-without-reply-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-response-card-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -2264,6 +2302,20 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-progress-update',
         text: parsed.text,
+      }
+    }
+    case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
+      const parsed = parseAttachResponseCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
       }
     }
     case MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name: {
@@ -2648,6 +2700,8 @@ export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  currentResponseCard?: AssistantResponseCard | null
+  privateDirectResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
@@ -2721,6 +2775,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid newsletter arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
+    case 'invalid-response-card-arguments':
+      return toolTextResult(false, 'invalid response card arguments')
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
     case 'invalid-send-vault-file-arguments':
@@ -2731,7 +2787,38 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
+    case 'attach-response-card': {
+      if (input.privateDirectResponseCardAllowed !== true) {
+        return toolTextResult(
+          false,
+          'response cards require a private direct conversation',
+        )
+      }
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'a response card is already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'response cards cannot be combined with response media',
+        )
+      }
+      return {
+        ...toolTextResult(true, 'response card attached'),
+        responseCardPatch: { card: input.request.card },
+      }
+    }
     case 'attach-response-media': {
+      if (
+        input.request.media.length > 0 &&
+        input.currentResponseCard !== null &&
+        input.currentResponseCard !== undefined
+      ) {
+        return toolTextResult(
+          false,
+          'response media cannot be combined with a response card',
+        )
+      }
       return {
         ...toolTextResult(
           true,
@@ -2833,6 +2920,12 @@ export async function executeMurphDynamicToolRequest(input: {
         return replyRequiredResult(
           false,
           'secure vault-file approval is unavailable for this conversation',
+        )
+      }
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return replyRequiredResult(
+          false,
+          'vault-file sending cannot be combined with a response card',
         )
       }
       if ((input.currentResponseMedia ?? []).length > 0) {
@@ -3096,6 +3189,9 @@ export async function executeMurphDynamicToolRequest(input: {
         }
       }
     case 'generate-image': {
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'image generation cannot be combined with a response card')
+      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
@@ -3204,6 +3300,9 @@ export async function executeMurphDynamicToolRequest(input: {
       }
     }
     case 'generate-voice-memo': {
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'voice memo generation cannot be combined with a response card')
+      }
       return await executeGenerateVoiceMemoDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
@@ -3212,6 +3311,9 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
     case 'generate-song': {
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'song generation cannot be combined with a response card')
+      }
       return await executeGenerateSongDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
@@ -5789,6 +5891,33 @@ function parseComputerArguments<TArgs>(input: {
 
   return {
     args: parsed.data,
+    ok: true,
+  }
+}
+
+function parseAttachResponseCardArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_response_card.input'
+  const toolName = 'murph.attach_response_card'
+  const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(attachResponseCardArgumentsSchema),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
     ok: true,
   }
 }

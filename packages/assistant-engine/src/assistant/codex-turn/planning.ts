@@ -840,6 +840,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+        responseCardsAvailable: privateInteractiveAudience,
         phoneCallsAvailable:
           (privateInteractiveAudience || hostedGroupRuntime) &&
           userActionAcceptedInputIds.length > 0 &&

@@ -112,8 +112,31 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
     expect(skill).toContain(
-      'Include supported\n   calorie and macro totals by default',
+      'canonical `vault-cli meal totals --from <date> --to <date>` read',
     )
+    expect(skill).toContain(
+      'Run it immediately before any response-card attachment',
+    )
+    expect(skill).toContain(
+      'When the run covers exactly one local date',
+    )
+    expect(skill).toContain('the canonical read includes a\n   calorie total')
+    expect(skill).toContain('numerical output is permitted for the member')
+    expect(skill).toContain('`murph.attach_response_card`')
+    expect(skill).toContain(
+      "Copy the\n   top-level meal count, every total, and each metric's supporting meal count",
+    )
+    expect(skill).toContain('Do not author a second nutrition summary')
+    expect(skill).toContain('For multi-date catch-up, missing\n   calories')
+    expect(skill).toContain(
+      'retain the current compact text or suppression behavior',
+    )
+    expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
+      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
+    )
+    expect(
+      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
+    ).toBeLessThan(skill.indexOf('murph.attach_response_card'))
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

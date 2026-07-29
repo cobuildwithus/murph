@@ -516,6 +516,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     answeredMailboxItemIds,
     bindingDelivery,
     candidate,
+    card,
     deliverySource,
     dependencies,
     explicitTarget,
@@ -549,10 +550,12 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     const request: Parameters<
       NonNullable<AssistantChannelDependencies['sendLinq']>
     >[0] = {
+      directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
       fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       targetKind: candidate.kind,
+      ...(card === null ? {} : { card, threadIsDirect }),
       message,
       ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       ...(mediaInput ? { media: mediaInput } : {}),
@@ -564,7 +567,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         ? await dependencies.sendLinq({
             ...request,
             answeredMailboxItemIds: answeredMailboxItemIds ?? [],
-            directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
             homeRouteFallbackAllowed: shouldAllowLinqHomeRouteFallback({
               bindingDelivery,
               candidate,

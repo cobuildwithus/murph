@@ -285,6 +285,7 @@ async function sendHostedProviderLinqMessageDirect(
   context: HostedProviderEffectContext,
 ): Promise<HostedRuntimeLinqSendResponse> {
   return await sendLinqMessage({
+    directRecipientPhoneNumber: request.directRecipientPhoneNumber ?? null,
     fromPhoneNumber: request.fromPhoneNumber ?? null,
     idempotencyKey: request.idempotencyKey ?? null,
     media: request.media ?? null,
@@ -295,6 +296,9 @@ async function sendHostedProviderLinqMessageDirect(
     ...(request.targetKind === null || request.targetKind === undefined
       ? {}
       : { targetKind: request.targetKind }),
+    ...(request.card == null
+      ? {}
+      : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
     env: context.env,
     fetchImplementation: context.fetchImplementation,
@@ -358,6 +362,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
 
   try {
     const delivered = await sendHostedProviderLinqMessageDirect({
+      directRecipientPhoneNumber: recipient,
       fromPhoneNumber: sender,
       idempotencyKey: input.request.idempotencyKey ?? null,
       media: input.request.media ?? null,
@@ -365,6 +370,7 @@ async function materializeHostedProviderLinqDirectThread(input: {
       replyToMessageId: input.request.replyToMessageId ?? null,
       target: recipient,
       targetKind: "participant",
+      ...(input.request.card == null ? {} : { card: input.request.card, threadIsDirect: true }),
     }, input.context);
     const target =
       normalizeHostedProviderText(delivered.target) ??

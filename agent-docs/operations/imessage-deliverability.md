@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-07-26
+Last verified: 2026-07-29
 
 ## Purpose
 
@@ -62,6 +62,12 @@ Read and apply this guide when touching any of these surfaces:
 8. Never message low-trust sources.
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
+
+## Assistant response cards
+
+Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and V1 prohibits a card from coexisting with media.
+
+V1 card values are immutable message content. They are stored inline in the iMessage app message URL as versioned Base64-encoded JSON; encoding is not encryption. There is no persisted remote card state, fetch API, cleanup lifecycle, or card-specific queue. Linq capability failure or an ineligible route falls back to the same deterministic ordinary text through the existing channel delivery path. Preservation of the inline URL in `selectedMessage.url` remains a physical-device release gate for the paired iOS implementation.
 
 ## Implementation checklist
 

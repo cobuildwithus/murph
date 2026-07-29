@@ -10888,6 +10888,7 @@ describe("hosted runtime callbacks", () => {
       },
     );
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       media: [
@@ -12486,6 +12487,7 @@ describe("hosted runtime callbacks", () => {
     );
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       media: null,
@@ -12588,6 +12590,7 @@ describe("hosted runtime callbacks", () => {
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       media: null,
@@ -12691,6 +12694,7 @@ describe("hosted runtime callbacks", () => {
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       media: null,

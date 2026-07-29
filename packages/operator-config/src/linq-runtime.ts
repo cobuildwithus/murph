@@ -46,6 +46,12 @@ import { VaultCliError } from './vault-cli-errors.js'
 import {
   createAssistantDeliveryBlockedError,
 } from './assistant/delivery-failure.js'
+import {
+  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppLayout,
+  encodeAppCardDataUrl,
+  type AssistantResponseCard,
+} from './assistant-response-cards.js'
 import type {
   AssistantMessageReaction,
 } from './assistant-cli-contracts.js'
@@ -160,10 +166,12 @@ const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
 type LinqOperation =
   | 'create_attachment_upload'
   | 'create_chat'
+  | 'check_imessage_capability'
   | 'create_webhook_subscription'
   | 'delete_message'
   | 'list_phone_numbers'
   | 'mark_read'
+  | 'send_imessage_app_card'
   | 'send_message'
   | 'send_voice_memo'
   | 'set_message_reaction'
@@ -172,7 +180,38 @@ type LinqOperation =
 
 type LinqFailureKind = 'chat_not_found'
 
+type LinqIMessageCapabilityCheckRequest = {
+  address: string
+  from?: string
+}
+
+type LinqIMessageAppCardRequest = {
+  message: {
+    preferred_service: 'iMessage'
+    idempotency_key: string
+    parts: [{
+      type: 'imessage_app'
+      app: {
+        name: 'Murph'
+        team_id: 'G9DJH2XUMK'
+        bundle_id: 'ai.withmurph.app.messages'
+        app_store_id: 6786145859
+      }
+      interactive: true
+      url: string
+      fallback_text: 'Open your Murph nutrition summary'
+      layout: {
+        caption: 'Murph'
+        subcaption: 'Nutrition summary'
+        trailing_caption: 'OPEN'
+      }
+    }]
+  }
+}
+
 type LinqJsonRequestBody =
+  | LinqIMessageCapabilityCheckRequest
+  | LinqIMessageAppCardRequest
   | AttachmentCreateParams
   | ChatCreateParams
   | ChatSendVoicememoParams
@@ -371,6 +410,90 @@ export async function sendLinqChatMessage(
       hasReplyToMessageId:
         input.nativeReplyRequested === true && replyToMessageId !== null,
       operation: 'send_message',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: `/chats/${encodeURIComponent(chatId)}/messages`,
+    body,
+    signal: dependencies.signal,
+  })
+}
+
+export async function checkLinqIMessageCapability(
+  input: {
+    address: string
+    from?: string | null
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<boolean> {
+  const address = normalizeRequiredString(input.address, 'capability address')
+  const from = normalizeNullableString(input.from)
+  const body: LinqIMessageCapabilityCheckRequest = {
+    address,
+    ...(from ? { from } : {}),
+  }
+  const response = await requestLinqJson<unknown>({
+    details: {
+      operation: 'check_imessage_capability',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: '/capability/check_imessage',
+    body,
+    signal: dependencies.signal,
+  })
+  return readRecord(response)?.available === true
+}
+
+export async function sendLinqIMessageAppCard(
+  input: {
+    card: AssistantResponseCard
+    chatId: string
+    idempotencyKey: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<MessageSendResponse> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+  const idempotencyKey = normalizeRequiredString(
+    input.idempotencyKey,
+    'iMessage app card idempotency key',
+  )
+  const body: LinqIMessageAppCardRequest = {
+    message: {
+      preferred_service: 'iMessage',
+      idempotency_key: idempotencyKey,
+      parts: [{
+        type: 'imessage_app',
+        app: {
+          name: 'Murph',
+          team_id: 'G9DJH2XUMK',
+          bundle_id: 'ai.withmurph.app.messages',
+          app_store_id: 6786145859,
+        },
+        interactive: true,
+        url: encodeAppCardDataUrl(input.card),
+        fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+        layout: buildLinqIMessageAppLayout(input.card),
+      }],
+    },
+  }
+
+  return requestLinqJson<MessageSendResponse>({
+    details: {
+      hasIdempotencyKey: true,
+      operation: 'send_imessage_app_card',
       provider: 'linq',
     },
     env: dependencies.env ?? process.env,

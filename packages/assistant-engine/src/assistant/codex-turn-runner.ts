@@ -641,6 +641,7 @@ async function executeAssistantCodexAttempt(input: {
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         responseMedia: result.responseMedia ?? [],
+        responseCard: result.responseCard ?? null,
         session: attemptPlan.session,
         usageAttribution,
         workingDirectory: attemptPlan.routePlan.workingDirectory,

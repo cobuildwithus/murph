@@ -10,6 +10,9 @@ import {
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantResponseCardSchema,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   parseHostedEmailThreadTarget,
@@ -82,6 +85,15 @@ export function createAssistantChannelAdapter(
       )
       const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
       const media = input.media ?? []
+      const card = input.card == null
+        ? null
+        : assistantResponseCardSchema.parse(input.card)
+      if (card !== null && media.length > 0) {
+        throw new VaultCliError(
+          'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+          'A response card cannot be combined with response media.',
+        )
+      }
       assertSupportedResponseMediaKinds({
         channel: spec.channel,
         media,
@@ -92,6 +104,7 @@ export function createAssistantChannelAdapter(
         answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
         bindingDelivery: input.bindingDelivery,
         candidate,
+        card,
         deliverySource: input.deliverySource ?? null,
         dependencies,
         explicitTarget: normalizeOptionalText(input.explicitTarget),

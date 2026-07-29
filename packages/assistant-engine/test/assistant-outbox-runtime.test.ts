@@ -25,6 +25,10 @@ import {
 } from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -93,6 +97,18 @@ const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
 > = {
   kind: 'linq',
   fromPhoneNumber: '+15550000',
+}
+
+const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
 }
 
 const tempRoots: string[] = []
@@ -957,6 +973,137 @@ describe('assistant outbox runtime', () => {
     expect(
       receipt?.timeline.filter((event) => event.kind === 'delivery.queued'),
     ).toHaveLength(1)
+  })
+
+  it('persists and dispatches response cards through the existing outbox owner', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
+    const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-response-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-response-card',
+      threadId: 'thread-response-card',
+      threadIsDirect: true,
+      turnId: 'turn-response-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(NUTRITION_RESPONSE_CARD)
+    expect(intent.media).toEqual([])
+    expect(intent.message).toBe(rendered)
+    await expect(readRawOutboxIntent(vaultRoot, intent.intentId)).resolves
+      .toMatchObject({
+        card: NUTRITION_RESPONSE_CARD,
+        media: [],
+        message: rendered,
+      })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-response-card-delivered',
+        target: 'thread-response-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: NUTRITION_RESPONSE_CARD,
+        media: [],
+        message: rendered,
+      }),
+      undefined,
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      media: [{
+        alt: null,
+        kind: 'image',
+        source: null,
+        url: 'https://cdn.example.test/nutrition.png',
+      }],
+      message: rendered,
+      sessionId: 'session-response-card-conflict',
+      threadId: 'thread-response-card',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-conflict',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-response-card-group-conflict',
+      threadId: 'thread-response-card-group',
+      threadIsDirect: false,
+      turnId: 'turn-response-card-group-conflict',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('rejects changed card values under the same transport identity', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-card-transport-identity-',
+    )
+    const transportIdentity = 'sha256:response-card-delivery'
+    await createAssistantOutboxIntent({
+      card: NUTRITION_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: transportIdentity,
+      deliveryIdempotencyKey: transportIdentity,
+      message: 'ignored model prose',
+      sessionId: 'session-response-card-transport',
+      threadId: 'thread-response-card-transport',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-transport',
+      vault: vaultRoot,
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: {
+        ...NUTRITION_RESPONSE_CARD,
+        totals: {
+          ...NUTRITION_RESPONSE_CARD.totals,
+          calories: {
+            ...NUTRITION_RESPONSE_CARD.totals.calories,
+            total: 1_491.25,
+          },
+        },
+      },
+      channel: 'linq',
+      dedupeToken: transportIdentity,
+      deliveryIdempotencyKey: transportIdentity,
+      message: 'different ignored model prose',
+      sessionId: 'session-response-card-transport',
+      threadId: 'thread-response-card-transport',
+      threadIsDirect: true,
+      turnId: 'turn-response-card-transport',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
   })
 
   it('stores response media while explicit dedupe tokens ignore media drift', async () => {
@@ -4708,6 +4855,7 @@ async function createIntent(
     actorId: string | null
     answeredMailboxItemIds: string[]
     automationAuthority: AssistantOutboxIntent['automationAuthority']
+    card: AssistantResponseCard | null
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -4733,6 +4881,7 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
+    card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,

@@ -174,11 +174,21 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. Send one compact closeout covering the selected dates. Include supported
-   calorie and macro totals by default; label partial totals as partial. Never
-   surface numbers in intuitive-eating, eating-disorder-risk, or number-sensitive
-   context, and never attach the photos. Suppress the message only when neither
-   a retained photo nor a same-occurrence removal revision is selected.
+6. After inspection, enrichment, read-back, and photo cleanup, run the exact
+   canonical `vault-cli meal totals --from <date> --to <date>` read for the
+   selected date range. Run it immediately before any response-card attachment;
+   do not reuse an earlier total or calculate nutrition independently.
+7. When the run covers exactly one local date, the canonical read includes a
+   calorie total, and numerical output is permitted for the member, call
+   `murph.attach_response_card` with `kind: "daily_nutrition"`. Copy the
+   top-level meal count, every total, and each metric's supporting meal count
+   exactly from that read. Do not author a second nutrition summary; the runtime
+   renders the closeout and will label partial totals as partial, identifying
+   missing or under-supported macros honestly. For multi-date catch-up, missing
+   calories, or intuitive-eating, eating-disorder-risk, or number-sensitive
+   suppression, retain the current compact text or suppression behavior. Never
+   attach the photos. Suppress the message only when neither a retained photo
+   nor a same-occurrence removal revision is selected.
 
 ## Handle edge cases
 

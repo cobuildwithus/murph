@@ -9,9 +9,11 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  checkLinqIMessageCapability,
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
+  sendLinqIMessageAppCard,
   setLinqMessageReaction as setLinqApiMessageReaction,
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
@@ -58,6 +60,9 @@ import type {
   AssistantResponseMedia,
   AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -494,6 +499,8 @@ export async function sendPreparedTelegramVoiceMemoMessage(
 
 export async function sendLinqMessage(
   input: {
+    card?: AssistantResponseCard | null
+    directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
@@ -502,6 +509,7 @@ export async function sendLinqMessage(
     replyToMessageId?: string | null
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
+    threadIsDirect?: boolean | null
   },
   dependencies: LinqRuntimeDependencies = {},
 ): Promise<{
@@ -528,6 +536,14 @@ export async function sendLinqMessage(
       'iMessage delivery requires an explicit chat id or a stored thread binding.',
     )
   }
+  const card = input.card ?? null
+  const responseMedia = input.media ?? []
+  if (card !== null && responseMedia.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
+    )
+  }
   if (input.nativeReplyRequested === true) {
     if (!normalizeOptionalText(input.replyToMessageId)) {
       throw new VaultCliError(
@@ -552,11 +568,62 @@ export async function sendLinqMessage(
     )
   }
 
+  const directRecipientPhoneNumber = normalizeOptionalText(
+    input.directRecipientPhoneNumber,
+  )
+  const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
+  const shouldAttemptNativeCard =
+    card !== null &&
+    input.targetKind === 'thread' &&
+    input.threadIsDirect === true &&
+    input.nativeReplyRequested !== true &&
+    directRecipientPhoneNumber !== null &&
+    idempotencyKey !== null
+  if (shouldAttemptNativeCard) {
+    let capabilityAvailable = false
+    try {
+      capabilityAvailable = await checkLinqIMessageCapability(
+        {
+          address: directRecipientPhoneNumber,
+          from: normalizeOptionalText(input.fromPhoneNumber),
+        },
+        {
+          env,
+          fetchImplementation: dependencies.fetchImplementation,
+          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        },
+      )
+    } catch (error) {
+      if (dependencies.signal?.aborted) {
+        throw error
+      }
+    }
+    if (capabilityAvailable) {
+      const delivered = await sendLinqIMessageAppCard(
+        {
+          card,
+          chatId: target,
+          idempotencyKey,
+        },
+        {
+          env,
+          fetchImplementation: dependencies.fetchImplementation,
+          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        },
+      )
+      return {
+        providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+        providerThreadId: null,
+        target,
+      }
+    }
+  }
+
   const media = await prepareLinqMessageMedia(
-    input.media ?? [],
+    responseMedia,
     dependencies,
   )
-  const message = (input.media ?? []).some((item) => item.kind === 'vault_file')
+  const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
     : input.message
 

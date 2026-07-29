@@ -6,10 +6,24 @@ import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
   hashAssistantOutboxIdentity,
+  hashAssistantOutboxLegacyMediaDedupeIdentity,
   hashAssistantOutboxTargetFingerprint,
   resolveAssistantOutboxIntentPath,
   resolveAssistantOutboxQuarantineDirectory,
 } from '../src/assistant/outbox/intents.ts'
+
+
+const NUTRITION_CARD = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+} as const
 
 describe('assistant outbox intent helpers', () => {
   it('normalizes persisted target fields while keeping delivery bindings intact', () => {
@@ -132,6 +146,75 @@ describe('assistant outbox intent helpers', () => {
     })
 
     expect(fallbackA).not.toBe(fallbackB)
+  })
+
+  it('preserves the legacy ordinary-message identity when card is null', () => {
+    const base = {
+      media: [],
+      message: 'ordinary message',
+      sessionId: 'session-legacy-card-null',
+      subject: null,
+      turnId: 'turn-legacy-card-null',
+    }
+
+    expect(hashAssistantOutboxIdentity(base)).toBe(
+      hashAssistantOutboxIdentity({
+        ...base,
+        card: null,
+      }),
+    )
+  })
+
+  it('changes delivery identity when only response-card values change', () => {
+    const changedCard = {
+      ...NUTRITION_CARD,
+      totals: {
+        ...NUTRITION_CARD.totals,
+        calories: {
+          ...NUTRITION_CARD.totals.calories,
+          total: 1_491.25,
+        },
+      },
+    } as const
+    const base = {
+      media: [],
+      message: 'same deterministic message',
+      sessionId: 'session-card',
+      subject: null,
+      turnId: 'turn-card',
+    }
+
+    expect(hashAssistantOutboxIdentity({
+      ...base,
+      card: NUTRITION_CARD,
+    })).not.toBe(hashAssistantOutboxIdentity({
+      ...base,
+      card: changedCard,
+    }))
+
+    const legacyTokenIdentity = hashAssistantOutboxIdentity({
+      ...base,
+      card: null,
+      dedupeToken: 'meal-closeout-token',
+    })
+    const firstCardIdentity = hashAssistantOutboxIdentity({
+      ...base,
+      card: NUTRITION_CARD,
+      dedupeToken: 'meal-closeout-token',
+    })
+    const changedCardIdentity = hashAssistantOutboxIdentity({
+      ...base,
+      card: changedCard,
+      dedupeToken: 'meal-closeout-token',
+    })
+
+    expect(firstCardIdentity).not.toBe(legacyTokenIdentity)
+    expect(changedCardIdentity).not.toBe(firstCardIdentity)
+    expect(hashAssistantOutboxLegacyMediaDedupeIdentity({
+      card: NUTRITION_CARD,
+      dedupeToken: 'meal-closeout-token',
+      media: [],
+    })).toBeNull()
   })
 
   it('includes native reply intent in non-token identity while preserving legacy absence', () => {

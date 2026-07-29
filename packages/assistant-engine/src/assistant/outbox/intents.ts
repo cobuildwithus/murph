@@ -4,6 +4,9 @@ import type {
   AssistantOutboxIntent,
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { resolveAssistantBindingDelivery } from '../bindings.js'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
@@ -109,6 +112,7 @@ export function buildAssistantOutboxPersistedTarget(
 export function hashAssistantOutboxIdentity(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  card?: AssistantResponseCard | null
   channel?: string | null
   deliverySource?: AssistantOutboxIntent['deliverySource']
   dedupeToken?: string | null
@@ -127,13 +131,18 @@ export function hashAssistantOutboxIdentity(input: {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
   if (dedupeToken) {
     return createHash('sha1')
-      .update(JSON.stringify({ dedupeToken }))
+      .update(JSON.stringify(
+        input.card == null
+          ? { dedupeToken }
+          : { card: input.card, dedupeToken },
+      ))
       .digest('hex')
   }
 
   return createHash('sha1')
     .update(
       JSON.stringify({
+        ...(input.card == null ? {} : { card: input.card }),
         media: input.media ?? [],
         message: input.message,
         subject: input.subject ?? null,
@@ -160,11 +169,12 @@ export function hashAssistantOutboxIdentity(input: {
 }
 
 export function hashAssistantOutboxLegacyMediaDedupeIdentity(input: {
+  card?: AssistantResponseCard | null
   dedupeToken?: string | null
   media?: readonly AssistantResponseMedia[] | null
 }): string | null {
   const dedupeToken = normalizeNullableString(input.dedupeToken)
-  if (!dedupeToken) {
+  if (!dedupeToken || input.card != null) {
     return null
   }
 

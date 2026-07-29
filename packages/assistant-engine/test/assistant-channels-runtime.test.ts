@@ -5,20 +5,40 @@ import type {
   AgentmailFetch,
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 const runtimeMocks = vi.hoisted(() => ({
+  checkLinqIMessageCapability: vi.fn(),
   createAgentmailApiClient: vi.fn(),
   createLinqChat: vi.fn(),
   probeLinqApi: vi.fn(),
   sendLinqChatMessage: vi.fn(),
+  sendLinqIMessageAppCard: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
   uploadLinqAttachment: vi.fn(),
 }))
 
 const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+
+const NUTRITION_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+}
+
+const NUTRITION_CARD_TEXT = renderAssistantResponseCardText(NUTRITION_CARD)
 
 vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => {
   const actual =
@@ -34,9 +54,11 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
     await importOriginal<typeof import('@murphai/operator-config/linq-runtime')>()
   return {
     ...actual,
+    checkLinqIMessageCapability: runtimeMocks.checkLinqIMessageCapability,
     createLinqChat: runtimeMocks.createLinqChat,
     probeLinqApi: runtimeMocks.probeLinqApi,
     sendLinqChatMessage: runtimeMocks.sendLinqChatMessage,
+    sendLinqIMessageAppCard: runtimeMocks.sendLinqIMessageAppCard,
     startLinqChatTypingIndicator: runtimeMocks.startLinqChatTypingIndicator,
     stopLinqChatTypingIndicator: runtimeMocks.stopLinqChatTypingIndicator,
     uploadLinqAttachment: runtimeMocks.uploadLinqAttachment,
@@ -65,10 +87,12 @@ import {
 beforeEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  runtimeMocks.checkLinqIMessageCapability.mockReset()
   runtimeMocks.createAgentmailApiClient.mockReset()
   runtimeMocks.createLinqChat.mockReset()
   runtimeMocks.probeLinqApi.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
+  runtimeMocks.sendLinqIMessageAppCard.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
   runtimeMocks.uploadLinqAttachment.mockReset()
@@ -1485,6 +1509,118 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+  })
+
+  it('sends eligible Linq response cards natively after capability confirmation', async () => {
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
+    runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({
+      message: { id: 'native-card-message-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      fromPhoneNumber: '+15550000',
+      idempotencyKey: 'card-delivery-1',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-1',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toEqual({
+      providerMessageId: 'native-card-message-1',
+      providerThreadId: null,
+      target: 'private-thread-1',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).toHaveBeenCalledWith({
+      address: '+15550001',
+      from: '+15550000',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
+      card: NUTRITION_CARD,
+      chatId: 'private-thread-1',
+      idempotencyKey: 'card-delivery-1',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
+  })
+
+  it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'fallback-message-1' },
+    })
+
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValueOnce(false)
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-fallback-false',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-false',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
+
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValueOnce(
+      new Error('capability unavailable'),
+    )
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-fallback-error',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-error',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: null,
+      idempotencyKey: 'card-fallback-no-handle',
+      message: NUTRITION_CARD_TEXT,
+      target: 'private-thread-no-handle',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
+
+    await expect(sendLinqMessage({
+      card: NUTRITION_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'card-fallback-group',
+      message: NUTRITION_CARD_TEXT,
+      target: 'group-thread-1',
+      targetKind: 'thread',
+      threadIsDirect: false,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    })).resolves.toMatchObject({ providerMessageId: 'fallback-message-1' })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledTimes(4)
+    for (const call of runtimeMocks.sendLinqChatMessage.mock.calls) {
+      expect(call[0]).toMatchObject({
+        message: NUTRITION_CARD_TEXT,
+      })
+      expect(call[0]).not.toHaveProperty('media')
+    }
   })
 
   it('uploads private Linq image bytes and sends only the provider attachment id', async () => {

@@ -18,6 +18,10 @@ import type {
   AssistantResponseMedia,
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
@@ -562,6 +566,7 @@ export interface CodexAppServerTurnResult {
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
+  responseCard: AssistantResponseCard | null
   jsonEvents: unknown[]
   providerActionCount: number
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
@@ -578,6 +583,11 @@ export interface CodexAppServerResponseSegment {
   media: AssistantResponseMedia[]
   response: string
   targetInputId?: string
+}
+
+interface CodexAppServerTrailingResponseCandidate
+  extends CodexAppServerResponseSegment {
+  card: AssistantResponseCard | null
 }
 
 export type CodexAppServerSteerInput = {
@@ -2791,11 +2801,12 @@ async function runCodexAppServerTurnOnProcess(
   // the final reply rather than a preceding duplicate.
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
-  let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
+  let trailingSteerCandidate: CodexAppServerTrailingResponseCandidate | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  let responseCard: AssistantResponseCard | null = null
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
     settings: {},
   }
@@ -3315,7 +3326,7 @@ async function runCodexAppServerTurnOnProcess(
 
   // App-server events mutate this state inside the asynchronous message
   // handler, so finalization reads it through an explicitly typed boundary.
-  const readTrailingSteerCandidate = (): CodexAppServerResponseSegment | null =>
+  const readTrailingSteerCandidate = (): CodexAppServerTrailingResponseCandidate | null =>
     trailingSteerCandidate
 
   const promoteTrailingSteerCandidate = (): void => {
@@ -3323,7 +3334,16 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    precedingAgentMessageSegments.push(trailingSteerCandidate)
+    precedingAgentMessageSegments.push({
+      deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
+      media: [...trailingSteerCandidate.media],
+      response: trailingSteerCandidate.card
+        ? renderAssistantResponseCardText(trailingSteerCandidate.card)
+        : trailingSteerCandidate.response,
+      ...(trailingSteerCandidate.targetInputId
+        ? { targetInputId: trailingSteerCandidate.targetInputId }
+        : {}),
+    })
     trailingSteerCandidate = null
   }
 
@@ -3470,9 +3490,47 @@ async function runCodexAppServerTurnOnProcess(
         'Response media cannot be attached after finish_without_reply.',
       )
     }
-    responseMedia = patch.op === 'replace'
+    const nextMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+    if (responseCard !== null && nextMedia.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+        'Response media cannot be combined with a response card.',
+      )
+    }
+    responseMedia = nextMedia
+  }
+
+  const applyResponseCardPatch = (
+    card: AssistantResponseCard,
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
+        'A response card cannot be attached after finish_without_reply.',
+      )
+    }
+    if (responseCard !== null) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
+        'Only one response card may be attached to a final response.',
+      )
+    }
+    if (responseMedia.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+        'A response card cannot be combined with response media.',
+      )
+    }
+    if (requiredVaultFileApprovalUrls.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_VAULT_FILE_CONFLICT',
+        'A response card cannot replace a required vault-file approval link.',
+      )
+    }
+    responseCard = card
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
@@ -3491,6 +3549,9 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseMedia.length > 0) {
+      return false
+    }
+    if (responseCard !== null) {
       return false
     }
     if (
@@ -3880,7 +3941,7 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequestDeliveryContextOrdinal,
           ) &&
           !vaultFileMayClassifyAfterGenericNoReply &&
-          isResponseMediaDynamicToolRequest(dynamicToolRequest)
+          isResponseAttachmentDynamicToolRequest(dynamicToolRequest)
         ) {
           return {
             rpcResult: {
@@ -3923,6 +3984,8 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
+          currentResponseCard: responseCard,
+          privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
@@ -3963,6 +4026,26 @@ async function runCodexAppServerTurnOnProcess(
         !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
       ) {
         requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
+      }
+      if (result.responseCardPatch) {
+        try {
+          applyResponseCardPatch(
+            result.responseCardPatch.card,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'response card unavailable for this final response',
+              }],
+            },
+          })
+          return
+        }
       }
       if (result.responseMediaPatch) {
         try {
@@ -4235,6 +4318,7 @@ async function runCodexAppServerTurnOnProcess(
           deliveryContextOrdinal: completedResponseDeliveryContextOrdinal,
           response: completedFinalAgentMessage,
           media: [...responseMedia],
+          card: responseCard,
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
             : {}),
@@ -4243,6 +4327,7 @@ async function runCodexAppServerTurnOnProcess(
         assistantStreams.clear()
         assistantStreamOrder.length = 0
         responseMedia = []
+        responseCard = null
       }
       completedUserMessageOrdinal += 1
     }
@@ -4836,7 +4921,8 @@ async function runCodexAppServerTurnOnProcess(
         !suppressTrailingSteerCandidateForEarlierNoReply &&
         (
           normalizeNullableString(extractedFinalMessage) !== null ||
-          responseMedia.length > 0
+          responseMedia.length > 0 ||
+          responseCard !== null
         )
       )
     )
@@ -4852,6 +4938,18 @@ async function runCodexAppServerTurnOnProcess(
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? responseMedia
         : finalTrailingSteerCandidate?.media ?? responseMedia
+  const finalResponseCard =
+    latestFinalActionPatch?.kind === 'none'
+      ? responseCard
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? responseCard
+        : finalTrailingSteerCandidate?.card ?? responseCard
+  if (finalResponseCard !== null && finalResponseMedia.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
+    )
+  }
   const finalDeliveryContextOrdinal =
     latestFinalActionPatch?.kind === 'none'
       ? latestDeliveryContextOrdinal
@@ -4870,8 +4968,11 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const semanticFinalMessage = finalResponseCard
+    ? renderAssistantResponseCardText(finalResponseCard)
+    : modelFinalMessage
   const finalMessage = appendRequiredVaultFileApprovalUrls(
-    modelFinalMessage,
+    semanticFinalMessage,
     requiredVaultFileApprovalUrls,
   )
   if (
@@ -4891,7 +4992,7 @@ async function runCodexAppServerTurnOnProcess(
     ))
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
-    (!noReplySelected && finalResponseMedia.length > 0)
+    (!noReplySelected && (finalResponseMedia.length > 0 || finalResponseCard !== null))
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -4901,8 +5002,10 @@ async function runCodexAppServerTurnOnProcess(
       finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
     transcriptMessage:
-      normalizeNullableString(modelFinalMessage) ??
-      (finalResponseMedia.length > 0 ? '' : null),
+      finalResponseCard
+        ? renderAssistantResponseCardText(finalResponseCard)
+        : normalizeNullableString(modelFinalMessage) ??
+          (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,
@@ -4921,6 +5024,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
+    responseCard: finalHasDeliverableOutput ? finalResponseCard : null,
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,
@@ -5051,6 +5155,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-reaction-arguments'
       | 'invalid-reply-target-arguments'
       | 'invalid-product-feedback-arguments'
+      | 'invalid-response-card-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
@@ -5066,6 +5171,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments' ||
     request.kind === 'invalid-product-feedback-arguments' ||
+    request.kind === 'invalid-response-card-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }
@@ -5078,6 +5184,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
+    request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
     request.kind === 'assistant-configuration' ||
@@ -5090,10 +5197,11 @@ function isSerializedDynamicToolRequest(
     isComputerDynamicToolRequest(request)
 }
 
-function isResponseMediaDynamicToolRequest(
+function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'attach-response-media' ||
+  return request.kind === 'attach-response-card' ||
+    request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||
     request.kind === 'generate-voice-memo' ||

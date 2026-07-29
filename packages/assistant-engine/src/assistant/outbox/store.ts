@@ -4,6 +4,9 @@ import {
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
@@ -163,6 +166,7 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
 }
 
 export async function findAssistantOutboxIntentByDedupeIdentity(input: {
+  card?: AssistantResponseCard | null
   dedupeKey: string
   deliveryIdempotencyKey?: string | null
   dedupeToken?: string | null
@@ -191,6 +195,7 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   return (
     activeIntents.find((intent) => {
       const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
+        card: input.card ?? null,
         dedupeToken,
         media: intent.media,
       })

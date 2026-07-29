@@ -15,6 +15,11 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantResponseCardSchema,
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
+import {
   type AutomationQueryRecord,
 } from '@murphai/query'
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
@@ -135,6 +140,7 @@ export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  card?: AssistantResponseCard | null
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
@@ -259,6 +265,7 @@ export type AssistantOutboxCreateIntentInput = {
   initialState?:
     | { status: 'pending' }
     | { nextAttemptAt: string; status: 'awaiting_approval' }
+  card?: AssistantResponseCard | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
@@ -282,13 +289,21 @@ export async function createAssistantOutboxIntent(
     const createdAt = input.createdAt ?? new Date().toISOString()
     const initialState = input.initialState ?? { status: 'pending' as const }
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    const card = input.card == null
+      ? null
+      : assistantResponseCardSchema.parse(input.card)
     const operation = normalizeAssistantOutboxReactionOperation(
       input.operation ?? null,
     )
-    const message = operation ? '' : normalizeOutboxMessage({
-      media,
-      message: input.message,
-    })
+    assertAssistantOutboxCardCompatible({ card, media, operation })
+    const message = operation
+      ? ''
+      : card
+        ? renderAssistantResponseCardText(card)
+        : normalizeOutboxMessage({
+            media,
+            message: input.message,
+          })
     assertAssistantOutboxResponseMediaSupported({
       channel: input.channel ?? null,
       media,
@@ -300,6 +315,12 @@ export async function createAssistantOutboxIntent(
       ...input,
       replyToMessageId,
     })
+    if (card !== null && persistedTarget.threadIsDirect !== true) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+        'A response card requires a private direct conversation.',
+      )
+    }
     assertAssistantOutboxNativeReplyTarget({
       channel: persistedTarget.channel,
       nativeReplyRequested: persistedTarget.nativeReplyRequested,
@@ -317,6 +338,7 @@ export async function createAssistantOutboxIntent(
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(persistedTarget)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
+      card,
       media,
       message,
       operation,
@@ -347,11 +369,13 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       deliveryIdempotencyKey,
       dedupeToken: input.dedupeToken,
+      card,
       vault: input.vault,
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       assertAssistantOutboxDedupeEffectMatches({
+        card,
         intent: existing,
         operation,
         persistedTarget,
@@ -427,6 +451,7 @@ export async function createAssistantOutboxIntent(
       message,
       emailHtml: input.emailHtml ?? null,
       media,
+      card,
       subject,
       operation,
       dedupeKey,
@@ -1130,6 +1155,7 @@ export async function deliverAssistantOutboxMessage(input: {
   reviewedAssistantAskCompletionExpiresAt?: string | null
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  card?: AssistantResponseCard | null
   channel?: string | null
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
@@ -1167,6 +1193,7 @@ export async function deliverAssistantOutboxMessage(input: {
     automationAuthority: input.automationAuthority ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
+    card: input.card ?? null,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
@@ -1456,6 +1483,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
     delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
       sessionId: input.sessionId,
+      card: input.card ?? null,
       media: input.media ?? [],
       message: input.message,
       ...(input.nativeReplyRequested === undefined
@@ -1947,10 +1975,14 @@ function assertAssistantOutboxNativeReplyTarget(input: {
 }
 
 function assertAssistantOutboxDedupeEffectMatches(input: {
+  card: AssistantResponseCard | null
   intent: AssistantOutboxIntent
   operation: AssistantOutboxOperation | null
   persistedTarget: AssistantOutboxPersistedTarget
 }): void {
+  if (!sameAssistantResponseCard(input.intent.card, input.card)) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
   const existingOperationKind = input.intent.operation?.kind ?? null
   const requestedOperationKind = input.operation?.kind ?? null
   if (existingOperationKind !== requestedOperationKind) {
@@ -1979,6 +2011,32 @@ function assertAssistantOutboxDedupeEffectMatches(input: {
     || existingNativeReplyRequested !== requestedNativeReplyRequested
   ) {
     throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+}
+
+function sameAssistantResponseCard(
+  left: AssistantResponseCard | null | undefined,
+  right: AssistantResponseCard | null | undefined,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+}
+
+function assertAssistantOutboxCardCompatible(input: {
+  card: AssistantResponseCard | null
+  media: readonly AssistantResponseMedia[]
+  operation: AssistantOutboxOperation | null
+}): void {
+  if (input.card !== null && input.media.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'A response card cannot be combined with response media.',
+    )
+  }
+  if (input.card !== null && input.operation !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_OPERATION_CONFLICT',
+      'A response card requires a normal message intent.',
+    )
   }
 }
 

@@ -22,6 +22,7 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -119,6 +120,17 @@ const MURPH_DYNAMIC_TOOLS_WITH_STYLE = resolveMurphDynamicTools({
   assistantStyleSettingsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: 193.125, mealCount: 3 },
+    fatGrams: { total: 34.75, mealCount: 3 },
+  },
+}
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -18149,6 +18161,13 @@ describe('steered final segments', () => {
         media: readonly unknown[]
       }
     | {
+        card: AssistantResponseCard
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'attach-response-card'
+      }
+    | {
         expectedSuccess?: boolean
         expectedText: string
         id: number
@@ -18186,6 +18205,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isAttachResponseCardStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-card' }> {
+    return 'kind' in step && step.kind === 'attach-response-card'
   }
 
   function isFinishWithoutReplyStep(
@@ -18243,6 +18268,7 @@ describe('steered final segments', () => {
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
+      responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
     } = {},
   ) {
@@ -18286,6 +18312,34 @@ describe('steered final segments', () => {
           }))
 
           for (const step of steps) {
+            if (isAttachResponseCardStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'attach_response_card',
+                  arguments: {
+                    card: step.card,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
             if (isAttachResponseMediaStep(step)) {
               child.stdout.write(jsonLine({
                 id: step.id,
@@ -18472,6 +18526,14 @@ describe('steered final segments', () => {
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
+      ...(input.responseCardsAvailable === true
+        ? {
+            dynamicTools: resolveMurphDynamicTools({
+              responseCardsAvailable: true,
+            }),
+            groupConversation: false,
+          }
+        : {}),
       hostedToolContext: input.hostedToolContext,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
@@ -18536,6 +18598,55 @@ describe('steered final segments', () => {
 
     expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
+  })
+
+  it('keeps each steered final response card singular', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-card-1',
+        type: 'user_message',
+        message: 'First nutrition question',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 84,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'assistant-card-1',
+        type: 'assistant_message',
+        message: 'Model prose replaced by card text.',
+      }),
+      completedItemEvent({
+        id: 'user-card-2',
+        type: 'user_message',
+        message: 'One more thought',
+      }),
+      {
+        card: DAILY_NUTRITION_RESPONSE_CARD,
+        expectedText: 'response card attached',
+        id: 85,
+        kind: 'attach-response-card',
+      },
+      completedItemEvent({
+        id: 'assistant-card-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toBe(
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    )
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response:
+        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+    }])
   })
 
   it('keeps independent last-successful reply and reaction targets per steered segment', async () => {
