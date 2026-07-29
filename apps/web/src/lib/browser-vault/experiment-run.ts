@@ -183,6 +183,11 @@ function mapExperimentResultsProjection(
         })
       : undefined,
     outcomeStatus: results.savedOutcomeStatus,
+    outcomeKind: results.persistedOutcome?.structuredReview
+      ? "structured_review"
+      : results.biomarkers.length > 0
+        ? "metric"
+        : null,
     outcomeConfidence: results.persistedOutcome?.confidence.level,
     summary,
     summaryDetail,
@@ -443,7 +448,7 @@ function buildTrends(
         baselineAvg: roundMetric(biomarker.baseline.mean),
         currentValue: roundMetric(currentValue),
         currentValueLabel: biomarker.intervention.mean !== null
-          ? "experiment average"
+          ? formatOutcomeStatisticLabel(biomarker.statistic)
           : "latest",
         delta: biomarker.deltaAbs === null || biomarker.completeness !== "good"
           ? ""
@@ -451,6 +456,27 @@ function buildTrends(
         windowComparison,
       }];
     });
+}
+
+function formatOutcomeStatisticLabel(
+  statistic: BrowserVaultExperimentBiomarkerResult["statistic"],
+): NonNullable<TrendData["currentValueLabel"]> {
+  switch (statistic) {
+    case "count":
+      return "count";
+    case "latest":
+      return "latest";
+    case "max":
+      return "maximum";
+    case "mean":
+      return "experiment average";
+    case "median":
+      return "median";
+    case "min":
+      return "minimum";
+    case "sum":
+      return "total";
+  }
 }
 
 function buildHistoryPoints(

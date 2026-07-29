@@ -236,7 +236,11 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   )
   assert.match(
     experimentStartSchema.options.properties.primaryBiomarkerKey.description ?? '',
-    /Required for --custom starts.*biomarker:<metric-slug>/u,
+    /Legacy primary biomarker identity/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.primaryOutcomeKey.description ?? '',
+    /Required for new custom runs.*biomarker:<outcome-slug>/u,
   )
   assert.equal('setupAnswer' in experimentStartSchema.options.properties, true)
   assert.equal('onboardingCompletedAt' in experimentStartSchema.options.properties, true)
@@ -420,7 +424,7 @@ test.sequential('experiment start requires an explicit protocol or custom fallba
   }
 })
 
-test.sequential('custom experiment start explains the required primary metric before writing', async () => {
+test.sequential('custom experiment start explains the required primary outcome before writing', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-start-metric-'))
 
   try {
@@ -442,11 +446,11 @@ test.sequential('custom experiment start explains the required primary metric be
     assert.equal(result.ok, false)
     assert.match(
       result.error.message ?? '',
-      /Custom experiment starts require --primary-biomarker-key biomarker:<metric-slug>/u,
+      /Custom experiment starts require --primary-outcome-key biomarker:<outcome-slug>/u,
     )
     assert.match(
       result.error.message ?? '',
-      /no protocol\/test-plan default primary metric/u,
+      /no protocol\/test-plan default primary outcome/u,
     )
 
     const shownAfterFailure = await runSliceCli([
@@ -457,6 +461,289 @@ test.sequential('custom experiment start explains the required primary metric be
       vaultRoot,
     ])
     assert.equal(shownAfterFailure.ok, false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('custom experiment start persists one first-class primary outcome', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-primary-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'repetition-benchmark',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Repetition Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:repetition-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-label',
+      'Repetition benchmark',
+      '--comparison-statistic',
+      'latest',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+
+    const shown = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'repetition-benchmark',
+      '--vault',
+      vaultRoot,
+    ])
+    const analysisPlan = requireRecord(
+      requireData(shown).entity.data.analysisPlan,
+      'analysisPlan',
+    )
+    assert.equal(analysisPlan.primaryBiomarkerKey, undefined)
+    assert.deepEqual(analysisPlan.primaryOutcome, {
+      kind: 'metric',
+      key: 'biomarker:repetition-benchmark',
+      label: 'Repetition benchmark',
+      statistic: 'latest',
+    })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start rejects competing primary outcome sources', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-outcome-conflict-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const result = await runSliceCli([
+      'experiment',
+      'start',
+      'outcome-conflict',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Outcome Conflict',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:first-outcome',
+      '--primary-biomarker-key',
+      'biomarker:legacy-outcome',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.match(
+      result.error.message ?? '',
+      /either --primary-outcome-key or the legacy --primary-biomarker-key/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('active structured reviews require bounded before-and-after evidence', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-structured-review-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const incomplete = await runSliceCli([
+      'experiment',
+      'start',
+      'movement-review-incomplete',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Movement Review',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:movement-review',
+      '--primary-outcome-kind',
+      'structured_review',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(incomplete.ok, false)
+    assert.match(
+      incomplete.error.message ?? '',
+      /bounded baseline and follow-up evidence/u,
+    )
+
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'movement-review',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Movement Review',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:movement-review',
+      '--primary-outcome-kind',
+      'structured_review',
+      '--primary-outcome-label',
+      'Movement review',
+      '--planned-measurement',
+      'role=baseline,kind=photo,window=2026-05-01..2026-05-01,biomarkerKeys=biomarker:movement-review',
+      '--planned-measurement',
+      'role=followup,kind=photo,window=2026-05-28..2026-05-28,biomarkerKeys=biomarker:movement-review',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('custom session outcomes require their declared capture field', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-session-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const missingField = await runSliceCli([
+      'experiment',
+      'start',
+      'session-benchmark-incomplete',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Session Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:session-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-session-field',
+      'benchmark_score',
+      '--primary-outcome-unit',
+      'points',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingField.ok, false)
+    assert.match(
+      missingField.error.message ?? '',
+      /requires --session-field benchmark_score/u,
+    )
+
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'session-benchmark',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Session Benchmark',
+      '--intervention-start',
+      '2026-05-01',
+      '--session-field',
+      'benchmark_score',
+      '--primary-outcome-key',
+      'biomarker:session-benchmark',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-session-field',
+      'benchmark_score',
+      '--primary-outcome-unit',
+      'points',
+      '--comparison-statistic',
+      'max',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      started.ok,
+      true,
+      started.ok ? undefined : started.error.message,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('derived outcomes require an existing deterministic metric source', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-derived-outcome-'))
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+    const unknownSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-missing-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'mistyped-daily-score',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(unknownSource.ok, false)
+    assert.match(
+      unknownSource.error.message ?? '',
+      /has no registered metric producer or existing metric points/u,
+    )
+
+    const registeredSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-registered-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'resting-heart-rate',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      registeredSource.ok,
+      true,
+      registeredSource.ok ? undefined : registeredSource.error.message,
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

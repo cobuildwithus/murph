@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-07-25
+Last verified: 2026-07-29
 
 ## Current State
 
@@ -70,13 +70,32 @@ Before Murph writes a private run, it should already know the exact Health Commo
 - For lab-backed runs, store and explain baseline evidence separately from the run baseline or pre-intervention window. A pre-existing lab panel may be the baseline evidence even when the runnable protocol has a prospective run-in window for adherence, logistics, or confounder control.
 - Completed outcome cards, shares, and community contributions must remain traceable back to this exact runnable contract.
 
-## Capturable Session Outcomes
+## Capturable Outcomes
 
 A run must be able to capture its promised primary outcome before it starts.
 
+- New runs store one first-class `analysisPlan.primaryOutcome`. Canonical
+  catalog membership enriches a metric with known aliases, units, validation,
+  and interpretation; it is not an experiment allowlist. Legacy
+  `primaryBiomarkerKey` records remain readable through the compatibility path,
+  but a plan must never persist both as competing sources of truth.
+- A numeric outcome declares a stable metric key, label, comparison reducer,
+  and one capture route: an ordinary measurement, a declared session field, or
+  an already-registered deterministic derived metric. A custom measurement may
+  use an open metric key and unit without catalog enrollment.
+- A structured-review outcome declares bounded baseline and follow-up text,
+  photo, or document evidence. Deterministic closeout preserves a
+  review-ready evidence receipt; it does not claim the evidence was interpreted
+  or manufacture a score or percentage change.
 - `runPlan.logging.sessionFields` declares the stable ids that an `intervention_session` may record. Logged `fields` values are typed strings, finite numbers, booleans, or `null`; undeclared ids are rejected.
 - The typed CLI accepts repeated `--field id=value` entries and rejects duplicate ids. Recognized subjective metrics, including bedtime delay, sleep-onset latency, sleepiness, sleep quality, arousal, and soreness measures, also enforce their metric-specific type and range.
-- Every primary biomarker must resolve to a canonical health metric. When it is a session-captured subjective metric, the run must declare exactly one recognized matching session field; unsupported or uncapturable primary outcomes block start and analysis readiness.
+- A session-field primary outcome must identify exactly one declared matching
+  field. Canonical session metrics retain their metric-specific validation;
+  custom fields use the saved outcome definition. Missing, duplicate, or
+  contradictory capture declarations block start and analysis readiness.
+- Derived outcomes may select only existing deterministic metric points or
+  registered reducers. Experiment setup does not execute user-authored
+  formulas.
 - Only fields on sessions linked to this experiment contribute subjective metric points. A session can confirm adherence and supply outcome evidence at the same time; do not create a second adherence event for the same action.
 
 ## Reminder Policy

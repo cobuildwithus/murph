@@ -1129,6 +1129,95 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain("Daily measurements and window averages, where available.");
   });
 
+  it("renders a saved structured review without a false empty-metrics state", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    expect(protocol).not.toBeNull();
+
+    const base = createSavedOutcome({
+      id: "exp_structured_review",
+      schemaVersion: "murph.experiment-outcome.v2",
+      slug: "structured-review-run",
+      title: "Movement quality review",
+    });
+    const outcome: ExperimentOutcome = {
+      ...base,
+      metricResults: [],
+      structuredReview: {
+        baseline: {
+          kinds: ["document"],
+          recordIds: ["evt_movement_baseline"],
+        },
+        followup: {
+          kinds: ["document"],
+          recordIds: ["evt_movement_followup"],
+        },
+        key: "biomarker:movement-quality-review",
+        kind: "structured_review",
+        label: "Movement quality",
+        status: "ready_for_review",
+      },
+    };
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client: await createClient({
+        experimentOutcomes: [outcome],
+        generatedAt: "2026-04-20T08:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              primaryOutcome: {
+                key: "biomarker:movement-quality-review",
+                kind: "structured_review",
+                label: "Movement quality",
+              },
+            },
+            id: "exp_structured_review",
+            outcomeRef: {
+              generatedAt: outcome.generatedAt,
+              outcomeId: outcome.outcomeId,
+            },
+            runPlan: {
+              interventionEnd: "2026-04-06",
+              interventionStart: "2026-04-01",
+            },
+            slug: "structured-review-run",
+            startedOn: "2026-04-01",
+            status: "completed",
+            title: "Movement quality review",
+          }),
+          id: "exp_structured_review",
+          slug: "structured-review-run",
+          startedOn: "2026-04-01",
+          status: "completed",
+          summary: "Structured review fixture.",
+          tags: [],
+          title: "Movement quality review",
+        }],
+      }),
+      experimentId: "exp_structured_review",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      outcomeKind: "structured_review",
+      outcomeStatus: "available",
+      signals: [],
+      trends: [],
+    }));
+
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(markup).toContain(outcome.conclusion.headline);
+    expect(markup).toContain("Evidence ready for review");
+    expect(markup).not.toContain("Saved result");
+    expect(markup).not.toContain("does not include comparable metric windows to chart");
+    expect(markup).not.toContain("there isn&#x27;t enough data for a clear comparison");
+  });
+
   it("keeps daily trend dates stable outside UTC", () => {
     const previousTimeZone = process.env.TZ;
     process.env.TZ = "America/New_York";

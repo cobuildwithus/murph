@@ -1,6 +1,7 @@
 import type { MetricSeriesPoint } from "./types.ts";
+import { unitsEquivalent } from "./normalize.ts";
 
-export type MetricAggregation = "mean" | "median" | "min" | "max" | "sum";
+export type MetricAggregation = "count" | "latest" | "mean" | "median" | "min" | "max" | "sum";
 
 type MetricConfidence = "none" | "low" | "medium" | "high";
 type MetricSelectionWarningCode =
@@ -83,14 +84,22 @@ export function selectMetricWindowComparison(input: {
   const baseline = summarizeMetricWindow(metricRows, input.baselineWindow, statistic);
   const comparison = summarizeMetricWindow(metricRows, input.comparisonWindow, statistic);
   const warnings = buildWindowWarnings(baseline, comparison);
-  const status = selectWindowStatus({
+  const unitsCompatible =
+    statistic === "count" ||
+    baseline.unit === null ||
+    comparison.unit === null ||
+    unitsEquivalent(baseline.unit, comparison.unit);
+  const selectedStatus = selectWindowStatus({
     baseline,
     comparison,
     minimumPoints,
     windowCount: countAvailableWindows(input.baselineWindow, input.comparisonWindow),
   });
-  const unit = comparison.unit ?? baseline.unit;
-  const delta = baseline.value !== null && comparison.value !== null
+  const status = selectedStatus === "ready" && !unitsCompatible
+    ? "unsupported"
+    : selectedStatus;
+  const unit = unitsCompatible ? comparison.unit ?? baseline.unit : null;
+  const delta = status === "ready" && baseline.value !== null && comparison.value !== null
     ? comparison.value - baseline.value
     : null;
   const deltaPercent = delta !== null && baseline.value !== null && baseline.value !== 0
@@ -189,13 +198,15 @@ function summarizeMetricWindow(
   window: MetricWindowRange,
   statistic: MetricAggregation,
 ): MetricWindowSummary {
-  const rows = dedupeMetricRowsByDay(points
+  const windowPoints = points
     .filter(hasNumericValue)
-    .filter((point) => dateInWindow(point.date, window)));
+    .filter((point) => dateInWindow(point.date, window));
+  const rows = aggregateMetricRowsByDay(windowPoints, statistic);
   const values = rows.map((row) => row.value);
-  const units = uniqueStrings(rows
+  const units = uniqueStrings(windowPoints
     .map((row) => row.unit)
     .filter((unit): unit is string => typeof unit === "string" && unit.length > 0));
+  const compatibleUnits = unitsAreCompatible(units, statistic);
 
   return {
     daysWithData: rows.length,
@@ -204,8 +215,14 @@ function summarizeMetricWindow(
     recordIds: uniqueStrings(rows.flatMap((row) => row.recordIds ?? [])),
     start: window.start,
     totalDays: window.totalDays ?? countWindowDays(window.start, window.end),
-    unit: units.at(-1) ?? null,
-    value: values.length > 0 ? aggregate(values, statistic) : null,
+    unit: statistic === "count"
+      ? "count"
+      : compatibleUnits
+        ? units.at(-1) ?? null
+        : null,
+    value: values.length > 0 && compatibleUnits
+      ? aggregate(values, statistic)
+      : null,
   };
 }
 
@@ -234,6 +251,12 @@ function selectWindowStatus(input: {
   if (input.windowCount < 2) {
     return "unsupported";
   }
+  if (
+    (input.baseline.daysWithData > 0 && input.baseline.value === null) ||
+    (input.comparison.daysWithData > 0 && input.comparison.value === null)
+  ) {
+    return "unsupported";
+  }
   if (input.baseline.daysWithData === 0 && input.comparison.daysWithData === 0) {
     return "no_data";
   }
@@ -246,14 +269,32 @@ function selectWindowStatus(input: {
   return "ready";
 }
 
-function dedupeMetricRowsByDay(
+function aggregateMetricRowsByDay(
   points: readonly (MetricSeriesPoint & { value: number })[],
+  statistic: MetricAggregation,
 ): Array<MetricSeriesPoint & { value: number }> {
-  const byDate = new Map<string, MetricSeriesPoint & { value: number }>();
+  const byDate = new Map<string, Array<MetricSeriesPoint & { value: number }>>();
   for (const point of points.slice().sort(compareMetricSeriesPointsAsc)) {
-    byDate.set(point.date, point);
+    const rows = byDate.get(point.date) ?? [];
+    rows.push(point);
+    byDate.set(point.date, rows);
   }
-  return [...byDate.values()].sort(compareMetricSeriesPointsAsc);
+  return [...byDate.values()].flatMap((rows) => {
+    const latest = rows.at(-1);
+    if (!latest) {
+      return [];
+    }
+    const values = rows.map((row) => row.value);
+    return [{
+      ...latest,
+      pointIds: uniqueStrings(rows.flatMap((row) => row.pointIds ?? [])),
+      recordIds: uniqueStrings(rows.flatMap((row) => row.recordIds ?? [])),
+      unit: statistic === "count" ? "count" : latest.unit,
+      value: statistic === "count"
+        ? values.length
+        : aggregate(values, statistic),
+    }];
+  }).sort(compareMetricSeriesPointsAsc);
 }
 
 function hasNumericValue(point: MetricSeriesPoint): point is MetricSeriesPoint & { value: number } {
@@ -263,6 +304,12 @@ function hasNumericValue(point: MetricSeriesPoint): point is MetricSeriesPoint &
 function aggregate(values: readonly number[], statistic: MetricAggregation): number {
   if (values.length === 0) {
     return 0;
+  }
+  if (statistic === "count") {
+    return values.reduce((sum, value) => sum + value, 0);
+  }
+  if (statistic === "latest") {
+    return values.at(-1) ?? 0;
   }
   if (statistic === "sum") {
     return values.reduce((sum, value) => sum + value, 0);
@@ -281,6 +328,17 @@ function aggregate(values: readonly number[], statistic: MetricAggregation): num
       : sorted[midpoint] ?? 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function unitsAreCompatible(
+  units: readonly string[],
+  statistic: MetricAggregation,
+): boolean {
+  if (statistic === "count" || units.length < 2) {
+    return true;
+  }
+  const [first, ...rest] = units;
+  return first !== undefined && rest.every((unit) => unitsEquivalent(first, unit));
 }
 
 function compareMetricSeriesPointsAsc(

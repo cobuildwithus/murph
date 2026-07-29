@@ -390,13 +390,16 @@ test("requires exactly one session capture field for a subjective primary metric
     metricKey: "resting-heart-rate",
     requiresSessionField: false,
   });
-  assert.equal(
-    assessExperimentPrimaryMetricCapture({
-      primaryBiomarkerKey: "biomarker:not-a-real-metric",
-      sessionFields: [],
-    }).issue,
-    "unsupported_primary_biomarker",
-  );
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:repetition-capacity",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:repetition-capacity",
+    issue: null,
+    matchingSessionFieldIds: [],
+    metricKey: "repetition-capacity",
+    requiresSessionField: false,
+  });
   assert.deepEqual(assessExperimentPrimaryMetricCapture({
     primaryBiomarkerKey: "biomarker:bun",
     sessionFields: [],
@@ -2315,6 +2318,8 @@ test("selects metric window comparisons and trends through shared selectors", ()
     ],
   });
   assert.equal(mixedUnits.warnings[0]?.code, "UNIT_NOT_NORMALIZED");
+  assert.equal(mixedUnits.status, "unsupported");
+  assert.equal(mixedUnits.delta, null);
 
   const flatTrend = selectMetricTrend({
     metricKey: "resting-heart-rate",
@@ -2357,6 +2362,53 @@ test("selects metric window comparisons and trends through shared selectors", ()
     metricKey: "unknown-metric",
     points: rows,
   }).status, "no_data");
+});
+
+test("reduces open-ended experiment windows with declared statistics", () => {
+  const points = [
+    { ...seriesPoint("2026-04-01", 8), id: "row:baseline:1" },
+    { ...seriesPoint("2026-04-01", 10), id: "row:baseline:2" },
+    { ...seriesPoint("2026-04-02", 9), id: "row:baseline:3" },
+    { ...seriesPoint("2026-04-03", 11), id: "row:followup:1" },
+    { ...seriesPoint("2026-04-03", 12), id: "row:followup:2" },
+    { ...seriesPoint("2026-04-03", 10), id: "row:followup:3" },
+  ];
+  const windows = {
+    baselineWindow: { end: "2026-04-02", start: "2026-04-01", totalDays: 2 },
+    comparisonWindow: { end: "2026-04-03", start: "2026-04-03", totalDays: 1 },
+    metricKey: "resting-heart-rate",
+    points,
+  };
+
+  const maximum = selectMetricWindowComparison({
+    ...windows,
+    statistic: "max",
+  });
+  assert.equal(maximum.baseline.value, 10);
+  assert.equal(maximum.comparison.value, 12);
+  assert.equal(maximum.delta, 2);
+
+  const counted = selectMetricWindowComparison({
+    ...windows,
+    statistic: "count",
+  });
+  assert.equal(counted.baseline.value, 3);
+  assert.equal(counted.comparison.value, 3);
+  assert.equal(counted.unit, "count");
+
+  const mean = selectMetricWindowComparison({
+    ...windows,
+    statistic: "mean",
+  });
+  assert.equal(mean.baseline.value, 9);
+  assert.equal(mean.comparison.value, 11);
+
+  const latest = selectMetricWindowComparison({
+    ...windows,
+    statistic: "latest",
+  });
+  assert.equal(latest.baseline.value, 9);
+  assert.equal(latest.comparison.value, 10);
 });
 
 test("goal progress reports neutral not_met for unscheduled selected-value targets", () => {
