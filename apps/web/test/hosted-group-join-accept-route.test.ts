@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+  requireHostedInviteForAuthentication: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
@@ -45,6 +46,11 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
   assertHostedMemberNotSuspended: mocks.assertHostedMemberNotSuspended,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
+  requireHostedInviteForAuthentication:
+    mocks.requireHostedInviteForAuthentication,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
@@ -65,6 +71,9 @@ beforeEach(async () => {
   mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: { id: "member_grantor", suspendedAt: null },
+  });
+  mocks.requireHostedInviteForAuthentication.mockResolvedValue({
+    memberId: "member_grantor",
   });
   mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
   const tx = { tx: true };
@@ -87,6 +96,66 @@ beforeEach(async () => {
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
 
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
+});
+
+test("requires a phone-bound group link to match the authenticated member", async () => {
+  mocks.requireHostedInviteForAuthentication.mockResolvedValueOnce({
+    memberId: "member_other",
+  });
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({
+      expectedMembershipId: null,
+      inviteCode: "invite_phone_bound",
+      selectedVaultShareProjectionScopes: [],
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(403);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "AUTH_INVITE_MISMATCH" },
+  });
+  expect(mocks.requireHostedInviteForAuthentication).toHaveBeenCalledWith(
+    "invite_phone_bound",
+    { tx: true },
+    expect.any(Date),
+  );
+  expect(mocks.acceptHostedGroupJoinCodeTx).not.toHaveBeenCalled();
+});
+
+test("accepts a phone-bound group link for its authenticated member", async () => {
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({
+      expectedMembershipId: null,
+      inviteCode: "invite_phone_bound",
+      selectedVaultShareProjectionScopes: [],
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(mocks.requireHostedInviteForAuthentication).toHaveBeenCalledWith(
+    "invite_phone_bound",
+    { tx: true },
+    expect.any(Date),
+  );
+  expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledTimes(1);
 });
 
 test("returns a group permission revocation without exposing internal metadata", async () => {

@@ -18,6 +18,9 @@ import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboardin
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import {
+  requireHostedInviteForAuthentication,
+} from "@/src/lib/hosted-onboarding/invite-service";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
@@ -52,21 +55,38 @@ export const POST = withJsonError(async (
   const joinCode = await resolveDecodedRouteParam(context.params, "joinCode");
   const body = await readOptionalJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
   const expectedMembershipId = parseExpectedMembershipId(body);
+  const inviteCode = parseOptionalInviteCode(body.inviteCode);
   const selectedVaultShareProjectionScopes = parseSelectedVaultShareProjectionScopes(
     body.selectedVaultShareProjectionScopes ?? body.selectedVaultShareProjectionKinds,
   );
 
   const prisma = getPrisma();
   const now = new Date();
-  const result = await prisma.$transaction(async (tx) => acceptHostedGroupJoinCodeTx({
-    confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
-    expectedMembershipId,
-    joinCode,
-    memberId: auth.member.id,
-    now,
-    selectedVaultShareProjectionScopes,
-    tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const result = await prisma.$transaction(async (tx) => {
+    if (inviteCode) {
+      const invite = await requireHostedInviteForAuthentication(
+        inviteCode,
+        tx,
+        now,
+      );
+      if (invite.memberId !== auth.member.id) {
+        throw hostedOnboardingError({
+          code: "AUTH_INVITE_MISMATCH",
+          message: "That invite belongs to a different hosted member.",
+          httpStatus: 403,
+        });
+      }
+    }
+    return acceptHostedGroupJoinCodeTx({
+      confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
+      expectedMembershipId,
+      joinCode,
+      memberId: auth.member.id,
+      now,
+      selectedVaultShareProjectionScopes,
+      tx,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const { joinConfirmationSignal, ...responseResult } = result;
 
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
@@ -107,6 +127,20 @@ export const POST = withJsonError(async (
   }
   return jsonOk({ ok: true, ...responseResult });
 });
+
+function parseOptionalInviteCode(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw hostedOnboardingError({
+      code: "INVITE_CODE_INVALID",
+      message: "The Murph invite code is invalid.",
+      httpStatus: 400,
+    });
+  }
+  return value.trim();
+}
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;

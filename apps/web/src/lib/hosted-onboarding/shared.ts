@@ -99,6 +99,10 @@ export function generateHostedGroupJoinOfferId(): string {
   return `hgrpjo_${randomBytes(12).toString("base64url")}`;
 }
 
+export function generateHostedGroupJoinOutreachId(): string {
+  return `hgrpjoa_${randomBytes(12).toString("base64url")}`;
+}
+
 export function generateHostedVaultShareId(): string {
   return `hbvs_${randomBytes(12).toString("base64url")}`;
 }

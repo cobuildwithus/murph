@@ -206,17 +206,42 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
+      if (providerResult.groupJoinOfferHandled) {
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-linq-group-join-offer-reaction",
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: true,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
         signal: input.signal,
       });
-      if (reactionResult.status === "accepted") {
+      // A refused region is a decided outcome for a reaction that provably
+      // targeted the canonical join offer, so it must be consumed here. Falling
+      // through would stage group-runtime work and wake the mailbox only to skip
+      // it, and could produce the group-visible behaviour this path avoids.
+      if (
+        reactionResult.status === "accepted"
+        || reactionResult.reason === "recipient_region_unsupported"
+      ) {
         const response: HostedOnboardingLinqWebhookResponse = {
           duplicate: providerResult.duplicate || undefined,
-          ignored: false,
+          ignored: reactionResult.status !== "accepted",
           ok: true,
-          reason: "accepted-linq-group-join-offer-reaction",
+          reason: reactionResult.status === "accepted"
+            ? "accepted-linq-group-join-offer-reaction"
+            : "ignored-linq-group-join-offer-region-unsupported",
         };
         responseReason = response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {
@@ -529,12 +554,58 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (plan.desiredSideEffects.length > 0) {
-      await drainHostedLinqSideEffectsDirect({
+      const drainResult = await drainHostedLinqSideEffectsDirect({
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
+      const pendingRequiredSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && skip.reason === "notice_in_flight",
+      );
+      if (pendingRequiredSignup) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          httpStatus: 503,
+          message:
+            "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          retryable: true,
+        });
+      }
+      const decidedUnsentSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && (
+            skip.reason === "effect_unresolved"
+            || skip.reason === "notice_already_claimed"
+            || skip.reason === "notice_target_unauthorized"
+          ),
+      );
+      if (decidedUnsentSignup && drainResult.sentCount === 0) {
+        plan = {
+          ...plan,
+          desiredSideEffects: [],
+          response: {
+            ...(decidedUnsentSignup.reason === "notice_already_claimed"
+              ? { duplicate: true }
+              : { ignored: true }),
+            ok: true,
+            reason: decidedUnsentSignup.reason === "effect_unresolved"
+              ? "signup-link-attempts-exhausted"
+              : decidedUnsentSignup.reason === "notice_already_claimed"
+                ? "signup-link-already-sent"
+                : "signup-link-target-unavailable",
+          },
+        };
+      }
     }
 
     scheduleHostedLinqProviderEventIngestionBestEffort({

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Current Guardrails
 
@@ -18,11 +18,13 @@ Last verified: 2026-07-27
   After the worker lock is acquired, native `tar` plus the production-compatible
   `zstd` stdin round trip must pass before Git reconstruction, installation, or
   candidate verification. The entrypoint internally selects `profile=static-ssh`;
-  that profile ignores caller scheduling overrides, cannot enter composed
-  acceptance from CPU count alone, and completes package coverage before app and
-  fixture work. Its readiness line, plus the `resources` line for
-  `verify:acceptance`, are required execution evidence rather than optional
-  diagnostics.
+  that profile ignores caller scheduling overrides and admits composed
+  acceptance only when the worker reports both at least 10 logical CPUs and
+  24 GiB of physical memory. The bounded capable plan retains the CLI release
+  interlock and aggregated failure propagation; smaller or memory-unobservable
+  workers retain the serial fallback. Its readiness line, plus the `resources`
+  line for `verify:acceptance`, are required execution evidence rather than
+  optional diagnostics.
   Crabbox's nested static lease and repository directories still resolve to one
   native macOS `lockf` descriptor above the run root, which remains the
   worker-capacity authority. A busy worker fails closed. The remote verifier
@@ -37,7 +39,7 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
-- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
+- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that identity during classifier latency, the admitted planner re-reads the winner under the shared participant-phone lock, cannot mint a token, and follows the ordinary signup-link path without attaching its event to the winner's invite. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
 
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
