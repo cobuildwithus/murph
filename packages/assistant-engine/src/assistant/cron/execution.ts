@@ -949,7 +949,13 @@ export async function executeClaimedAssistantCronJob(
               deliveryOutcome: result.deliveryOutcome ?? null,
               job: input.job,
             })
-          if (result.deliveryOutcome?.kind === 'queued') {
+          const newsletterPendingDeliveryIntentId =
+            resolveAssistantCronNewsletterPendingDeliveryIntentId(result)
+          if (newsletterPendingDeliveryIntentId) {
+            pendingDeliveryIntentId = newsletterPendingDeliveryIntentId
+            outcome = 'delivery_pending'
+            reason = 'delivery_pending'
+          } else if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
             outcome = 'delivery_pending'
             reason = 'delivery_pending'
@@ -1539,8 +1545,23 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
   return !newsletterSendResult
     || newsletterSendResult.status === 'unavailable'
-    || newsletterSendResult.status === 'accepted'
+    || (
+      newsletterSendResult.status === 'accepted'
+      && !resolveAssistantCronNewsletterPendingDeliveryIntentId(input.result)
+    )
     ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
+    : null
+}
+
+function resolveAssistantCronNewsletterPendingDeliveryIntentId(
+  result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>,
+): string | null {
+  const expectations = result.postTurnDeliveryExpectations
+  const intentId = expectations?.newsletterPendingDeliveryIntentId ?? null
+  return expectations?.newsletterSendResult?.status === 'accepted'
+    && intentId
+    && intentId.trim().length > 0
+    ? intentId
     : null
 }
 

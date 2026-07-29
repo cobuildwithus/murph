@@ -2813,7 +2813,7 @@ describe("murph.newsletter dynamic tool", () => {
       "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "current-week shared facts",
+      "shared facts from the seven completed local days",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
       "exact live email and health-share grants",
@@ -3174,7 +3174,7 @@ describe("murph.newsletter dynamic tool", () => {
             displayName: "Ada",
             memberId: "member_a",
             weeklyStats: [{
-              currentWeekAvg: 7_000,
+              completedDaysAvg: 7_000,
               observedDayCount: 1,
               observedDates: ["2026-07-06"],
               stream: "steps",

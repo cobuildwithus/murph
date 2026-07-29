@@ -28,6 +28,7 @@ export function createAssistantNewsletterOutboxTool(input: {
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   authority: HostedRuntimeNewsletterScheduledAuthority | null
   newsletterTool: AssistantHostedNewsletterTool
+  recordPendingDeliveryIntentId?: (intentId: string) => void
   sessionId: string
   turnId: string
   vault: string
@@ -111,58 +112,26 @@ export function createAssistantNewsletterOutboxTool(input: {
       const parentIntents = currentIntents
         .filter(isNewsletterParentIntent)
         .sort(compareOutboxIntentCreationOrder)
-      if (parentIntents.some(isActiveOutboxIntent)) {
+      const activeParent = parentIntents.find(isActiveOutboxIntent)
+      if (activeParent) {
+        input.recordPendingDeliveryIntentId?.(activeParent.intentId)
         return newsletterAccepted(prepared)
       }
 
-      const sentParent = parentIntents.find((intent) => intent.status === 'sent')
-      if (sentParent) {
-        const recipientIntentGroups = groupNewsletterRecipientIntents(currentIntents)
-        if (
-          [...recipientIntentGroups.values()].some((recipientIntents) =>
-            recipientIntents.some(isActiveOutboxIntent)
-          )
-        ) {
-          return newsletterAccepted(prepared)
-        }
-
-        if (sentParent.newsletterAuthorizationProof !== prepared.authorizationProof) {
-          return resolveTerminalNewsletterResult({
-            preparation: prepared,
-            recipientIntentGroups,
-            treatSafelyReplayableFailuresAsTerminal: true,
-          })
-        }
-
-        const recreatedRecipientCount = await createRetryRecipientIntentsFromParent({
-          deliveryIdempotencyKey,
-          parent: sentParent,
-          participantMemberIds: prepared.participantMemberIds,
-          recipientIntentGroups,
-          vault: input.vault,
-        })
-        if (recreatedRecipientCount > 0) {
-          return newsletterAccepted(prepared)
-        }
-
-        return resolveTerminalNewsletterResult({
-          preparation: prepared,
-          recipientIntentGroups,
-          treatSafelyReplayableFailuresAsTerminal: false,
-        })
+      if (parentIntents.some((intent) => intent.status === 'sent')) {
+        return newsletterSent(prepared)
       }
 
-      if (parentIntents.some(isRetryExhaustedTerminalIntent)) {
-        return newsletterRetryExhausted(prepared)
+      if (parentIntents.length > 0) {
+        return newsletterFailed(prepared)
       }
 
-      await createAssistantOutboxIntent({
+      const parentIntent = await createAssistantOutboxIntent({
         automationAuthority: input.automationAuthority ?? null,
         channel: 'email',
         dedupeToken: [
           'group-newsletter-parent',
           deliveryIdempotencyKey,
-          `attempt-${parentIntents.length}`,
         ].join(':'),
         deliveryIdempotencyKey,
         emailHtml: request.html,
@@ -179,6 +148,7 @@ export function createAssistantNewsletterOutboxTool(input: {
         turnId: input.turnId,
         vault: input.vault,
       })
+      input.recordPendingDeliveryIntentId?.(parentIntent.intentId)
       return newsletterAccepted(prepared)
     },
   }
@@ -219,7 +189,20 @@ function newsletterUnavailable(
   }
 }
 
-function newsletterRetryExhausted(
+function newsletterSent(
+  preparation: NewsletterPreparation,
+): HostedRuntimeNewsletterToolResponse {
+  return {
+    action: 'send',
+    result: {
+      participantCount: preparation.participantMemberIds.length,
+      skippedNoEmailMemberIds: preparation.skippedNoEmailMemberIds,
+      status: 'sent',
+    },
+  }
+}
+
+function newsletterFailed(
   preparation: NewsletterPreparation,
 ): HostedRuntimeNewsletterToolResponse {
   return {
@@ -232,126 +215,6 @@ function newsletterRetryExhausted(
       status: 'partial_failure',
     },
   }
-}
-
-function resolveTerminalNewsletterResult(input: {
-  preparation: NewsletterPreparation
-  recipientIntentGroups: ReadonlyMap<string, readonly AssistantOutboxIntent[]>
-  treatSafelyReplayableFailuresAsTerminal: boolean
-}): HostedRuntimeNewsletterToolResponse {
-  const recipientIntentGroups = [...input.recipientIntentGroups.values()]
-  const sentRecipientCount = recipientIntentGroups.filter((intents) =>
-    intents.some((intent) => intent.status === 'sent')
-  ).length
-  const failedRecipientCount = recipientIntentGroups.filter((intents) =>
-    !intents.some((intent) => intent.status === 'sent')
-    && intents.some((intent) =>
-      intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
-      || isRetryExhaustedTerminalIntent(intent)
-      || (
-        input.treatSafelyReplayableFailuresAsTerminal
-        && isSafelyReplayableTerminalIntent(intent)
-      )
-    )
-  ).length
-  if (failedRecipientCount === 0) {
-    return {
-      action: 'send',
-      result: {
-        participantCount: input.preparation.participantMemberIds.length,
-        skippedNoEmailMemberIds: input.preparation.skippedNoEmailMemberIds,
-        status: 'sent',
-      },
-    }
-  }
-  return {
-    action: 'send',
-    result: {
-      failedRecipientCount,
-      participantCount: input.preparation.participantMemberIds.length,
-      sentRecipientCount,
-      skippedNoEmailMemberIds: input.preparation.skippedNoEmailMemberIds,
-      status: 'partial_failure',
-    },
-  }
-}
-
-async function createRetryRecipientIntentsFromParent(input: {
-  deliveryIdempotencyKey: string
-  parent: AssistantOutboxIntent
-  participantMemberIds: readonly string[]
-  recipientIntentGroups: ReadonlyMap<string, readonly AssistantOutboxIntent[]>
-  vault: string
-}): Promise<number> {
-  const parentTarget = parseHostedEmailThreadTarget(input.parent.explicitTarget)
-  if (!parentTarget || parentTarget.targetKind !== 'group' || !parentTarget.groupId) {
-    return 0
-  }
-
-  let createdCount = 0
-  for (const memberId of input.participantMemberIds) {
-    const existingRecipientIntents = input.recipientIntentGroups.get(memberId) ?? []
-    if (existingRecipientIntents.length === 0) {
-      continue
-    }
-    if (existingRecipientIntents.some(isNonReplayableRecipientIntent)) {
-      continue
-    }
-    if (!existingRecipientIntents.every(isSafelyReplayableTerminalIntent)) {
-      continue
-    }
-
-    await createAssistantOutboxIntent({
-      actorId: input.parent.actorId,
-      answeredMailboxItemIds: input.parent.answeredMailboxItemIds,
-      automationAuthority: input.parent.automationAuthority ?? null,
-      channel: 'email',
-      dedupeToken: [
-        'hosted-email-group-recipient',
-        input.parent.intentId,
-        memberId,
-        `retry-${existingRecipientIntents.length}`,
-      ].join(':'),
-      deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-      deliveryTransportIdempotent: false,
-      explicitTarget: serializeHostedEmailThreadTarget({
-        ...parentTarget,
-        recipientMemberId: memberId,
-      }),
-      identityId: input.parent.identityId,
-      media: [],
-      message: input.parent.message,
-      emailHtml: input.parent.emailHtml ?? null,
-      newsletterAuthorizationProof: input.parent.newsletterAuthorizationProof ?? null,
-      replyToMessageId: input.parent.replyToMessageId,
-      sessionId: input.parent.sessionId,
-      subject: null,
-      threadId: input.parent.threadId,
-      threadIsDirect: false,
-      turnId: input.parent.turnId,
-      vault: input.vault,
-    })
-    createdCount += 1
-  }
-  return createdCount
-}
-
-function groupNewsletterRecipientIntents(
-  intents: readonly AssistantOutboxIntent[],
-): Map<string, AssistantOutboxIntent[]> {
-  const grouped = new Map<string, AssistantOutboxIntent[]>()
-  for (const intent of intents) {
-    const memberId = parseHostedEmailThreadTarget(
-      intent.explicitTarget,
-    )?.recipientMemberId
-    if (!memberId) {
-      continue
-    }
-    const entries = grouped.get(memberId) ?? []
-    entries.push(intent)
-    grouped.set(memberId, entries)
-  }
-  return grouped
 }
 
 function isNewsletterParentIntent(intent: AssistantOutboxIntent): boolean {
@@ -372,22 +235,4 @@ function isActiveOutboxIntent(intent: AssistantOutboxIntent): boolean {
     || intent.status === 'pending'
     || intent.status === 'retryable'
     || intent.status === 'sending'
-}
-
-function isSafelyReplayableTerminalIntent(intent: AssistantOutboxIntent): boolean {
-  return (intent.status === 'failed' || intent.status === 'abandoned')
-    && intent.lastError?.code !== 'ASSISTANT_DELIVERY_AMBIGUOUS'
-    && !isRetryExhaustedTerminalIntent(intent)
-}
-
-function isNonReplayableRecipientIntent(intent: AssistantOutboxIntent): boolean {
-  return isActiveOutboxIntent(intent)
-    || intent.status === 'sent'
-    || intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
-    || isRetryExhaustedTerminalIntent(intent)
-}
-
-function isRetryExhaustedTerminalIntent(intent: AssistantOutboxIntent): boolean {
-  return (intent.status === 'failed' || intent.status === 'abandoned')
-    && intent.lastError?.code === 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED'
 }

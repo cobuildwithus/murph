@@ -4079,7 +4079,9 @@ describe('assistant cron runtime orchestration', () => {
 
   it.each([
     {
+      expectedRunStatus: 'succeeded',
       label: 'partial newsletter delivery',
+      newsletterPendingDeliveryIntentId: null,
       newsletterSendResult: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -4089,14 +4091,30 @@ describe('assistant cron runtime orchestration', () => {
       },
     },
     {
+      expectedRunStatus: 'succeeded',
       label: 'newsletter with no recipients',
+      newsletterPendingDeliveryIntentId: null,
       newsletterSendResult: {
         participantCount: 0,
         skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
       },
     },
-  ])('succeeds a scheduled newsletter occurrence after $label', async ({ newsletterSendResult }) => {
+    {
+      expectedRunStatus: 'skipped',
+      label: 'durable newsletter fanout is pending',
+      newsletterPendingDeliveryIntentId: 'outbox-newsletter-parent',
+      newsletterSendResult: {
+        participantCount: 3,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted' as const,
+      },
+    },
+  ])('settles a scheduled newsletter occurrence when $label', async ({
+    expectedRunStatus,
+    newsletterPendingDeliveryIntentId,
+    newsletterSendResult,
+  }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
     try {
@@ -4169,6 +4187,9 @@ describe('assistant cron runtime orchestration', () => {
           text: 'Newsletter handled.',
         },
         postTurnDeliveryExpectations: {
+          ...(newsletterPendingDeliveryIntentId
+            ? { newsletterPendingDeliveryIntentId }
+            : {}),
           newsletterSendResult,
         },
         response: 'Newsletter handled.',
@@ -4184,10 +4205,17 @@ describe('assistant cron runtime orchestration', () => {
         vault: vaultRoot,
       })
 
-      expect(result.run.status).toBe('succeeded')
+      expect(result.run.status).toBe(expectedRunStatus)
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
-      expect(current?.state.pendingOccurrenceAt).toBeNull()
+      expect(current?.state.pendingOccurrenceAt).toBe(
+        newsletterPendingDeliveryIntentId
+          ? '2026-07-12T13:00:00.000Z'
+          : null,
+      )
+      expect(current?.state.pendingDeliveryIntentId ?? null).toBe(
+        newsletterPendingDeliveryIntentId,
+      )
       expect(current?.state.consecutiveFailures).toBe(0)
       expect(current?.state.lastFailedAt).toBeNull()
     } finally {

@@ -187,6 +187,7 @@ export interface AssistantNotificationCommitContext {
 }
 
 export interface AssistantNotificationPostTurnDeliveryExpectations {
+  newsletterPendingDeliveryIntentId?: string | null
   newsletterSendResult?: Extract<
     HostedRuntimeNewsletterToolResponse,
     { action: 'send' }
@@ -288,6 +289,7 @@ export async function sendAssistantNotificationLocal(
               unavailableReason: 'newsletter_send_not_observed',
             }
           : null
+      let newsletterPendingDeliveryIntentId: string | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -313,6 +315,9 @@ export async function sendAssistantNotificationLocal(
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
+                ...(newsletterPendingDeliveryIntentId
+                  ? { newsletterPendingDeliveryIntentId }
+                  : {}),
                 newsletterSendResult,
               },
             }
@@ -394,6 +399,9 @@ export async function sendAssistantNotificationLocal(
                 current: newsletterSendResult ?? null,
                 next: result.result,
               })
+            },
+            recordNewsletterPendingDeliveryIntentId: (intentId) => {
+              newsletterPendingDeliveryIntentId = intentId
             },
             route,
             session: resolved.session,
