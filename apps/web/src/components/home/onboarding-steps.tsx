@@ -138,7 +138,7 @@ export function OnboardingSteps({
         return (
           <div
             key={step.id}
-            className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 lg:flex-none ${desktopCardWidthClass} ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
+            className={`group flex flex-col justify-between rounded-2xl border p-7 transition-colors duration-300 lg:min-w-0 lg:flex-none ${desktopCardWidthClass} ${isPrimary ? "border-primary/35 bg-primary/12 hover:border-primary/45" : "border-border/50 bg-[rgba(255,252,246,0.9)] hover:border-[#7a8c6e]/25"}`}
             data-onboarding-step={step.id}
           >
             <div>

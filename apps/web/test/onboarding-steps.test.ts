@@ -128,6 +128,7 @@ test("OnboardingSteps keeps four desktop cards on one horizontal track", async (
   assert.match(markup, /lg:overflow-x-auto/);
   assert.doesNotMatch(markup, /xl:grid-cols-3/);
   assert.equal(markup.match(/data-onboarding-step=/gu)?.length, 4);
+  assert.equal(markup.match(/lg:min-w-0/gu)?.length, 4);
   assert.equal(
     markup.match(/lg:basis-\[calc\(\(100%-2\.5rem\)\/3\)\]/gu)?.length,
     4,
