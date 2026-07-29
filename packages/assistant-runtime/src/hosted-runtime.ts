@@ -3253,8 +3253,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           continue;
         }
+        const imageGenerationWorkPending =
+          options.runtimeWakeSignal !== null
+          && options.runtimeWakeSignal !== undefined
+          && imageGenerationController?.hasWork() === true;
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-          idleCheckpointStartByMs,
+          // An idle checkpoint cannot release the workspace while detached
+          // image work is still running. Both image readiness and new mailbox
+          // input use the existing runtime wake signal, so keep that waiter
+          // installed instead of synchronously retrying an expired idle
+          // deadline and starving the event loop.
+          idleCheckpointStartByMs: imageGenerationWorkPending
+            ? Date.now() + HOSTED_RUNTIME_MAX_TIMER_DELAY_MS
+            : idleCheckpointStartByMs,
           projectedAssistantWakeAtMs: hotProjectedAssistantWake?.wakeAtMs ?? null,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
