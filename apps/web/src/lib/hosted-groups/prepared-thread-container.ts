@@ -128,7 +128,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   const pendingSetupApplied =
     ensure.created && pendingSetupClaim.kind === "claimed";
   if (pendingSetupApplied) {
-    const style = pendingSetupClaim.setup.payload.style;
+    const style = pendingSetupClaim.setup.setup.style;
     if (style) {
       await upsertHostedMemberAssistantPreferencesTx({
         memberId: ensure.containerMemberId,
@@ -151,7 +151,7 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   return {
     ensure,
     initialRoomContextMarkdown: pendingSetupApplied
-      ? pendingSetupClaim.setup.payload.roomContextMarkdown ?? null
+      ? pendingSetupClaim.setup.setup.roomContextMarkdown ?? null
       : null,
     kind: "ensured",
     ownerMemberId,
