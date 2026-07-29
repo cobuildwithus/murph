@@ -121,14 +121,19 @@ describe("StartExperimentButton", () => {
     expect(container.textContent).toContain("Telegram");
     expect(container.textContent).toContain("Email");
 
-    const links = Array.from(container.querySelectorAll("a"))
-      .map((anchor) => (anchor as HTMLAnchorElement).href);
+    const anchors = Array.from(container.querySelectorAll("a"));
+    const links = anchors.map((anchor) => (anchor as HTMLAnchorElement).href);
     expect(links.some((href) => href.startsWith("sms:+15550100001?body="))).toBe(true);
     expect(links.some((href) => href.startsWith(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`))).toBe(true);
     expect(links.some((href) => href.startsWith("mailto:murph@mail.withmurph.ai"))).toBe(true);
     expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
       .toContain("I want to start the Finnish Dry Sauna experiment.");
     expect(links.join("\n")).not.toContain("sha256");
+    for (const anchor of anchors) {
+      expect(anchor.className).toContain("focus-visible:border-ring");
+      expect(anchor.className).toContain("focus-visible:ring-ring");
+      expect(anchor.className).toContain("focus-visible:ring-offset-popover");
+    }
 
     const renderedContactSurface = [
       container.textContent ?? "",

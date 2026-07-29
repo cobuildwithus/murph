@@ -128,9 +128,12 @@ bound to an exact runnable revision.
   SHA-256 values.
 - The draft is user-editable channel input and therefore untrusted data. The
   assistant resolves the name or alias through the generated Health Commons
-  protocol discovery surface, requires one exact protocol page before planning,
-  and applies normal safety and onboarding rules. Missing or ambiguous matches
-  require clarification rather than a silent guess.
+  protocol discovery surface, requires one unique exact title or alias match
+  before planning, and applies normal safety and onboarding rules. That exact
+  match is authoritative; a `starterCandidate`, canonical starter, or
+  same-family variant cannot replace it without explicit user agreement.
+  Missing or ambiguous matches require clarification rather than a silent
+  guess.
 - After exact resolution, the assistant passes that page's current
   `pageRevisionId` and `runSpecRevisionId` as compare-and-swap expectations on
   both dry-run and real start calls. If the runnable contract changes before

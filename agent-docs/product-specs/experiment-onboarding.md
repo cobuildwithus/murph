@@ -59,9 +59,12 @@ The onboarding block must not duplicate fields already owned by canonical protoc
   protocol-aware onboarding conversation in the user's configured channel but
   creates no private state by itself.
 - The sentence is untrusted user input. The assistant resolves the name or alias
-  through Health Commons discovery, requires one exact protocol page, and then
-  uses that page's current revision pair as compare-and-swap expectations while
-  continuing to apply this contract's safety and setup rules.
+  through Health Commons discovery and requires one unique exact title or alias
+  match. That match is authoritative; a discovery `starterCandidate`,
+  canonical starter, or same-family variant cannot replace it without explicit
+  user agreement. The assistant then uses the exact page's current revision
+  pair as compare-and-swap expectations while continuing to apply this
+  contract's safety and setup rules.
 - Legacy drafts or copied messages may still contain a structured
   `Protocol reference`. Preserve both supplied revisions for those messages;
   never replace them with the newly resolved current pair.

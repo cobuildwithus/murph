@@ -168,7 +168,7 @@ function ContactOptionLink({ option }: { option: ExperimentStartContactOption })
       target={isExternal ? "_blank" : undefined}
       rel={isExternal ? "noreferrer" : undefined}
       aria-label={`Continue experiment setup in ${option.label}`}
-      className="group/channel flex min-h-16 w-full items-center gap-3.5 whitespace-normal rounded-lg border border-border bg-background/55 px-3 py-3 text-left text-foreground outline-none transition-[background-color,border-color,transform] duration-200 hover:border-primary/40 hover:bg-background active:translate-y-px focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-popover sm:min-h-[72px] sm:px-3.5"
+      className="group/channel flex min-h-16 w-full items-center gap-3.5 whitespace-normal rounded-lg border border-border bg-background/55 px-3 py-3 text-left text-foreground outline-none transition-[background-color,border-color,transform] duration-200 hover:border-primary/40 hover:bg-background active:translate-y-px focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover sm:min-h-[72px] sm:px-3.5"
     >
       <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-primary">
         <Icon className="size-[18px]" data-icon="inline-start" />
