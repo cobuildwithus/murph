@@ -42,12 +42,16 @@ export type HostedLinqEgressPolicyResult =
       kind: "block";
     };
 
+export type HostedLinqResolvedEgressPolicy = {
+  policy: HostedLinqEgressPolicyResult;
+};
+
 export async function resolveHostedLinqEgressPolicyForRuntime(input: {
   fromPhoneNumber?: string | null;
   prisma: HostedLinqEgressPolicyClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<HostedLinqEgressPolicyResult> {
+}): Promise<HostedLinqResolvedEgressPolicy> {
   const targetKind = input.targetKind?.trim() ?? "";
   const newConversation = targetKind === "participant";
   const chatHealth = newConversation
@@ -84,14 +88,16 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
     }),
   ]);
 
-  return evaluateHostedLinqEgressPolicy({
-    chatHealthStatus: chatHealth?.providerStatus ?? null,
-    lineDeliveryHealthStatus: line?.healthStatus ?? null,
-    lineEgressPolicy: line?.egressPolicy ?? null,
-    lineReputationStatus: lineProviderState?.reputationStatus ?? null,
-    lineServiceStatus: lineProviderState?.serviceStatus ?? null,
-    newConversation,
-  });
+  return {
+    policy: evaluateHostedLinqEgressPolicy({
+      chatHealthStatus: chatHealth?.providerStatus ?? null,
+      lineDeliveryHealthStatus: line?.healthStatus ?? null,
+      lineEgressPolicy: line?.egressPolicy ?? null,
+      lineReputationStatus: lineProviderState?.reputationStatus ?? null,
+      lineServiceStatus: lineProviderState?.serviceStatus ?? null,
+      newConversation,
+    }),
+  };
 }
 
 export function evaluateHostedLinqEgressPolicy(input: {
