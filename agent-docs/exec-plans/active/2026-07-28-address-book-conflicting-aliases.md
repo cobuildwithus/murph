@@ -78,3 +78,5 @@ Updated: 2026-07-28
   No contact values or direct identifiers were printed or persisted.
 - The deployment contract is backend first: existing clients remain accepted,
   then the new iOS producer may emit the explicit alternative form.
+- Product-experience review passed with no findings: the explicit separator
+  preserves uncertainty without adding a prompt, setting, or user choice.

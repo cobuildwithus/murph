@@ -177,9 +177,11 @@ retention.
 For the two-label extension, deploy Web acceptance before distributing an iOS
 build that may emit ` / `. Old iOS builds continue sending the existing
 single-label subset, and the updated Web parser accepts both forms. Rolling Web
-back while that iOS build is live can reject an entire replacement, so rollback
-must first stop distribution of the new producer or temporarily disable
-replacement writes.
+back after that iOS build has written a two-label value can reject a replacement
+and make the stored advisory overlay unreadable. Before such a rollback, stop
+distribution of the new producer and turn both existing address-book gates Off.
+Keep them Off until a compatible Web parser is restored; do not add a migration
+or compatibility service for this emergency window.
 
 1. Apply the additive Postgres migration.
 2. Deploy the updated Cloudflare runner consumer while the current Web producer
