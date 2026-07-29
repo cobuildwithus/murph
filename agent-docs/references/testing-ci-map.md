@@ -38,6 +38,11 @@ the broad suite on the exact head. `pnpm test:diff` remains an optional local
 helper, while `pnpm verify:acceptance` is mandatory before a direct push to
 `main` or another shared default branch. If CI fails, reproduce the narrowest
 failing owner or scenario locally before expanding to an umbrella command.
+The required host-support release gate keeps parity with local acceptance by
+assigning every package coverage owner, including Exercise Library and Health
+Metrics, and by running the prepared Messaging Ingress, Inboxd, and Hosted
+Local Harness package-boundary checks. The workflow guard locks those owners
+and commands against drift.
 
 When either canonical root command is selected, `pnpm test:diff` and
 `pnpm verify:acceptance` stay local by default. An explicitly forced remote run

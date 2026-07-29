@@ -134,7 +134,7 @@ become fallback product-decision owners.
    - meaning-preserving `apps/web` typo, punctuation, grammar, or equivalent localization corrections may use the tiny copy-only fast path
    - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, run local `product-experience-review`
    - user-facing `apps/web` UI changes outside the copy-only fast path activate the frontend lens and require redacted rendered desktop/mobile evidence in that pass
-   - repo code/test/config changes that alter executable behavior or its proof activate the coverage lens; this does not depend on running a local coverage umbrella command
+   - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
    - any product-owned dimension separately adds local `product-experience-review`, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the later cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Once implementation is stable, run the focused local proof selected from the

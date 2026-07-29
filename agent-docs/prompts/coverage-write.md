@@ -4,9 +4,9 @@ action: preliminary specialist coverage review
 ---
 
 Use this lens inside the preliminary `completion-specialists` ReviewGPT pass
-when executable behavior, tests, fixtures, config, or direct-proof scaffolding
-changed in a way that needs truthful proof review. Applicability does not depend
-on a local coverage umbrella command.
+when the diff changes executable behavior or changes the tests, fixtures,
+configuration, or direct-proof scaffolding that establishes its proof.
+Applicability does not depend on a local coverage umbrella command.
 
 Outcome:
 Determine whether the pushed implementation has truthful executable proof at

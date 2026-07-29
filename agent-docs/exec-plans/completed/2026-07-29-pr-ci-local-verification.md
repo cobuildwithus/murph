@@ -1,6 +1,6 @@
 # Rely on pull request CI for full verification
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -27,9 +27,10 @@ Updated: 2026-07-29
 ## Scope
 
 - In scope: agent workflow documentation, the preliminary specialist prompt,
-  and the focused policy-oracle test.
-- Out of scope: changing tests, GitHub Actions workflows, required-check
-  settings, release workflows, or deployment gates.
+  focused policy-oracle tests, and closing exact-head CI parity gaps in the
+  existing host-support release gate.
+- Out of scope: changing product behavior or product tests, required-check
+  settings, release/deployment workflows, or deployment gates.
 
 ## Constraints
 
@@ -51,13 +52,19 @@ Updated: 2026-07-29
    command ran.
    Mitigation: make coverage applicability depend on changed executable
    behavior and accept focused local proof plus current exact-head CI status.
+4. Risk: broad local verification moves to CI while CI omits an acceptance
+   owner.
+   Mitigation: keep every acceptance package coverage owner and built
+   package-boundary check in the required host-support release gate, with a
+   focused workflow guard.
 
 ## Tasks
 
 1. Update the routing and verification ownership rules.
 2. Align completion and ReviewGPT specialist instructions.
-3. Update the testing map, top-level agent rule, and docs index.
-4. Run focused policy checks, inspect the final diff, and finish through the PR
+3. Close and guard any exact-head CI parity gap revealed by specialist review.
+4. Update the testing map, top-level agent rule, and docs index.
+5. Run focused policy checks, inspect the final diff, and finish through the PR
    lane.
 
 ## Decisions
@@ -66,14 +73,28 @@ Updated: 2026-07-29
 - Local PR verification remains focused and behavior-specific.
 - `pnpm verify:acceptance` remains mandatory for direct default-branch pushes.
 - CI failure diagnosis starts narrow and expands only when evidence requires it.
+- The preliminary specialist review identified two real CI-parity omissions and
+  one subjective coverage-lens trigger. The final policy keeps the objective
+  trigger and adds the missing existing acceptance owners to the existing
+  required host-support gate instead of creating a second gate.
 
 ## Verification
 
 - `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts`
   passed with 40 tests and one intentional skip.
+- `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/host-support-workflow-guards.test.ts packages/cli/test/release-script-coverage-audit.test.ts`
+  passed with 46 tests and one intentional skip after the preliminary
+  specialist remediation.
 - `pnpm docs:drift` passed.
 - `git diff --check` passed.
 - Secret-safe searches found no personal identifier in the changed files and no
   remaining live policy phrase that requires a local coverage-bearing umbrella
   command for PR-bound work.
-- Exact-head GitHub Actions remain pending until the review candidate is pushed.
+- The preliminary specialist pass returned findings; every accepted finding was
+  resolved in the final diff, and no patch artifact was applied.
+- All 27 GitHub Actions checks passed on the first pushed head. Required
+  exact-head CI remains pending for the final specialist-remediation head.
+- Parent final review found no unresolved finding. The separate final ReviewGPT
+  gate is not applicable to this repo-internal workflow, test, and documentation
+  change with no production behavior.
+Completed: 2026-07-29

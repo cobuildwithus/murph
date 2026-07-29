@@ -23,9 +23,10 @@ The three lenses are conditional:
   components, rendered interactions, or design-system-facing UI. The
   repository's meaning-preserving tiny static-copy fast path should not reach
   this review.
-- Apply the coverage lens when executable behavior, tests, fixtures, config, or
-  direct-proof scaffolding changed in a way that needs truthful proof review.
-  Applicability does not depend on a local coverage umbrella command.
+- Apply the coverage lens when the diff changes executable behavior or changes
+  the tests, fixtures, configuration, or direct-proof scaffolding that
+  establishes its proof. Applicability does not depend on a local coverage
+  umbrella command.
 
 State `applicable` or `not applicable` for each lens with one sentence of
 evidence. Apply every applicable lens together; do not split them into separate

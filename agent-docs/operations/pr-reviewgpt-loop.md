@@ -73,8 +73,8 @@ Run one preliminary specialist pass when any of these lenses apply:
   or prompt regression behavior changed;
 - frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
   path; or
-- coverage: executable behavior, tests, fixtures, config, or direct-proof
-  scaffolding changed in a way that needs a truthful proof review.
+- coverage: the diff changes executable behavior or changes the tests, fixtures,
+  configuration, or direct-proof scaffolding that establishes its proof.
 
 The task must use a clean worktree/PR lane. Commit and push the review candidate,
 open or update the PR, and run

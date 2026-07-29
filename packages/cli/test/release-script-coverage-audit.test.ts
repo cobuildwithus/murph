@@ -1500,6 +1500,8 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
       'utf8',
     )
+    const coverageAdmissionRule =
+      /diff changes executable behavior or changes\s+the tests,\s+fixtures,\s+configuration,\s+or direct-proof scaffolding that\s+establishes its proof/u
     expect(agentsGuide).toContain(
       'do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance`',
     )
@@ -1512,9 +1514,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(verificationAndRuntime).toMatch(
       /run\s+`pnpm verify:acceptance` before pushing/u,
     )
-    expect(completionSpecialistsPrompt).toContain(
-      'Applicability does not depend on a local coverage umbrella command',
+    expect(completionSpecialistsPrompt).toMatch(
+      /Applicability does not depend on a local coverage\s+umbrella command/u,
     )
+    expect(completionSpecialistsPrompt).toMatch(coverageAdmissionRule)
+    expect(prReviewGptLoop).toMatch(coverageAdmissionRule)
+    expect(completionWorkflow).toMatch(coverageAdmissionRule)
     expect(completionSpecialistsPrompt).toContain(
       'push\nit through required exact-head CI',
     )
@@ -1575,6 +1580,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
     expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
     expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
     expect(
       existsSync(
         path.join(
@@ -1719,8 +1725,8 @@ describe('monorepo release flow coverage audit', () => {
       '`product-experience-review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
-    expect(completionWorkflow).toContain(
-      'repo code/test/config changes that alter executable behavior or its proof activate the coverage lens',
+    expect(completionWorkflow).toMatch(
+      /coverage lens applies when the diff changes executable behavior/u,
     )
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',
