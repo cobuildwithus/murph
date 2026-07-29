@@ -12,21 +12,10 @@ import {
   parseHostedLinqLineReputationStatus,
   parseHostedLinqLineServiceStatus,
   type HostedLinqChatHealthStatus,
-  type HostedLinqLineReputationStatus,
-  type HostedLinqLineServiceStatus,
 } from "./linq-provider-status";
 import { normalizeNullableString } from "./shared";
 
 type HostedLinqProviderHealthClient = PrismaClient | Prisma.TransactionClient;
-
-export type HostedLinqLineProviderStateSnapshot = {
-  lastStatusEventId: string | null;
-  phoneNumberLookupKey: string;
-  providerObservedAt: Date;
-  providerUpdatedAt: Date | null;
-  reputationStatus: HostedLinqLineReputationStatus | null;
-  serviceStatus: HostedLinqLineServiceStatus | null;
-};
 
 export type HostedLinqChatHealthSnapshot = {
   linqChatLookupKey: string;
@@ -46,9 +35,14 @@ export async function projectHostedLinqLineProviderStateTx(input: {
   serviceStatus?: unknown;
 }): Promise<boolean> {
   const phoneNumberLookupKey = normalizeNullableString(input.phoneNumberLookupKey);
+  const reputationStatusSupplied = input.reputationStatus !== undefined;
+  const serviceStatusSupplied = input.serviceStatus !== undefined;
   const serviceStatus = parseHostedLinqLineServiceStatus(input.serviceStatus);
   const reputationStatus = parseHostedLinqLineReputationStatus(input.reputationStatus);
-  if (!phoneNumberLookupKey || (!serviceStatus && !reputationStatus)) {
+  if (
+    !phoneNumberLookupKey
+    || (!serviceStatusSupplied && !reputationStatusSupplied)
+  ) {
     return false;
   }
 
@@ -57,24 +51,7 @@ export async function projectHostedLinqLineProviderStateTx(input: {
   const lastStatusEventId = input.eventId
     ? createHostedLinqProviderEventLookupKey(input.eventId)
     : null;
-  const createData = {
-    lastStatusEventId,
-    phoneNumberLookupKey,
-    providerObservedAt,
-    providerUpdatedAt,
-    reputationStatus,
-    serviceStatus,
-  } satisfies Prisma.HostedLinqLineProviderStateCreateManyInput;
-
-  const created = await input.prisma.hostedLinqLineProviderState.createMany({
-    data: createData,
-    skipDuplicates: true,
-  });
-  if (created.count === 1) {
-    return true;
-  }
-
-  const sameTimestampWhere: Prisma.HostedLinqLineProviderStateWhereInput[] =
+  const sameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
     lastStatusEventId
       ? [
           {
@@ -86,13 +63,18 @@ export async function projectHostedLinqLineProviderStateTx(input: {
           },
         ]
       : [];
-  const updated = await input.prisma.hostedLinqLineProviderState.updateMany({
+  const updated = await input.prisma.hostedLinqLine.updateMany({
     data: {
-      ...(lastStatusEventId ? { lastStatusEventId } : {}),
-      providerObservedAt,
+      lastStatusEventId,
+      providerLastSeenAt: providerObservedAt,
+      providerSeenAt: providerObservedAt,
       providerUpdatedAt,
-      ...(reputationStatus ? { reputationStatus } : {}),
-      ...(serviceStatus ? { serviceStatus } : {}),
+      ...(reputationStatusSupplied
+        ? { providerReputationStatus: reputationStatus }
+        : {}),
+      ...(serviceStatusSupplied
+        ? { providerServiceStatus: serviceStatus }
+        : {}),
     },
     where: {
       phoneNumberLookupKey,
@@ -113,6 +95,8 @@ export async function projectHostedLinqChatHealthTx(input: {
   prisma: HostedLinqProviderHealthClient;
   providerStatus: unknown;
   providerUpdatedAt: Date;
+  isGroup?: boolean | null;
+  service?: string | null;
 }): Promise<boolean> {
   const currentLookupKey = createHostedLinqChatLookupKey(input.chatId);
   const lookupKeyCandidates = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
@@ -138,31 +122,42 @@ export async function projectHostedLinqChatHealthTx(input: {
     : lookupKeyCandidates.find((candidate) => existingKeys.has(candidate))
       ?? currentLookupKey;
   const providerObservedAt = input.observedAt ?? new Date();
+  const phoneNumberLookupKeySupplied =
+    input.phoneNumberLookupKey !== undefined;
   const phoneNumberLookupKey = normalizeNullableString(
     input.phoneNumberLookupKey ?? null,
   );
-  const createData = {
-    linqChatLookupKey,
-    phoneNumberLookupKey,
-    providerObservedAt,
-    providerStatus,
-    providerUpdatedAt: input.providerUpdatedAt,
-  } satisfies Prisma.HostedLinqChatHealthCreateManyInput;
-
-  const created = await input.prisma.hostedLinqChatHealth.createMany({
-    data: createData,
-    skipDuplicates: true,
-  });
-  if (created.count === 1) {
-    return true;
+  if (existingKeys.size === 0) {
+    const created = await input.prisma.hostedLinqChatHealth.createMany({
+      data: {
+        linqChatLookupKey: currentLookupKey,
+        phoneNumberLookupKey,
+        providerObservedAt,
+        providerStatus,
+        providerUpdatedAt: input.providerUpdatedAt,
+        isGroup: input.isGroup ?? null,
+        service: normalizeNullableString(input.service ?? null),
+      } satisfies Prisma.HostedLinqChatHealthCreateManyInput,
+      skipDuplicates: true,
+    });
+    if (created.count === 1) {
+      return true;
+    }
   }
 
   const updated = await input.prisma.hostedLinqChatHealth.updateMany({
     data: {
-      ...(phoneNumberLookupKey ? { phoneNumberLookupKey } : {}),
+      ...(linqChatLookupKey !== currentLookupKey
+        ? { linqChatLookupKey: currentLookupKey }
+        : {}),
+      ...(phoneNumberLookupKeySupplied ? { phoneNumberLookupKey } : {}),
       providerObservedAt,
       providerStatus,
       providerUpdatedAt: input.providerUpdatedAt,
+      ...(input.isGroup === undefined ? {} : { isGroup: input.isGroup }),
+      ...(input.service === undefined
+        ? {}
+        : { service: normalizeNullableString(input.service) }),
     },
     where: {
       linqChatLookupKey,
@@ -170,41 +165,6 @@ export async function projectHostedLinqChatHealthTx(input: {
     },
   });
   return updated.count === 1;
-}
-
-export async function readHostedLinqLineProviderState(input: {
-  phoneNumberLookupKeys: readonly string[];
-  prisma: HostedLinqProviderHealthClient;
-}): Promise<HostedLinqLineProviderStateSnapshot | null> {
-  const phoneNumberLookupKeys = [...new Set(
-    input.phoneNumberLookupKeys
-      .map((value) => normalizeNullableString(value))
-      .filter((value): value is string => value !== null),
-  )];
-  if (phoneNumberLookupKeys.length === 0) {
-    return null;
-  }
-
-  const state = await input.prisma.hostedLinqLineProviderState.findFirst({
-    orderBy: [
-      { providerUpdatedAt: "desc" },
-      { providerObservedAt: "desc" },
-    ],
-    where: {
-      phoneNumberLookupKey: { in: phoneNumberLookupKeys },
-    },
-  });
-  if (!state) {
-    return null;
-  }
-  return {
-    lastStatusEventId: state.lastStatusEventId,
-    phoneNumberLookupKey: state.phoneNumberLookupKey,
-    providerObservedAt: state.providerObservedAt,
-    providerUpdatedAt: state.providerUpdatedAt,
-    reputationStatus: parseHostedLinqLineReputationStatus(state.reputationStatus),
-    serviceStatus: parseHostedLinqLineServiceStatus(state.serviceStatus),
-  };
 }
 
 export async function readHostedLinqChatHealth(input: {
@@ -236,49 +196,4 @@ export async function readHostedLinqChatHealth(input: {
     providerStatus,
     providerUpdatedAt: state.providerUpdatedAt,
   };
-}
-
-export async function filterHostedLinqNewConversationLines<
-  TLine extends { phoneNumberLookupKey: string },
->(input: {
-  lines: readonly TLine[];
-  prisma: HostedLinqProviderHealthClient;
-}): Promise<TLine[]> {
-  if (input.lines.length === 0) {
-    return [];
-  }
-
-  const states = await input.prisma.hostedLinqLineProviderState.findMany({
-    select: {
-      phoneNumberLookupKey: true,
-      reputationStatus: true,
-      serviceStatus: true,
-    },
-    where: {
-      phoneNumberLookupKey: {
-        in: [...new Set(input.lines.map((line) => line.phoneNumberLookupKey))],
-      },
-    },
-  });
-  const stateByLine = new Map(
-    states.map((state) => [state.phoneNumberLookupKey, state] as const),
-  );
-  return input.lines.filter((line) => {
-    const state = stateByLine.get(line.phoneNumberLookupKey);
-    return isHostedLinqLineProviderStateEligibleForNewConversation({
-      reputationStatus: state?.reputationStatus ?? null,
-      serviceStatus: state?.serviceStatus ?? null,
-    });
-  });
-}
-
-export function isHostedLinqLineProviderStateEligibleForNewConversation(input: {
-  reputationStatus: unknown;
-  serviceStatus: unknown;
-}): boolean {
-  const serviceStatus = parseHostedLinqLineServiceStatus(input.serviceStatus);
-  const reputationStatus = parseHostedLinqLineReputationStatus(input.reputationStatus);
-  return serviceStatus !== "FLAGGED"
-    && reputationStatus !== "AT_RISK"
-    && reputationStatus !== "CRITICAL";
 }

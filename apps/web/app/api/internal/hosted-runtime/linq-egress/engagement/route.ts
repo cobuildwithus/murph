@@ -6,10 +6,8 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
-} from "@/src/lib/hosted-onboarding/linq-egress-engagement";
-import {
   resolveHostedLinqEgressPolicyForRuntime,
-} from "@/src/lib/hosted-onboarding/linq-egress-policy";
+} from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -90,6 +88,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
     const providerTarget = asserted.targetOverride?.target ?? target;
     const providerTargetKind = asserted.targetOverride?.targetKind ?? targetKind;
+    let finalAuthority = asserted;
     if (
       providerTargetKind !== "participant"
       && providerTarget
@@ -99,7 +98,8 @@ export const POST = withJsonError(async (request: Request) => {
         chatId: providerTarget,
         tx,
       });
-      await assertHostedLinqRecentInboundEngagementForRuntime({
+      finalAuthority =
+        await assertHostedLinqRecentInboundEngagementForRuntime({
         answeredMailboxItemIds,
         authorityCheckOnly,
         directRecipientPhoneNumber,
@@ -116,6 +116,8 @@ export const POST = withJsonError(async (request: Request) => {
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({
       fromPhoneNumber,
+      linePhoneNumberLookupKey:
+        finalAuthority.linePhoneNumberLookupKey,
       prisma: tx,
       target: providerTarget,
       targetKind: providerTargetKind,

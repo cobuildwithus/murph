@@ -17,7 +17,6 @@ describe('assistant automation turn envelope', () => {
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
       },
-      executionContext: { hosted: null },
       serviceTier: null,
       turnEnvironment: null,
       turnTrigger: 'automation-cron',
@@ -29,18 +28,5 @@ describe('assistant automation turn envelope', () => {
       assistantTargetOverride: {},
       turnTrigger: 'automation-cron',
     })).not.toHaveProperty('assistantTargetOverride')
-  })
-
-  it('preserves a supplied execution context without re-normalizing it', () => {
-    const executionContext = {
-      hosted: {
-        memberId: 'member-1',
-        userEnvKeys: [],
-      },
-    }
-    expect(buildAssistantAutomationTurnEnvelope({
-      executionContext,
-      turnTrigger: 'automation-cron',
-    }).executionContext).toBe(executionContext)
   })
 })

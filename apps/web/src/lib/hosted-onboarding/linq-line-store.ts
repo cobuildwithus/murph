@@ -15,9 +15,6 @@ import {
   encryptHostedLinqLinePhoneNumber,
 } from "./linq-line-phone-codec";
 import {
-  filterHostedLinqNewConversationLines,
-} from "./linq-provider-health-store";
-import {
   parseHostedLinqLineReputationStatus,
   parseHostedLinqLineServiceStatus,
   type HostedLinqLineReputationStatus,
@@ -63,6 +60,8 @@ type HostedLinqContactCardLineRow = {
   phoneNumberEncrypted: string | null;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  providerReputationStatus: string | null;
+  providerServiceStatus: string | null;
 };
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
@@ -296,10 +295,7 @@ export async function listHostedLinqAssignableHomeLines(input: {
     });
   }
 
-  return filterHostedLinqNewConversationLines({
-    lines: mapHostedLinqAssignableHomeLineRows(rows),
-    prisma: input.prisma,
-  });
+  return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
 /**
@@ -343,6 +339,7 @@ export async function listHostedLinqHealthyProactiveLines(input: {
       egressPolicy: "enabled",
       healthStatus: "healthy",
       phoneNumberEncrypted: { not: null },
+      ...buildHostedLinqProviderEligibleWhere(),
     },
     orderBy: [
       { assignmentWeight: "desc" },
@@ -369,10 +366,7 @@ export async function listHostedLinqHealthyProactiveLines(input: {
     });
   }
 
-  return filterHostedLinqNewConversationLines({
-    lines: mapHostedLinqAssignableHomeLineRows(rows),
-    prisma: input.prisma,
-  });
+  return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
@@ -440,6 +434,26 @@ function buildActiveHostedLinqManagedLineWhere(): Prisma.HostedLinqLineWhereInpu
     egressPolicy: "enabled",
     healthStatus: { in: ["healthy", "unknown"] },
     phoneNumberEncrypted: { not: null },
+    ...buildHostedLinqProviderEligibleWhere(),
+  };
+}
+
+function buildHostedLinqProviderEligibleWhere(): Prisma.HostedLinqLineWhereInput {
+  return {
+    AND: [
+      {
+        OR: [
+          { providerServiceStatus: null },
+          { providerServiceStatus: { not: "FLAGGED" } },
+        ],
+      },
+      {
+        OR: [
+          { providerReputationStatus: null },
+          { providerReputationStatus: { notIn: ["AT_RISK", "CRITICAL"] } },
+        ],
+      },
+    ],
   };
 }
 
@@ -485,6 +499,8 @@ export async function listHostedLinqContactCardLines(input: {
       phoneNumberEncrypted: true,
       phoneNumberHint: true,
       phoneNumberLookupKey: true,
+      providerReputationStatus: true,
+      providerServiceStatus: true,
     },
   });
 
@@ -505,49 +521,19 @@ export async function listHostedLinqContactCardLines(input: {
         phoneNumberEncrypted: true,
         phoneNumberHint: true,
         phoneNumberLookupKey: true,
+        providerReputationStatus: true,
+        providerServiceStatus: true,
       },
     });
     rows = [...configuredRows, ...providerRows];
   }
 
-  const lines = mapHostedLinqContactCardRows(rows);
-  const states = lines.length === 0
-    ? []
-    : await input.prisma.hostedLinqLineProviderState.findMany({
-        select: {
-          phoneNumberLookupKey: true,
-          reputationStatus: true,
-          serviceStatus: true,
-        },
-        where: {
-          phoneNumberLookupKey: {
-            in: lines.map((line) => line.phoneNumberLookupKey),
-          },
-        },
-      });
-  const stateByLine = new Map(
-    states.map((state) => [state.phoneNumberLookupKey, state] as const),
-  );
-  return lines.map((line) => {
-    const state = stateByLine.get(line.phoneNumberLookupKey);
-    return {
-      ...line,
-      providerReputationStatus: parseHostedLinqLineReputationStatus(
-        state?.reputationStatus,
-      ),
-      providerServiceStatus: parseHostedLinqLineServiceStatus(
-        state?.serviceStatus,
-      ),
-    };
-  });
+  return mapHostedLinqContactCardRows(rows);
 }
 
 function mapHostedLinqContactCardRows(
   rows: readonly HostedLinqContactCardLineRow[],
-): Array<Omit<
-  HostedLinqContactCardLine,
-  "providerReputationStatus" | "providerServiceStatus"
->> {
+): HostedLinqContactCardLine[] {
   return rows.flatMap((row) => {
     const phoneNumber = normalizePhoneNumber(
       decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),
@@ -559,6 +545,12 @@ function mapHostedLinqContactCardRows(
       phoneNumber,
       phoneNumberHint: row.phoneNumberHint,
       phoneNumberLookupKey: row.phoneNumberLookupKey,
+      providerReputationStatus: parseHostedLinqLineReputationStatus(
+        row.providerReputationStatus,
+      ),
+      providerServiceStatus: parseHostedLinqLineServiceStatus(
+        row.providerServiceStatus,
+      ),
     }];
   });
 }

@@ -1,15 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedLinqChatLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  listHostedLinqChatHealthInventory,
   parseHostedLinqChatHealthInventoryRecord,
 } from "@/src/lib/hosted-onboarding/linq-chat-health-inventory";
 import {
   evaluateHostedLinqEgressPolicy,
 } from "@/src/lib/hosted-onboarding/linq-egress-policy";
 import {
+  resolveHostedLinqEgressPolicyForRuntime,
+} from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import {
   parseHostedLinqProviderHealthEvent,
-} from "@/src/lib/hosted-onboarding/linq-provider-health-event";
+} from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
   projectHostedLinqChatHealthTx,
   projectHostedLinqLineProviderStateTx,
@@ -19,6 +28,26 @@ import {
   parseHostedLinqLineReputationStatus,
   parseHostedLinqLineServiceStatus,
 } from "@/src/lib/hosted-onboarding/linq-provider-status";
+
+const inventoryMocks = vi.hoisted(() => ({
+  fetchLinqApi: vi.fn(),
+}));
+
+vi.mock("@/src/lib/linq/api", () => ({
+  fetchLinqApi: inventoryMocks.fetchLinqApi,
+  LinqApiTimeoutError: class LinqApiTimeoutError extends Error {},
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingLinqConfig: () => ({
+    apiBaseUrl: "https://provider.example.test/v3",
+    apiToken: "test-token",
+  }),
+}));
+
+beforeEach(() => {
+  inventoryMocks.fetchLinqApi.mockReset();
+});
 
 describe("Linq provider status parsing", () => {
   it("accepts only the documented independent status domains", () => {
@@ -60,9 +89,11 @@ describe("Linq provider status parsing", () => {
             updated_at: "2026-07-29T16:01:00.000Z",
           },
           id: "chat-health",
+          is_group: false,
           owner_handle: {
             handle: "+1 (404) 379-0351",
           },
+          service: "iMessage",
         },
         message: {
           parts: [{ type: "text", value: "private message" }],
@@ -72,9 +103,11 @@ describe("Linq provider status parsing", () => {
     }))).toEqual({
       chat: {
         chatId: "chat-health",
+        isGroup: false,
         linePhoneNumber: "+14043790351",
         providerStatus: "AT_RISK",
         providerUpdatedAt: new Date("2026-07-29T16:01:00.000Z"),
+        service: "iMessage",
       },
       line: null,
     });
@@ -93,11 +126,15 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
         updated_at: "2026-07-29T16:02:00.000Z",
       },
       id: "chat-1",
+      is_group: true,
+      service: "iMessage",
     })).toEqual({
       chatId: "chat-1",
+      isGroup: true,
       linePhoneNumber: "+14043790351",
       providerStatus: "HEALTHY",
       providerUpdatedAt: new Date("2026-07-29T16:02:00.000Z"),
+      service: "iMessage",
     });
   });
 
@@ -120,12 +157,60 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
   });
 });
 
+describe("listHostedLinqChatHealthInventory", () => {
+  it("follows the global cursor beyond one hundred chats", async () => {
+    inventoryMocks.fetchLinqApi
+      .mockResolvedValueOnce(jsonResponse({
+        chats: Array.from({ length: 100 }, (_, index) =>
+          buildChatInventoryRecord(`chat-${index}`)),
+        next_cursor: "page-2",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        chats: [buildChatInventoryRecord("chat-100")],
+        next_cursor: null,
+      }));
+
+    await expect(listHostedLinqChatHealthInventory({
+      maxChats: 101,
+    })).resolves.toMatchObject({
+      chats: { length: 101 },
+      skippedCount: 0,
+    });
+    expect(inventoryMocks.fetchLinqApi).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ path: "chats?limit=100" }),
+    );
+    expect(inventoryMocks.fetchLinqApi).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "chats?limit=100&cursor=page-2",
+      }),
+    );
+  });
+
+  it("fails visibly instead of returning a partial fleet snapshot", async () => {
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      chats: [
+        buildChatInventoryRecord("chat-1"),
+        buildChatInventoryRecord("chat-2"),
+      ],
+      next_cursor: null,
+    }));
+
+    await expect(listHostedLinqChatHealthInventory({
+      maxChats: 1,
+    })).rejects.toMatchObject({
+      code: "LINQ_CHAT_HEALTH_INVENTORY_LIMIT_EXCEEDED",
+      retryable: false,
+    });
+  });
+});
+
 describe("Linq provider health projections", () => {
   it("orders same-timestamp line snapshots by the provider event key", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      hostedLinqLineProviderState: {
-        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      hostedLinqLine: {
         updateMany,
       },
     } as never;
@@ -142,8 +227,8 @@ describe("Linq provider health projections", () => {
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        reputationStatus: "AT_RISK",
-        serviceStatus: "ACTIVE",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       }),
       where: {
         phoneNumberLookupKey: "line-key",
@@ -155,6 +240,28 @@ describe("Linq provider health projections", () => {
           }),
         ]),
       },
+    }));
+  });
+
+  it("clears a supplied unknown provider value instead of retaining stale health", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+
+    await expect(projectHostedLinqLineProviderStateTx({
+      eventId: "event-future",
+      phoneNumberLookupKey: "line-key",
+      prisma: {
+        hostedLinqLine: { updateMany },
+      } as never,
+      providerUpdatedAt: new Date("2026-07-29T16:05:00.000Z"),
+      reputationStatus: "FUTURE_STATUS",
+      serviceStatus: "ACTIVE",
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerReputationStatus: null,
+        providerServiceStatus: "ACTIVE",
+      }),
     }));
   });
 
@@ -183,6 +290,75 @@ describe("Linq provider health projections", () => {
         providerUpdatedAt: { lte: new Date("2026-07-29T16:00:00.000Z") },
       }),
     }));
+  });
+
+  it("clears stale line attribution when the provider handle is ambiguous", async () => {
+    const linqChatLookupKey = createHostedLinqChatLookupKey("chat-health");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    if (!linqChatLookupKey) {
+      throw new Error("Expected a chat lookup key.");
+    }
+
+    await expect(projectHostedLinqChatHealthTx({
+      chatId: "chat-health",
+      phoneNumberLookupKey: null,
+      prisma: {
+        hostedLinqChatHealth: {
+          createMany: vi.fn(),
+          findMany: vi.fn().mockResolvedValue([{ linqChatLookupKey }]),
+          updateMany,
+        },
+      } as never,
+      providerStatus: "AT_RISK",
+      providerUpdatedAt: new Date("2026-07-29T16:07:00.000Z"),
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        phoneNumberLookupKey: null,
+      }),
+    }));
+  });
+
+  it("moves an existing logical chat row to the current privacy key", async () => {
+    const restore = configureContactPrivacyKeyringForTest("v1");
+    const legacyLookupKey = createHostedLinqChatLookupKey("chat-health");
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    clearHostedOnboardingEnvCache();
+    const currentLookupKey = createHostedLinqChatLookupKey("chat-health");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const createMany = vi.fn();
+
+    if (!legacyLookupKey || !currentLookupKey) {
+      throw new Error("Expected chat lookup keys.");
+    }
+
+    try {
+      await expect(projectHostedLinqChatHealthTx({
+        chatId: "chat-health",
+        prisma: {
+          hostedLinqChatHealth: {
+            createMany,
+            findMany: vi.fn().mockResolvedValue([{ linqChatLookupKey: legacyLookupKey }]),
+            updateMany,
+          },
+        } as never,
+        providerStatus: "HEALTHY",
+        providerUpdatedAt: new Date("2026-07-29T16:10:00.000Z"),
+      })).resolves.toBe(true);
+
+      expect(createMany).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey: currentLookupKey,
+        }),
+        where: expect.objectContaining({
+          linqChatLookupKey: legacyLookupKey,
+        }),
+      }));
+    } finally {
+      restore();
+    }
   });
 });
 
@@ -257,6 +433,46 @@ describe("evaluateHostedLinqEgressPolicy", () => {
   });
 });
 
+describe("resolveHostedLinqEgressPolicyForRuntime", () => {
+  it("uses the final chat projection's line instead of a stale sender input", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      egressPolicy: "enabled",
+      healthStatus: "healthy",
+      phoneNumberLookupKey: "line-current",
+      providerReputationStatus: "CRITICAL",
+      providerServiceStatus: "ACTIVE",
+    });
+
+    await expect(resolveHostedLinqEgressPolicyForRuntime({
+      fromPhoneNumber: "+15550100099",
+      prisma: {
+        hostedLinqChatHealth: {
+          findFirst: vi.fn().mockResolvedValue({
+            linqChatLookupKey: "chat-current",
+            phoneNumberLookupKey: "line-current",
+            providerObservedAt: new Date("2026-07-29T16:00:00.000Z"),
+            providerStatus: "HEALTHY",
+            providerUpdatedAt: new Date("2026-07-29T15:59:00.000Z"),
+          }),
+        },
+        hostedLinqLine: { findFirst },
+      } as never,
+      target: "chat-current",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      policy: {
+        code: "line_critical",
+        kind: "block",
+      },
+    });
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        phoneNumberLookupKey: { in: ["line-current"] },
+      },
+    }));
+  });
+});
+
 function buildProviderEvent(input: {
   data: unknown;
   eventType: string;
@@ -268,4 +484,57 @@ function buildProviderEvent(input: {
     event_id: "event-health",
     event_type: input.eventType,
   };
+}
+
+function buildChatInventoryRecord(id: string) {
+  return {
+    handles: [{ handle: "+14043790351", is_me: true }],
+    health_status: {
+      status: "HEALTHY",
+      updated_at: "2026-07-29T16:02:00.000Z",
+    },
+    id,
+    is_group: false,
+    service: "iMessage",
+  };
+}
+
+function jsonResponse(payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    headers: { "content-type": "application/json" },
+    status: 200,
+  });
+}
+
+function configureContactPrivacyKeyringForTest(currentVersion: string): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
+    `v1:${Buffer.from("1".repeat(32), "utf8").toString("base64")}`,
+    `v2:${Buffer.from("2".repeat(32), "utf8").toString("base64")}`,
+  ].join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnv("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
 }

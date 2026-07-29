@@ -66,8 +66,9 @@ Updated: 2026-07-29
 
 1. [x] Add independent provider line fields and the latest chat-health
    projection through an expand migration.
-2. [x] Replace severity merging with narrow provider-status parsers and dual
-   writes during the compatibility window.
+2. [x] Replace severity merging with narrow provider-status parsers and
+   independent provider projections while retaining legacy columns during the
+   compatibility window.
 3. [x] Add webhook chat-health projection and bounded global chat
    reconciliation.
 4. [x] Update line selection and implement one pure final-target egress policy.
@@ -87,5 +88,14 @@ Updated: 2026-07-29
 - `git diff --check` passed on the prepared implementation patch.
 - Every changed TypeScript file passed syntax transpilation with TypeScript 5.9
   before publication.
-- Focused package tests, generated Prisma validation, exact-head CI, review gates,
-  and merge-base reconciliation are pending on the published implementation.
+- Focused Web tests passed 350/350, assistant-engine tests passed 159/159, and
+  the provider-entry regression passed with no Linq message send after a final
+  hard block.
+- Web, assistant-engine, assistant-runtime, and hosted-execution typechecks
+  passed. Prisma Client generation and `prisma validate` also passed.
+- Product-experience review returned no findings. It confirmed that the
+  scheduled-warning and hard-block flow is the smallest complete user
+  experience; full rendered model-output and one live/staging end-to-end run
+  remain post-deploy evidence gaps.
+- Exact-head CI, preliminary/final ReviewGPT gates, and merge-base
+  reconciliation remain pending on the next pushed implementation head.

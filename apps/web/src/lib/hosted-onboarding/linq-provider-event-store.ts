@@ -20,7 +20,6 @@ import {
   projectHostedLinqChatHealthTx,
   projectHostedLinqLineProviderStateTx,
 } from "./linq-provider-health-store";
-import type { HostedLinqProviderHealthEvent } from "./linq-provider-health-event";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -29,7 +28,6 @@ type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
-  health?: HostedLinqProviderHealthEvent | null;
   prisma: HostedLinqProviderEventClient;
   receivedAt?: Date;
 }): Promise<{
@@ -41,7 +39,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
-  const health = input.health ?? input.event.providerHealth ?? {
+  const health = input.event.providerHealth ?? {
     chat: null,
     line: null,
   };
@@ -84,7 +82,11 @@ export async function ingestHostedLinqProviderEventTx(input: {
       phoneNumberRole: input.event.phoneNumberRole,
       providerCreatedAt: input.event.providerCreatedAt,
       providerReason: input.event.providerReason,
+      providerReputationStatus: health.line?.reputationStatus ?? null,
+      providerServiceStatus: health.line?.serviceStatus ?? null,
       providerStatus: input.event.providerStatus,
+      chatHealthStatus: health.chat?.providerStatus ?? null,
+      chatHealthUpdatedAt: health.chat?.providerUpdatedAt ?? null,
       receivedAt,
       service: input.event.service,
       traceIdSuffix: input.event.traceIdSuffix,
@@ -172,11 +174,13 @@ export async function ingestHostedLinqProviderEventTx(input: {
   if (health.chat) {
     await projectHostedLinqChatHealthTx({
       chatId: health.chat.chatId,
+      isGroup: health.chat.isGroup,
       observedAt: receivedAt,
       phoneNumberLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
       providerStatus: health.chat.providerStatus,
       providerUpdatedAt: health.chat.providerUpdatedAt,
+      service: health.chat.service,
     });
   }
 

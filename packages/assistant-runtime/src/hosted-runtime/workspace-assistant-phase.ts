@@ -1596,6 +1596,7 @@ export async function runHostedWorkspaceAssistantPhase(
           return authority;
         },
         resolveScheduledLinqRoute: async ({
+          fromPhoneNumber,
           homeRouteFallbackAllowed,
           signal,
           target,
@@ -1612,6 +1613,7 @@ export async function runHostedWorkspaceAssistantPhase(
           }
           const authority = await assertEngagement({
             authorityCheckOnly: true,
+            ...(fromPhoneNumber ? { fromPhoneNumber } : {}),
             homeRouteFallbackAllowed,
             target,
             targetKind,

@@ -1321,6 +1321,7 @@ describe("hosted web production migration guard", () => {
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
+      "/api/internal/hosted-onboarding/linq/health/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);

@@ -11,24 +11,19 @@ import {
   compactAutomationAssistantTargetOverride,
 } from './target-override.js'
 
-export type AssistantAutomationTurnEnvelope = Omit<
-  Pick<
-    AssistantMessageInput,
-    | 'abortSignal'
-    | 'assistantTargetOverride'
-    | 'deliveryDispatchMode'
-    | 'executionContext'
-    | 'scheduledAutomationAuthority'
-    | 'scheduledInvocationAuthority'
-    | 'scheduledOccurrenceAt'
-    | 'serviceTier'
-    | 'turnEnvironment'
-    | 'turnTrigger'
-  >,
-  'executionContext'
-> & {
-  executionContext: AssistantExecutionContext
-}
+export type AssistantAutomationTurnEnvelope = Pick<
+  AssistantMessageInput,
+  | 'abortSignal'
+  | 'assistantTargetOverride'
+  | 'deliveryDispatchMode'
+  | 'executionContext'
+  | 'scheduledAutomationAuthority'
+  | 'scheduledInvocationAuthority'
+  | 'scheduledOccurrenceAt'
+  | 'serviceTier'
+  | 'turnEnvironment'
+  | 'turnTrigger'
+>
 
 export function buildAssistantAutomationTurnEnvelope(input: {
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -50,7 +45,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     abortSignal: input.signal,
     ...(targetOverride ? { assistantTargetOverride: targetOverride } : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: input.executionContext ?? { hosted: null },
+    executionContext: input.executionContext,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,

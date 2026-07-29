@@ -417,6 +417,7 @@ export interface AssistantHostedExecutionContext {
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
+    fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null
     target: string

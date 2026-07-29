@@ -1,19 +1,7 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedRuntimeLinqDeliveryBlockCode,
   HostedRuntimeLinqDeliveryPosture,
 } from "@murphai/hosted-execution/routes";
-
-import {
-  createHostedPhoneLookupKeyReadCandidates,
-} from "./contact-privacy";
-import {
-  readHostedLinqChatHealth,
-  readHostedLinqLineProviderState,
-} from "./linq-provider-health-store";
-import { normalizePhoneNumber } from "./phone";
-
-type HostedLinqEgressPolicyClient = PrismaClient | Prisma.TransactionClient;
 
 export type HostedLinqDeliveryPosture =
   | "normal"
@@ -41,64 +29,6 @@ export type HostedLinqEgressPolicyResult =
       code: HostedLinqEgressBlockCode;
       kind: "block";
     };
-
-export type HostedLinqResolvedEgressPolicy = {
-  policy: HostedLinqEgressPolicyResult;
-};
-
-export async function resolveHostedLinqEgressPolicyForRuntime(input: {
-  fromPhoneNumber?: string | null;
-  prisma: HostedLinqEgressPolicyClient;
-  target: string | null;
-  targetKind?: string | null;
-}): Promise<HostedLinqResolvedEgressPolicy> {
-  const targetKind = input.targetKind?.trim() ?? "";
-  const newConversation = targetKind === "participant";
-  const chatHealth = newConversation
-    ? null
-    : await readHostedLinqChatHealth({
-        chatId: input.target,
-        prisma: input.prisma,
-      });
-  const phoneNumberLookupKeys = new Set(
-    createHostedPhoneLookupKeyReadCandidates(
-      normalizePhoneNumber(input.fromPhoneNumber),
-    ),
-  );
-  if (chatHealth?.phoneNumberLookupKey) {
-    phoneNumberLookupKeys.add(chatHealth.phoneNumberLookupKey);
-  }
-  const lineLookupKeys = [...phoneNumberLookupKeys];
-  const [line, lineProviderState] = await Promise.all([
-    lineLookupKeys.length === 0
-      ? null
-      : input.prisma.hostedLinqLine.findFirst({
-          select: {
-            egressPolicy: true,
-            healthStatus: true,
-            phoneNumberLookupKey: true,
-          },
-          where: {
-            phoneNumberLookupKey: { in: lineLookupKeys },
-          },
-        }),
-    readHostedLinqLineProviderState({
-      phoneNumberLookupKeys: lineLookupKeys,
-      prisma: input.prisma,
-    }),
-  ]);
-
-  return {
-    policy: evaluateHostedLinqEgressPolicy({
-      chatHealthStatus: chatHealth?.providerStatus ?? null,
-      lineDeliveryHealthStatus: line?.healthStatus ?? null,
-      lineEgressPolicy: line?.egressPolicy ?? null,
-      lineReputationStatus: lineProviderState?.reputationStatus ?? null,
-      lineServiceStatus: lineProviderState?.serviceStatus ?? null,
-      newConversation,
-    }),
-  };
-}
 
 export function evaluateHostedLinqEgressPolicy(input: {
   chatHealthStatus: unknown;

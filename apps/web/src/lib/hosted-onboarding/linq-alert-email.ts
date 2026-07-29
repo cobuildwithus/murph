@@ -210,7 +210,7 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
     typeof details.providerReason === "string" ? `Provider reason: ${details.providerReason}` : null,
     typeof details.providerCreatedAt === "string" ? `Provider created at: ${details.providerCreatedAt}` : null,
     "",
-    "Action taken: recorded the provider event and refreshed Linq delivery and health projections. Existing routes stay sticky; current egress policy is evaluated separately at send time.",
+    "Action taken: recorded the provider event and refreshed Linq service and reputation projections. Existing routes stay sticky; current egress policy is evaluated separately at send time.",
   ].filter((line): line is string => line !== null).join("\n");
 }
 

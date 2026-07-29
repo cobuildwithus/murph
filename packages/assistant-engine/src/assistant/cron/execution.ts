@@ -796,7 +796,8 @@ export async function executeClaimedAssistantCronJob(
           const deliveryRoute = authorizedDelivery.route
           const postureExecutionContext =
             appendAssistantHostedDynamicContextPrompt({
-              executionContext: automationTurn.executionContext,
+              executionContext:
+                automationTurn.executionContext ?? { hosted: null },
               prompt: buildAssistantLinqDeliveryPosturePrompt(
                 authorizedDelivery.deliveryPosture,
               ),
@@ -2525,6 +2526,10 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     )
   }
   const authority = await resolveScheduledLinqRoute({
+    fromPhoneNumber:
+      input.target.deliverySource?.kind === 'linq'
+        ? input.target.deliverySource.fromPhoneNumber
+        : null,
     homeRouteFallbackAllowed: route.threadIsDirect !== false,
     signal: input.signal,
     target,

@@ -21,9 +21,11 @@ export const HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT = 5_000;
 
 export type HostedLinqChatHealthInventoryRecord = {
   chatId: string;
+  isGroup: boolean | null;
   linePhoneNumber: string | null;
   providerStatus: HostedLinqChatHealthStatus;
   providerUpdatedAt: Date;
+  service: string | null;
 };
 
 export async function syncHostedLinqChatHealthInventory(input: {
@@ -67,6 +69,8 @@ export async function syncHostedLinqChatHealthInventory(input: {
       prisma: input.prisma,
       providerStatus: chat.providerStatus,
       providerUpdatedAt: chat.providerUpdatedAt,
+      isGroup: chat.isGroup,
+      service: chat.service,
     });
     if (projected) {
       syncedCount += 1;
@@ -210,9 +214,11 @@ export function parseHostedLinqChatHealthInventoryRecord(
 
   return {
     chatId,
+    isGroup: typeof record?.is_group === "boolean" ? record.is_group : null,
     linePhoneNumber: uniqueOwnPhones.length === 1 ? uniqueOwnPhones[0] ?? null : null,
     providerStatus,
     providerUpdatedAt,
+    service: normalizeNullableString(readString(record?.service)),
   };
 }
 

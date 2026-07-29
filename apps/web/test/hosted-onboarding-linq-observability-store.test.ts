@@ -1080,19 +1080,20 @@ describe("hosted Linq observability stores", () => {
           where: { phoneNumberLookupKey: legacyLineLookupKey },
         }),
       );
-      expect(fixture.hostedLinqLineProviderStateCreateMany).toHaveBeenCalledWith({
+      expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          phoneNumberLookupKey: legacyLineLookupKey,
-          reputationStatus: "CRITICAL",
-          serviceStatus: null,
+          providerReputationStatus: "CRITICAL",
         }),
-        skipDuplicates: true,
+        where: expect.objectContaining({
+          phoneNumberLookupKey: legacyLineLookupKey,
+        }),
       });
-      expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
       expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             phoneNumberLookupKey: legacyLineLookupKey,
+            providerReputationStatus: "CRITICAL",
+            providerServiceStatus: null,
           }),
         }),
       );
@@ -1120,16 +1121,25 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
     });
 
-    expect(fixture.hostedLinqLineProviderStateCreateMany).toHaveBeenCalledWith({
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
         providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-        reputationStatus: "CRITICAL",
-        serviceStatus: "FLAGGED",
+        providerReputationStatus: "CRITICAL",
+        providerServiceStatus: "FLAGGED",
       }),
-      skipDuplicates: true,
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
     });
-    expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerReputationStatus: "CRITICAL",
+          providerServiceStatus: "FLAGGED",
+        }),
+      }),
+    );
     expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -4037,10 +4047,6 @@ function createObservabilityPrismaFixture() {
     Promise.resolve({
       phoneNumberLookupKey: input.create.phoneNumberLookupKey,
     }));
-  const hostedLinqLineProviderStateCreateMany =
-    vi.fn().mockResolvedValue({ count: 1 });
-  const hostedLinqLineProviderStateUpdateMany =
-    vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqChatHealthFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqChatHealthCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqChatHealthUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -4086,10 +4092,6 @@ function createObservabilityPrismaFixture() {
       updateMany: hostedLinqLineUpdateMany,
       upsert: hostedLinqLineUpsert,
     },
-    hostedLinqLineProviderState: {
-      createMany: hostedLinqLineProviderStateCreateMany,
-      updateMany: hostedLinqLineProviderStateUpdateMany,
-    },
     hostedLinqProviderEvent: {
       createMany: hostedLinqProviderEventCreateMany,
       findFirst: hostedLinqProviderEventFindFirst,
@@ -4123,8 +4125,6 @@ function createObservabilityPrismaFixture() {
     hostedLinqLineUpdate,
     hostedLinqLineUpdateMany,
     hostedLinqLineUpsert,
-    hostedLinqLineProviderStateCreateMany,
-    hostedLinqLineProviderStateUpdateMany,
     hostedLinqChatHealthCreateMany,
     hostedLinqChatHealthFindMany,
     hostedLinqChatHealthUpdateMany,

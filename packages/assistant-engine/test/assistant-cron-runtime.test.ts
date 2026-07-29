@@ -7351,6 +7351,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
+        fromPhoneNumber: '+15550001111',
         homeRouteFallbackAllowed: true,
         target: '+15550002222',
         targetKind: 'explicit',

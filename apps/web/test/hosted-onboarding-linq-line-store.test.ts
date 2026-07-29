@@ -36,33 +36,20 @@ describe("listHostedLinqContactCardLines", () => {
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
         }),
       ])
       .mockResolvedValueOnce([
         buildLineRow("+15550100002", {
           providerLastSeenAt: new Date("2026-06-30T12:10:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "AT_RISK",
+          providerServiceStatus: "ACTIVE",
         }),
       ]);
-    const providerStateFindMany = vi.fn().mockResolvedValue([
-      {
-        phoneNumberLookupKey: "lookup:+15550100001",
-        reputationStatus: "HEALTHY",
-        serviceStatus: "ACTIVE",
-      },
-      {
-        phoneNumberLookupKey: "lookup:+15550100002",
-        reputationStatus: "AT_RISK",
-        serviceStatus: "ACTIVE",
-      },
-    ]);
     const prisma = {
       hostedLinqLine: {
         findMany,
-      },
-      hostedLinqLineProviderState: {
-        findMany: providerStateFindMany,
       },
     } as never;
 
@@ -137,13 +124,9 @@ describe("listHostedLinqAssignableHomeLines", () => {
         proactiveConversationDayUtc,
       }),
     ]);
-    const providerStateFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       hostedLinqLine: {
         findMany,
-      },
-      hostedLinqLineProviderState: {
-        findMany: providerStateFindMany,
       },
     } as never;
 
@@ -167,10 +150,23 @@ describe("listHostedLinqAssignableHomeLines", () => {
         egressPolicy: "enabled",
         healthStatus: { in: ["healthy", "unknown"] },
         phoneNumberEncrypted: { not: null },
+        AND: [
+          {
+            OR: [
+              { providerServiceStatus: null },
+              { providerServiceStatus: { not: "FLAGGED" } },
+            ],
+          },
+          {
+            OR: [
+              { providerReputationStatus: null },
+              { providerReputationStatus: { notIn: ["AT_RISK", "CRITICAL"] } },
+            ],
+          },
+        ],
       },
     }));
     expect(findMany).toHaveBeenCalledTimes(1);
-    expect(providerStateFindMany).toHaveBeenCalledOnce();
   });
 
   it("fails closed when the configured assignable pool exceeds the reviewed cap", async () => {
@@ -205,27 +201,16 @@ describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
           buildAssignableLineRow("+15550100001"),
         ]),
       },
-      hostedLinqLineProviderState: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
     } as never;
 
     await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
       .resolves.toBeUndefined();
   });
 
-  it("fails visibly when every configured line is at risk", async () => {
-    const line = buildAssignableLineRow("+15550100001");
+  it("fails visibly when no provider-eligible configured line remains", async () => {
     const prisma = {
       hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([line]),
-      },
-      hostedLinqLineProviderState: {
-        findMany: vi.fn().mockResolvedValue([{
-          phoneNumberLookupKey: line.phoneNumberLookupKey,
-          reputationStatus: "AT_RISK",
-          serviceStatus: "ACTIVE",
-        }]),
+        findMany: vi.fn().mockResolvedValue([]),
       },
     } as never;
 
@@ -458,7 +443,8 @@ function buildLineRow(
   phoneNumber: string,
   input: {
     providerLastSeenAt: Date;
-    providerStatus: string;
+    providerReputationStatus: string;
+    providerServiceStatus: string;
   },
 ) {
   return {
@@ -466,7 +452,8 @@ function buildLineRow(
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
     providerLastSeenAt: input.providerLastSeenAt,
-    providerStatus: input.providerStatus,
+    providerReputationStatus: input.providerReputationStatus,
+    providerServiceStatus: input.providerServiceStatus,
   };
 }
 

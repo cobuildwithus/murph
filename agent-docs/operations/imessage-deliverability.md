@@ -24,7 +24,7 @@ Read and apply this guide when touching any of these surfaces:
 1. Optimize for recipient replies early.
    - Design each new conversation to earn a real recipient reply within the first three outbound messages.
    - Prefer genuine questions over one-way statements.
-   - For one-way use cases like reminders or alerts, establish the thread first with an explicit confirmation such as "Reply YES to confirm" before sending repeated notifications.
+   - For one-way use cases like reminders or alerts, establish the thread with an explicit natural confirmation before sending repeated notifications. Ask a real question about the proposed cadence or purpose; never force a keyword or turn the conversation into a status interface.
 
 2. Avoid broadcast-shaped behavior.
    - Do not send many new conversations from one line without replies.
