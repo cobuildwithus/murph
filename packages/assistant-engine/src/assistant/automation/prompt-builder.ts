@@ -135,6 +135,9 @@ export function buildAssistantAutoReplyPrompt(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -208,6 +211,9 @@ export async function prepareAssistantAutoReplyInput(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -396,8 +402,26 @@ export function renderAssistantInputGroupContextPrompt(input: {
   return sections.length > 0 ? sections.join('\n\n') : null
 }
 
+export function renderAssistantInputLinqCorrectionContext(
+  metadata: AssistantInputSourceMetadata | null,
+): string | null {
+  if (
+    metadata?.kind !== 'linq' ||
+    metadata.editedTextPartIndex === undefined
+  ) {
+    return null
+  }
+
+  return [
+    'Trusted message correction:',
+    `This input replaces text part ${metadata.editedTextPartIndex} of the person's earlier accepted Linq message.`,
+    'Treat it as a correction, not a separate request. For the same part, the newest accepted correction is authoritative.',
+  ].join('\n')
+}
+
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
+  correctionContext: string | null
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
   groupContext: string | null
@@ -426,6 +450,9 @@ function renderAssistantAutoReplyInputSection(input: {
   }
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)
+  }
+  if (input.correctionContext) {
+    sections.push(input.correctionContext)
   }
   const projectionNote = input.hasAttachmentContext && input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({

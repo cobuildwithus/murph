@@ -119,6 +119,43 @@ describe("hosted execution wake guards", () => {
     expect(isHostedSystemWake(emailWake)).toBe(false);
   });
 
+  it("parses Linq message corrections with a bounded text-part index", () => {
+    const wake = {
+      ...buildHostedExecutionLinqConversationMessageWake({
+        eventId: "linq-edit-wake-1",
+        linqMessage: {
+          chatId: "chat_edit",
+          editedTextPartIndex: 0,
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_edit",
+          parts: [{ type: "text" as const, value: "corrected wording" }],
+          replyToMessageId: "msg_edit",
+        },
+        occurredAt: "2026-07-28T18:00:00.000Z",
+        phoneLookupKey: "phone_lookup_edit",
+        userId: "user_edit",
+      }),
+    };
+
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+
+    for (const editedTextPartIndex of [-1, 1.5, 2_147_483_648]) {
+      expect(() =>
+        parseHostedExecutionWake({
+          ...wake,
+          message: {
+            ...wake.message,
+            linqMessage: {
+              ...wake.message.linqMessage,
+              editedTextPartIndex,
+            },
+          },
+        }),
+      ).toThrow("editedTextPartIndex");
+    }
+  });
+
   it("parses member preferences updated wakes with strict shared preference ids", () => {
     expect(
       parseHostedExecutionWake({

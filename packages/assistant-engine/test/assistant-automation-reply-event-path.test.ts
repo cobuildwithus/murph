@@ -111,6 +111,119 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
+  it('admits trusted Linq corrections into a live turn while deferring ordinary native replies', async () => {
+    const vault = await createTempVault()
+    const initial = createAssistantInputCandidate({
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-07-28T18:00:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: false,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      text: 'Original wording',
+      threadIsDirect: true,
+    })
+    const ordinaryNativeReply = createAssistantInputCandidate({
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-07-28T18:01:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: false,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'prior-assistant-message',
+        service: 'iMessage',
+      },
+      text: 'A native reply for the next turn',
+      threadIsDirect: true,
+    })
+    const correction = createAssistantInputCandidate({
+      inputId: 'ain_33333333333333333333333333333333',
+      occurredAt: '2026-07-28T18:02:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'linq',
+      sourceMetadata: {
+        editedTextPartIndex: 0,
+        externalThreadRouteAuthorityPresent: false,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'prior-assistant-message',
+        service: 'iMessage',
+      },
+      text: 'Corrected wording',
+      threadIsDirect: true,
+    })
+    const listInputCandidatesByIds = vi.fn()
+      .mockResolvedValueOnce({
+        inputs: [ordinaryNativeReply],
+        nextCursor: ordinaryNativeReply.event.cursor,
+      })
+      .mockResolvedValueOnce({
+        inputs: [correction],
+        nextCursor: correction.event.cursor,
+      })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidatesByIds,
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const admit = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      ?.activeTurnInput
+    expect(admit).toBeTypeOf('function')
+    if (!admit) {
+      throw new Error('Expected an active-turn input admission hook.')
+    }
+    await expect(admit({
+      availableInputIds: [ordinaryNativeReply.event.inputId],
+      sessionId: 'session-live-turn',
+      turnId: 'turn-live',
+      vault,
+    })).resolves.toEqual({
+      kind: 'no-new-input',
+    })
+    await expect(admit({
+      availableInputIds: [correction.event.inputId],
+      sessionId: 'session-live-turn',
+      turnId: 'turn-live',
+      vault,
+    })).resolves.toMatchObject({
+      acceptedInputs: [{
+        id: correction.event.inputId,
+        source: 'assistant-input',
+      }],
+      kind: 'accepted',
+      prompt: expect.stringContaining('Trusted message correction:'),
+    })
+  })
+
   it.each([
     ['low', 'direct', true, true],
     ['low', 'group', false, true],

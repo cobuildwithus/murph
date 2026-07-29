@@ -80,6 +80,7 @@ export interface HostedMailboxItemRow {
   payloadRef: string | null;
   payloadBytes: number | null;
   payloadHash: string | null;
+  sourceMessageLookupKey?: string | null;
   consumedAt: Date | null;
   expiresAt: Date | null;
   createdAt: Date;
@@ -110,6 +111,13 @@ export interface AppendHostedMailboxItemResult {
   dedupeConflict: boolean;
   inserted: boolean;
   item: HostedMailboxItemRecord;
+}
+
+export interface HostedMailboxSourceConversationEntry {
+  contentAvailable: boolean;
+  itemId: string;
+  userId: string;
+  wake: HostedExecutionConversationMessageWake | null;
 }
 
 export interface HostedMailboxLaneCursor {
@@ -171,6 +179,7 @@ interface AppendHostedMailboxItemBaseInput {
 
 interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBaseInput {
   itemId?: string;
+  sourceMessageLookupKey?: string | null;
 }
 
 export async function appendHostedMailboxItem(
@@ -254,6 +263,13 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     userId,
   });
   const { payloadBytes, payloadHash, serialized } = payloadMetadata;
+  const sourceMessageLookupKey = input.sourceMessageLookupKey === undefined
+    || input.sourceMessageLookupKey === null
+    ? null
+    : requireNonEmptyString(
+        input.sourceMessageLookupKey,
+        "Hosted mailbox sourceMessageLookupKey",
+      );
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey,
     tx: input.tx,
@@ -337,6 +353,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       id,
       user_id,
       assistant_input_lookup_key,
+      source_message_lookup_key,
       causal_seq,
       lane,
       lane_seq,
@@ -356,6 +373,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       ${itemId},
       ${userId},
       ${input.assistantInputLookupKey},
+      ${sourceMessageLookupKey},
       ${causalSeq},
       ${lane},
       ${laneSeq},
@@ -376,6 +394,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
       id,
       user_id AS "userId",
       assistant_input_lookup_key AS "assistantInputLookupKey",
+      source_message_lookup_key AS "sourceMessageLookupKey",
       causal_seq AS "causalSeq",
       lane,
       lane_seq AS "laneSeq",
@@ -478,6 +497,15 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   return appendHostedMailboxEnvelopeInternalTx(input);
 }
 
+export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  sourceMessageLookupKey: string;
+  sourceMessageLookupKeyLockCandidates: readonly string[];
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx(input);
+}
+
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   expiresAt: Date | string;
@@ -495,9 +523,17 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
+  sourceMessageLookupKey?: string | null;
+  sourceMessageLookupKeyLockCandidates?: readonly string[];
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
+  await acquireHostedMailboxSourceMessageLocksTx({
+    sourceMessageLookupKeys:
+      input.sourceMessageLookupKeyLockCandidates
+      ?? (input.sourceMessageLookupKey ? [input.sourceMessageLookupKey] : []),
+    tx: input.tx,
+  });
   await assertHostedMailboxEnvelopeWorkspaceTargetTx({
     envelope,
     tx: input.tx,
@@ -535,6 +571,9 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     lane,
     occurredAt: envelope.occurredAt,
     payloadSerializedJson: encodedPayload.serialized,
+    ...(input.sourceMessageLookupKey === undefined
+      ? {}
+      : { sourceMessageLookupKey: input.sourceMessageLookupKey }),
     tx: input.tx,
     userId: envelope.userId,
   });
@@ -1311,6 +1350,58 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
   return decoded ? parseHostedExecutionWake(decoded) : null;
 }
 
+export async function readHostedMailboxSourceConversationEntriesTx(input: {
+  sourceMessageLookupKeys: readonly string[];
+  tx: HostedMailboxMutationTx;
+}): Promise<HostedMailboxSourceConversationEntry[]> {
+  const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
+    input.sourceMessageLookupKeys,
+  );
+  if (sourceMessageLookupKeys.length === 0) {
+    return [];
+  }
+
+  await acquireHostedMailboxSourceMessageLocksTx({
+    sourceMessageLookupKeys,
+    tx: input.tx,
+  });
+  const rows = await input.tx.hostedMailboxItem.findMany({
+    orderBy: [
+      { causalSeq: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      id: true,
+      userId: true,
+    },
+    // One original plus Linq's documented five-edit limit fits in six rows.
+    // Read one extra so callers can fail closed on impossible lineage.
+    take: 7,
+    where: {
+      kind: "conversation.message",
+      sourceMessageLookupKey: {
+        in: sourceMessageLookupKeys,
+      },
+    },
+  });
+
+  return Promise.all(rows.map(async (row) => {
+    const wake = await readHostedMailboxWakeByItemId({
+      mailboxItemId: row.id,
+      prisma: input.tx,
+    });
+    const conversationWake = wake?.kind === "conversation.message"
+      ? wake
+      : null;
+    return {
+      contentAvailable: conversationWake !== null,
+      itemId: row.id,
+      userId: row.userId,
+      wake: conversationWake,
+    };
+  }));
+}
+
 export async function readHostedMailboxWakeByItemId(input: {
   availableAt?: Date;
   mailboxItemId: string;
@@ -1920,6 +2011,31 @@ async function acquireHostedMailboxDedupeAppendLockTx(input: {
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.dedupeKey}))
   `;
+}
+
+export async function acquireHostedMailboxSourceMessageLocksTx(input: {
+  sourceMessageLookupKeys: readonly string[];
+  tx: HostedMailboxMutationTx;
+}): Promise<void> {
+  const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
+    input.sourceMessageLookupKeys,
+  );
+  for (const sourceMessageLookupKey of sourceMessageLookupKeys) {
+    await input.tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext('mailbox-source-message'),
+        hashtext(${sourceMessageLookupKey})
+      )
+    `;
+  }
+}
+
+function normalizeHostedMailboxSourceMessageLookupKeys(
+  values: readonly string[],
+): string[] {
+  return [...new Set(values.map((value) =>
+    requireNonEmptyString(value, "Hosted mailbox sourceMessageLookupKey")
+  ))].sort();
 }
 
 async function recordHostedMailboxAppendLogTx(input: {

@@ -527,6 +527,8 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   }
 
   switch (input.event.eventType) {
+    case "message.edited":
+      return false;
     case "message.received":
       return projectMessageReceived(input.prisma, lineLookupKey, input.event);
     case "message.delivered":

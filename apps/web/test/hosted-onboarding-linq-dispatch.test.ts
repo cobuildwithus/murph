@@ -159,10 +159,12 @@ const mocks = vi.hoisted(() => {
       id: input.mailboxItemId,
       userId: "member_123",
     })),
+    planHostedLinqMessageEditedWebhook: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
       envelope?: { eventId: string };
       eventId?: string;
+      tx?: unknown;
       wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
@@ -179,6 +181,7 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
+    appendHostedMailboxEnvelopeWithSourceMessageTx: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
@@ -212,6 +215,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithSourceMessageTx:
+      mocks.appendHostedMailboxEnvelopeWithSourceMessageTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
@@ -223,6 +228,8 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
   >();
   return {
     ...actual,
+    planHostedLinqMessageEditedWebhook:
+      mocks.planHostedLinqMessageEditedWebhook,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   };
@@ -668,6 +675,28 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       usageCreditLedgerVersion: 0n,
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
+    mocks.appendHostedMailboxEnvelopeWithSourceMessageTx.mockImplementation(
+      async (input: { envelope: { eventId: string }; tx: unknown }) =>
+        mocks.appendHostedMailboxEnvelopeTx({
+          envelope: input.envelope,
+          tx: input.tx,
+        }),
+    );
+    mocks.planHostedLinqMessageEditedWebhook.mockResolvedValue({
+      desiredSideEffects: [],
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-message-edit",
+      },
+      wakeHandoffs: [{
+        eventId: "evt_edit_123",
+        linqChatId: "chat_123",
+        mailboxItemId: "mailbox_evt_edit_123",
+        source: "linq",
+        userId: "member_123",
+      }],
+    });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_123",
       messageId: "provider_msg_123",
@@ -715,6 +744,58 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("routes message edits through the narrow correction planner without a read receipt", async () => {
+    const prisma = asPrismaTransactionClient({});
+    const scheduleAfterResponse = vi.fn();
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v3",
+        created_at: "2026-07-28T18:01:00.000Z",
+        data: {
+          chat: { id: "chat_123" },
+          direction: "inbound",
+          edited_at: "2026-07-28T18:01:00.000Z",
+          id: "msg_123",
+          part: {
+            index: 0,
+            text: "Corrected question",
+          },
+          sender_handle: {
+            handle: "+15551234567",
+            id: "handle_sender_edit_123",
+            is_me: false,
+            service: "iMessage",
+          },
+        },
+        event_id: "evt_edit_123",
+        event_type: "message.edited",
+        webhook_version: "2026-02-03",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toEqual({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-message-edit",
+    });
+    expect(mocks.planHostedLinqMessageEditedWebhook).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        event_id: "evt_edit_123",
+        event_type: "message.edited",
+      }),
+      prisma,
+    });
+    expectHostedLinqPointerSignalAccepted("evt_edit_123");
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).toHaveBeenCalledTimes(2);
   });
 
   it.each([

@@ -1560,6 +1560,12 @@ function createHostedConversationAssistantInputSourceMetadata(
       ...(wake.message.linqMessage.affirmativeReaction === true
         ? { affirmativeReaction: true }
         : {}),
+      ...(wake.message.linqMessage.editedTextPartIndex === undefined
+        ? {}
+        : {
+            editedTextPartIndex:
+              wake.message.linqMessage.editedTextPartIndex,
+          }),
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,

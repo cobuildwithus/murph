@@ -10,7 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
-import { appendHostedMailboxItemTx } from "@/src/lib/hosted-mailbox/store";
+import {
+  acquireHostedMailboxSourceMessageLocksTx,
+  appendHostedMailboxItemTx,
+} from "@/src/lib/hosted-mailbox/store";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
@@ -110,6 +113,57 @@ async function waitForBlockedBackend(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it("serializes original and edit mailbox work on the blind source key", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const sourceMessageLookupKey =
+        `test:linq-message-source:${randomUUID()}`;
+      const ownerLocked = createDeferred();
+      const contenderPid = createDeferred<number>();
+      const releaseOwner = createDeferred();
+      let ownerTransaction: Promise<void> | null = null;
+      let contenderTransaction: Promise<void> | null = null;
+
+      try {
+        ownerTransaction = owner.$transaction(async (tx) => {
+          await acquireHostedMailboxSourceMessageLocksTx({
+            sourceMessageLookupKeys: [sourceMessageLookupKey],
+            tx,
+          });
+          ownerLocked.resolve();
+          await releaseOwner.promise;
+        }, transactionOptions);
+        await ownerLocked.promise;
+
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          await acquireHostedMailboxSourceMessageLocksTx({
+            sourceMessageLookupKeys: [sourceMessageLookupKey],
+            tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await contenderPid.promise,
+        });
+
+        releaseOwner.resolve();
+        await expect(
+          Promise.all([ownerTransaction, contenderTransaction]),
+        ).resolves.toEqual([undefined, undefined]);
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled(
+          [ownerTransaction, contenderTransaction].filter(
+            (transaction): transaction is Promise<void> =>
+              transaction !== null,
+          ),
+        );
+        await disconnectClients([observer, owner, contender]);
+      }
+    });
+
     it("admits only one concurrent claim for the final daily slot", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });

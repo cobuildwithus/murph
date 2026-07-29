@@ -24,6 +24,24 @@ export interface LinqMessageReceivedEvent extends LinqWebhookEvent {
   data: LinqMessageReceivedData;
 }
 
+export interface LinqMessageEditedEvent extends LinqWebhookEvent {
+  event_type: "message.edited";
+  webhook_version: "2026-02-03";
+  data: LinqMessageEditedData;
+}
+
+export interface LinqMessageEditedData {
+  chat: LinqChatInfo;
+  direction: "inbound" | "outbound";
+  edited_at: string;
+  id: string;
+  part: {
+    index: number;
+    text: string;
+  };
+  sender_handle: LinqChatHandle;
+}
+
 export interface LinqMessageReceivedData {
   chat_id: string;
   chat?: LinqChatInfo | null;
@@ -111,6 +129,8 @@ export interface LinqMessageReceivedSummary {
 
 const DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const LINQ_WEBHOOK_SIGNATURE_HEX_PATTERN = /^[a-f0-9]{64}$/iu;
+const LINQ_WEBHOOK_TIMESTAMP_TIMEZONE_PATTERN = /(?:[zZ]|[+-]\d\d(?::?\d\d)?)$/u;
+const LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS = 10_000;
 
 export class LinqWebhookVerificationError extends Error {
   constructor(message: string) {
@@ -340,6 +360,72 @@ export function parseLinqMessageReceivedEvent(
   return parseNormalizedLinqMessageReceivedEventData(event, data);
 }
 
+export function parseLinqMessageEditedEvent(
+  event: LinqWebhookEvent,
+): LinqMessageEditedEvent {
+  if (event.event_type !== "message.edited") {
+    throw new TypeError("Linq webhook event does not contain a supported message.edited payload.");
+  }
+  if (event.webhook_version !== "2026-02-03") {
+    throw new TypeError('Linq message.edited webhook_version must be "2026-02-03".');
+  }
+
+  const data = toLinqObjectRecord(event.data, "Linq message.edited data");
+  const chatRecord = toLinqObjectRecord(data.chat, "Linq message.edited chat");
+  const part = toLinqObjectRecord(data.part, "Linq message.edited part");
+  const partIndex = normalizeNullableInteger(part.index);
+  if (partIndex === null || partIndex < 0 || partIndex > 2_147_483_647) {
+    throw new TypeError("Linq message.edited part.index must be a non-negative int32.");
+  }
+  if (
+    typeof part.text !== "string"
+    || part.text.length === 0
+    || part.text.length > LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS
+  ) {
+    throw new TypeError(
+      `Linq message.edited part.text must contain 1-${LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS} characters.`,
+    );
+  }
+
+  const editedAt = normalizeRequiredTimezoneTimestamp(
+    data.edited_at,
+    "Linq message.edited edited_at",
+  );
+
+  return {
+    ...event,
+    created_at: normalizeRequiredTimezoneTimestamp(
+      event.created_at,
+      "Linq webhook created_at",
+    ),
+    event_type: "message.edited",
+    webhook_version: "2026-02-03",
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
+    data: {
+      chat: {
+        id: normalizeRequiredString(chatRecord.id, "Linq message.edited chat.id"),
+        is_group: normalizeLinqIsGroupFlag(chatRecord.is_group),
+        owner_handle: parseOptionalChatHandle(chatRecord.owner_handle) ?? undefined,
+      },
+      direction: normalizeRequiredDirection(
+        data.direction,
+        "Linq message.edited direction",
+      ),
+      edited_at: editedAt,
+      id: normalizeRequiredString(data.id, "Linq message.edited id"),
+      part: {
+        index: partIndex,
+        text: part.text,
+      },
+      sender_handle: parseRequiredChatHandle(
+        data.sender_handle,
+        "Linq message.edited sender_handle",
+      ),
+    },
+  };
+}
+
 export function buildLinqMessageText(
   parts: ReadonlyArray<LinqMessagePart> | null | undefined,
 ): string | null {
@@ -400,6 +486,10 @@ function pickMinimizedLinqWebhookEvent(event: LinqWebhookEvent): Record<string, 
     event.event_type === "message.received"
       ? parseLinqMessageReceivedEvent(event)
       : null;
+  const editedEvent =
+    event.event_type === "message.edited"
+      ? parseLinqMessageEditedEvent(event)
+      : null;
 
   return compactRecord({
     api_version: event.api_version,
@@ -409,7 +499,11 @@ function pickMinimizedLinqWebhookEvent(event: LinqWebhookEvent): Record<string, 
     webhook_version: event.webhook_version,
     trace_id: event.trace_id,
     partner_id: event.partner_id,
-    data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : undefined,
+    data: messageEvent
+      ? pickLinqMessageReceivedData(messageEvent.data)
+      : editedEvent
+        ? pickLinqMessageEditedData(editedEvent.data)
+        : undefined,
   });
 }
 
@@ -607,6 +701,14 @@ function normalizeRequiredTimestamp(value: unknown, label: string): string {
 function normalizeOptionalTimestamp(value: unknown, label: string): string | null {
   const normalized = normalizeNullableString(value);
   return normalized ? toIsoTimestamp(normalized) : null;
+}
+
+function normalizeRequiredTimezoneTimestamp(value: unknown, label: string): string {
+  const normalized = normalizeRequiredString(value, label);
+  if (!LINQ_WEBHOOK_TIMESTAMP_TIMEZONE_PATTERN.test(normalized)) {
+    throw new TypeError(`${label} must include a timezone.`);
+  }
+  return toIsoTimestamp(normalized);
 }
 
 function normalizeRequiredDirection(
@@ -879,6 +981,19 @@ function pickLinqMessageReceivedData(data: LinqMessageReceivedData): Record<stri
       parts: data.message.parts.map((part) => pickLinqMessagePart(part)),
       reply_to: pickLinqReplyTo(data.message.reply_to),
     }),
+  });
+}
+
+function pickLinqMessageEditedData(data: LinqMessageEditedData): Record<string, unknown> {
+  return compactRecord({
+    chat: pickLinqChatInfo(data.chat),
+    direction: data.direction,
+    edited_at: data.edited_at,
+    id: data.id,
+    part: compactRecord({
+      index: data.part.index,
+    }),
+    sender_handle: pickLinqChatHandle(data.sender_handle),
   });
 }
 

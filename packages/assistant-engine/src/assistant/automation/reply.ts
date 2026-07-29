@@ -107,6 +107,7 @@ import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   renderAssistantInputAttachmentDescriptorPromptSection,
   renderAssistantInputGroupContextPrompt,
+  renderAssistantInputLinqCorrectionContext,
   type AssistantAutoReplyPromptInput,
   type AssistantTrustedHostedImageCompletion,
 } from './prompt-builder.js'
@@ -1702,7 +1703,9 @@ function promptInputCarriesNativeReplyReference(
   candidate: AssistantInputCandidate,
 ): boolean {
   const metadata = candidate.event.sourceMetadata
-  return metadata?.kind === 'linq' && metadata.replyToMessageId !== null
+  return metadata?.kind === 'linq' &&
+    metadata.replyToMessageId !== null &&
+    metadata.editedTextPartIndex === undefined
 }
 
 interface HostedAutoReplyDeliveryIdempotency {
@@ -2716,10 +2719,14 @@ function buildCapturelessAssistantInputPrompt(
         projectionStatus: candidate.projection.status,
       })
       const groupContext = renderAssistantInputGroupContextPrompt(candidate.event)
+      const correctionContext = renderAssistantInputLinqCorrectionContext(
+        candidate.event.sourceMetadata,
+      )
       const sections = [
         `Source: ${candidate.event.source}
 Occurred at: ${candidate.event.occurredAt}`,
         groupContext,
+        correctionContext,
         transcript
           ? `Message text:
 ${transcript}`
