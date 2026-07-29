@@ -1742,7 +1742,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
   }
 });
 
-test("SettingsPage falls back to empty offers, no purchase, and no Privy hints when those reads fail", async () => {
+test("SettingsPage preserves billing when optional usage and Privy reads fail", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -1763,6 +1763,9 @@ test("SettingsPage falls back to empty offers, no purchase, and no Privy hints w
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockRejectedValue(
     new Error("purchase lookup failed"),
   );
+  mocks.readHostedAiUsageActivity.mockRejectedValue(
+    new Error("usage activity unavailable"),
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
@@ -1779,6 +1782,7 @@ test("SettingsPage falls back to empty offers, no purchase, and no Privy hints w
     snapshot: EMPTY_ACCOUNT_SETTINGS,
     serverApprovedPrivyLinkedAccounts: null,
   });
+  expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
 
 test("SettingsPage renders fallback values without reading settings data when the session has no member", async () => {

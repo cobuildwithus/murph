@@ -542,7 +542,7 @@ async function readSettingsPageData(input: {
   const usageActivity = await readHostedAiUsageActivity({
     memberId,
     prisma,
-  });
+  }).catch(() => null);
   const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
     memberId,
     prisma,
