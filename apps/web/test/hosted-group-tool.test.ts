@@ -196,6 +196,7 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", () => ({
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES: 16,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS: 2_000,
   readHostedOwnerAddressBookAdvisoryNames:
     mocks.readHostedOwnerAddressBookAdvisoryNames,
@@ -236,6 +237,7 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   type HostedAddressBookAdvisoryLookupOutcome,
 } from "@/src/lib/hosted-address-book/projection";
@@ -1159,6 +1161,80 @@ describe("handleHostedRuntimeGroupTool", () => {
           displayName: "Named Contact",
           displayNameSource: "unverified-owner-contact",
           senderHandle: "+15552220002",
+        }],
+        status: "ok",
+      },
+    });
+  });
+
+  it("emits misses only for phones admitted to the bounded contact lookup", async () => {
+    const senderHandles = Array.from(
+      { length: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES + 1 },
+      (_, index) => `+1555${String(index).padStart(7, "0")}`,
+    );
+    const overflowHandle = senderHandles.at(-1);
+    if (!overflowHandle) {
+      throw new Error("expected an overflow sender handle");
+    }
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId
+      .mockImplementation(async (input: { linqSenderHandles: readonly string[] }) => ({
+        candidates: input.linqSenderHandles.map((senderHandle) => ({
+          profileDisplayName: null,
+          senderHandle,
+        })),
+        status: "ok" as const,
+      }));
+    mocks.readHostedOwnerAddressBookAdvisoryNames
+      .mockResolvedValueOnce(
+        addressBookLookupResult(new Map(), "no_contact_match"),
+      )
+      .mockResolvedValueOnce(
+        addressBookLookupResult(
+          new Map([[overflowHandle, "Overflow Contact"]]),
+          "matched",
+        ),
+      );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: senderHandles,
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        nameMissSenderHandles: senderHandles.slice(
+          0,
+          HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+        ),
+        participants: [],
+        status: "ok",
+      },
+    });
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames)
+      .toHaveBeenNthCalledWith(1, {
+        containerMemberId: "member_group_runtime",
+        phoneHandles: senderHandles.slice(
+          0,
+          HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+        ),
+        prisma: expect.anything(),
+      });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: [overflowHandle],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Overflow Contact",
+          displayNameSource: "unverified-owner-contact",
+          senderHandle: overflowHandle,
         }],
         status: "ok",
       },

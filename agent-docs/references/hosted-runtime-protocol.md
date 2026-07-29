@@ -1603,12 +1603,16 @@ one unsuspended matched member but no profile name, may reuse the existing human
 owner address-book advisory reader; an ambiguous or suspended member match
 remains unnamed. The advisory reader rechecks owner existence, suspension,
 launch consent, projection enablement, safe uniqueness, and its KMS/storage
-boundaries. A successful response returns labeled entries with only
+boundaries. A granted profile share with a null, not-yet-materialized snapshot
+is unavailable instead of profileless. The advisory reader admits at most 16
+phones; only that exact prefix may produce contact labels or miss evidence, and
+overflow handles remain operation-local. A successful response returns labeled entries with only
 `senderHandle`, `displayName`, and `displayNameSource` (`profile-name` or
 `unverified-owner-contact`). Its optional `nameMissSenderHandles` contains only
 exact requested handles for which every applicable authorized profile/contact
-source was successfully checked and no safe label exists. Policy, ambiguity,
-suspension, authorization, and rollout omissions are excluded. The response
+source was successfully checked and no safe label exists. Pending snapshots,
+bounded-lookup overflow, policy, ambiguity, suspension, authorization, and
+rollout omissions are excluded. The response
 never returns a hosted member id or participant id.
 
 The assistant-runtime presentation reader owns one operation-local memo and one

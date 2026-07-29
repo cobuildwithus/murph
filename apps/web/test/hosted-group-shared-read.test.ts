@@ -142,6 +142,7 @@ function createPrisma(input: {
           phoneNumberVerifiedAt: Date | null;
         } | null;
         routing: { telegramUserLookupKey: string | null } | null;
+        suspendedAt?: Date | null;
       };
       memberId: string;
     }>;
@@ -231,6 +232,48 @@ describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () 
       unavailableReason: "runtime_inactive",
     });
     expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
+  });
+
+  it("treats a granted profile share with a pending snapshot as unavailable", async () => {
+    const senderHandle = "+15557770007";
+    const verifiedAt = new Date("2026-07-29T12:00:00.000Z");
+    const {
+      hostedVaultShareFindMany,
+      prisma,
+    } = createPrisma({
+      group: {
+        members: [{
+          id: "participant_pending_profile",
+          member: {
+            emailAuthorization: null,
+            identity: {
+              phoneLookupKey: createHostedPhoneLookupKey(senderHandle),
+              phoneNumberVerifiedAt: verifiedAt,
+            },
+            routing: null,
+            suspendedAt: null,
+          },
+          memberId: "member_pending_profile",
+        }],
+      },
+      shares: [shareRow({
+        id: "share_pending_profile",
+        memberId: "member_pending_profile",
+        projectionScope: PROFILE_SCOPE,
+      })],
+    });
+
+    await expect(
+      readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: [senderHandle],
+        prisma,
+        runtimeMemberId: RUNTIME_MEMBER_ID,
+      }),
+    ).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "participant_names_unavailable",
+    });
+    expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
   });
 
   it("decrypts exact active-member profiles and omits ambiguous or suspended handles", async () => {

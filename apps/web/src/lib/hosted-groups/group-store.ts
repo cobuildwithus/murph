@@ -612,7 +612,7 @@ export async function readHostedGroupParticipantDisplayNameCandidatesByRuntimeMe
     const displayNamesByMemberId = new Map<string, string>();
     for (const [index, share] of capture.shares.entries()) {
       const records = snapshots[index];
-      if (records === undefined) {
+      if (records === undefined || records === null) {
         throw new Error("Hosted group participant name snapshot is missing.");
       }
       const displayName = readHostedGroupSharedProfileName(records);

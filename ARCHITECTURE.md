@@ -1358,7 +1358,11 @@ lazily during prompt preparation against current Web authority: an exact unique
 current member's authorized `profile-name.v0` display name wins, otherwise the
 human group owner's explicitly enabled address-book projection may provide one
 safe unique canonical-phone label marked as unverified. Failure leaves the
-speaker unnamed.
+speaker unnamed. A granted profile share whose snapshot is not yet materialized
+is unavailable rather than profileless, so its post-join publication can win on
+the next ordinary operation. The owner-contact reader admits at most 16 phones
+per request; only those exact admitted handles can receive positive or negative
+contact evidence, while overflow remains operation-local.
 
 The assistant-runtime Linq presentation adapter owns the compound operation
 memo and one bounded private file cache at

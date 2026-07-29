@@ -62,6 +62,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { getHostedTelegramGroupTitle } from "../hosted-onboarding/telegram-client";
 import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
   type HostedOwnerAddressBookAdvisoryNamesResult,
@@ -1649,17 +1650,21 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
       }
     }
 
-    const ownerContactLookup = unresolvedPhoneHandles.length === 0
+    const contactLookupPhoneHandles = unresolvedPhoneHandles.slice(
+      0,
+      HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    );
+    const ownerContactLookup = contactLookupPhoneHandles.length === 0
       ? null
       : await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
           containerMemberId: input.memberId,
-          phoneHandles: unresolvedPhoneHandles,
+          phoneHandles: contactLookupPhoneHandles,
           prisma: getPrisma(),
         });
-    if (unresolvedPhoneHandles.length > 0 && ownerContactLookup === null) {
+    if (contactLookupPhoneHandles.length > 0 && ownerContactLookup === null) {
       return unavailable();
     }
-    for (const senderHandle of unresolvedPhoneHandles) {
+    for (const senderHandle of contactLookupPhoneHandles) {
       const displayName = ownerContactLookup?.names.get(senderHandle);
       if (displayName) {
         participants.push({
@@ -1674,7 +1679,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
       && ownerContactLookup.outcome === "no_contact_match"
     ) {
       const namedPhoneHandles = ownerContactLookup.names;
-      for (const senderHandle of unresolvedPhoneHandles) {
+      for (const senderHandle of contactLookupPhoneHandles) {
         if (!namedPhoneHandles.has(senderHandle)) {
           nameMissSenderHandles.push(senderHandle);
         }

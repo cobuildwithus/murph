@@ -464,8 +464,9 @@ profile default, explicit non-overlapping name-miss evidence, exact response
 keys, and rejection of private participant ids.
 Hosted Web tests prove exact current-membership/profile candidates, pre-group
 and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
-profile-over-contact precedence, fail-soft advisory outcomes, and one set-based
-profile/contact lookup. Assistant-runtime tests prove the operation-local
+pending-profile-snapshot recovery, profile-over-contact precedence, fail-soft
+advisory outcomes, one set-based profile/contact lookup, and operation-local
+overflow beyond the 16-phone contact bound. Assistant-runtime tests prove the operation-local
 reader memo, bounded private file-backed profile/contact-positive and
 valid-negative cache, operation-only policy omissions, reuse across fresh
 module instances, exact runtime and
