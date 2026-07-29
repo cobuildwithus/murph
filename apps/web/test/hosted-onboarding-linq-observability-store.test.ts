@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -2863,6 +2865,51 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("records a failed runtime rich-link outcome with its accepted primary identity", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const failedAt = new Date("2026-03-26T12:00:02.000Z");
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      failedAt,
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "assistant-outbox:intent_partial_link",
+      linqChatId: "linq_chat_123",
+      messageId: "linq_text_accepted",
+      messageIds: ["linq_text_accepted"],
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_partial_link",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failedAt,
+          messageIdSuffix: "cepted",
+          messageLookupKey:
+            createHostedLinqMessageLookupKey("linq_text_accepted"),
+          status: "failed",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            messageLookupKey:
+              createHostedLinqMessageLookupKey("linq_text_accepted"),
+            ordinal: 0,
+          }),
+        ],
+      }),
+    );
+  });
+
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
@@ -3651,6 +3698,46 @@ describe("hosted Linq observability stores", () => {
     expect(updateData).not.toHaveProperty("attemptedAt");
   });
 
+  it("correlates a partial rich-link failure to its accepted primary message and chat", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      id: "hld_partial_link",
+    });
+
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "assistant-outbox:intent-partial-link",
+      linqChatId: "linq_chat_partial",
+      messageIds: ["linq_text_accepted"],
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey: createHostedLinqChatLookupKey("linq_chat_partial"),
+          messageLookupKey: createHostedLinqMessageLookupKey(
+            "linq_text_accepted",
+          ),
+          status: "failed",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            deliveryId: "hld_partial_link",
+            messageLookupKey: createHostedLinqMessageLookupKey(
+              "linq_text_accepted",
+            ),
+            ordinal: 0,
+          }),
+        ],
+      }),
+    );
+  });
+
   it("records a proven retryable Telegram failure on the exact delivery", async () => {
     const fixture = createObservabilityPrismaFixture();
     const expectedAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -4154,6 +4241,195 @@ describe("hosted Linq signup-link delivery attempts", () => {
   });
 });
 
+describe("owned multi-part Linq delivery receipts", () => {
+  it.each([
+    {
+      expectedStatus: "failed",
+      label: "primary delivered and link failed",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_primary_delivered"),
+        buildOwnedDeliveryMessageState("failed", "evt_link_failed"),
+      ],
+      receiptMessageId: "msg_link",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "failed",
+      label: "primary failed and link delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("failed", "evt_primary_failed"),
+        buildOwnedDeliveryMessageState("delivered", "evt_link_delivered"),
+      ],
+      receiptMessageId: "msg_primary",
+      receiptType: "message.failed",
+    },
+    {
+      expectedStatus: "delivered",
+      label: "both parts delivered",
+      messages: [
+        buildOwnedDeliveryMessageState("delivered", "evt_primary_delivered"),
+        buildOwnedDeliveryMessageState("delivered", "evt_link_delivered"),
+      ],
+      receiptMessageId: "msg_link",
+      receiptType: "message.delivered",
+    },
+  ])(
+    "derives the aggregate outcome when $label",
+    async ({
+      expectedStatus,
+      messages,
+      receiptMessageId,
+      receiptType,
+    }) => {
+      const fixture = createOwnedDeliveryReceiptPrismaFixture(messages);
+      const result = await applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: receiptMessageId,
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_${receiptMessageId}_${expectedStatus}`,
+          eventType: receiptType,
+        })),
+        prisma: fixture.prisma as never,
+      });
+
+      expect(result).toMatchObject({
+        advanced: true,
+        deliveryId: "hld_owned_parts",
+      });
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: expectedStatus,
+          }),
+          where: { id: "hld_owned_parts" },
+        }),
+      );
+      if (expectedStatus === "failed") {
+        expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              deliveredAt: null,
+              failedAt: expect.any(Date),
+            }),
+          }),
+        );
+      } else {
+        expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              deliveredAt: expect.any(Date),
+              failedAt: null,
+            }),
+          }),
+        );
+      }
+    },
+  );
+
+  it("records ordered primary and link identities with the link as the scalar owner key", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_owned_parts",
+      sourceRef: null,
+      template: null,
+    });
+    fixture.hostedLinqDeliveryMessageCreateMany.mockResolvedValueOnce({
+      count: 2,
+    });
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "payment-message:evt_123",
+      linqChatId: "chat_123",
+      messageId: "msg_link",
+      messageIds: ["msg_primary", "msg_link"],
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_link"),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          deliveryId: "hld_owned_parts",
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_primary"),
+          ordinal: 0,
+        }),
+        expect.objectContaining({
+          deliveryId: "hld_owned_parts",
+          messageLookupKey: createHostedLinqMessageLookupKey("msg_link"),
+          ordinal: 1,
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+});
+
+function buildOwnedDeliveryMessageState(
+  status: "delivered" | "failed",
+  eventId: string,
+) {
+  const occurredAt = new Date("2026-03-26T12:00:00.000Z");
+  return {
+    deliveredAt: status === "delivered" ? occurredAt : null,
+    failedAt: status === "failed" ? occurredAt : null,
+    failureCode: status === "failed" ? "provider_rejected" : null,
+    failureReason: status === "failed" ? "Provider rejected message." : null,
+    lastProviderEventId: createHostedLinqProviderEventLookupKey(eventId),
+    lastReceiptAt: occurredAt,
+    service: "iMessage",
+    status,
+  };
+}
+
+function createOwnedDeliveryReceiptPrismaFixture(
+  messages: ReturnType<typeof buildOwnedDeliveryMessageState>[],
+) {
+  const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue({});
+  const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedLinqDelivery: {
+      findUnique: vi.fn().mockResolvedValue({
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        status: "accepted",
+      }),
+      update: hostedLinqDeliveryUpdate,
+    },
+    hostedLinqDeliveryMessage: {
+      findFirst: vi.fn().mockResolvedValue({
+        delivery: {
+          groupJoinOutreachId: null,
+          groupJoinReplyOccurredAt: null,
+          id: "hld_owned_parts",
+          idempotencyKey: "payment-message:evt_123",
+          phoneNumberLookupKey: null,
+          sourceRef: null,
+          template: null,
+        },
+        id: "hldm_receipt_target",
+      }),
+      findMany: vi.fn().mockResolvedValue(messages),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+  };
+  return {
+    hostedLinqDeliveryUpdate,
+    prisma,
+  };
+}
+
 function createObservabilityPrismaFixture() {
   const transaction = vi.fn();
   const executeRaw = vi.fn().mockResolvedValue([]);
@@ -4170,6 +4446,14 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedLinqDeliveryMessageCreateMany =
+    vi.fn().mockResolvedValue({ count: 0 });
+  const hostedLinqDeliveryMessageFindFirst =
+    vi.fn().mockResolvedValue(null);
+  const hostedLinqDeliveryMessageFindMany =
+    vi.fn().mockResolvedValue([]);
+  const hostedLinqDeliveryMessageUpdateMany =
+    vi.fn().mockResolvedValue({ count: 0 });
   const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
@@ -4211,6 +4495,12 @@ function createObservabilityPrismaFixture() {
       updateMany: hostedLinqDeliveryUpdateMany,
       upsert: hostedLinqDeliveryUpsert,
     },
+    hostedLinqDeliveryMessage: {
+      createMany: hostedLinqDeliveryMessageCreateMany,
+      findFirst: hostedLinqDeliveryMessageFindFirst,
+      findMany: hostedLinqDeliveryMessageFindMany,
+      updateMany: hostedLinqDeliveryMessageUpdateMany,
+    },
     hostedLinqLine: {
       findMany: hostedLinqLineFindMany,
       findUnique: hostedLinqLineFindUnique,
@@ -4243,6 +4533,10 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryFindFirst,
     hostedLinqDeliveryFindMany,
     hostedLinqDeliveryFindUnique,
+    hostedLinqDeliveryMessageCreateMany,
+    hostedLinqDeliveryMessageFindFirst,
+    hostedLinqDeliveryMessageFindMany,
+    hostedLinqDeliveryMessageUpdateMany,
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,

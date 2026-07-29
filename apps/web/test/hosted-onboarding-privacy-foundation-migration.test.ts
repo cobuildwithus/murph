@@ -1006,6 +1006,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260728030000_hosted_usage_referral_credit_entry_constraints",
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "20260728190000_hosted_mailbox_source_message",
+      "20260729160000_hosted_linq_delivery_messages",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -2257,6 +2258,37 @@ describe("hosted Prisma baseline migration", () => {
         `${modelName} must stay scalar-only. Add a typed column or a dedicated owner table instead of a catch-all Json blob.`,
       ).toEqual([]);
     }
+  });
+
+  it("stores multi-part Linq receipt identities under one delivery without raw provider ids", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729160000_hosted_linq_delivery_messages/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const messageModel = readPrismaModelBlock(
+      schema,
+      "HostedLinqDeliveryMessage",
+    );
+
+    expect(messageModel).toMatch(
+      /messageLookupKey\s+String\s+@unique\s+@map\("message_lookup_key"\)/u,
+    );
+    expect(messageModel).toMatch(
+      /delivery\s+HostedLinqDelivery\s+@relation\(fields: \[deliveryId\], references: \[id\], onDelete: Cascade\)/u,
+    );
+    expect(messageModel).not.toMatch(/\bmessageId\s+String\b/u);
+    expect(migrationSql).toContain(
+      'REFERENCES "hosted_linq_delivery"("id")',
+    );
+    expect(migrationSql).toContain("ON DELETE CASCADE");
+    expect(migrationSql).not.toMatch(/"message_id"\s+TEXT/u);
   });
 });
 

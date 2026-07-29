@@ -37,6 +37,7 @@ const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
 // can stamp every answered conversation item.
 const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
+const HOSTED_LINQ_DELIVERY_PROVIDER_MESSAGE_ID_LIMIT = 10;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
@@ -83,6 +84,10 @@ export const POST = withJsonError(async (request: Request) => {
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const providerMessageId = readOptionalBodyString(body.providerMessageId);
+  const providerMessageIds = parseProviderMessageIds(
+    body.providerMessageIds,
+    providerMessageId,
+  );
   const target = readOptionalBodyString(body.target);
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const directRecipientPhoneNumber = readOptionalBodyString(
@@ -111,6 +116,9 @@ export const POST = withJsonError(async (request: Request) => {
     idempotencyKey,
     linqChatId,
     messageId: providerMessageId,
+    ...(Array.isArray(body.providerMessageIds)
+      ? { messageIds: providerMessageIds }
+      : {}),
     phoneNumber: routeLineLookupKey ? null : fromPhoneNumber,
     phoneNumberLookupKey: routeLineLookupKey,
     sourceRef,
@@ -289,6 +297,47 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
   }
 
   return itemIds;
+}
+
+function parseProviderMessageIds(
+  value: unknown,
+  providerMessageId: string | null,
+): string[] {
+  if (value !== undefined && value !== null && !Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_PROVIDER_MESSAGE_IDS_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery provider message ids must be an array.",
+      retryable: false,
+    });
+  }
+  const messageIds: string[] = [];
+  for (const entry of Array.isArray(value) ? value : []) {
+    const messageId = readOptionalBodyString(entry);
+    if (!messageId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_PROVIDER_MESSAGE_ID_INVALID",
+        httpStatus: 400,
+        message: "Hosted Linq delivery provider message id is invalid.",
+        retryable: false,
+      });
+    }
+    if (!messageIds.includes(messageId) && messageId !== providerMessageId) {
+      messageIds.push(messageId);
+    }
+  }
+  if (providerMessageId) {
+    messageIds.push(providerMessageId);
+  }
+  if (messageIds.length > HOSTED_LINQ_DELIVERY_PROVIDER_MESSAGE_ID_LIMIT) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_PROVIDER_MESSAGE_IDS_TOO_MANY",
+      httpStatus: 400,
+      message: "Hosted Linq delivery provider message ids are too many.",
+      retryable: false,
+    });
+  }
+  return messageIds;
 }
 
 async function readHostedLinqDeliveryMemberRouteLineLookupKey(input: {

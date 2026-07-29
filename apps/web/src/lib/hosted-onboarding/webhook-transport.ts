@@ -708,6 +708,7 @@ async function sendHostedLinqSideEffect(
         chatId: result.chatId,
         effect: deliveryEffect,
         messageId: result.messageId,
+        messageIds: result.providerMessageIds,
         prisma: options.prisma,
         throwOnError: options.completeProviderOutcomeBeforeReturn,
       });
@@ -794,6 +795,7 @@ async function sendHostedLinqSideEffect(
       chatId: result.chatId ?? deliveryChatId,
       effect: deliveryEffect,
       messageId: result.messageId,
+      messageIds: result.providerMessageIds,
       prisma: options.prisma,
       throwOnError:
         deliveryEffect.payload.template === "ai_usage_quota"
@@ -1303,6 +1305,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   chatId: string | null;
   effect: HostedLinqMessageSideEffect;
   messageId: string | null;
+  messageIds?: readonly string[];
   prisma: HostedLinqTransportPersistenceClient;
   throwOnError?: boolean;
 }): Promise<void> {
@@ -1319,6 +1322,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         idempotencyKey: input.effect.effectId,
         linqChatId: input.chatId,
         messageId: input.messageId,
+        ...(input.messageIds ? { messageIds: input.messageIds } : {}),
         prisma,
       });
       if (milestone.reopenOnboardingLink) {
@@ -1401,16 +1405,47 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<void> {
   try {
+    const errorRecord = readErrorRecord(input.error);
+    const partialMessageIds = readHostedLinqPartialDeliveryMessageIds(input.error);
+    const partialRichLinkDelivery =
+      readHostedLinqSideEffectString(errorRecord, "code")
+      === "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+    const partialChatId = readHostedLinqSideEffectString(
+      errorRecord,
+      "providerThreadId",
+    );
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: input.expectedAttemptedAt,
-      failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
+      failureCode: readHostedLinqSideEffectString(errorRecord, "code"),
       failureReason: input.error instanceof Error ? input.error.message : null,
       idempotencyKey: input.effect.effectId,
+      ...(partialRichLinkDelivery
+        ? {
+            linqChatId: partialChatId,
+            messageIds: partialMessageIds,
+          }
+        : {}),
       prisma: input.prisma,
     });
   } catch {
     // Preserve the original delivery error. This telemetry update is non-critical.
   }
+}
+
+function readHostedLinqPartialDeliveryMessageIds(error: unknown): string[] {
+  const errorRecord = readErrorRecord(error);
+  const values = errorRecord?.providerMessageIds;
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const output: string[] = [];
+  for (const value of values) {
+    const messageId = typeof value === "string" ? value.trim() : "";
+    if (messageId && !output.includes(messageId)) {
+      output.push(messageId);
+    }
+  }
+  return output;
 }
 
 function buildHostedLinqSideEffectLogDetails(

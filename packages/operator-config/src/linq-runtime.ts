@@ -247,6 +247,11 @@ export interface ProbeLinqApiResult {
 export interface CreateLinqChatResult {
   chatId: string | null
   messageId: string | null
+  providerMessageIds?: string[]
+}
+
+export type LinqMessageSendResponse = MessageSendResponse & {
+  providerMessageIds?: string[]
 }
 
 export interface CreateLinqWebhookSubscriptionResult {
@@ -357,7 +362,7 @@ export async function sendLinqChatMessage(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   } = {},
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   const split = splitTrailingHttpsLink(
     sanitizeUserFacingMessageLinks(input.message),
   )
@@ -389,15 +394,35 @@ export async function sendLinqChatMessage(
     },
     dependencies,
   )
-  await sendLinqChatRichLink(
-    {
-      chatId: input.chatId,
-      idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
-      linkUrl: split.linkUrl,
-    },
-    dependencies,
-  )
-  return primaryResponse
+  try {
+    const linkResponse = await sendLinqChatRichLink(
+      {
+        chatId: input.chatId,
+        idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
+        linkUrl: split.linkUrl,
+      },
+      dependencies,
+    )
+    const providerMessageIds = collectLinqProviderMessageIds(
+      primaryResponse.message?.id,
+      linkResponse.message?.id,
+    )
+    return {
+      ...linkResponse,
+      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
+    }
+  } catch (error) {
+    throw createLinqRichLinkPartialDeliveryFailure({
+      error,
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds: collectLinqProviderMessageIds(
+        primaryResponse.message?.id,
+      ),
+      providerThreadId: input.chatId,
+      target: input.chatId,
+      targetKind: 'thread',
+    })
+  }
 }
 
 async function sendLinqChatMessageParts(
@@ -414,7 +439,7 @@ async function sendLinqChatMessageParts(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   },
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const message = normalizeNullableString(input.message) ?? ''
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -449,7 +474,7 @@ async function sendLinqChatRichLink(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   },
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = input.nativeReplyRequested === true
@@ -480,7 +505,7 @@ async function sendLinqChatMessageBody(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   },
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   return requestLinqJson<MessageSendResponse>({
     details: {
       hasIdempotencyKey: input.idempotencyKey !== null,
@@ -897,15 +922,35 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
-  await sendLinqChatRichLink(
-    {
-      chatId,
-      idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
-      linkUrl: split.linkUrl,
-    },
-    dependencies,
-  )
-  return result
+  try {
+    const linkResponse = await sendLinqChatRichLink(
+      {
+        chatId,
+        idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
+        linkUrl: split.linkUrl,
+      },
+      dependencies,
+    )
+    const linkMessageId = normalizeNullableString(linkResponse.message?.id ?? null)
+    const providerMessageIds = collectLinqProviderMessageIds(
+      result.messageId,
+      linkMessageId,
+    )
+    return {
+      ...result,
+      messageId: linkMessageId ?? result.messageId,
+      ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
+    }
+  } catch (error) {
+    throw createLinqRichLinkPartialDeliveryFailure({
+      error,
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds: collectLinqProviderMessageIds(result.messageId),
+      providerThreadId: chatId,
+      target: chatId,
+      targetKind: 'thread',
+    })
+  }
 }
 
 async function createLinqChatWithPrimaryMessage(
@@ -973,6 +1018,60 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
       retryable: true,
     },
   )
+}
+
+function collectLinqProviderMessageIds(
+  ...values: readonly unknown[]
+): string[] {
+  const output: string[] = []
+  for (const value of values) {
+    const messageId = normalizeNullableString(
+      typeof value === 'string' ? value : null,
+    )
+    if (messageId && !output.includes(messageId)) {
+      output.push(messageId)
+    }
+  }
+  return output
+}
+
+function createLinqRichLinkPartialDeliveryFailure(input: {
+  error: unknown
+  idempotencyKey: string | null
+  providerMessageIds: readonly string[]
+  providerThreadId: string
+  target: string
+  targetKind: 'thread'
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: string | null
+  providerMessageIds: string[]
+  providerThreadId: string
+  target: string
+  targetKind: 'thread'
+} {
+  const providerMessageIds = [...input.providerMessageIds]
+  const failure = new VaultCliError(
+    'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+    'iMessage rich-link delivery failed after the primary message was accepted; automatic retry is disabled to avoid duplicate text.',
+    {
+      idempotencyKey: input.idempotencyKey,
+      providerMessageIds,
+      providerThreadId: input.providerThreadId,
+      target: input.target,
+      targetKind: input.targetKind,
+    },
+  )
+
+  return Object.assign(failure, {
+    cause: input.error,
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    providerThreadId: input.providerThreadId,
+    target: input.target,
+    targetKind: input.targetKind,
+  })
 }
 
 export async function createLinqWebhookSubscription(

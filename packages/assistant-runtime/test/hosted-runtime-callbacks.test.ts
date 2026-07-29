@@ -9503,7 +9503,8 @@ describe("hosted runtime callbacks", () => {
       NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
     >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "linq_message_sent",
+      providerMessageId: "linq_link_message",
+      providerMessageIds: ["linq_text_message", "linq_link_message"],
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "participant" as const,
@@ -9525,6 +9526,7 @@ describe("hosted runtime callbacks", () => {
           channel: "linq",
           idempotencyKey: "signup-welcome:member_123",
           providerMessageId: delivery.providerMessageId,
+          providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
           target: delivery.target,
           targetKind: delivery.targetKind,
@@ -9585,7 +9587,8 @@ describe("hosted runtime callbacks", () => {
       NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
     >(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
-      providerMessageId: "linq_message_sent",
+      providerMessageId: "linq_link_message",
+      providerMessageIds: ["linq_text_message", "linq_link_message"],
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "participant" as const,
@@ -9607,6 +9610,7 @@ describe("hosted runtime callbacks", () => {
           channel: "linq",
           idempotencyKey: "signup-welcome:member_123",
           providerMessageId: delivery.providerMessageId,
+          providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
           target: delivery.target,
           targetKind: delivery.targetKind,
@@ -9639,7 +9643,8 @@ describe("hosted runtime callbacks", () => {
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         intentId: "intent_123",
-        providerMessageId: "linq_message_sent",
+        providerMessageId: "linq_link_message",
+        providerMessageIds: ["linq_text_message", "linq_link_message"],
         providerTarget: null,
         providerThreadId: "linq_chat_123",
         target: null,
@@ -10327,6 +10332,94 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("provider_msg_private");
     expect(recordedOutcome).not.toContain("+15550109999");
     expect(recordedOutcome).not.toContain("private reply text");
+  });
+
+  it("records accepted Linq text identity when the rich-link follow-up fails", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      message: "Complete payment https://pay.example.test/session",
+      transportIdempotent: false,
+    });
+    const providerError = Object.assign(
+      new Error("Linq rich-link delivery failed after primary acceptance."),
+      {
+        code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      },
+    );
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => undefined);
+    mocks.sendLinqMessage.mockRejectedValueOnce(providerError);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Complete payment https://pay.example.test/session",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: "linq_text_accepted",
+            providerMessageIds: ["linq_text_accepted"],
+            providerThreadId: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          status: "abandoned",
+        }, {
+          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+          message: "Provider delivery may have partially succeeded.",
+        });
+      }
+
+      throw new Error("Expected Linq rich-link send to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        retryable: false,
+      }),
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        providerMessageId: "linq_text_accepted",
+        providerMessageIds: ["linq_text_accepted"],
+        providerThreadId: "linq_chat_123",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("checks egress authority for signup welcome Linq sends into existing threads", async () => {

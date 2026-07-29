@@ -4362,6 +4362,53 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('marks Linq text-plus-link partial delivery as abandoned without replaying accepted text', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-link-partial-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-link',
+      message: 'Use this payment link https://pay.example.test/session',
+      sessionId: 'session-linq-link-partial',
+      turnId: 'turn-linq-link-partial',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('rich-link endpoint failed'), {
+        code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: 'linq-text-message',
+        providerMessageIds: ['linq-text-message'],
+        providerThreadId: 'thread-linq-link',
+        target: 'thread-linq-link',
+        targetKind: 'thread',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:23:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      messageLength: seeded.message.length,
+      providerMessageId: 'linq-text-message',
+      providerMessageIds: ['linq-text-message'],
+      providerThreadId: 'thread-linq-link',
+      target: 'thread-linq-link',
+      targetKind: 'thread',
+    })
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
   it('abandons Linq media-only voice memo ambiguity without retrying', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-voice-only-')
 

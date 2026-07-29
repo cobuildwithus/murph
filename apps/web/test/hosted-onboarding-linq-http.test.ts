@@ -437,7 +437,8 @@ describe("createHostedLinqChat", () => {
       to: ["+15550000001"],
     })).resolves.toEqual({
       chatId: "chat_created",
-      messageId: "msg_text",
+      messageId: "msg_link",
+      providerMessageIds: ["msg_text", "msg_link"],
     });
 
     expect(requests).toEqual([
@@ -553,13 +554,20 @@ describe("createHostedLinqChat", () => {
         message: "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
         to: ["+15550000001"],
       });
-      const expectation = expect(result).rejects.toMatchObject({
-        code: "LINQ_SEND_FAILED",
-        message: stalledRequest === 1
-          ? "Linq chat create timed out."
-          : "Linq outbound reply timed out.",
-        retryable: true,
-      });
+      const expectation = stalledRequest === 1
+        ? expect(result).rejects.toMatchObject({
+            code: "LINQ_SEND_FAILED",
+            message: "Linq chat create timed out.",
+            retryable: true,
+          })
+        : expect(result).rejects.toMatchObject({
+            code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            deliveryMayHaveSucceeded: true,
+            message:
+              "Linq rich-link delivery failed after the primary message was accepted.",
+            providerMessageIds: ["msg_text"],
+            retryable: false,
+          });
 
       await vi.advanceTimersByTimeAsync(5_000);
 
@@ -756,7 +764,8 @@ describe("sendHostedLinqChatMessage", () => {
       replyToMessageId: "msg_parent_123",
     })).resolves.toEqual({
       chatId: "chat_123",
-      messageId: "msg_text",
+      messageId: "msg_link",
+      providerMessageIds: ["msg_text", "msg_link"],
     });
 
     expect(requestBodies).toEqual([
@@ -781,19 +790,19 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
-  it("replays both stable message identities when the rich-link follow-up is retried", async () => {
+  it("preserves the accepted primary identity when the rich-link follow-up fails permanently", async () => {
     const requestBodies: unknown[] = [];
     let requestCount = 0;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       requestBodies.push(readJsonRequestBody(init));
       requestCount += 1;
       if (requestCount === 2) {
-        return createJsonResponse({}, 503);
+        return createJsonResponse({}, 400);
       }
       return createJsonResponse({
         chat_id: "chat_123",
         message: {
-          id: requestCount === 4 ? "msg_link" : "msg_text",
+          id: "msg_text",
         },
       }, 200);
     });
@@ -805,19 +814,18 @@ describe("sendHostedLinqChatMessage", () => {
       message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
     };
     await expect(sendHostedLinqChatMessage(input)).rejects.toMatchObject({
-      code: "LINQ_SEND_FAILED",
-      retryable: true,
-    });
-    await expect(sendHostedLinqChatMessage(input)).resolves.toEqual({
-      chatId: "chat_123",
-      messageId: "msg_text",
+      code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      deliveryMayHaveSucceeded: true,
+      expectedProviderMessageCount: 2,
+      providerMessageId: "msg_text",
+      providerMessageIds: ["msg_text"],
+      providerThreadId: "chat_123",
+      retryable: false,
     });
 
     expect(requestBodies.map((body) =>
       (body as { message: { idempotency_key: string } }).message.idempotency_key
     )).toEqual([
-      "payment-message:evt_123",
-      "payment-message:evt_123:link",
       "payment-message:evt_123",
       "payment-message:evt_123:link",
     ]);
@@ -852,11 +860,20 @@ describe("sendHostedLinqChatMessage", () => {
         message:
           "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
       });
-      const expectation = expect(result).rejects.toMatchObject({
-        code: "LINQ_SEND_FAILED",
-        message: "Linq outbound reply timed out.",
-        retryable: true,
-      });
+      const expectation = stalledRequest === 1
+        ? expect(result).rejects.toMatchObject({
+            code: "LINQ_SEND_FAILED",
+            message: "Linq outbound reply timed out.",
+            retryable: true,
+          })
+        : expect(result).rejects.toMatchObject({
+            code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            deliveryMayHaveSucceeded: true,
+            message:
+              "Linq rich-link delivery failed after the primary message was accepted.",
+            providerMessageIds: ["msg_text"],
+            retryable: false,
+          });
 
       await vi.advanceTimersByTimeAsync(5_000);
 

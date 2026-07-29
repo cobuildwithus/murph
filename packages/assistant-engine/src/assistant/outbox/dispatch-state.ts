@@ -476,7 +476,10 @@ function isLinqPartialDeliveryWithoutProviderIds(input: {
     readNonEmptyString(errorRecord?.code) ??
     readNonEmptyString(context?.code) ??
     null
-  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+  if (
+    code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY'
+    && code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+  ) {
     return false
   }
 
@@ -558,7 +561,10 @@ function readLinqPartialDeliveryFromError(input: {
     readNonEmptyString(errorRecord?.code) ??
     readNonEmptyString(context?.code) ??
     null
-  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+  if (
+    code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY'
+    && code !== 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+  ) {
     return null
   }
 

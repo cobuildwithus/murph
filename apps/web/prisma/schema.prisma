@@ -1877,6 +1877,7 @@ model HostedLinqDelivery {
   line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts                   HostedLinqAlert[]
   ingressLatencyTraces     HostedIngressLatencyTrace[]
+  messages                 HostedLinqDeliveryMessage[]
 
   @@index([groupJoinOutreachId, status, attemptedAt], map: "hosted_linq_delivery_group_join_outreach_status_idx")
   @@index([phoneNumberLookupKey, attemptedAt])
@@ -1884,6 +1885,31 @@ model HostedLinqDelivery {
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
   @@map("hosted_linq_delivery")
+}
+
+model HostedLinqDeliveryMessage {
+  id                  String   @id
+  deliveryId          String   @map("delivery_id")
+  ordinal             Int
+  messageLookupKey    String   @unique @map("message_lookup_key")
+  messageIdSuffix     String?  @map("message_id_suffix")
+  status              String   @default("accepted")
+  acceptedAt          DateTime @map("accepted_at")
+  deliveredAt         DateTime? @map("delivered_at")
+  failedAt            DateTime? @map("failed_at")
+  lastReceiptAt       DateTime? @map("last_receipt_at")
+  lastProviderEventId String?  @map("last_provider_event_id")
+  failureCode         String?  @map("failure_code")
+  failureReason       String?  @map("failure_reason")
+  service             String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  delivery            HostedLinqDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([deliveryId, ordinal])
+  @@index([deliveryId, status])
+  @@index([lastReceiptAt])
+  @@map("hosted_linq_delivery_message")
 }
 
 model HostedLinqAlert {
