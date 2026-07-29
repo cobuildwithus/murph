@@ -1367,8 +1367,11 @@ Initial prompt preparation reads unresolved unique handles in one batch; later
 live admissions reuse operation-local positive, negative, and fail-soft entries
 and read only new handles. Across ordinary turns that reuse the same local
 workspace, validated profile and owner-shared contact labels have a fixed
-14-day TTL, while a valid successful omission after both sources are unresolved
-has a fixed six-hour TTL. Each entry uses an opaque
+14-day TTL. Web separately returns `nameMissSenderHandles` only for exact
+requested handles where every applicable authorized profile/contact source was
+successfully checked and no safe label exists; only that explicit evidence has
+a fixed six-hour TTL. An omitted handle without this evidence remains
+operation-local. Each entry uses an opaque
 SHA-256 key over the callback-bound runtime member, exact accepted-input route
 conversation key, channel, and normalized handle. The versioned JSON file is
 atomically replaced, capped at 2,048 insertion-ordered entries and two MiB on
@@ -1376,8 +1379,9 @@ read, stored below a `0700` owner directory as a `0600` file, and never names a
 member, route, handle, or label in its path. Hits do not slide TTL or eviction
 order. Missing, corrupt, oversized, or unreadable files are ordinary misses;
 expired entries are pruned opportunistically without timers. Resolver failures,
-timeouts, rollout skew, malformed or ambiguous responses, and authorization
-loss remain operation-local and are never written. There is no second resident
+timeouts, rollout skew, policy-limited contact reads, malformed or ambiguous
+responses, suspension, and authorization loss remain operation-local and are
+never written. There is no second resident
 cross-operation cache, single-flight owner, mutation invalidation, lock manager,
 or distributed coordination. `.runtime/cache/**` is excluded from hosted
 workspace checkpoints, so the file can bridge fresh reader or process instances

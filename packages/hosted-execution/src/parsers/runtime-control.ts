@@ -1846,7 +1846,11 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
   if (status !== "ok") {
     throw new TypeError(`${label} status is invalid.`);
   }
-  assertAllowedObjectKeys(result, new Set(["participants", "status"]), label);
+  assertAllowedObjectKeys(
+    result,
+    new Set(["nameMissSenderHandles", "participants", "status"]),
+    label,
+  );
   const entries = requireArray(result.participants, `${label} participants`);
   if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
     throw new TypeError(
@@ -1886,7 +1890,26 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
       );
     return { displayName, displayNameSource, senderHandle };
   });
-  return { participants, status };
+  const nameMissSenderHandles = result.nameMissSenderHandles === undefined
+    ? undefined
+    : parseHostedRuntimeGroupBoundedHandles(result.nameMissSenderHandles, {
+        allowEmpty: true,
+        label: `${label} nameMissSenderHandles`,
+      });
+  if (
+    nameMissSenderHandles?.some((senderHandle) =>
+      senderHandles.has(senderHandle)
+    )
+  ) {
+    throw new TypeError(
+      `${label} nameMissSenderHandles must not overlap participants.`,
+    );
+  }
+  return {
+    ...(nameMissSenderHandles === undefined ? {} : { nameMissSenderHandles }),
+    participants,
+    status,
+  };
 }
 
 function parseHostedRuntimeGroupParticipantDisplayNameSource(

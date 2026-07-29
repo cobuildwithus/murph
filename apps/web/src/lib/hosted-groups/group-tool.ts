@@ -64,6 +64,7 @@ import { getHostedTelegramGroupTitle } from "../hosted-onboarding/telegram-clien
 import {
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
+  type HostedOwnerAddressBookAdvisoryNamesResult,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import {
@@ -1588,7 +1589,8 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
       prisma,
     });
   for (const participant of participants) {
-    const ownerAdvisoryName = ownerAdvisoryNames?.get(participant.handle);
+    const ownerAdvisoryName =
+      ownerAdvisoryNames?.names.get(participant.handle);
     if (ownerAdvisoryName) {
       participant.ownerAdvisoryName = ownerAdvisoryName;
     }
@@ -1626,6 +1628,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
     }
 
     const participants: HostedRuntimeGroupParticipantDisplayName[] = [];
+    const nameMissSenderHandles: string[] = [];
     const unresolvedPhoneHandles: string[] = [];
     for (const candidate of candidates.candidates) {
       if (candidate.profileDisplayName) {
@@ -1638,21 +1641,26 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
         normalizePhoneNumber(candidate.senderHandle) === candidate.senderHandle
       ) {
         unresolvedPhoneHandles.push(candidate.senderHandle);
+      } else {
+        // Owner contacts are phone-only. Reaching this branch proves the exact
+        // current member/profile lookup succeeded and no applicable second
+        // source exists for this handle.
+        nameMissSenderHandles.push(candidate.senderHandle);
       }
     }
 
-    const ownerContactLabels = unresolvedPhoneHandles.length === 0
-      ? new Map<string, string>()
+    const ownerContactLookup = unresolvedPhoneHandles.length === 0
+      ? null
       : await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
           containerMemberId: input.memberId,
           phoneHandles: unresolvedPhoneHandles,
           prisma: getPrisma(),
         });
-    if (ownerContactLabels === null) {
+    if (unresolvedPhoneHandles.length > 0 && ownerContactLookup === null) {
       return unavailable();
     }
     for (const senderHandle of unresolvedPhoneHandles) {
-      const displayName = ownerContactLabels.get(senderHandle);
+      const displayName = ownerContactLookup?.names.get(senderHandle);
       if (displayName) {
         participants.push({
           displayName,
@@ -1661,10 +1669,31 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
         });
       }
     }
+    if (
+      ownerContactLookup
+      && (
+        ownerContactLookup.outcome === "matched"
+        || ownerContactLookup.outcome === "no_contact_match"
+        || ownerContactLookup.outcome === "no_safe_unique_label"
+      )
+    ) {
+      const namedPhoneHandles = ownerContactLookup.names;
+      for (const senderHandle of unresolvedPhoneHandles) {
+        if (!namedPhoneHandles.has(senderHandle)) {
+          nameMissSenderHandles.push(senderHandle);
+        }
+      }
+    }
 
     return {
       action: "read_participant_display_names",
-      result: { participants, status: "ok" },
+      result: {
+        ...(nameMissSenderHandles.length === 0
+          ? {}
+          : { nameMissSenderHandles }),
+        participants,
+        status: "ok",
+      },
     };
   } catch {
     return unavailable();
@@ -1673,7 +1702,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
 
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
-): Promise<ReadonlyMap<string, string> | null> {
+): Promise<HostedOwnerAddressBookAdvisoryNamesResult | null> {
   const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
     (result) => ({ kind: "completed" as const, result }),
     (error: unknown) => ({
@@ -1702,7 +1731,7 @@ async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
         outcome: terminal.result.outcome,
         requestedHandleCount: terminal.result.requestedHandleCount,
       });
-      return terminal.result.names;
+      return terminal.result;
     }
     if (terminal.kind === "failed") {
       console.warn("Hosted address-book advisory lookup unavailable.", {

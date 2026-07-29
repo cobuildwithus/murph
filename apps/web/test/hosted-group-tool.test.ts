@@ -975,6 +975,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).resolves.toEqual({
       action: "read_participant_display_names",
       result: {
+        nameMissSenderHandles: ["member@example.test"],
         participants: [
           {
             displayName: "Alice Profile",
@@ -1042,10 +1043,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     "owner_suspended",
     "consent_unavailable",
     "projection_disabled",
-    "no_safe_unique_label",
-    "no_contact_match",
   ] as const satisfies readonly HostedAddressBookAdvisoryLookupOutcome[])(
-    "keeps a completed empty advisory lookup status ok when the outcome is %s",
+    "keeps a policy-limited empty advisory lookup operation-local when the outcome is %s",
     async (outcome) => {
       mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
         candidates: [{
@@ -1066,7 +1065,44 @@ describe("handleHostedRuntimeGroupTool", () => {
         },
       })).resolves.toEqual({
         action: "read_participant_display_names",
-        result: { participants: [], status: "ok" },
+        result: {
+          participants: [],
+          status: "ok",
+        },
+      });
+    },
+  );
+
+  it.each([
+    "no_safe_unique_label",
+    "no_contact_match",
+  ] as const satisfies readonly HostedAddressBookAdvisoryLookupOutcome[])(
+    "marks a fully checked empty advisory lookup as a name miss when the outcome is %s",
+    async (outcome) => {
+      mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+        candidates: [{
+          profileDisplayName: null,
+          senderHandle: "+15552220002",
+        }],
+        status: "ok",
+      });
+      mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+        addressBookLookupResult(new Map(), outcome),
+      );
+
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_group_runtime",
+        request: {
+          action: "read_participant_display_names",
+          linqSenderHandles: ["+15552220002"],
+        },
+      })).resolves.toEqual({
+        action: "read_participant_display_names",
+        result: {
+          nameMissSenderHandles: ["+15552220002"],
+          participants: [],
+          status: "ok",
+        },
       });
     },
   );

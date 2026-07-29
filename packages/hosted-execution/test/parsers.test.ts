@@ -1855,6 +1855,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     const response = {
       action: "read_participant_display_names",
       result: {
+        nameMissSenderHandles: ["member@example.test"],
         participants: [{
           displayName: "Mara P.",
           displayNameSource: "unverified-owner-contact",
@@ -1877,6 +1878,23 @@ describe("parseHostedRuntimeGroupTool", () => {
         unavailableReason: "runtime_inactive",
       },
     });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        nameMissSenderHandles: ["+15551110001"],
+      },
+    })).toThrow(/must not overlap participants/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        nameMissSenderHandles: [
+          "member@example.test",
+          "member@example.test",
+        ],
+      },
+    })).toThrow();
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {

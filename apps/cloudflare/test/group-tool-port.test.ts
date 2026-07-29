@@ -90,6 +90,7 @@ it("bounds the display-name soft deadline by the configured control timeout", as
   const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
     action: "read_participant_display_names",
     result: {
+      nameMissSenderHandles: ["+15551110000"],
       participants: [],
       status: "ok",
     },
@@ -110,6 +111,7 @@ it("bounds the display-name soft deadline by the configured control timeout", as
   })).resolves.toEqual({
     action: "read_participant_display_names",
     result: {
+      nameMissSenderHandles: ["+15551110000"],
       participants: [],
       status: "ok",
     },

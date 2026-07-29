@@ -460,13 +460,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
 
 Authenticated Linq group speaker-label coverage is split across the existing
 owners. Hosted-execution parser tests lock the additive provenance enum, legacy
-profile default, exact response keys, and rejection of private participant ids.
+profile default, explicit non-overlapping name-miss evidence, exact response
+keys, and rejection of private participant ids.
 Hosted Web tests prove exact current-membership/profile candidates, pre-group
 and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
 profile-over-contact precedence, fail-soft advisory outcomes, and one set-based
 profile/contact lookup. Assistant-runtime tests prove the operation-local
 reader memo, bounded private file-backed profile/contact-positive and
-valid-negative cache, reuse across fresh module instances, exact runtime and
+valid-negative cache, operation-only policy omissions, reuse across fresh
+module instances, exact runtime and
 route scope isolation, the 14-day positive and six-hour true-miss boundaries,
 non-sliding FIFO eviction, failure-only operation suppression,
 corruption recovery, opaque keys, private permissions where portable, provenance

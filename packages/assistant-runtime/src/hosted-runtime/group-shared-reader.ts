@@ -48,8 +48,9 @@ const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES = 2 * 1_024 * 1_024;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_ENTRIES = 2_048;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_KEY_PATTERN =
   /^[a-f0-9]{64}$/u;
-// A successful omission means Web found neither an authorized profile name nor
-// an owner-shared contact label. Bound its reuse without adding invalidation.
+// Web explicitly marks only handles for which it successfully checked every
+// applicable authorized name source and found neither a profile name nor an
+// owner-shared contact label. Bound that proven miss without adding invalidation.
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_NEGATIVE_TTL_MS =
   6 * 60 * 60 * 1_000;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_POSITIVE_TTL_MS =
@@ -216,10 +217,22 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
       }
 
       const requestedHandleSet = new Set(senderHandles);
+      const nameMissSenderHandles =
+        response.result.nameMissSenderHandles ?? [];
+      const nameMissSenderHandleSet = new Set(nameMissSenderHandles);
       const hasUnexpectedParticipant = response.result.participants.some(
         (participant) => !requestedHandleSet.has(participant.senderHandle),
       );
-      if (hasUnexpectedParticipant) {
+      const hasInvalidNameMiss =
+        nameMissSenderHandleSet.size !== nameMissSenderHandles.length
+        || nameMissSenderHandles.some(
+          (senderHandle) => !requestedHandleSet.has(senderHandle),
+        )
+        || response.result.participants.some(
+          (participant) =>
+            nameMissSenderHandleSet.has(participant.senderHandle),
+        );
+      if (hasUnexpectedParticipant || hasInvalidNameMiss) {
         memoizeUnavailable(senderHandles);
         return false;
       }
@@ -233,13 +246,15 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
         );
         if (participants.length === 0) {
           operationResolvedByHandle.set(senderHandle, null);
-          cacheUpdates.push({
-            expiresAtMs:
-              filledAtMs
-              + HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_NEGATIVE_TTL_MS,
-            key: buildCacheKey(senderHandle),
-            kind: "negative",
-          });
+          if (nameMissSenderHandleSet.has(senderHandle)) {
+            cacheUpdates.push({
+              expiresAtMs:
+                filledAtMs
+                + HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_NEGATIVE_TTL_MS,
+              key: buildCacheKey(senderHandle),
+              kind: "negative",
+            });
+          }
           continue;
         }
 

@@ -341,6 +341,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       return {
         action: "read_participant_display_names",
         result: {
+          nameMissSenderHandles: round === 2 ? [actorC] : [],
           participants: input.linqSenderHandles.flatMap((senderHandle) => {
             if (senderHandle === actorC && round === 2) {
               return [];
@@ -412,6 +413,60 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       senderHandle: actorC,
     }]);
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a successful policy omission operation-local without negative-caching it", async () => {
+    const vaultRoot = await createTestVaultRoot();
+    const senderHandle = "+15553330004";
+    let round = 0;
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
+      round += 1;
+      return {
+        action: "read_participant_display_names",
+        result: {
+          ...(round === 1
+            ? { participants: [] }
+            : {
+                participants: [{
+                  displayName: "Available Later",
+                  displayNameSource: "unverified-owner-contact" as const,
+                  senderHandle,
+                }],
+              }),
+          status: "ok",
+        },
+      };
+    });
+    const createReader = () => createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request },
+      routeConversationKey: "linq\0room-policy-omission",
+      runtimeMemberId: "member-policy-omission",
+      vaultRoot,
+    });
+    const firstOperation = createReader();
+
+    await expect(firstOperation.read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([]);
+    await expect(firstOperation.read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([]);
+    expect(request).toHaveBeenCalledTimes(1);
+    await expect(access(
+      resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot),
+    )).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([{
+      displayName: "Available Later",
+      displayNameSource: "unverified-owner-contact",
+      senderHandle,
+    }]);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("suppresses an unavailable lookup for one operation without file-caching it", async () => {

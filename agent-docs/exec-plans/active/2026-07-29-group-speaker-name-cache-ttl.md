@@ -13,8 +13,9 @@ Updated: 2026-07-29
 
 - Both `profile-name` and `unverified-owner-contact` results are positive cache
   entries with a fixed 14-day TTL.
-- A successful response that contains neither source for a requested handle is
-  a negative cache entry with a fixed six-hour TTL.
+- Only Web's explicit proof that every applicable authorized name source was
+  checked and absent for a requested handle creates a negative cache entry with
+  a fixed six-hour TTL.
 - Failure, ambiguity, suspension, authorization loss, timeout, and malformed
   responses remain operation-local and are not persisted.
 - Focused runtime tests, affected typecheck, required reviews, exact-head CI,
@@ -22,10 +23,11 @@ Updated: 2026-07-29
 
 ## Scope
 
-- In scope: the existing assistant-runtime file-cache TTLs, deterministic cache
-  tests, and live architecture/security/reliability/testing documentation.
-- Out of scope: cache invalidation, schema changes, new state owners, Web query
-  changes, profile/contact authority changes, or participant-effect behavior.
+- In scope: the existing assistant-runtime file-cache TTLs, additive explicit
+  Web name-miss evidence, deterministic cache tests, and live
+  architecture/security/reliability/testing documentation.
+- Out of scope: cache invalidation, new state owners, new Web queries,
+  profile/contact authority changes, or participant-effect behavior.
 
 ## Constraints
 
@@ -43,16 +45,19 @@ Updated: 2026-07-29
 
 ## Tasks
 
-1. Prove the current Web result already treats shared contact labels as named
-   positive results and only omits a handle after both sources are unresolved.
+1. Prove the current Web result treats shared contact labels as named positive
+   results and add explicit evidence for only those omissions where every
+   applicable authorized source was checked.
 2. Change the two fixed TTLs and strengthen focused boundary coverage.
 3. Update live owner documents and the PR intent/evidence.
 4. Run focused verification, required reviews, exact-head CI, and merge proof.
 
 ## Decisions
 
-- Reuse the existing positive/negative cache kinds. No new cache key, source
-  enum, invalidation path, or state version is needed.
+- Reuse the existing positive/negative cache kinds. Add one optional
+  `nameMissSenderHandles` response field so old Web responses remain readable
+  and cannot create durable negative entries. No new cache key, source enum,
+  invalidation path, or state version is needed.
 - Existing entries keep their stored absolute expiry. The new duration applies
   naturally to subsequent successful writes without migration machinery.
 

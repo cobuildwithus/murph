@@ -1603,9 +1603,13 @@ one unsuspended matched member but no profile name, may reuse the existing human
 owner address-book advisory reader; an ambiguous or suspended member match
 remains unnamed. The advisory reader rechecks owner existence, suspension,
 launch consent, projection enablement, safe uniqueness, and its KMS/storage
-boundaries. A successful response returns only `senderHandle`, `displayName`,
-and `displayNameSource` (`profile-name` or `unverified-owner-contact`); it never
-returns a hosted member id or participant id.
+boundaries. A successful response returns labeled entries with only
+`senderHandle`, `displayName`, and `displayNameSource` (`profile-name` or
+`unverified-owner-contact`). Its optional `nameMissSenderHandles` contains only
+exact requested handles for which every applicable authorized profile/contact
+source was successfully checked and no safe label exists. Policy, ambiguity,
+suspension, authorization, and rollout omissions are excluded. The response
+never returns a hosted member id or participant id.
 
 The assistant-runtime presentation reader owns one operation-local memo and one
 bounded versioned file cache at
@@ -1615,15 +1619,17 @@ including a 20-message/four-sender burst as one four-handle request. Later live
 admissions reuse operation-local positive, negative, and fail-soft entries and
 batch only newly unresolved handles. Across ordinary turns and fresh reader or
 process instances sharing one local workspace, a validated profile or
-owner-shared contact entry has a fixed 14-day TTL and a valid successful
-omission after both sources are unresolved has a fixed six-hour TTL. The
+owner-shared contact entry has a fixed 14-day TTL and only an explicit
+`nameMissSenderHandles` entry has a fixed six-hour TTL. An omitted handle
+without that evidence remains operation-local. The
 2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
 callback-bound runtime member, exact accepted-input route conversation key,
 channel, and normalized handle; hits neither slide expiry nor reorder eviction.
 The fixed-path JSON is atomically replaced under `0700`/`0600` permissions and
 rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
-ordinary misses. Failures and malformed or unauthorized responses are
-operation-local only and never written. There are no timers, resident mirror,
+ordinary misses. Failures, policy-limited reads, and malformed or unauthorized
+responses are operation-local only and never written. There are no timers,
+resident mirror,
 single-flight, mutation invalidation, locks, or distributed cache owners.
 `.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
 same surviving local workspace can reuse the file; cold restore or replacement

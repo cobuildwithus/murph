@@ -1271,6 +1271,13 @@ export interface HostedRuntimeGroupParticipantDisplayName {
 
 export type HostedRuntimeGroupParticipantDisplayNamesResult =
   | {
+      /**
+       * Requested handles for which Web successfully checked every applicable
+       * authorized name source and found no safe display name. Omitted by
+       * legacy Web deployments and never includes policy or authority
+       * omissions.
+       */
+      nameMissSenderHandles?: readonly string[];
       participants: readonly HostedRuntimeGroupParticipantDisplayName[];
       status: "ok";
     }
