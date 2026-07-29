@@ -4160,7 +4160,15 @@ async function runCodexAppServerTurnOnProcess(
         // Transport diagnostics are metadata-only and must not block turns.
       }
     }
-    const providerActionKey = extractCodexProviderActionKey(normalizedEvent)
+    const transportDiagnosticSource =
+      readCodexTransportDiagnosticSource(message, method)
+    if (transportDiagnosticSource?.willRetry === true) {
+      input.productFeedbackRecorder?.discardProductFeedback()
+    }
+    const providerActionKey = extractCodexProviderActionKey(
+      normalizedEvent,
+      message,
+    )
     if (providerActionKey && !providerActionItemIds.has(providerActionKey)) {
       providerActionItemIds.add(providerActionKey)
       providerActionCount += 1
@@ -5084,7 +5092,6 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
-    request.kind === 'submit-product-feedback' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     isComputerDynamicToolRequest(request)
@@ -5327,12 +5334,19 @@ function normalizeCodexRolloutRelativePath(
 
 function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
+  rawEvent: CodexRpcMessage,
 ): string | null {
   if (normalizedEvent.kind === 'status_item') {
     if (
       normalizedEvent.itemType !== 'command.execution' &&
       normalizedEvent.itemType !== 'dynamic.tool.call' &&
       normalizedEvent.itemType !== 'file.change'
+    ) {
+      return null
+    }
+    if (
+      normalizedEvent.itemType === 'dynamic.tool.call' &&
+      isCodexProductFeedbackDynamicToolEvent(rawEvent)
     ) {
       return null
     }
@@ -5353,6 +5367,25 @@ function extractCodexProviderActionKey(
   return (
     normalizedEvent.itemId ??
     providerActionFallbackKeyFromNormalized(normalizedEvent)
+  )
+}
+
+function isCodexProductFeedbackDynamicToolEvent(
+  event: CodexRpcMessage,
+): boolean {
+  const params = readCodexRecordField(event, 'params')
+  const data = readCodexRecordField(event, 'data')
+  const item =
+    readCodexRecordField(event, 'item') ??
+    readCodexRecordField(params, 'item') ??
+    readCodexRecordField(data, 'item')
+  const itemType = readCodexStringField(item, 'type')
+    ?.replaceAll(/[._-]/gu, '')
+    .toLowerCase()
+  return (
+    itemType === 'dynamictoolcall' &&
+    readCodexStringField(item, 'namespace') === 'murph' &&
+    readCodexStringField(item, 'tool') === 'submit_product_feedback'
   )
 }
 

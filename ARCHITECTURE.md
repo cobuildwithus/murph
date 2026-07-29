@@ -53,6 +53,17 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
+`murph.group action="read_chat_name"` is the on-demand provider-title primitive.
+Web resolves the signed callback member's single encrypted thread-container
+route only after the model invokes it, then performs one bounded Linq chat read
+or Telegram `getChat` read. The model supplies no provider thread id. Linq's
+synthetic comma-joined handle label is returned as no name rather than exposing
+phone or email handles. The result contains only bounded untrusted display text
+with `ok`, `none`, or `unavailable` status; it grants no authority and creates
+no cache, retry, reconciliation, wake field, or new state owner. New-group setup
+may pass the exact immediately preceding `ok` result into the existing
+`create_join_link` or `post_join_offer` display-name field.
+
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
 the bounded, route-authorized current-turn Linq sender handles already visible
@@ -307,7 +318,12 @@ runtime entitlement authority. Direct wakes reject it. The growth projection
 uses current blind-index resolution only for legacy wakes and unregistered Linq
 participants, falls back to the existing keyed opaque sender identity when no
 legacy registration remains, and omits valid group-email wakes because that
-channel has no authenticated per-sender attribution.
+channel has no authenticated per-sender attribution. Mailbox content retirement
+remains authoritative over analytics: the projection never decrypts a row after
+its content-retirement marker is set, reports any affected rolling count as a
+lower bound, and withholds a week-over-week comparison when either weekly
+window has incomplete group-sender evidence. Missing unretired content remains
+an integrity failure.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
@@ -743,6 +759,31 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
+- The same Cloudflare app owns one production database-health singleton that is
+  deliberately independent of hosted Web and Postgres. A five-minute Cron
+  Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
+  scrape the configured PlanetScale production branch, retain 30 days of
+  normalized connection metrics or classified scrape failures, evaluate the
+  branch-local PgBouncer and Postgres connection conditions, and page one
+  preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
+  bounded state maps, error-counter baselines, failure codes, and alert
+  admission state. First-incident and non-replayable direct-error alert
+  admission shares one synchronous SQLite transaction with sample/baseline
+  persistence; an inside-fence direct-error body excludes co-occurring
+  replayable evidence, and acknowledged replayable recurrence is admitted only
+  from the current sample once the attempt fence opens. Any direct-error delta
+  observed while the single immutable message slot is occupied accumulates as
+  count-plus-check-time evidence in the same alert row and transaction that
+  advances the persisted sample baseline. After the older message is
+  acknowledged, the next run atomically promotes that evidence into the one
+  pending message slot; provider pacing still applies, and retry never mutates
+  a provider-entered body. Acknowledged Linq entry is the only operation that
+  clears a pending page. SQLite contains no connection URL,
+  credential, query, member identifier, phone number, or raw response. This is
+  operational monitoring history, never health truth, routing authority, or a
+  product control plane.
+  The Web-owned reply-latency monitor remains a separate Resend-email incident
+  owner and never falls back to this Linq path.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:
@@ -1223,6 +1264,41 @@ impact: accepted Linq reply delivery stamps the exact mailbox item with
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. There is no other
 Web-to-Cloudflare prewarm or nudge path.
+
+Hosted Linq message edits are immutable correction inputs, not mutations of an
+accepted mailbox item or transcript. Each accepted inbound Linq conversation
+message stores a private versioned blind lookup key for its provider-global
+message id. A verified `message.edited` webhook locks that source lineage,
+finds the already-accepted original, and revalidates its exact sender, chat,
+direction, direct home route or same group route, and container access before
+appending a structured correction through the ordinary mailbox and wake
+handoff. The lock is edit-only: ordinary accepted messages write the blind
+source index without an additional source-lock query. An edit that races an
+uncommitted original receives the existing bounded retryable missing-source
+outcome and resolves after provider retry; simultaneous edits serialize from
+lineage read through correction append. Optional group `senderMemberId`
+attribution and personal entitlement
+never grant or remove owner-backed room authority: an absent participant
+projection remains eligible, while an existing projection that positively
+records removal or a different handle fails closed. The
+replacement text stays user-authored data; only the separate part index,
+deterministic opaque reference to the original accepted assistant input, and
+correction framing are trusted runtime metadata. That reference distinguishes
+corrections to different originals without exposing provider identifiers.
+Corrections accepted before planning may join the current turn, corrections
+accepted during an active turn may steer it only when their opaque original
+reference names an input already accepted into that same turn, and corrections
+to older inputs remain ordinary pending conversation work. The owner keeps at
+most the provider-supported five corrections, rejects conflicting replay,
+ignores stale or ambiguous ordering, and retries a missing original only within
+the provider delivery window. If the referenced input already received a
+completed answer,
+the assistant sends one concise follow-up only when the correction materially
+changes that answer or action; immaterial wording changes end with the existing
+durable `finish_without_reply` policy. It
+does not rewrite history, cancel a turn, rerun onboarding, fetch the message
+from Linq, create a second queue, or use the provider diagnostic ledger as
+correctness state. Outbound edit events are diagnostic only.
 
 Participant-derived thread-container authority is a seven-day lease over an
 authoritative provider observation, reused by ordinary access, AI admission,

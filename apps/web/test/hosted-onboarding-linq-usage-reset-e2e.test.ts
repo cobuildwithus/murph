@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope?: { eventId: string };
       eventId?: string;
+      tx?: unknown;
     }) => {
       const eventId = input.eventId ?? input.envelope?.eventId;
       if (!eventId) {
@@ -133,6 +134,13 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithSourceMessageTx: (
+      input: Parameters<typeof actual.appendHostedMailboxEnvelopeWithSourceMessageTx>[0],
+    ) =>
+      mocks.appendHostedMailboxEnvelopeTx({
+        envelope: input.envelope,
+        tx: input.tx,
+      }),
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };

@@ -38,8 +38,61 @@ Last verified: 2026-07-28
 
 ## Runtime Security Posture
 
+- The database-health cron is a platform operation, not runner provider egress.
+  Its PlanetScale service-token id/token, Linq token, and operator chat id are
+  required Worker-only secrets and must never enter runner env, URLs, logs,
+  persisted samples, fixtures with real values, or alert copy. The configured
+  PlanetScale organization, database, branch-name, and branch-ID selectors are
+  deploy vars, not request input. The dedicated service token is
+  organization-scoped because that is where PlanetScale grants
+  `read_metrics_endpoints`, and it has no other permission. Service discovery
+  uses the fixed PlanetScale API origin and the
+  documented `token <id>:<token>` authorization contract; the authenticated
+  response may select only one HTTPS/443 scrape target with a bounded path and
+  bounded signed `__param_*` query values. The service credential is sent only
+  to the fixed discovery origin; signed scrape parameters are never persisted
+  or logged. Discovery and scrape disable redirects, enforce ten-second
+  timeouts and byte caps, and reduce responses to allowlisted connection
+  metrics before persistence. Before Linq message egress, the dedicated sender
+  reads the configured direct chat and current line reputation, requires both
+  to be healthy, canonicalizes only the documented phone-number formatting,
+  accepts the current nested reputation status plus the documented deprecated
+  top-level health-status alias, derives its sole external phone recipient in
+  memory, and persists or logs none of that provider response. It then uses Linq's
+  no-`from` auto-selection endpoint so a line that becomes flagged after
+  preflight can fail over; no model, runner, request, or stored state can select
+  another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
+- `murph.group action="read_chat_name"` is a read-only, Web-owned provider
+  metadata boundary. The signed callback member selects the synthetic group
+  runtime; Web resolves its single encrypted Linq or Telegram thread route and
+  never accepts a provider chat id from the model. Provider titles are bounded
+  untrusted display text and confer no identity, membership, consent, routing,
+  or mutation authority. They are returned only as `displayName` with an
+  `ok`, `none`, or `unavailable` status and must not be logged or cached.
+  Suppress Linq's default comma-joined participant-handle label so phone
+  numbers and email addresses cannot become a group name. Group email and
+  direct or personal runtimes cannot authorize this provider-title lookup.
 - An accepted-message `Message ref` is an opaque selector, not authority. Render only the existing `AssistantInputEvent.inputId` when at least one targeting action is eligible and the accepted input is either positively identified Linq iMessage or Telegram with a valid numeric message target; conversation source and reply-target channel must also agree. Linq SMS, RCS, and unknown service types expose no ref and are ineligible for both tools. Both `murph.select_reply_target` and `murph.react_to_message` must require an exact active root invocation, use the same resolver, bind the ref to the current delivery-context ordinal, reload the stored event, and recheck route, conversation, direct/group audience, account, group actor, provider target, and action-specific capability before execution. The dispatcher must reject descendant, stale-turn, or foreign-thread tool requests before consulting accepted-message authority, and descendant shell env carries no targeting authority. Invented, stale, cross-turn, cross-thread, descendant, or unsupported refs fail closed. Provider message ids must stay out of prompts, tool arguments/results, model history, diagnostics, and model-visible errors; only the local delivery owner may resolve one immediately before the effect.
+- A signed Linq edit webhook authenticates provider delivery, not the edited
+  text or its claimed authority. Web may correlate it only to an already
+  accepted inbound conversation item through the private versioned blind
+  source-message key, then must reattest the original sender, chat, direction,
+  and current direct route or same group route plus container authority before
+  appending a correction. Optional group member attribution and personal
+  entitlement are not room authority; missing participant projection remains
+  eligible, while an existing projection must fail closed on positive
+  removal or handle-conflict evidence. A correction may join an active turn
+  only when its opaque original reference names an input already accepted into
+  that turn; otherwise it remains pending for ordinary planning.
+  The edited text remains quoted user data; the runtime-injected part index,
+  opaque original assistant-input reference, and correction framing are the
+  only trusted prompt metadata. The reference is deterministically derived
+  from the already-accepted envelope and must never expose the provider
+  message id. Provider
+  diagnostics may retain event identity, timing, direction, and blinded
+  correlation keys, but never replacement text or raw message, sender, or chat
+  identifiers. Outbound edits are diagnostic facts and never runtime work.
 - Hosted automation record authority is scoped by the active write-fenced member or synthetic-group workspace and its restored canonical vault, not by each record's stored delivery route. A narrow automation port is captured from durable accepted input for the active authenticated root turn and binds new or explicit retarget writes to that trusted route. Invocation-scoped automation and device authority is exposed only through typed root-turn dynamic tools and must be absent from Codex App Server and descendant shell env. The dispatcher must reject descendant, stale-turn, or foreign-thread use. Tool arguments must not let the model select another route. Attended and scheduled root turns use the same dynamic-tool planner; the invocation's actual route, audience, available ports, and accepted-input evidence decide which tools can perform an effect. Non-direct email remains unable to mutate durable room controls because its audience is not authenticated for those controls, not because it runs a reduced assistant profile.
 - Group newsletter setup is valid only from a verified non-direct iMessage or Telegram group route. The structured setup action owns the stable slug, canonical configuration, and exactly one system delivery tag; ordinary model-authored automation writes cannot claim those tags. The ordinary dynamic-tool planner exposes the newsletter email port only when the trusted runtime supplies scheduled email occurrence authority, so a current-chat newsletter receives no email capability. For group-email preparation, the signed callback member resolves the unique hosted group; any legacy request `groupId` is compatibility-only, ignored, and never authority.
 - Interactive group participant attribution comes only from provider-authenticated ingress, never from the model or from message content. Web attaches the sending Telegram user id to non-direct route-authorized inbound only after that id resolves, under row lock, to exactly one active linked member; anonymous administrators, `sender_chat` posts, bots, unlinked users, and direct threads stay unattributed. Sender evidence reaching `read_shared` travels in one field per channel and is matched only against that channel's member identity index, because a numeric Telegram user id normalizes into a valid phone lookup key and would otherwise resolve to an unrelated member; populating both fields fails closed. A Telegram `@username` may accompany the handle for display only; it is optional, user-mutable, and re-registerable, so it is never identity authority.

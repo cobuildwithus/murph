@@ -39,6 +39,70 @@ Last verified: 2026-07-28
 
 ## Runtime Expectations
 
+- The production database-health operator alert is an independent Cloudflare
+  singleton so the monitored Postgres database cannot take down its own page
+  owner. A five-minute Cron Trigger records one normalized PlanetScale sample
+  or classified failure in Durable Object SQLite and prunes history after 30
+  days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
+  required-metric absence must recur on two consecutive runs before paging.
+  A newly opened incident or one-shot direct migration admission failure admits
+  its exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances any direct-error counter baseline.
+  If another immutable page already owns the single pending-message slot, the
+  same transaction advances the sample baseline and accumulates the later
+  direct-error count plus latest check time in the existing alert row instead
+  of dropping it. An acknowledged older page cannot close the incident while
+  that evidence remains. The next run with a free slot atomically promotes the
+  accumulated count into one direct-error page, which then follows the ordinary
+  attempt fence, health preflight, exact-body retry, and restart contract.
+  When a direct error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  direct-error evidence; co-occurring replayable gauges remain in the persisted
+  sample but cannot become stale pending claims. That exact direct-error page
+  owns the next eligible attempt. A replayable condition still unsafe at that
+  boundary remains eligible for the following paced recurrence. The same
+  one-slot ordering applies in reverse: a later direct-error obligation waits
+  behind an older page but cannot be consumed by the counter baseline. This
+  explicit prioritization keeps admitted bodies immutable without another
+  message queue or delivery lifecycle.
+  An acknowledged incident's replayable gauge or monitoring recurrence does
+  not admit stale evidence while the attempt fence is closed; once the fence
+  opens, a still-unsafe current sample admits the recurrence, while recovery
+  closes the incident without another page. An already pending page is
+  processed or deferred before a later clean sample can close the incident,
+  and only an acknowledged provider response clears it. Provider entry is
+  globally fenced by the persisted last-attempt
+  timestamp, so neither a new incident, recurrence, retry, nor worker restart
+  can attempt Linq more often than once every 30 minutes. The attempt time is
+  actual wall time, not the Cron slot, and is written before network egress.
+  The message's UTC check time likewise comes from the actual completed
+  collection run while the Cron slot remains only the persisted sample
+  identity. Every eligible attempt retrieves the configured direct chat and
+  current line reputation; unhealthy or indeterminate delivery health produces
+  no message POST and retains the pending alert for the next paced attempt.
+  Healthy delivery uses Linq's no-`from` auto-selection route. A
+  transport-ambiguous or rejected send keeps the exact persisted body and Linq
+  idempotency key for the next eligible attempt; acknowledged recurrences
+  advance the alert sequence and choose another fixed opening from current
+  metric evidence. Message variation must remain contextual and
+  deterministic, never random padding. Database pages intentionally have no
+  quiet hours.
+- Linq edit delivery is at-least-once and remains owned by the existing hosted
+  mailbox. A per-source advisory lock serializes correction planners from
+  lineage read through correction append; ordinary accepted messages write the
+  blind source index without taking that lock. An edit that races an
+  uncommitted original sees the source as missing and returns the existing
+  retryable response so a provider retry observes the committed original.
+  Provider event identity makes exact replay idempotent, changed replay
+  conflicts, stale edits cannot replace newer corrections, and equal
+  timestamps fail closed as ambiguous. One original plus the provider-supported
+  five corrections is the hard lineage bound. If an edit arrives before its
+  original, Web returns a retryable response only during Linq's documented
+  retry horizon and then terminates without inventing a local pending queue.
+  Roll out the nullable source index first, deploy readers and ordinary-message
+  writers next, wait through the maximum edit plus webhook retry window, and
+  enable the `2026-02-03` edit subscription last.
 - Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that identity during classifier latency, the admitted planner re-reads the winner under the shared participant-phone lock, cannot mint a token, and follows the ordinary signup-link path without attaching its event to the winner's invite. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
 
 - Define startup requirements, health checks, and critical invariants.
@@ -91,6 +155,12 @@ Last verified: 2026-07-28
   ownership; delayed observations remain subject to the shared seven-day lease
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
+- Current-chat naming is one on-demand provider read through
+  `murph.group action="read_chat_name"`. It uses the current durable route and
+  existing bounded Linq or Telegram request timeout and does not retry, cache,
+  reconcile, or add a state owner. Provider failure returns `unavailable`; an
+  absent title or Linq-synthesized handle label returns `none`. New-group setup
+  may continue unnamed after either outcome.
 - Group-origin Telegram recovery retains three outcomes in the existing
   delivery owner. Explicit Telegram rate limits persist a retry time;
   provider-confirmed permanent 4xx rejection persists a recognizable definitely
@@ -365,6 +435,7 @@ Last verified: 2026-07-28
 - Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
 - Automatic meal import is complete only after the stable 9pm managed automation exists. Capture enrollment and upload require a current active private route, including a verified email fallback, which Web includes in the private mailbox envelope. The import writes the canonical meal first, then idempotently ensures that automation from the envelope route; if the upsert fails, the mailbox item stays retryable. Direct email delivery replaces the saved address with the current verified address through the existing signed Web-control boundary before every provider call, and fails closed when Web no longer returns one. Reconciliation evaluates engagement and AI usage for runnable model work even when system lag is present, while blocked model work can still admit deterministic import-only processing. System-only import must checkpoint the generic cron projection from the mutated vault before running post-checkpoint staging cleanup; a projection read failure leaves the import uncheckpointed for retry. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, so ordinary due automations may resume; it does not bypass AI-usage authorization. Authorized fresh conversation owns the ordinary foreground pass so a retryable system item cannot starve it. A same-workspace retry finds the existing meal, while a retry from the last checkpoint safely repeats the deterministic canonical write before ensuring the missing postcondition. The automation uses the ordinary cron planner and delivery path. `meal closeout-work` derives one bounded batch directly from canonical meals: same-occurrence removal revisions first, then the oldest retained automatic-capture photos. The photos remain the only pending-work queue, so old captures eventually drain without a cursor or another state store. If the provider fails after cleanup begins, a photo-removal revision recorded at or after the scheduled occurrence instant remains evidence only for that occurrence's retry; remaining photos and those revisions reconstruct partial work, while a later occurrence cannot resend the completed one. Photo cleanup is a canonical, idempotent meal mutation that fails closed on changed bytes, mismatched manifest ownership, ordinary meal photos, or partial writes.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
+- Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - Exact-message targeting must preserve existing effect owners. Reply selection is side-effect free until normal delivery, while reactions keep the existing `message-reaction` operation and retry policy. The local service re-resolves the accepted input before either effect. For a reaction followed by `finish_without_reply`, the provider's already-recorded reaction patch—not a later mutable eligibility check—defers suppression evidence until the delivery outcome is known. A marked normal message persists `nativeReplyRequested: true` with its provider target, and both fields participate in outbox fingerprinting, equality, dedupe, and retry. Every `---` bubble from one response segment copies that same pair; unmarked automatic replies remain flat. Invalid or stale refs fail as recoverable tool results before any effect. A marked Linq send may not create a replacement direct chat, and a selected Linq voice-only response must fail before sending because the voice-memo endpoint cannot carry the reply target.
 - Clinical Records retrieval is generation-fenced and page-idempotent. A
   server-derived run/page fingerprint deduplicates caller request ids without

@@ -202,6 +202,7 @@ export type HostedLinqChatHandleSummary = {
 };
 
 export type HostedLinqChatSummary = {
+  displayName?: string | null;
   handles: HostedLinqChatHandleSummary[];
   isGroup: boolean | null;
 };
@@ -239,10 +240,12 @@ export async function getHostedLinqChatSummary(input: {
   }
 
   const payload = readHostedLinqCanonicalChat(response.payload);
+  const displayName = normalizeNullableString(payload?.display_name);
   const handles: Chat["handles"] = payload?.handles ?? [];
   const isGroup: Chat["is_group"] | null = payload?.is_group ?? null;
 
   return {
+    displayName,
     handles: handles
       .map(parseHostedLinqChatHandleSummary)
       .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
@@ -332,7 +335,7 @@ function parseHostedLinqReactionTargetPart(value: unknown): string {
 
 function readHostedLinqCanonicalChat(
   value: unknown,
-): Pick<Chat, "handles" | "is_group"> | null {
+): Pick<Chat, "display_name" | "handles" | "is_group"> | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -343,6 +346,7 @@ function readHostedLinqCanonicalChat(
   }
 
   return {
+    display_name: normalizeNullableString(record.display_name),
     handles: record.handles,
     is_group: record.is_group,
   };

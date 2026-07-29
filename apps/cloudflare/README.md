@@ -97,6 +97,8 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 Bindings:
 
 - `USER_RUNNER`
+- `DATABASE_HEALTH_MONITOR`, one environment-scoped SQLite Durable Object for
+  production database metric history and alert admission
 - `RUNNER_CONTAINER`
 - `BUNDLES`
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
@@ -105,12 +107,16 @@ Bindings:
 Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET`
 - `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `LINQ_API_TOKEN`
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
@@ -123,6 +129,7 @@ fallback.
 
 Required worker vars:
 
+- `HOSTED_DATABASE_ALERT_ENABLED=1` in production only
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
@@ -130,6 +137,10 @@ Required worker vars:
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
@@ -142,6 +153,46 @@ production origin or when callback origins use HTTP, localhost, Docker bridge,
 loopback, preview/development, or private-network hosts. The GitHub workflow
 runs that preflight before artifact preparation; the local `deploy:worker`
 path also runs it inside the apply step before artifact validation and upload.
+
+### Production database-health monitor
+
+The Worker cron `*/5 * * * *` calls the singleton
+`DatabaseHealthDurableObject`. It uses PlanetScale's documented
+[HTTP service discovery](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
+and [Postgres metric names](https://planetscale.com/docs/postgres/monitoring/prometheus-metrics-postgres)
+to retain 30 days of:
+
+- PgBouncer oldest-client wait and waiting-client count;
+- the most saturated primary pod's current PgBouncer-to-Postgres connections
+  against `max_connections`, plus server-pool state counts;
+- primary Postgres connection states and total utilization; and
+- per-region direct-port 5432 connection-error counters and positive deltas.
+
+Discovery selects exactly one target by organization, database name, and branch
+name. The configured branch ID then filters the selected Prometheus payload's
+metric series. Both selectors are required because one organization can have
+several production branches with the same branch name while discovery does not
+publish branch IDs.
+
+The direct-port signal is named a migration admission failure because production
+application traffic is required to use transaction-mode PgBouncer on 6432 and
+the direct endpoint is migration-only. Adding another direct production client
+requires splitting that signal first.
+
+Unsafe samples open one incident. Two consecutive collection failures open the
+fallback monitoring incident. The object writes Linq provider-attempt admission
+before egress, never attempts more than once per 30 minutes across all incidents,
+and reuses the exact body plus idempotency key after an ambiguous send. The
+message reports actual collection time rather than the scheduled Cron slot.
+Before each message POST it requires the configured direct
+[Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
+current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
+to be `HEALTHY`. It derives that chat's sole external phone recipient in memory,
+never persists or logs it, and sends through Linq's no-`from` auto-selection
+endpoint so a newly flagged line can fail over. Unhealthy or indeterminate
+delivery health suppresses the POST and leaves the alert pending for the next
+paced attempt. This path does not share state or fallback behavior with the
+Resend-only hosted reply-latency monitor.
 
 Defaulted worker vars:
 
