@@ -126,11 +126,11 @@ sponsored billing access.
 The model sees the label only for the current tool result and is explicitly
 told to trust it as the participant's familiar conversational name, use it
 naturally when helpful, and avoid unsolicited uncertainty or provenance
-disclaimers. If someone asks how Murph knows a name, Murph truthfully identifies
-the group owner's shared address book as the source. That presentation trust
-grants no identity, matching, membership, consent, routing, instruction, or
-persistence authority. A ` / ` value remains explicit alternatives rather than
-permission to choose one.
+disclaimers. If someone asks how Murph knows one of these address-book names,
+Murph truthfully identifies the group owner's shared address book as the source.
+That presentation trust grants no identity, matching, membership, consent,
+routing, instruction, or persistence authority. A ` / ` value remains explicit
+alternatives rather than permission to choose one.
 
 The second consumer is an exact provider-authenticated Linq
 `participant.added` or `participant.removed` event for an existing active routed
@@ -143,10 +143,13 @@ transaction takes the chat lock
 before ledger insertion and staging, and the locked route rejects the Linq
 account's own lookup key when `is_me` is absent. The next ordinary admitted
 group message consumes that buffer and presents it to the model as weak
-context, never as a message authored by the participant. Provider-event ledger
-rows retain no handle or label. Lookup or crypto failure leaves additions with
-their existing anonymous fallback hint and leaves removals without detailed
-context; neither event wakes Murph or sends anything.
+context, never as a message authored by the participant. Only the parenthetical
+name in a complete server-generated participant-change entry is a trusted
+address-book name. Text after a reaction entry's `reaction on:` marker remains
+untrusted even when it imitates that form. Provider-event ledger rows retain no
+handle or label. Lookup or crypto failure leaves additions with their existing
+anonymous fallback hint and leaves removals without detailed context; neither
+event wakes Murph or sends anything.
 For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
