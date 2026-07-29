@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
+import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedLinqRecentMessageEffectCountsQuery,
   readHostedLinqRecentMessageEffectCountsTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -20,7 +22,7 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq recent message load PostgreSQL proof",
   () => {
-    it("counts only recent canonical effects with both partial indexes installed", async () => {
+    it("counts only recent canonical effects and uses both partial indexes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const suffix = randomUUID();
       const busyLineKey = `test:linq-recent-load:busy:${suffix}`;
@@ -74,6 +76,20 @@ describe.skipIf(!runPostgresProof)(
             delivery("future", busyLineKey, at("2026-07-29T15:00:00.001Z")),
             delivery("failed", busyLineKey, null),
             delivery("unbound", null, at("2026-07-29T14:00:00.000Z")),
+            ...Array.from({ length: 512 }, (_, index) => (
+              delivery(
+                `busy-history-${index}`,
+                busyLineKey,
+                at("2026-07-01T14:00:00.000Z"),
+              )
+            )),
+            ...Array.from({ length: 512 }, (_, index) => (
+              delivery(
+                `quiet-history-${index}`,
+                quietLineKey,
+                at("2026-07-01T14:00:00.000Z"),
+              )
+            )),
           ],
         });
         await prisma.hostedLinqProviderEvent.createMany({
@@ -85,6 +101,24 @@ describe.skipIf(!runPostgresProof)(
             event("old", busyLineKey, "inbound", "message.received", at("2026-07-22T14:59:59.999Z")),
             event("future", busyLineKey, "inbound", "message.received", at("2026-07-29T15:00:00.001Z")),
             event("unbound", null, "inbound", "message.received", at("2026-07-29T14:30:00.000Z")),
+            ...Array.from({ length: 512 }, (_, index) => (
+              event(
+                `busy-history-${index}`,
+                busyLineKey,
+                "inbound",
+                "message.received",
+                at("2026-07-01T14:00:00.000Z"),
+              )
+            )),
+            ...Array.from({ length: 512 }, (_, index) => (
+              event(
+                `quiet-history-${index}`,
+                quietLineKey,
+                "inbound",
+                "message.received",
+                at("2026-07-01T14:00:00.000Z"),
+              )
+            )),
           ],
         });
 
@@ -98,19 +132,24 @@ describe.skipIf(!runPostgresProof)(
           [busyLineKey, 2],
           [quietLineKey, 3],
         ]));
-        const indexes = await prisma.$queryRaw<Array<{ indexName: string }>>`
-          SELECT indexname AS "indexName"
-          FROM pg_indexes
-          WHERE schemaname = current_schema()
-            AND indexname IN (
-              'hosted_linq_delivery_line_accepted_at_idx',
-              'hosted_linq_provider_event_line_inbound_received_at_idx'
-            )
-        `;
-        expect(new Set(indexes.map((index) => index.indexName))).toEqual(new Set([
+        await prisma.$executeRaw`ANALYZE "hosted_linq_delivery"`;
+        await prisma.$executeRaw`ANALYZE "hosted_linq_provider_event"`;
+        const queryPlan = await prisma.$queryRaw<Array<{ "QUERY PLAN": unknown }>>(
+          Prisma.sql`
+            EXPLAIN (FORMAT JSON, COSTS OFF)
+            ${buildHostedLinqRecentMessageEffectCountsQuery({
+              lineLookupKeys: [busyLineKey, quietLineKey],
+              now,
+            })}
+          `,
+        );
+        const serializedPlan = JSON.stringify(queryPlan);
+        expect(serializedPlan).toContain(
           "hosted_linq_delivery_line_accepted_at_idx",
+        );
+        expect(serializedPlan).toContain(
           "hosted_linq_provider_event_line_inbound_received_at_idx",
-        ]));
+        );
       } finally {
         await prisma.hostedLinqProviderEvent.deleteMany({
           where: { eventId: { startsWith: eventPrefix } },

@@ -383,6 +383,46 @@ export async function listHostedLinqHealthyProactiveLines(input: {
  * Derive recent load from the deduplicated effect owners. Accepted deliveries
  * own outbound effects; inbound message events own inbound effects.
  */
+export function buildHostedLinqRecentMessageEffectCountsQuery(input: {
+  lineLookupKeys: readonly string[];
+  now: Date;
+}): Prisma.Sql {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_LINQ_RECENT_MESSAGE_LOAD_WINDOW_MS,
+  );
+
+  return Prisma.sql`
+    WITH recent_line_counts AS (
+      SELECT
+        "phone_number_lookup_key",
+        COUNT(*)::bigint AS "message_effect_count"
+      FROM "hosted_linq_delivery"
+      WHERE "phone_number_lookup_key" IN (${Prisma.join(input.lineLookupKeys)})
+        AND "accepted_at" >= ${cutoff}
+        AND "accepted_at" <= ${input.now}
+      GROUP BY "phone_number_lookup_key"
+
+      UNION ALL
+
+      SELECT
+        "phone_number_lookup_key",
+        COUNT(*)::bigint AS "message_effect_count"
+      FROM "hosted_linq_provider_event"
+      WHERE "phone_number_lookup_key" IN (${Prisma.join(input.lineLookupKeys)})
+        AND "event_type" = 'message.received'
+        AND "direction" = 'inbound'
+        AND "received_at" >= ${cutoff}
+        AND "received_at" <= ${input.now}
+      GROUP BY "phone_number_lookup_key"
+    )
+    SELECT
+      "phone_number_lookup_key" AS "phoneNumberLookupKey",
+      SUM("message_effect_count")::bigint AS "messageEffectCount"
+    FROM recent_line_counts
+    GROUP BY "phone_number_lookup_key"
+  `;
+}
+
 export async function readHostedLinqRecentMessageEffectCountsTx(input: {
   lineLookupKeys: readonly string[];
   now: Date;
@@ -398,42 +438,13 @@ export async function readHostedLinqRecentMessageEffectCountsTx(input: {
     );
   }
 
-  const cutoff = new Date(
-    input.now.getTime() - HOSTED_LINQ_RECENT_MESSAGE_LOAD_WINDOW_MS,
-  );
   const rows = await input.prisma.$queryRaw<Array<{
     messageEffectCount: bigint;
     phoneNumberLookupKey: string;
-  }>>(Prisma.sql`
-    WITH recent_line_counts AS (
-      SELECT
-        "phone_number_lookup_key",
-        COUNT(*)::bigint AS "message_effect_count"
-      FROM "hosted_linq_delivery"
-      WHERE "phone_number_lookup_key" IN (${Prisma.join(lineLookupKeys)})
-        AND "accepted_at" >= ${cutoff}
-        AND "accepted_at" <= ${input.now}
-      GROUP BY "phone_number_lookup_key"
-
-      UNION ALL
-
-      SELECT
-        "phone_number_lookup_key",
-        COUNT(*)::bigint AS "message_effect_count"
-      FROM "hosted_linq_provider_event"
-      WHERE "phone_number_lookup_key" IN (${Prisma.join(lineLookupKeys)})
-        AND "event_type" = 'message.received'
-        AND "direction" = 'inbound'
-        AND "received_at" >= ${cutoff}
-        AND "received_at" <= ${input.now}
-      GROUP BY "phone_number_lookup_key"
-    )
-    SELECT
-      "phone_number_lookup_key" AS "phoneNumberLookupKey",
-      SUM("message_effect_count")::bigint AS "messageEffectCount"
-    FROM recent_line_counts
-    GROUP BY "phone_number_lookup_key"
-  `);
+  }>>(buildHostedLinqRecentMessageEffectCountsQuery({
+    lineLookupKeys,
+    now: input.now,
+  }));
 
   return new Map(
     rows.map((row) => [
