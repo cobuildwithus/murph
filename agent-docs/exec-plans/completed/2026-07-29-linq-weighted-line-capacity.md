@@ -1,6 +1,6 @@
 # Weighted Linq line capacity
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -73,3 +73,4 @@ Updated: 2026-07-29
 - Expected outcomes: weighted selection and fallback tests pass, route
   projection/backfill is additive and idempotent, and exact-head ReviewGPT/CI
   complete with no accepted findings.
+Completed: 2026-07-29
