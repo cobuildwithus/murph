@@ -899,6 +899,9 @@ export async function executeClaimedAssistantCronJob(
             channel: claimedJob.target.channel,
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
+            onNewsletterPendingDeliveryIntentId: (intentId) => {
+              pendingDeliveryIntentId = intentId
+            },
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
             outboxExternalThreadRouteAuthority:
@@ -1059,6 +1062,16 @@ export async function executeClaimedAssistantCronJob(
     foregroundPreemption.dispose()
     finishedAt = new Date().toISOString()
     yieldCancellation.dispose()
+  }
+
+  if (pendingDeliveryIntentId) {
+    foregroundYielded = false
+    outcome = 'delivery_pending'
+    reason = errorCode
+      ? `delivery_pending_after_${errorCode}`
+      : errorText
+        ? 'delivery_pending_after_error'
+        : 'delivery_pending'
   }
 
   const run = assistantCronRunRecordSchema.parse({

@@ -4079,6 +4079,9 @@ describe('assistant cron runtime orchestration', () => {
 
   it.each([
     {
+      expectedRunError: null,
+      expectedRunOutcome: 'no_op',
+      expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'partial newsletter delivery',
       newsletterPendingDeliveryIntentId: null,
@@ -4089,8 +4092,12 @@ describe('assistant cron runtime orchestration', () => {
         skippedNoEmailMemberIds: [],
         status: 'partial_failure' as const,
       },
+      throwsAfterAcceptance: false,
     },
     {
+      expectedRunError: null,
+      expectedRunOutcome: 'no_op',
+      expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'newsletter with no recipients',
       newsletterPendingDeliveryIntentId: null,
@@ -4099,8 +4106,12 @@ describe('assistant cron runtime orchestration', () => {
         skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
       },
+      throwsAfterAcceptance: false,
     },
     {
+      expectedRunError: null,
+      expectedRunOutcome: 'delivery_pending',
+      expectedRunReason: 'delivery_pending',
       expectedRunStatus: 'skipped',
       label: 'durable newsletter fanout is pending',
       newsletterPendingDeliveryIntentId: 'outbox-newsletter-parent',
@@ -4109,11 +4120,32 @@ describe('assistant cron runtime orchestration', () => {
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
       },
+      throwsAfterAcceptance: false,
+    },
+    {
+      expectedRunError: 'notification failed after durable newsletter acceptance',
+      expectedRunOutcome: 'delivery_pending',
+      expectedRunReason:
+        'delivery_pending_after_ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      expectedRunStatus: 'skipped',
+      label: 'durable newsletter acceptance precedes a notification error',
+      newsletterPendingDeliveryIntentId:
+        'outbox-newsletter-parent-after-error',
+      newsletterSendResult: {
+        participantCount: 3,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted' as const,
+      },
+      throwsAfterAcceptance: true,
     },
   ])('settles a scheduled newsletter occurrence when $label', async ({
+    expectedRunError,
+    expectedRunOutcome,
+    expectedRunReason,
     expectedRunStatus,
     newsletterPendingDeliveryIntentId,
     newsletterSendResult,
+    throwsAfterAcceptance,
   }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
@@ -4180,23 +4212,42 @@ describe('assistant cron runtime orchestration', () => {
         },
         paths,
       })
-      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-        decision: {
-          kind: 'send_message',
-          privateSummary: 'Newsletter handled.',
-          text: 'Newsletter handled.',
-        },
-        postTurnDeliveryExpectations: {
-          ...(newsletterPendingDeliveryIntentId
-            ? { newsletterPendingDeliveryIntentId }
-            : {}),
-          newsletterSendResult,
-        },
-        response: 'Newsletter handled.',
-        session: {
-          sessionId: 'session-newsletter-send-succeeded',
-        },
-      })
+      if (throwsAfterAcceptance) {
+        cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
+          notificationInput: {
+            onNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+          },
+        ) => {
+          if (!newsletterPendingDeliveryIntentId) {
+            throw new Error('Expected a pending newsletter parent id.')
+          }
+          notificationInput.onNewsletterPendingDeliveryIntentId?.(
+            newsletterPendingDeliveryIntentId,
+          )
+          throw new VaultCliError(
+            'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+            expectedRunError ?? 'notification failed',
+          )
+        })
+      } else {
+        cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Newsletter handled.',
+            text: 'Newsletter handled.',
+          },
+          postTurnDeliveryExpectations: {
+            ...(newsletterPendingDeliveryIntentId
+              ? { newsletterPendingDeliveryIntentId }
+              : {}),
+            newsletterSendResult,
+          },
+          response: 'Newsletter handled.',
+          session: {
+            sessionId: 'session-newsletter-send-succeeded',
+          },
+        })
+      }
 
       const result = await executeClaimedAssistantCronJob({
         job: claimed,
@@ -4206,6 +4257,9 @@ describe('assistant cron runtime orchestration', () => {
       })
 
       expect(result.run.status).toBe(expectedRunStatus)
+      expect(result.run.outcome).toBe(expectedRunOutcome)
+      expect(result.run.reason).toBe(expectedRunReason)
+      expect(result.run.error).toBe(expectedRunError)
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
       expect(current?.state.pendingOccurrenceAt).toBe(

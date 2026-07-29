@@ -155,8 +155,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain(
-      'never attribute that to sync or permissions without direct tool evidence',
+      'never attribute the absence to sync or permissions',
     )
+    expect(section).not.toContain('direct tool evidence')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')

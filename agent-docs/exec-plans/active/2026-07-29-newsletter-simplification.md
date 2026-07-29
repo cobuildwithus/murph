@@ -61,5 +61,31 @@ Updated: 2026-07-29
 - Focused query, newsletter outbox, cron, notification, skill, prompt, hosted
   fanout, and package typecheck checks pass. The local product-experience review
   returned no findings.
-- Preliminary specialist ReviewGPT, exact-head CI, parent final review, plan
+- Preliminary specialist ReviewGPT found that parent acceptance needed to reach
+  cron before provider completion, that this boundary needed a real
+  notification integration test, and that the empty-stat explanation needed
+  one categorical rule. All three findings are addressed: the existing
+  callback now reports acceptance immediately, cron gives that durable pending
+  state precedence over later turn errors while retaining the error on the run,
+  the integration test covers successful, malformed, and terminal provider
+  outcomes after a real prepare/send pair, and prompt plus skill guidance agree
+  that sync and permissions are never inferred.
+- The downloaded specialist coverage patch was test-only, applied manually
+  after a clean applicability check, and expanded to cover the two
+  post-acceptance error paths.
+- The remediation's five focused test files pass with 250 tests, assistant
+  typecheck passes, and the diff is whitespace-clean.
+- The real pinned Codex App Server measurement on stable representative inputs
+  leaves the Individual request unchanged. The final Group request is 20,220
+  tokens and 90,134 bytes versus 20,170 tokens and 89,871 bytes at the base:
+  +50 tokens (+0.25%) and +263 bytes (+0.29%). Transport-only
+  `client_metadata`, `prompt_cache_key`, and HTTP headers are excluded; the
+  temporary measurement harness was removed.
+- The required product-experience rereview returned no findings after checking
+  the immediate acceptance callback, post-acceptance error precedence,
+  pre-acceptance retry, rolling-day summary, and categorical empty-stat rule.
+  Remaining production-faithful gaps are an induced turn-persistence failure,
+  the complete hosted cold/restart/backlog delivery chain, and live-model
+  empty-stat copy.
+- Documentation drift and the final focused suite pass. Exact-head CI, plan
   closure, and final ReviewGPT remain pending.

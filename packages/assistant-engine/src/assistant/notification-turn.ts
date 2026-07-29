@@ -238,6 +238,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  onNewsletterPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
@@ -402,6 +403,7 @@ export async function sendAssistantNotificationLocal(
             },
             recordNewsletterPendingDeliveryIntentId: (intentId) => {
               newsletterPendingDeliveryIntentId = intentId
+              input.onNewsletterPendingDeliveryIntentId?.(intentId)
             },
             route,
             session: resolved.session,

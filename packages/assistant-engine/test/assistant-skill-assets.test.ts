@@ -923,6 +923,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('After any email `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
+    expect(raw).toContain('never attribute the absence to sync or permissions')
+    expect(raw).not.toContain('direct tool evidence')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).toContain('### Example 1: close race')

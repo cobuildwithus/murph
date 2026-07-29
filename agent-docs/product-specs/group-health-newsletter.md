@@ -147,15 +147,18 @@ intents without revision authority remain readable for compatible retry
 handling. No new queue, table, route, scheduler, or state owner exists.
 
 The parent and children share the occurrence-scoped delivery key. Once the
-outbox accepts the parent, cron stores that parent id in its existing
-`delivery_pending` state and stops model work for the occurrence. Web marks the
-parent sent only after it has revalidated the proof and durably persisted the
-recipient fanout intents. The existing deterministic cron reconciler then
-settles the occurrence from that parent state; it never starts another model
-turn to inspect or recreate recipient work. Each child stays with the generic
-outbox's bounded retry lifecycle, and terminal child failure does not gain a
-fresh budget or body through newsletter-specific replay. Missing prepare/send
-results and unavailable preparation are explicit retryable model-turn failures.
+outbox accepts the parent, it reports that id to cron immediately. Cron stores
+the id in its existing `delivery_pending` state and stops model work for the
+occurrence even if provider completion, decision validation, or turn
+persistence later fails; the run record retains that post-acceptance error.
+Web marks the parent sent only after it has revalidated the proof and durably
+persisted the recipient fanout intents. The existing deterministic cron
+reconciler then settles the occurrence from that parent state; it never starts
+another model turn to inspect or recreate recipient work. Each child stays with
+the generic outbox's bounded retry lifecycle, and terminal child failure does
+not gain a fresh budget or body through newsletter-specific replay. Missing
+prepare/send results and unavailable preparation before parent acceptance are
+explicit retryable model-turn failures.
 The first-run opt-out window remains separate and supplies no scheduled send
 authority, so it can still consume its intentional no-send occurrence.
 Immediately before MIME construction and each recipient provider entry, the web

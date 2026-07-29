@@ -107,7 +107,7 @@ then stop for that run. If participants can receive the email but the featured
 set is empty, send a short email without health comparisons. Never mention who
 failed to share, who lacks an email, or who had insufficient data.
 Do not invent a cause for empty stats: say only that no usable completed-day
-stats were returned, never that data failed to sync or permissions were missing.
+stats were returned; never attribute the absence to sync or permissions.
 
 ## Turn stats into a story
 
