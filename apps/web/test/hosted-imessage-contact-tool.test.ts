@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
+  readHostedMemberEmailAuthorization: vi.fn(),
+  readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   reserveHostedLinqHomeLineFromPoolTx: vi.fn(),
@@ -18,6 +20,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqRecipientPhoneTx:
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
+}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+}));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
 }));
 vi.mock(
   "@/src/lib/hosted-onboarding/linq-home-routing",
@@ -68,6 +76,11 @@ describe("hosted iMessage contact tool", () => {
       userId: "member_telegram",
     });
     mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneLookupKey: "hbidx:phone:v1:member-telegram",
+      phoneNumberVerifiedAt: new Date("2026-07-27T19:00:00.000Z"),
+    });
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -87,6 +100,54 @@ describe("hosted iMessage contact tool", () => {
 
     expect(mocks.reserveHostedLinqHomeLineFromPoolTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it("does not assign or return a line until an iMessage sender identity is verified", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue({
+      phoneLookupKey: "hbidx:phone:v1:unverified",
+      phoneNumberVerifiedAt: null,
+    });
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      verifiedEmail: null,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqRecipientPhone: "+15550100001",
+    });
+
+    await expect(handleHostedRuntimeIMessageContactTool({
+      memberId: "member_telegram",
+      request: { assistantInputId: ASSISTANT_INPUT_ID },
+    })).resolves.toEqual({
+      phoneNumber: null,
+      status: "identity_required",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedLinqHomeLineFromPoolTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts a verified iMessage email identity when no phone is connected", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      verifiedEmail: {
+        address: "member@example.test",
+        lookupKey: "hbidx:email:v1:member-telegram",
+        verifiedAt: new Date("2026-07-27T19:00:00.000Z"),
+      },
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqRecipientPhone: "+15550100001",
+    });
+
+    await expect(handleHostedRuntimeIMessageContactTool({
+      memberId: "member_telegram",
+      request: { assistantInputId: ASSISTANT_INPUT_ID },
+    })).resolves.toEqual({
+      phoneNumber: "+15550100001",
+      status: "existing",
+    });
   });
 
   it("assigns one line and returns the same line on a repeated request", async () => {

@@ -3907,10 +3907,10 @@ export function parseHostedRuntimeIMessageContactToolResponse(
     record.status,
     "Hosted runtime iMessage contact tool response status",
   );
-  if (status === "unavailable") {
+  if (status === "identity_required" || status === "unavailable") {
     if (record.phoneNumber !== null) {
       throw new TypeError(
-        "Hosted runtime iMessage contact unavailable response requires a null phoneNumber.",
+        "Hosted runtime iMessage contact response without a number requires a null phoneNumber.",
       );
     }
     return { phoneNumber: null, status };

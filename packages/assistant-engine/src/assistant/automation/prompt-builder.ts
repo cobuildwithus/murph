@@ -651,7 +651,6 @@ function buildAssistantAutoReplyContextLines(
   const mediaGroupId = resolveGroupedTelegramMediaGroupId(inputs)
   return [
     `Source: ${firstInput.source}`,
-    renderMurphIMessageContactContext(inputs),
     `Occurred at: ${
       firstInput.occurredAt === lastInput.occurredAt
         ? firstInput.occurredAt
@@ -662,27 +661,6 @@ function buildAssistantAutoReplyContextLines(
     inputs.length > 1 ? `Grouped inputs: ${inputs.length}` : null,
     mediaGroupId ? 'Telegram media group: present' : null,
   ]
-}
-
-function renderMurphIMessageContactContext(
-  inputs: readonly AssistantAutoReplyPromptInput[],
-): string | null {
-  if (inputs[0]?.source !== 'telegram') {
-    return null
-  }
-  const phoneNumbers = new Set(
-    inputs.flatMap((input) =>
-      input.sourceMetadata?.kind === 'telegram' &&
-        input.sourceMetadata.murphIMessagePhoneNumber
-        ? [input.sourceMetadata.murphIMessagePhoneNumber]
-        : []
-    ),
-  )
-  if (phoneNumbers.size !== 1) {
-    return null
-  }
-  const [phoneNumber] = phoneNumbers
-  return `Murph iMessage contact: ${phoneNumber}. Use this trusted contact when the user asks how to message Murph or add Murph to an iMessage group.`
 }
 
 function resolveGroupedTelegramMediaGroupId(

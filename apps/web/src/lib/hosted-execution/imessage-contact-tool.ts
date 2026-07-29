@@ -18,6 +18,12 @@ import {
   readHostedLinqHomeLineAuthority,
   reserveHostedLinqHomeLineFromPoolTx,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
+import {
+  readHostedMemberIdentity,
+} from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import {
+  readHostedMemberEmailAuthorization,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -51,6 +57,25 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
       throw new TypeError(
         "iMessage contact assignment requires current direct Telegram input.",
       );
+    }
+    const [identity, emailAuthorization] = await Promise.all([
+      readHostedMemberIdentity({
+        memberId: input.memberId,
+        prisma: tx,
+      }),
+      readHostedMemberEmailAuthorization({
+        memberId: input.memberId,
+        prisma: tx,
+      }),
+    ]);
+    if (
+      !(identity?.phoneLookupKey && identity.phoneNumberVerifiedAt)
+      && !emailAuthorization?.verifiedEmail?.lookupKey
+    ) {
+      return {
+        phoneNumber: null,
+        status: "identity_required",
+      };
     }
 
     await acquireHostedMemberHomeLinqRouteLockTx({

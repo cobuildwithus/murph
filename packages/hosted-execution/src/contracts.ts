@@ -608,7 +608,6 @@ export function readHostedLinqConversationMessageAccountLookupKey(
 
 export interface HostedExecutionTelegramConversationMessagePayload {
   channel: "telegram";
-  murphIMessagePhoneNumber?: string | null;
   routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
   senderMemberId?: string;
   telegramMessage: HostedExecutionTelegramMessage;

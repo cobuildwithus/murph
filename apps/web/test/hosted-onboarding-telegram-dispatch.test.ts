@@ -354,15 +354,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const privateColumns = await buildHostedMemberRoutingPrivateColumns({
-      linqChatId: null,
-      linqRecipientPhone: "+15550100001",
-      memberId: "member_telegram_123",
-      pendingLinqChatId: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: "123",
-      telegramUserId: "456",
-    });
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
@@ -390,7 +381,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             suspendedAt: null,
           },
           memberId: "member_telegram_123",
-          ...privateColumns,
         }),
         upsert: hostedMemberRoutingUpsert,
       },
@@ -445,7 +435,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           kind: "conversation.message",
           message: expect.objectContaining({
             channel: "telegram",
-            murphIMessagePhoneNumber: "+15550100001",
             telegramMessage: expect.objectContaining({
               messageId: "1",
               replyContextPreview: "Replying to: Earlier message\nQuoted text: quoted",

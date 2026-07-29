@@ -357,8 +357,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId,
-      murphIMessagePhoneNumber:
-        lockedMemberLookup.lookup.routing.murphIMessagePhoneNumber,
       occurredAt: summary.occurredAt,
       ...(!summary.isDirect
         ? {

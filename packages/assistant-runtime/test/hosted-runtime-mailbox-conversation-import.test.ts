@@ -1776,7 +1776,6 @@ describe("hosted mailbox conversation import adapter", () => {
     const decodedWake = createConversationWake({
       message: {
         channel: "telegram",
-        murphIMessagePhoneNumber: "+15550100001",
         routeAuthority: {
           channel: "telegram",
           containerMemberId: TEST_USER_ID,
@@ -2999,7 +2998,6 @@ describe("hosted mailbox conversation import adapter", () => {
       eventId: "evt_synthetic_telegram_001",
       message: {
         channel: "telegram",
-        murphIMessagePhoneNumber: "+15550100001",
         routeAuthority: {
           channel: "telegram",
           containerMemberId: TEST_USER_ID,
@@ -3081,7 +3079,6 @@ describe("hosted mailbox conversation import adapter", () => {
       mediaGroupId: event.sourceMetadata?.kind === "telegram"
         ? event.sourceMetadata.mediaGroupId
         : null,
-      murphIMessagePhoneNumber: "+15550100001",
       replyContext: "Replying to: earlier Telegram message",
     });
     assert.match(

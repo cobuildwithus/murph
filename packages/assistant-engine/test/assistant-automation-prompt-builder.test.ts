@@ -1369,32 +1369,6 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).not.toContain('Telegram media group:')
   })
 
-  it('gives Telegram Murph its trusted iMessage contact for contact questions', () => {
-    const result = buildAssistantAutoReplyPrompt([
-      createPromptInput({
-        captureOverrides: {
-          text: 'What is Murph\'s phone number?',
-        },
-        sourceMetadata: {
-          kind: 'telegram',
-          mediaGroupId: null,
-          murphIMessagePhoneNumber: '+15550100001',
-          replyContext: null,
-        },
-      }),
-    ])
-
-    expect(result.kind).toBe('ready')
-    if (result.kind !== 'ready') {
-      throw new Error('Expected a ready prompt result.')
-    }
-    expect(result.prompt).toContain([
-      'Murph iMessage contact: +15550100001.',
-      'Use this trusted contact when the user asks how to message Murph or add Murph to an iMessage group.',
-    ].join(' '))
-    expect(result.prompt).toContain('Message text:\nWhat is Murph\'s phone number?')
-  })
-
   it('keeps telegram media-group context when the first grouped capture lacks metadata but later captures agree', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({

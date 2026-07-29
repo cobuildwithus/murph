@@ -1715,7 +1715,7 @@ export type HostedRuntimeIMessageContactToolResponse =
     }
   | {
       phoneNumber: null;
-      status: "unavailable";
+      status: "identity_required" | "unavailable";
     };
 
 export type HostedRuntimeAssistantConfigurationToolRequest =

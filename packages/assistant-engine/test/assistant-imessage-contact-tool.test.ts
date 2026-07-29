@@ -108,6 +108,37 @@ describe("assistant iMessage contact tool", () => {
     );
   });
 
+  it("explains how to connect an iMessage sender identity before assignment", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {},
+        namespace: "murph",
+        tool: "imessage_contact",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected an iMessage contact dynamic tool request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: buildHostedToolContext(vi.fn(async () => ({
+        phoneNumber: null,
+        status: "identity_required" as const,
+      }))),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "No Murph iMessage number was assigned because this account does not have a verified phone number or email for iMessage. Tell the member to connect and verify the phone number or email they use for iMessage at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.",
+    );
+  });
+
   it("does not claim assignment status when the request cannot be confirmed", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",

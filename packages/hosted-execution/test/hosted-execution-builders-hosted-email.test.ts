@@ -445,7 +445,6 @@ describe("hosted execution wake builders", () => {
     });
     const telegramWake = buildHostedExecutionTelegramConversationMessageWake({
       eventId: "telegram-group-stable-sender",
-      murphIMessagePhoneNumber: "+15550100001",
       occurredAt,
       routeAuthority: {
         channel: "telegram",
@@ -466,7 +465,6 @@ describe("hosted execution wake builders", () => {
 
     expect(parseHostedExecutionWake(linqWake)).toEqual(linqWake);
     expect(parseHostedExecutionWake(telegramWake)).toEqual(telegramWake);
-    expect(telegramWake.message.murphIMessagePhoneNumber).toBe("+15550100001");
 
     expect(() => buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-direct-stable-sender",

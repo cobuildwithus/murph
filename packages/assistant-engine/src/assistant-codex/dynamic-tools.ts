@@ -3462,6 +3462,12 @@ async function executeIMessageContactTool(input: {
 
   try {
     const result = await tool.ensure({ assistantInputId })
+    if (result.status === 'identity_required') {
+      return toolTextResult(
+        true,
+        'No Murph iMessage number was assigned because this account does not have a verified phone number or email for iMessage. Tell the member to connect and verify the phone number or email they use for iMessage at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.',
+      )
+    }
     if (result.status === 'unavailable') {
       return toolTextResult(
         true,

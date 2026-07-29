@@ -446,6 +446,13 @@ describe("hosted runtime control contracts", () => {
       phoneNumber: null,
       status: "unavailable",
     });
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: null,
+      status: "identity_required",
+    })).toEqual({
+      phoneNumber: null,
+      status: "identity_required",
+    });
     expect(() => parseHostedRuntimeIMessageContactToolResponse({
       phoneNumber: "+15550100001",
       status: "unavailable",

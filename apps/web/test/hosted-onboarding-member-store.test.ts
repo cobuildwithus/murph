@@ -641,7 +641,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("returns the member's assigned Murph line instead of a pending line", async () => {
+  it("looks up routing by Telegram lookup key without exposing the blind index", async () => {
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -650,11 +650,7 @@ describe("hosted-member-store", () => {
             memberId: "member_123",
             value: "chat_123",
           }),
-          linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-routing.home-linq-recipient-phone",
-            memberId: "member_123",
-            value: "+15550100001",
-          }),
+          linqRecipientPhoneEncrypted: null,
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_123",
@@ -662,11 +658,7 @@ describe("hosted-member-store", () => {
           },
           memberId: "member_123",
           pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-routing.pending-linq-recipient-phone",
-            memberId: "member_123",
-            value: "+15550100002",
-          }),
+          pendingLinqRecipientPhoneEncrypted: null,
           telegramUserIdEncrypted: null,
           telegramUserLookupKey: "hbidx:telegram-user:v1:abc123",
         }),
@@ -689,12 +681,11 @@ describe("hosted-member-store", () => {
         hasTelegramUserBinding: true,
         linqChatId: "chat_123",
         memberId: "member_123",
-        murphIMessagePhoneNumber: "+15550100001",
       },
     });
   });
 
-  it("does not treat a pending Linq line as an assigned Murph line", async () => {
+  it("looks up routing by raw Telegram user id through read candidates", async () => {
     const findMany = vi.fn().mockResolvedValue([{
       linqChatIdEncrypted: null,
       linqRecipientPhoneEncrypted: null,
@@ -705,11 +696,7 @@ describe("hosted-member-store", () => {
       },
       memberId: "member_123",
       pendingLinqChatIdEncrypted: null,
-      pendingLinqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-routing.pending-linq-recipient-phone",
-        memberId: "member_123",
-        value: "+15550100002",
-      }),
+      pendingLinqRecipientPhoneEncrypted: null,
       telegramUserIdEncrypted: null,
       telegramUserLookupKey: "hbidx:telegram-user:v1:abc123",
     }]);
@@ -735,7 +722,6 @@ describe("hosted-member-store", () => {
         hasTelegramUserBinding: true,
         linqChatId: null,
         memberId: "member_123",
-        murphIMessagePhoneNumber: null,
       },
     });
 

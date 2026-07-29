@@ -108,7 +108,6 @@ export interface HostedMemberRoutingLookupSnapshot {
   hasTelegramUserBinding: boolean;
   linqChatId: string | null;
   memberId: string;
-  murphIMessagePhoneNumber: string | null;
 }
 
 export type HostedMemberRoutingLookupMatch =
@@ -186,7 +185,6 @@ export async function projectHostedMemberRoutingLookup(
       hasTelegramUserBinding: Boolean(routing.telegramUserLookupKey),
       linqChatId: routingState.linqChatId,
       memberId: routingState.memberId,
-      murphIMessagePhoneNumber: routingState.linqRecipientPhone,
     },
   };
 }

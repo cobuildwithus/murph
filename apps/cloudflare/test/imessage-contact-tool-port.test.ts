@@ -14,10 +14,35 @@ import {
 import {
   createHostedRuntimeIMessageContactToolPort,
 } from "../src/runtime-platform/imessage-contact-tool-port.ts";
+import {
+  readHostedRunnerWebControlPolicy,
+} from "../src/runner-outbound/shared-web-control-policy.ts";
 
 describe("hosted iMessage contact tool port", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("allows only the exact bounded POST route", () => {
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "imessage_contact_tool",
+    });
+    expect(readHostedRunnerWebControlPolicy({
+      method: "GET",
+      path: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+    }).allowed).toBe(false);
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: `${HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH}/arbitrary`,
+    }).allowed).toBe(false);
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: "/api/internal/hosted-execution/unrelated/tool",
+    }).allowed).toBe(false);
   });
 
   it("binds the request to the runtime member and validates the response", async () => {

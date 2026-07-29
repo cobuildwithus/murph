@@ -1622,14 +1622,10 @@ function createHostedConversationAssistantInputSourceMetadata(
   );
   const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
     && wake.message.routeAuthority !== null;
-  const murphIMessagePhoneNumber = normalizeHostedMurphIMessagePhoneNumber(
-    wake.message.murphIMessagePhoneNumber,
-  );
   if (
     !mediaGroupId
     && !replyContext
     && !externalThreadRouteAuthorityPresent
-    && !murphIMessagePhoneNumber
   ) {
     return null;
   }
@@ -1645,7 +1641,6 @@ function createHostedConversationAssistantInputSourceMetadata(
       : {}),
     kind: "telegram",
     mediaGroupId,
-    ...(murphIMessagePhoneNumber ? { murphIMessagePhoneNumber } : {}),
     replyContext,
     ...(senderHandle
       ? {
@@ -1654,13 +1649,6 @@ function createHostedConversationAssistantInputSourceMetadata(
         }
       : {}),
   };
-}
-
-function normalizeHostedMurphIMessagePhoneNumber(
-  value: string | null | undefined,
-): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return /^\+[1-9][0-9]{7,14}$/u.test(normalized) ? normalized : null;
 }
 
 /**
