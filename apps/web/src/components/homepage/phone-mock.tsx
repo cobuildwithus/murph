@@ -39,6 +39,8 @@ export type ExperimentResult = {
   };
 };
 
+export type PhoneResultPlacement = "after" | "before";
+
 export function PhoneMock({
   conversationHeight = 460,
   headerTitle = "Murph",
@@ -46,6 +48,7 @@ export function PhoneMock({
   messages,
   priorMessages,
   result,
+  resultPlacement = "before",
 }: {
   conversationHeight?: number;
   headerTitle?: string;
@@ -53,7 +56,14 @@ export function PhoneMock({
   messages: ReadonlyArray<PhoneMessage>;
   priorMessages?: ReadonlyArray<PhoneMessage>;
   result?: ExperimentResult;
+  resultPlacement?: PhoneResultPlacement;
 }) {
+  const resultCard = result ? (
+    <div className="shrink-0">
+      <ExperimentCard result={result} />
+    </div>
+  ) : null;
+
   return (
     <div className="relative rounded-[2.75rem] bg-[#0a0a0a] p-[4px] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55)]">
       <div className="overflow-hidden rounded-[2.5rem] bg-[#f5f0e8]">
@@ -70,12 +80,9 @@ export function PhoneMock({
               {priorMessages && priorMessages.length > 0 ? (
                 <MessageStream messages={priorMessages} />
               ) : null}
-              {result ? (
-                <div className="shrink-0">
-                  <ExperimentCard result={result} />
-                </div>
-              ) : null}
+              {resultPlacement === "before" ? resultCard : null}
               <MessageStream messages={messages} />
+              {resultPlacement === "after" ? resultCard : null}
             </div>
           </PhoneChatScroller>
         </div>
@@ -460,8 +467,7 @@ function Composer() {
   return (
     <div className="bg-[#f5f0e8] px-3 pb-2 pt-1.5">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
+        <span
           aria-hidden="true"
           className="flex size-[30px] shrink-0 items-center justify-center rounded-full border border-[#c4a882]/25 bg-white text-[#5a6e32]"
         >
@@ -473,7 +479,7 @@ function Composer() {
               strokeLinecap="round"
             />
           </svg>
-        </button>
+        </span>
         <div className="flex flex-1 items-center justify-between rounded-full border border-[#c4a882]/25 bg-white py-[6px] pl-4 pr-3">
           <span className="text-[0.8125rem] tracking-tight text-[#736a58]/45">
             iMessage

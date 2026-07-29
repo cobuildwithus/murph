@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { ClubChallengeModes } from "@/src/components/clubs/club-challenge-modes";
@@ -6,9 +7,132 @@ import {
   DEFAULT_MURPH_HEADSHOT,
 } from "@/src/components/homepage/murph-headshot-avatar";
 import {
+  PhoneMock,
+  type ExperimentResult,
+  type PhoneMessage,
+} from "@/src/components/homepage/phone-mock";
+import {
   buildClubPilotMailto,
   MURPH_CLUBS_EMAIL,
 } from "@/src/lib/club-contact";
+
+const CLUB_WEARABLES = [
+  { label: "WHOOP", src: "/brand-logos/connect/whoop.svg" },
+  { label: "Oura", src: "/brand-logos/connect/oura.png" },
+  { label: "Apple Health", src: "/brand-logos/connect/apple-health.png" },
+  { label: "Garmin", src: "/brand-logos/connect/garmin.png" },
+  { label: "Fitbit", src: "/brand-logos/connect/fitbit.svg" },
+  { label: "Eight Sleep", src: "/brand-logos/connect/eight-sleep.svg" },
+  { label: "Withings", src: "/brand-logos/connect/withings.png" },
+  { label: "Peloton", src: "/brand-logos/connect/peloton.svg" },
+  { label: "Polar", src: "/brand-logos/connect/polar.svg" },
+] as const;
+
+const CHALLENGE_INPUT_GROUPS = [
+  {
+    items: [
+      "Steps",
+      "Distance",
+      "Elevation gain",
+      "Floors climbed",
+      "Active calories",
+      "Activity minutes",
+    ],
+    label: "Move",
+  },
+  {
+    items: [
+      "Workouts",
+      "Session count",
+      "Workout minutes",
+      "Running",
+      "Walking",
+      "Cycling",
+      "Swimming",
+      "Sauna",
+    ],
+    label: "Train",
+  },
+  {
+    items: [
+      "Heart-rate zones",
+      "Workout strain",
+      "Day strain",
+      "Activity score",
+      "VO2 max",
+      "Max heart rate",
+    ],
+    label: "Perform",
+  },
+  {
+    items: [
+      "Sleep duration",
+      "Deep sleep",
+      "REM sleep",
+      "Sleep timing",
+      "Resting heart rate",
+      "HRV",
+    ],
+    label: "Recover",
+  },
+  {
+    items: [
+      "Logged protein",
+      "Logged calories",
+      "Logged carbs",
+      "Logged fat",
+      "Logged fiber",
+    ],
+    label: "Nourish",
+  },
+] as const;
+
+const ORGANIZER_MESSAGES: ReadonlyArray<PhoneMessage> = [
+  {
+    from: "user",
+    text: "How many people are ready to score?",
+  },
+  {
+    from: "murph",
+    text: "78 of 86. Five need a connection check; three haven’t shared distance.",
+  },
+  {
+    from: "user",
+    text: "Draft the halfway update.",
+  },
+  {
+    from: "murph",
+    text: "Drafted. It leads with the halfway milestone and keeps the missing-data note private.",
+  },
+];
+
+const ORGANIZER_SUMMARY: ExperimentResult = {
+  eyebrow: "August challenge · live",
+  stats: [
+    { label: "Joined", value: "86" },
+    { label: "Scoring", value: "78" },
+    { label: "Needs help", value: "8" },
+  ],
+};
+
+const MEMBER_MESSAGES: ReadonlyArray<PhoneMessage> = [
+  {
+    from: "user",
+    text: "how are we doing?",
+  },
+  {
+    from: "murph",
+    text: "The club is 61% to the goal and slightly ahead of pace. You’ve contributed 14.2 miles.",
+  },
+  {
+    from: "user",
+    text: "what do i need this week?",
+  },
+  {
+    from: "murph",
+    text: "Another 3.8 miles keeps you on your own pace.",
+  },
+];
 
 export function ClubsPageContent({
   animatePhoneDemo = true,
@@ -29,6 +153,7 @@ export function ClubsPageContent({
       />
       <ModesSection />
       <HowItWorksSection />
+      <WearablesSection />
       <OrganizerSection />
       <MemberSection />
       <PrivacySection />
@@ -52,7 +177,7 @@ function HeroSection({
     >
       <div className="relative mx-auto grid max-w-[1180px] items-center gap-16 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-20">
         <div>
-          <SectionEyebrow dark>Early access · Murph for clubs</SectionEyebrow>
+          <SectionEyebrow dark>Early access · Works in iMessage</SectionEyebrow>
           <h1
             className="mt-8 max-w-[13ch] font-serif text-[clamp(2.75rem,6.6vw,5.4rem)] font-semibold leading-[0.97] tracking-[-0.045em] text-balance text-[#f5f0e8]"
             id="club-hero-title"
@@ -60,9 +185,10 @@ function HeroSection({
             You run the club. <span className="italic text-[#c4a882]">Murph runs the challenge.</span>
           </h1>
           <p className="mt-8 max-w-[55ch] text-[1rem] leading-[1.75] text-pretty text-[#f5f0e8]/66 sm:text-[1.125rem]">
-            Launch one shared goal, split the club into teams, or let everyone
-            compete. Members join from one link. In an early pilot, Murph helps
-            keep score, send updates, and handle the busywork.
+            Create and run the whole challenge in iMessage. Members join from
+            one link and connect the supported wearables they already use.
+            Murph keeps score, sends the useful updates, and handles the
+            busywork.
           </p>
           <div className="mt-9 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
             <a
@@ -203,8 +329,108 @@ function HowItWorksSection() {
         </div>
 
         <p className="mt-9 text-center font-mono text-[9px] uppercase tracking-[0.15em] text-[#736a58]">
-          No spreadsheet · no giant group chat · no new organizer app
+          No spreadsheets required · no manual scorekeeping · no new organizer app
         </p>
+      </div>
+    </section>
+  );
+}
+
+function WearablesSection() {
+  return (
+    <section
+      aria-labelledby="club-wearables-title"
+      className="bg-[#dfe7d3] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
+    >
+      <div className="mx-auto max-w-[1120px]">
+        <div className="grid items-end gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
+          <div>
+            <SectionEyebrow>Wearables, handled</SectionEyebrow>
+            <h2
+              className="mt-6 max-w-[15ch] font-serif text-[clamp(2.2rem,5vw,4.2rem)] font-semibold leading-[0.99] tracking-[-0.04em] text-balance text-[#2d3436]"
+              id="club-wearables-title"
+            >
+              Different wearables. One live challenge.
+            </h2>
+          </div>
+          <div>
+            <p className="max-w-[52ch] text-[1rem] leading-[1.75] text-pretty text-[#4d4533]">
+              Members connect a supported source they already use. Murph
+              automatically turns it into the exact daily stat each person
+              approves, keeps the standings current, and checks missing data
+              without handing the organizer a spreadsheet.
+            </p>
+            <p className="mt-5 font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#3d5028]">
+              No spreadsheets required
+            </p>
+          </div>
+        </div>
+
+        <div
+          aria-label="Connected wearable sources"
+          className="mt-14 grid grid-cols-3 border-y border-[#5a6e32]/20 py-8 sm:grid-cols-5 lg:grid-cols-9"
+        >
+          {CLUB_WEARABLES.map((wearable) => (
+            <div
+              className="flex min-h-24 flex-col items-center justify-center gap-3 px-2 py-3"
+              key={wearable.label}
+            >
+              <Image
+                alt={wearable.label}
+                className="h-8 w-auto max-w-full object-contain sm:h-9"
+                height={72}
+                src={wearable.src}
+                width={72}
+              />
+              <span className="text-center font-mono text-[8px] font-medium uppercase tracking-[0.11em] text-[#635a48]">
+                {wearable.label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-14">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#3d5028]">
+                Supported challenge inputs
+              </p>
+              <h3 className="mt-3 max-w-[22ch] font-serif text-[1.8rem] font-semibold leading-[1.05] tracking-[-0.03em] text-[#2d3436] sm:text-[2.2rem]">
+                Score what your community already tracks.
+              </h3>
+            </div>
+            <p className="max-w-[45ch] text-[0.875rem] leading-[1.65] text-[#635a48]">
+              Availability depends on the connected source. Each challenge asks
+              only for the bounded metric it needs.
+            </p>
+          </div>
+
+          <div className="mt-9 grid border-y border-[#5a6e32]/20 sm:grid-cols-2 lg:grid-cols-5">
+            {CHALLENGE_INPUT_GROUPS.map((group) => (
+              <div
+                className="border-b border-[#5a6e32]/20 px-1 py-6 last:border-b-0 sm:px-5 lg:border-b-0 lg:border-l lg:first:border-l-0"
+                key={group.label}
+              >
+                <p className="font-serif text-[1.2rem] font-semibold text-[#2d3436]">
+                  {group.label}
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {group.items.map((item) => (
+                    <li
+                      className="flex gap-2 text-[0.8125rem] leading-[1.4] text-[#4d4533]"
+                      key={item}
+                    >
+                      <span aria-hidden="true" className="text-[#5a6e32]">
+                        ·
+                      </span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -216,7 +442,7 @@ function OrganizerSection() {
       aria-labelledby="club-organizer-title"
       className="bg-[#1a1f16] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
     >
-      <div className="mx-auto grid max-w-[1120px] items-center gap-14 lg:grid-cols-[0.88fr_1.12fr] lg:gap-20">
+      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-24">
         <div>
           <SectionEyebrow dark>For organizers</SectionEyebrow>
           <h2
@@ -226,43 +452,24 @@ function OrganizerSection() {
             Keep the energy. Lose the admin.
           </h2>
           <p className="mt-6 max-w-[48ch] text-[1rem] leading-[1.75] text-pretty text-[#f5f0e8]/62">
-            Ask Murph what is happening, change the teams, prepare an update,
-            or close the challenge from a small organizer chat. Murph remembers
-            the rules and handles the repetitive work.
+            Text Murph in a private organizer thread in iMessage to check the
+            room, change the teams, prepare an update, or close the challenge.
+            Murph remembers the rules and handles the repetitive work.
           </p>
         </div>
 
-        <div className="rounded-[2rem] border border-[#c4a882]/20 bg-[#f5f0e8] p-5 sm:p-8">
-          <div className="flex items-center justify-between border-b border-[#c4a882]/20 pb-5">
-            <div>
-              <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.17em] text-[#5a6e32]">
-                Organizer room
-              </p>
-              <p className="mt-1 font-serif text-[1.35rem] font-semibold text-[#2d3436]">
-                August challenge
-              </p>
-            </div>
-            <span className="rounded-full bg-[#5a6e32]/10 px-3 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#3d5028]">
-              Live
-            </span>
-          </div>
-
-          <div className="mt-6 space-y-3">
-            <OrganizerExchange
-              answer="78 of 86. Five need a connection check; three haven’t shared distance."
-              request="How many people are ready to score?"
-            />
-            <OrganizerExchange
-              answer="Drafted. It leads with the halfway milestone, names the team race, and keeps the missing-data note private."
-              request="Draft the halfway update."
-            />
-          </div>
-
-          <div className="mt-7 grid grid-cols-3 divide-x divide-[#c4a882]/20 rounded-[1.1rem] bg-[#fffcf6] px-2 py-4 ring-1 ring-black/[0.03]">
-            <OrganizerStat label="Joined" value="86" />
-            <OrganizerStat label="Scoring" value="78" />
-            <OrganizerStat label="Needs help" value="8" />
-          </div>
+        <div
+          aria-label="Organizer conversation in iMessage"
+          className="mx-auto w-full max-w-[320px]"
+        >
+          <PhoneMock
+            conversationHeight={480}
+            headerTitle="Organizer room"
+            messages={ORGANIZER_MESSAGES}
+            murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
+            result={ORGANIZER_SUMMARY}
+            resultPlacement="after"
+          />
         </div>
       </div>
     </section>
@@ -275,32 +482,17 @@ function MemberSection() {
       aria-labelledby="club-member-title"
       className="bg-[#f5f0e8] px-5 py-20 sm:px-10 sm:py-24 lg:px-16 lg:py-28"
     >
-      <div className="mx-auto grid max-w-[1120px] items-center gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
+      <div className="mx-auto grid max-w-[1040px] items-center gap-14 lg:grid-cols-[320px_minmax(0,1fr)] lg:gap-24">
         <div className="order-2 lg:order-1">
-          <div className="mx-auto max-w-[520px] rounded-[2rem] bg-[#ebdfc6] p-5 sm:p-8">
-            <div className="rounded-[1.5rem] border border-[#c4a882]/20 bg-[#fffcf6] p-5 sm:p-6">
-              <div className="flex items-center gap-3 border-b border-[#c4a882]/20 pb-4">
-                <div className="flex size-9 items-center justify-center rounded-full bg-[#5a6e32] font-serif text-[0.875rem] font-semibold text-white">
-                  M
-                </div>
-                <div>
-                  <p className="text-[0.8125rem] font-semibold text-[#2d3436]">Your private Murph</p>
-                  <p className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#736a58]">
-                    Only you can see this chat
-                  </p>
-                </div>
-              </div>
-              <div className="mt-5 flex flex-col gap-2.5">
-                <PrivateMessage from="user">how are we doing?</PrivateMessage>
-                <PrivateMessage from="murph">
-                  The club is 61% to the goal and slightly ahead of pace. You&apos;ve contributed 14.2 miles.
-                </PrivateMessage>
-                <PrivateMessage from="user">what do i need this week?</PrivateMessage>
-                <PrivateMessage from="murph">
-                  Another 3.8 miles keeps you on your own pace.
-                </PrivateMessage>
-              </div>
-            </div>
+          <div
+            aria-label="Private member conversation in iMessage"
+            className="mx-auto w-full max-w-[320px]"
+          >
+            <PhoneMock
+              conversationHeight={420}
+              messages={MEMBER_MESSAGES}
+              murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
+            />
           </div>
         </div>
 
@@ -313,9 +505,9 @@ function MemberSection() {
             One challenge. Personal support for everyone in it.
           </h2>
           <p className="mt-6 max-w-[50ch] text-[1rem] leading-[1.75] text-pretty text-[#635a48]">
-            Every participant has their own private Murph. They can check their
-            progress, ask what to do next, or understand a missing score without
-            turning the club organizer into tech support.
+            Every participant gets private support in iMessage. They can check
+            their progress, ask what to do next, or understand a missing score
+            without turning the club organizer into tech support.
           </p>
         </div>
       </div>
@@ -381,6 +573,11 @@ function PrivacySection() {
 const FAQS = [
   {
     answer:
+      "Yes. Organizers and members talk with Murph through ordinary iMessage conversations; the web is used only when a richer setup or consent step is needed.",
+    question: "Does it really work in iMessage?",
+  },
+  {
+    answer:
       "No. Each member can connect a supported health source individually, and the challenge uses only the metric they explicitly share.",
     question: "Does everyone need the same tracker?",
   },
@@ -388,6 +585,11 @@ const FAQS = [
     answer:
       "No. Organizers can use a small chat with Murph as the control room. Participants join from a link and receive updates privately.",
     question: "Does everyone join one group chat?",
+  },
+  {
+    answer:
+      "No. Murph keeps the supported challenge metric, standings, and missing-data checks current. Organizers can ask for the status or an update in iMessage.",
+    question: "Do organizers need a spreadsheet?",
   },
   {
     answer:
@@ -527,53 +729,6 @@ function ClarityRow({ children, label }: { children: ReactNode; label: string })
       </span>
       <p className="text-[0.8125rem] leading-[1.5] text-[#2d3436]">{children}</p>
     </div>
-  );
-}
-
-function OrganizerExchange({ answer, request }: { answer: string; request: string }) {
-  return (
-    <div className="rounded-[1.15rem] bg-[#fffcf6] p-4 ring-1 ring-black/[0.03] sm:p-5">
-      <p className="ml-auto w-fit max-w-[88%] rounded-2xl rounded-br-[6px] bg-[#5a6e32] px-4 py-2.5 text-[0.875rem] leading-[1.45] text-white">
-        {request}
-      </p>
-      <p className="mt-3 max-w-[92%] rounded-2xl rounded-bl-[6px] bg-[#f5f0e8] px-4 py-2.5 text-[0.875rem] leading-[1.5] text-[#2d3436]">
-        {answer}
-      </p>
-    </div>
-  );
-}
-
-function OrganizerStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="px-2 text-center">
-      <p className="font-serif text-[1.55rem] font-semibold leading-none tracking-[-0.035em] text-[#2d3436]">
-        {value}
-      </p>
-      <p className="mt-2 font-mono text-[8px] uppercase tracking-[0.12em] text-[#736a58]">
-        {label}
-      </p>
-    </div>
-  );
-}
-
-function PrivateMessage({
-  children,
-  from,
-}: {
-  children: ReactNode;
-  from: "murph" | "user";
-}) {
-  const isUser = from === "user";
-  return (
-    <p
-      className={`w-fit max-w-[84%] rounded-2xl px-4 py-2.5 text-[0.875rem] leading-[1.5] ${
-        isUser
-          ? "ml-auto rounded-br-[6px] bg-[#5a6e32] text-white"
-          : "rounded-bl-[6px] bg-[#f5f0e8] text-[#2d3436]"
-      }`}
-    >
-      {children}
-    </p>
   );
 }
 

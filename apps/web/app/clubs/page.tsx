@@ -9,7 +9,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { StickyNav } from "../sticky-nav";
 
 const CLUBS_METADATA_DESCRIPTION =
-  "Run mileage, movement, workout, and team challenges for your club without spreadsheets or manual scorekeeping.";
+  "Run club challenges in iMessage with automatic scoring from the supported wearables members already use, no spreadsheets required.";
 const CLUBS_OPEN_GRAPH_IMAGE = {
   alt: "You run the club. Murph runs the challenge.",
   height: 630,
