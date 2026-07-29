@@ -227,8 +227,10 @@ const HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY = 5;
  * so the retry advances to the next attempt ordinal. A synchronous send
  * failure keeps its ordinal: the row is not provider-correlated and the
  * existing stale-attempt re-claim on the same key stays dedupe-safe against
- * a provider that may have half-processed it. Returns null when that exact
- * identity's attempt budget is exhausted.
+ * a provider that may have half-processed it. An incomplete rich-link partial
+ * also keeps its ordinal even when one provider identity is known, because a
+ * fresh ordinal could replay an already accepted message. Returns null when
+ * that exact identity's attempt budget is exhausted.
  */
 export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
   effectId: string;
@@ -260,6 +262,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
     select: {
       acceptedAt: true,
       deliveredAt: true,
+      failureCode: true,
       idempotencyKey: true,
       lastReceiptAt: true,
       messageLookupKey: true,
@@ -272,6 +275,13 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
     const lookupKey = lookupKeys[index];
     const row = lookupKey ? rowsByKey.get(lookupKey) : undefined;
     if (!row) {
+      return candidate;
+    }
+    if (
+      row.status === "failed"
+      && row.failureCode
+        === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+    ) {
       return candidate;
     }
     if (row.status !== "failed" || !isHostedLinqDeliveryProviderCorrelated(row)) {
@@ -2004,12 +2014,15 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
   const deliveredAt = allMessagesDelivered
     ? selectLatestDate(messages.map((message) => message.deliveredAt))
     : null;
-  const failedAt = latestFailedMessage?.failedAt
-    ?? (incompletePartialDelivery ? delivery.failedAt : null);
-  const failureCode = latestFailedMessage?.failureCode
-    ?? (incompletePartialDelivery ? delivery.failureCode : null);
-  const failureReason = latestFailedMessage?.failureReason
-    ?? (incompletePartialDelivery ? delivery.failureReason : null);
+  const failedAt = incompletePartialDelivery
+    ? delivery.failedAt
+    : latestFailedMessage?.failedAt ?? null;
+  const failureCode = incompletePartialDelivery
+    ? delivery.failureCode
+    : latestFailedMessage?.failureCode ?? null;
+  const failureReason = incompletePartialDelivery
+    ? delivery.failureReason
+    : latestFailedMessage?.failureReason ?? null;
   const terminalStatusChanged =
     status !== delivery.status
     && (status === "delivered" || status === "failed");

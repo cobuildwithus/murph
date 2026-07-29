@@ -512,6 +512,51 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it.each(["invite_signup", "invite_signup_fallback"] as const)(
+    "makes no provider call when a repeated %s partial resolves to its completed delivery row",
+    async (template) => {
+      vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValueOnce({
+        claimed: false,
+        id: "hld_partial_signup",
+        outcome: "completed",
+      });
+      const effect = template === "invite_signup"
+        ? createHostedWebhookLinqMessageSideEffect({
+            chatId: "chat-1",
+            inviteId: "invite-1",
+            memberId: "member-1",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            replyToMessageId: "message-1",
+            sourceEventId: "event-partial-replay",
+            template,
+          })
+        : createHostedWebhookLinqMessageSideEffect({
+            assignedRecipientPhone: "+15550100001",
+            inviteId: "invite-1",
+            memberId: "member-1",
+            memberPhone: "+15551234567",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+            sourceEventId: "event-partial-replay",
+            template,
+          });
+
+      await expect(drainHostedLinqSideEffectsDirect({
+        prisma: createInviteSignupPrismaFixture() as never,
+        sideEffects: [effect],
+      })).resolves.toEqual({
+        sentCount: 0,
+        skipped: [{
+          effectId: effect.effectId,
+          reason: "notice_already_claimed",
+          template,
+        }],
+      });
+
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+      expect(createHostedLinqChat).not.toHaveBeenCalled();
+    },
+  );
+
   it("gives different group reply events independent provider identities", async () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
