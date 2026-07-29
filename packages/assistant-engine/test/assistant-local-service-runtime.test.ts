@@ -157,7 +157,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
-test('sendAssistantMessageLocal records product feedback only after durable reply handoff', async () => {
+test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
   const session = createAssistantSession()
   const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
     idempotencyKey: 'feedback-after-reply',
@@ -165,8 +165,8 @@ test('sendAssistantMessageLocal records product feedback only after durable repl
     relatedChangelogItemIds: [],
     summary: 'Speculative: support the missing Murph path.',
   }
-  const recordProductFeedback = vi.fn(async () => {
-    throw new Error('Best-effort product feedback write failed.')
+  const acceptProductFeedbackCandidate = vi.fn(() => {
+    throw new Error('Best-effort product feedback handoff failed.')
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     providerOutcome: {
@@ -195,8 +195,8 @@ test('sendAssistantMessageLocal records product feedback only after durable repl
     executionContext: {
       hosted: {
         memberId: 'member-product-feedback',
-        productFeedbackRecorder: {
-          recordProductFeedback,
+        productFeedbackCandidateSink: {
+          acceptProductFeedbackCandidate,
         },
         userEnvKeys: [],
       },
@@ -208,16 +208,16 @@ test('sendAssistantMessageLocal records product feedback only after durable repl
     status: 'completed',
   })
 
-  expect(recordProductFeedback).toHaveBeenCalledOnce()
-  expect(recordProductFeedback).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
   expect(
-    recordProductFeedback.mock.invocationCallOrder[0],
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
   ).toBeGreaterThan(
     mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ??
       Number.POSITIVE_INFINITY,
   )
   expect(
-    recordProductFeedback.mock.invocationCallOrder[0],
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
   ).toBeGreaterThan(
     mocks.dispatchAssistantReply.mock.invocationCallOrder[0] ??
       Number.POSITIVE_INFINITY,

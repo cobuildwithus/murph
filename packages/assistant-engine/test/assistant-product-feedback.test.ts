@@ -66,8 +66,8 @@ describe("assistant product feedback", () => {
     ])).toEqual(["assistant_input_1"]);
     expect(createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "initial-user-prompt", source: "initial" }],
-      productFeedbackRecorder: {
-        recordProductFeedback: vi.fn(),
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate: vi.fn(),
       },
     })).toBeNull();
   });
@@ -86,14 +86,11 @@ describe("assistant product feedback", () => {
 
   it("collects the first candidate with the latest checkpointed input authority", async () => {
     let acceptedInputIds = ["assistant_input_1"];
-    const recordProductFeedback = vi.fn(async () => ({
-      feedbackId: "product_feedback_steered",
-      recorded: true,
-    }));
+    const acceptProductFeedbackCandidate = vi.fn();
     const recorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
       getAcceptedInputIds: () => acceptedInputIds,
-      productFeedbackRecorder: { recordProductFeedback },
+      productFeedbackCandidateSink: { acceptProductFeedbackCandidate },
     });
     if (!recorder) {
       throw new Error("Expected a turn-scoped product feedback recorder.");
@@ -107,7 +104,7 @@ describe("assistant product feedback", () => {
 
     await recorder.recordProductFeedback(feedback);
 
-    expect(recordProductFeedback).not.toHaveBeenCalled();
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(recorder.readProductFeedback()).toEqual({
       ...feedback,
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
@@ -139,13 +136,10 @@ describe("assistant product feedback", () => {
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
-    const recordProductFeedback = vi.fn(async () => ({
-      feedbackId: "product_feedback_123",
-      recorded: true,
-    }));
+    const acceptProductFeedbackCandidate = vi.fn();
     const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
-      productFeedbackRecorder: { recordProductFeedback },
+      productFeedbackCandidateSink: { acceptProductFeedbackCandidate },
     });
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -184,7 +178,7 @@ describe("assistant product feedback", () => {
       request,
     });
 
-    expect(recordProductFeedback).not.toHaveBeenCalled();
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled();
     expect(productFeedbackRecorder.readProductFeedback()).toEqual({
       idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
         acceptedInputIds: ["assistant_input_1"],

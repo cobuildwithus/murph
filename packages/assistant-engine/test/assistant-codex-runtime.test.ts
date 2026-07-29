@@ -8739,14 +8739,14 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-product-feedback-retry-',
     )
-    const hostedRecordProductFeedback = vi.fn()
+    const acceptProductFeedbackCandidate = vi.fn()
     const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{
         id: 'assistant_input_feedback_retry',
         source: 'assistant-input',
       }],
-      productFeedbackRecorder: {
-        recordProductFeedback: hostedRecordProductFeedback,
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
       },
     })
     if (!productFeedbackRecorder) {
@@ -8902,7 +8902,7 @@ describe('assistant codex runtime', () => {
       kind: 'feature_request',
       summary: 'Speculative: recovered candidate.',
     })
-    expect(hostedRecordProductFeedback).not.toHaveBeenCalled()
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })
 
   it('emits terminal Codex transport diagnostics after provider actions', async () => {

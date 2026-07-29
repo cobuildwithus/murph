@@ -29,7 +29,7 @@ import type {
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
 import type {
-  AssistantHostedProductFeedbackRecorder,
+  AssistantHostedProductFeedbackCandidateSink,
 } from './execution-context.js'
 
 export interface AssistantProgressDelivery {
@@ -92,13 +92,13 @@ export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   getAcceptedInputIds?: (() => readonly string[]) | null
-  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
+  productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
 }): AssistantTurnProductFeedbackRecorder | null {
-  const productFeedbackRecorder = input.productFeedbackRecorder ?? null
+  const productFeedbackCandidateSink = input.productFeedbackCandidateSink ?? null
   const initialAcceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
     input.acceptedInputItems ?? [],
   )
-  if (!productFeedbackRecorder || initialAcceptedInputIds.length === 0) {
+  if (!productFeedbackCandidateSink || initialAcceptedInputIds.length === 0) {
     return null
   }
 
