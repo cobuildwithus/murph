@@ -31,16 +31,20 @@ describe('assistant automation turn envelope', () => {
     })).not.toHaveProperty('assistantTargetOverride')
   })
 
-  it('preserves a hosted execution context', () => {
-    const executionContext = {
+  it('preserves hosted execution authority while normalizing the envelope', () => {
+    expect(buildAssistantAutomationTurnEnvelope({
+      executionContext: {
+        hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
+        },
+      },
+      turnTrigger: 'automation-cron',
+    }).executionContext).toEqual({
       hosted: {
         memberId: 'member-1',
         userEnvKeys: [],
       },
-    }
-    expect(buildAssistantAutomationTurnEnvelope({
-      executionContext,
-      turnTrigger: 'automation-cron',
-    }).executionContext).toBe(executionContext)
+    })
   })
 })
