@@ -39,4 +39,3 @@ contract before its first deployment.
   required-metric checks.
 - Deploy Cloudflare only after the protected production environment contains
   the complete validated contract.
-
