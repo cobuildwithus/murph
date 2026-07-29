@@ -28,6 +28,20 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('uses available hosted current time for time-sensitive advice', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      hostedRuntime: true,
+    })
+
+    expect(layers.threadContextPrompt).toContain(
+      "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
+    )
+    expect(
+      buildAssistantSystemPromptLayers(baseConversationInput).threadContextPrompt,
+    ).not.toContain('use the user\'s current local time')
+  })
+
   it.each(['direct', 'group'] as const)(
     'adds the conversational low-usage rule for hosted %s chats',
     (conversationScope) => {

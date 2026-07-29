@@ -629,6 +629,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
     conversationScope === "unverified-external"
       ? ASSISTANT_DATE_STYLE_GUIDANCE_TEXT
       : buildAssistantTimeStyleContextText({
+          currentTimeAvailable: input.hostedRuntime === true,
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
@@ -923,6 +924,9 @@ const ASSISTANT_DATE_STYLE_GUIDANCE_TEXT =
 const ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT =
   'For relative dates, be careful around late-night or after-midnight messages: if the user says "tomorrow" or "tmrw" before they have slept, or before the current night has a sleep record, they may mean the upcoming wake-day, which can be the current calendar day. Clarify before writing dates, scheduling, or logging when this changes the outcome.';
 
+const ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT =
+  "When timing materially affects immediate advice, use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise to what still makes sense now.";
+
 function buildAssistantTimezoneLineText(currentTimeZone: string): string {
   return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
 }
@@ -942,6 +946,7 @@ function buildAssistantProductBaseUrlLineText(
 }
 
 function buildAssistantTimeStyleContextText(input: {
+  currentTimeAvailable: boolean;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
@@ -950,6 +955,9 @@ function buildAssistantTimeStyleContextText(input: {
       buildAssistantTimezoneLineText(input.currentTimeZone),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
       ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
+      ...(input.currentTimeAvailable
+        ? [ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT]
+        : []),
     ].join("\n"),
     buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
   );
