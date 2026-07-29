@@ -2079,6 +2079,88 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("flushes diagnostics for committed updates when a later update fails", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        id: "conn_whoop",
+        provider: "whoop",
+        updatedAt: "2026-05-19T22:00:44.000Z",
+      }),
+    });
+    const originalError = new Error("second update failed");
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    let primaryTransactionActive = false;
+    const defaultWithConnectionMutationLock = harness.store.withConnectionMutationLock
+      .getMockImplementation();
+    if (!defaultWithConnectionMutationLock) {
+      throw new Error("Expected the authority harness to own the connection lock.");
+    }
+    harness.store.withConnectionMutationLock.mockImplementation(async (
+      connectionId,
+      callback,
+    ) => {
+      primaryTransactionActive = true;
+      try {
+        if (connectionId === "conn_second") {
+          throw originalError;
+        }
+        return await defaultWithConnectionMutationLock(connectionId, callback);
+      } finally {
+        primaryTransactionActive = false;
+      }
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await expect(applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          occurredAt: "2026-05-19T22:03:28.000Z",
+          updates: [
+            {
+              connectionId: "conn_whoop",
+              failureDiagnostic: {
+                accountStatus: "reauthorization_required",
+                code: "WHOOP_TOKEN_REQUEST_FAILED",
+                retryable: false,
+              },
+              localState: {
+                lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+                lastErrorMessage: "WHOOP token request failed.",
+                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+              },
+              observedConnectedAt: "2026-04-06T09:00:00.000Z",
+              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
+            },
+            {
+              connectionId: "conn_second",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      scheduleFailureDiagnostics: (task) => {
+        expect(primaryTransactionActive).toBe(false);
+        scheduledTasks.push(task);
+      },
+      trustedUserId: "user_123",
+    })).rejects.toBe(originalError);
+
+    expect(scheduledTasks).toHaveLength(1);
+    expect(mocks.writeHostedRuntimeLogs).not.toHaveBeenCalled();
+    await scheduledTasks[0]?.();
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledTimes(1);
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
+      entries: [expect.objectContaining({
+        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        eventCode: "device-sync.job_failed",
+      })],
+      userId: "user_123",
+    });
+  });
+
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {
     const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(

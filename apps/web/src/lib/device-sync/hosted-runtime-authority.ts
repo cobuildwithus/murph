@@ -200,10 +200,11 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
   const failureDiagnostics: HostedRuntimeLogEntry[] = [];
-  for (const update of parsed.updates) {
-    const applied = await controlPlane.store.withConnectionMutationLock(
-      update.connectionId,
-      async (tx) => {
+  try {
+    for (const update of parsed.updates) {
+      const applied = await controlPlane.store.withConnectionMutationLock(
+        update.connectionId,
+        async (tx) => {
         const record = await tx.deviceConnection.findFirst({
           where: {
             id: update.connectionId,
@@ -494,25 +495,36 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             writeUpdate,
           },
         } satisfies HostedRuntimeFailureApplyResult;
-      },
-    );
-    updates.push(applied.update);
-    if (applied.failureDiagnostic) {
-      failureDiagnostics.push(applied.failureDiagnostic);
+        },
+      );
+      updates.push(applied.update);
+      if (applied.failureDiagnostic) {
+        failureDiagnostics.push(applied.failureDiagnostic);
+      }
     }
-  }
-
-  if (failureDiagnostics.length > 0) {
-    const task = async () => {
-      await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
-        entries: failureDiagnostics,
-        userId: input.trustedUserId,
-      });
-    };
-    if (input.scheduleFailureDiagnostics) {
-      input.scheduleFailureDiagnostics(task);
-    } else {
-      await task();
+  } finally {
+    if (failureDiagnostics.length > 0) {
+      const entries = [...failureDiagnostics];
+      const task = async () => {
+        await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
+          entries,
+          userId: input.trustedUserId,
+        });
+      };
+      if (input.scheduleFailureDiagnostics) {
+        try {
+          input.scheduleFailureDiagnostics(task);
+        } catch (error) {
+          console.warn(
+            "Hosted device-sync failure diagnostic scheduling failed.",
+            formatHostedExecutionSafeLogErrorDetails(error, {
+              code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_SCHEDULING_FAILED",
+            }),
+          );
+        }
+      } else {
+        await task();
+      }
     }
   }
 

@@ -2023,7 +2023,21 @@ function recordHostedMailboxDedupeConflictLog(input: {
   // The mailbox row is already the durable append authority. Keep only this
   // rare mismatch in platform logs, with content-free metadata, so optional
   // diagnostics cannot add work to or abort the canonical transaction.
-  console.warn("Hosted mailbox dedupe conflict.", {
+  console.warn(
+    "Hosted mailbox dedupe conflict.",
+    summarizeHostedMailboxDedupeConflictForLog(input),
+  );
+}
+
+function summarizeHostedMailboxDedupeConflictForLog(input: {
+  existing: HostedMailboxItemRow;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  payloadBytes: number;
+  payloadHash: string | null;
+  payloadSchema: string;
+}) {
+  return {
     component: "mailbox",
     eventCode: "mailbox.dedupe_conflict",
     existingBytes: input.existing.payloadBytes ?? null,
@@ -2036,7 +2050,7 @@ function recordHostedMailboxDedupeConflictLog(input: {
     requestedKind: input.kind,
     requestedLane: input.lane,
     requestedSchema: input.payloadSchema,
-  });
+  };
 }
 
 export async function hydrateHostedMailboxItemTx(input: {

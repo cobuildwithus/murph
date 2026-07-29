@@ -7,8 +7,11 @@ import pg, { type Client, type Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  deleteExpiredHostedRuntimeLogs,
   deleteHostedRuntimeLogDataForUsers,
   hostedRuntimeLogSubjectKey,
+  listHostedRuntimeLogs,
+  listHostedRuntimeTurnTimingLogs,
   recordHostedRuntimeLogs,
   type HostedRuntimeLogSqlClient,
   type HostedRuntimeLogSqlDatabase,
@@ -223,15 +226,147 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       }),
     ]);
   });
+
+  it("executes dedicated recent and timing reads against the migrated schema", async () => {
+    const sql = requireDatabase(database);
+    const userId = `member_runtime_log_reads_${randomToken()}`;
+    rememberSubject(subjectKeys, userId);
+    const attemptId = `attempt_${randomToken()}`;
+
+    await expect(recordHostedRuntimeLogs({
+      database: sql,
+      entries: [
+        runtimeEntry(),
+        timingEntry({
+          attemptId,
+          stage: "reply-dispatched",
+        }),
+        timingEntry({
+          attemptId,
+          stage: "provider-result",
+        }),
+      ],
+      isUserActive: async () => true,
+      userId,
+    })).resolves.toBe(3);
+
+    const recent = await listHostedRuntimeLogs({
+      database: sql,
+      limit: 10,
+      userId,
+    });
+    expect(recent).toHaveLength(3);
+    expect(recent.every((row) => row.userId === userId)).toBe(true);
+    expect(recent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+      }),
+      expect.objectContaining({
+        attemptId,
+        eventCode: "assistant.automation_detail",
+      }),
+    ]));
+
+    const timing = await listHostedRuntimeTurnTimingLogs({
+      attemptIds: [attemptId],
+      database: sql,
+      from: new Date("2026-07-29T00:00:00.000Z"),
+      limit: 10,
+      to: new Date("2026-07-30T00:00:00.000Z"),
+    });
+    expect(timing).toEqual([
+      expect.objectContaining({
+        attemptId,
+        redactedJson: expect.objectContaining({
+          turnTimingStage: "reply-dispatched",
+        }),
+      }),
+    ]);
+  });
+
+  it("executes one-row retention batches with separate verbose and hard cutoffs", async () => {
+    const postgres = requirePool(pool);
+    const userId = `member_runtime_log_retention_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    const rowPrefix = `retention_${randomToken()}`;
+    const rows = [
+      [`${rowPrefix}_old_info`, "2026-07-20T00:00:00.000Z", "info"],
+      [`${rowPrefix}_recent_info`, "2026-07-23T00:00:00.000Z", "info"],
+      [`${rowPrefix}_old_warn`, "2026-07-14T00:00:00.000Z", "warn"],
+      [`${rowPrefix}_recent_warn`, "2026-07-19T00:00:00.000Z", "warn"],
+    ] as const;
+    for (const [id, at, level] of rows) {
+      await postgres.query(
+        `
+          INSERT INTO hosted_runtime_log (
+            id,
+            subject_key,
+            at,
+            level,
+            component,
+            phase,
+            event_code
+          )
+          VALUES ($1, $2, $3, $4, 'mailbox', 'import', 'mailbox.imported')
+        `,
+        [id, subjectKey, at, level],
+      );
+    }
+
+    await expect(deleteExpiredHostedRuntimeLogs({
+      batchSize: 1,
+      database: requireDatabase(database),
+      maxBatches: 4,
+      retentionCutoff: new Date("2026-07-15T00:00:00.000Z"),
+      verboseCutoff: new Date("2026-07-22T00:00:00.000Z"),
+    })).resolves.toBe(2);
+
+    await expect(postgres.query<{ id: string }>(
+      `
+        SELECT id
+        FROM hosted_runtime_log
+        WHERE subject_key = $1
+        ORDER BY id
+      `,
+      [subjectKey],
+    )).resolves.toMatchObject({
+      rows: [
+        { id: `${rowPrefix}_recent_info` },
+        { id: `${rowPrefix}_recent_warn` },
+      ],
+    });
+  });
 });
 
 function runtimeEntry() {
   return {
-    at: new Date().toISOString(),
+    at: "2026-07-29T12:00:00.000Z",
     component: "mailbox" as const,
     eventCode: "mailbox.imported" as const,
     level: "info" as const,
     phase: "import" as const,
+  };
+}
+
+function timingEntry(input: {
+  attemptId: string;
+  stage: string;
+}) {
+  return {
+    at: input.stage === "reply-dispatched"
+      ? "2026-07-29T12:00:02.000Z"
+      : "2026-07-29T12:00:01.000Z",
+    attemptId: input.attemptId,
+    component: "assistant" as const,
+    eventCode: "assistant.automation_detail" as const,
+    level: "info" as const,
+    phase: "active_turn_input" as const,
+    redactedJson: {
+      schema: "murph.assistant-turn-timing.v1",
+      turnTimingStage: input.stage,
+      type: "assistant.turn.timing",
+    },
   };
 }
 
