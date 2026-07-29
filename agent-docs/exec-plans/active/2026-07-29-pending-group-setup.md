@@ -154,6 +154,9 @@ Updated: 2026-07-29
   pending setup is only a one-shot transfer envelope.
 - Preserve existing first-active-sender behavior whenever no setup can be
   selected safely.
+- Keep this scope distinct from open Linq group work: line recovery, line/chat
+  health, and participant display-name presentation reuse neighboring owners
+  but do not own pending setup or roster-matched ownership transfer.
 - Keep the PR draft until the full configured-group behavior and exact-head gates
   are complete.
 
@@ -181,5 +184,10 @@ Updated: 2026-07-29
   69 dynamic group-tool tests.
 - The required product-experience review found two blocking recovery/ordering
   gaps; both were corrected with the focused replay proofs above.
+- An open-PR title/body/file audit found no duplicate pending-group
+  implementation. The nearest overlapping PRs own line recovery (#1122),
+  line/chat health (#1118), and participant display names (#1133); their shared
+  hot files remain a reconciliation concern, not a reason for a second setup
+  architecture.
 - Exact-head CI is running from the reconciled branch. Preliminary specialist
   review, parent final review, final ReviewGPT, and final merge proof remain.
