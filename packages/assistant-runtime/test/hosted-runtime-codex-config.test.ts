@@ -234,10 +234,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     ),
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
-  assert.match(
-    config,
-    /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
-  );
+  assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.match(
     config,
     /\[features\.current_time_reminder\]\nenabled = true\nclock_source = "system"\ndelivery_mode = "after_user_or_tool_output"\nreminder_interval_seconds = 60/u,
@@ -1444,9 +1441,6 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[features]",
       "plugins = false",
       "memories = true",
-      "",
-      "[features.code_mode]",
-      'direct_only_tool_namespaces = ["murph"]',
       "",
       "[features.current_time_reminder]",
       "enabled = true",

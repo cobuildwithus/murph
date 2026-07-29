@@ -81,6 +81,20 @@ describe("clubs client behavior", () => {
         expect(pressedButtons[0]?.textContent).toContain(mode.label);
         expect(rendered.container.textContent).toContain(mode.preview);
       }
+
+      const portraitStyles = [
+        ...rendered.container.querySelectorAll<HTMLElement>(
+          '[aria-hidden="true"][style*="/personas/"]',
+        ),
+      ].map((portrait) => portrait.getAttribute("style"));
+      expect(portraitStyles).toHaveLength(3);
+      expect(portraitStyles).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("/personas/athlete.jpg"),
+          expect.stringContaining("/personas/founder.jpg"),
+          expect.stringContaining("/personas/sleeper.jpg"),
+        ]),
+      );
     } finally {
       await rendered.cleanup();
     }
