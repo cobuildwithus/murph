@@ -26,7 +26,10 @@ import {
   buildHostedMemberBillingPrivateColumns,
   readHostedMemberBillingPrivateState,
 } from "./member-private-codecs";
-import { assertHostedMemberNotSuspended } from "./entitlement";
+import {
+  assertHostedMemberNotSuspended,
+  isHostedMemberSuspended,
+} from "./entitlement";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -961,16 +964,20 @@ export async function bindPreparedHostedMemberStripeCustomerIfMissingTx(input: {
   memberId: string;
   preparedCustomer: PreparedHostedMemberStripeCustomer;
   tx: Prisma.TransactionClient;
-}): Promise<boolean> {
+}): Promise<
+  "bound" | "existing_customer" | "member_missing" | "member_suspended"
+> {
   await lockHostedMemberRow(input.tx, input.memberId);
   const member = await input.tx.hostedMember.findUnique({
     select: { suspendedAt: true },
     where: { id: input.memberId },
   });
   if (!member) {
-    return false;
+    return "member_missing";
   }
-  assertHostedMemberNotSuspended(member);
+  if (isHostedMemberSuspended(member.suspendedAt)) {
+    return "member_suspended";
+  }
   await assertHostedMemberStripeBillingIdentifiersAvailableTx({
     memberId: input.memberId,
     stripeCustomerId: input.preparedCustomer.stripeCustomerId,
@@ -982,7 +989,7 @@ export async function bindPreparedHostedMemberStripeCustomerIfMissingTx(input: {
     where: { memberId: input.memberId },
   });
   if (currentBillingRef?.stripeCustomerLookupKey) {
-    return false;
+    return "existing_customer";
   }
 
   try {
@@ -1009,7 +1016,7 @@ export async function bindPreparedHostedMemberStripeCustomerIfMissingTx(input: {
     throw error;
   }
 
-  return true;
+  return "bound";
 }
 
 export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {

@@ -111,16 +111,26 @@ export async function closeUnboundHostedSubscriptionCheckout(input: {
   }
 
   if (input.deleteSessionCustomer && terminal.customerId) {
-    try {
-      await input.stripe.customers.del(terminal.customerId);
-    } catch (error) {
-      if (!isStripeResourceMissingError(error)) {
-        logHostedStripeFailure({
-          error,
-          operationName: "customers.del.unbound-checkout",
-        });
-        throw error;
-      }
+    await deleteUnboundHostedStripeCustomer({
+      customerId: terminal.customerId,
+      stripe: input.stripe,
+    });
+  }
+}
+
+export async function deleteUnboundHostedStripeCustomer(input: {
+  customerId: string;
+  stripe: Stripe;
+}): Promise<void> {
+  try {
+    await input.stripe.customers.del(input.customerId);
+  } catch (error) {
+    if (!isStripeResourceMissingError(error)) {
+      logHostedStripeFailure({
+        error,
+        operationName: "customers.del.unbound-checkout",
+      });
+      throw error;
     }
   }
 }

@@ -66,7 +66,10 @@ import {
   normalizeNullableString,
 } from "./shared";
 import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
-import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
+import {
+  closeUnboundHostedSubscriptionCheckout,
+  deleteUnboundHostedStripeCustomer,
+} from "./subscription-checkout-lifecycle";
 import {
   bindHostedMemberSubscriptionCheckoutUnderLockTx,
   prepareHostedMemberSubscriptionCheckout,
@@ -893,7 +896,7 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
     prisma: input.prisma,
     stripeCustomerId: candidateStripeCustomerId,
   });
-  const bound = await input.prisma.$transaction(
+  const bindOutcome = await input.prisma.$transaction(
     (tx) => bindPreparedHostedMemberStripeCustomerIfMissingTx({
       memberId: input.memberId,
       preparedCustomer,
@@ -901,7 +904,7 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
     }),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
-  if (bound) {
+  if (bindOutcome === "bound") {
     return candidateStripeCustomerId;
   }
 
@@ -909,7 +912,22 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (!currentBillingRef?.stripeCustomerId) {
+  const candidateIsBound =
+    currentBillingRef?.stripeCustomerId === candidateStripeCustomerId;
+  if (!candidateIsBound) {
+    await deleteUnboundHostedStripeCustomer({
+      customerId: candidateStripeCustomerId,
+      stripe: input.stripe,
+    });
+  }
+  if (bindOutcome === "member_suspended") {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message: "This hosted account is suspended. Contact support to restore access.",
+    });
+  }
+  if (bindOutcome === "member_missing") {
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
       httpStatus: 409,
@@ -917,7 +935,24 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
       retryable: true,
     });
   }
-  return currentBillingRef.stripeCustomerId;
+  if (candidateIsBound) {
+    return candidateStripeCustomerId;
+  }
+
+  if (currentBillingRef?.stripeCustomerId) {
+    return currentBillingRef.stripeCustomerId;
+  }
+  if (bindOutcome === "existing_customer") {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+      httpStatus: 409,
+      message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+      retryable: true,
+    });
+  }
+
+  bindOutcome satisfies never;
+  throw new TypeError("Unexpected Pulse Trial Stripe Customer bind outcome.");
 }
 
 async function resolveHostedBillingCheckoutAuth(

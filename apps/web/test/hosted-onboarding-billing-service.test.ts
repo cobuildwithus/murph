@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
+    prepareHostedMemberStripeCustomer: vi.fn(),
     readActiveHostedFamilySponsorship: vi.fn(),
     readHostedMemberFamilyBillingClaim: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
@@ -30,6 +31,24 @@ const mocks = vi.hoisted(() => {
     stripe,
   };
 });
+
+vi.mock(
+  "@/src/lib/hosted-onboarding/hosted-member-billing-store",
+  async () => {
+    const actual = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/hosted-member-billing-store")
+    >("@/src/lib/hosted-onboarding/hosted-member-billing-store");
+    mocks.prepareHostedMemberStripeCustomer.mockImplementation(
+      actual.prepareHostedMemberStripeCustomer,
+    );
+
+    return {
+      ...actual,
+      prepareHostedMemberStripeCustomer:
+        mocks.prepareHostedMemberStripeCustomer,
+    };
+  },
+);
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -542,6 +561,69 @@ describe("createHostedBillingCheckout", () => {
     );
   });
 
+  it("finishes Pulse Trial provider and crypto preparation before opening the member transaction", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+    const { stripeCustomerIdEncrypted } =
+      await buildHostedMemberBillingPrivateColumns({
+        memberId: "member_123",
+        stripeCustomerId: "cus_pulse_trial_123",
+        stripeSubscriptionId: null,
+      });
+    if (!stripeCustomerIdEncrypted) {
+      throw new Error("Expected encrypted Stripe Customer fixture.");
+    }
+    const stripeCustomerLookupKey =
+      createHostedStripeCustomerLookupKey("cus_pulse_trial_123");
+    if (!stripeCustomerLookupKey) {
+      throw new Error("Expected Stripe Customer lookup fixture.");
+    }
+    const stripeCustomer = createDeferred<{ id: string }>();
+    const preparedCustomer = createDeferred<{
+      stripeCustomerId: string;
+      stripeCustomerIdEncrypted: string;
+      stripeCustomerLookupKey: string;
+    }>();
+    mocks.stripe.customers.create.mockReturnValueOnce(stripeCustomer.promise);
+    mocks.prepareHostedMemberStripeCustomer.mockReturnValueOnce(
+      preparedCustomer.promise,
+    );
+
+    const checkout = createHostedBillingCheckout({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.stripe.customers.create).toHaveBeenCalledOnce();
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    stripeCustomer.resolve({ id: "cus_pulse_trial_123" });
+    await vi.waitFor(() => {
+      expect(
+        mocks.prepareHostedMemberStripeCustomer,
+      ).toHaveBeenCalledOnce();
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    preparedCustomer.resolve({
+      stripeCustomerId: "cus_pulse_trial_123",
+      stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey,
+    });
+
+    await expect(checkout).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
   it("uses the durable customer that wins while Pulse Trial customer creation is in flight", async () => {
     process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
@@ -586,6 +668,59 @@ describe("createHostedBillingCheckout", () => {
       }),
       expect.anything(),
     );
+    expect(mocks.stripe.customers.del).toHaveBeenCalledWith(
+      "cus_losing_candidate",
+    );
+  });
+
+  it("deletes the unbound Pulse Trial customer when account deletion wins", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({ member: null });
+
+    await expect(createHostedBillingCheckout({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.customers.del).toHaveBeenCalledWith(
+      "cus_pulse_trial_123",
+    );
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("deletes the unbound Pulse Trial customer when suspension wins", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        suspendedAt: new Date("2026-03-27T12:00:01.000Z"),
+      },
+    });
+
+    await expect(createHostedBillingCheckout({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.stripe.customers.del).toHaveBeenCalledWith(
+      "cus_pulse_trial_123",
+    );
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it("rejects Pulse Trial checkout when the rollout flag is disabled", async () => {
@@ -1529,4 +1664,15 @@ function matchesBillingRefWhere(
     );
   }
   return true;
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }

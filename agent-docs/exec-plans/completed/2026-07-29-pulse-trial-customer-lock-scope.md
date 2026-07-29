@@ -1,6 +1,6 @@
 # Pulse Trial Customer Lock Scope
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -19,6 +19,8 @@ Updated: 2026-07-29
   the candidate only when no Customer has already won.
 - Concurrent callers converge on the member's bound Customer without adding a
   queue, lease, lifecycle state, schema, dependency, or cleanup loop.
+- A definitely unbound candidate is deleted after the transaction when account
+  deletion, suspension, or a different durable Customer wins the race.
 - Focused coverage proves Stripe and hosted-crypto operations cannot execute
   while the member lock is held.
 
@@ -70,6 +72,9 @@ Updated: 2026-07-29
   regression.
 - [x] Implement the smallest outside-transaction provider/crypto preparation
   with a short locked bind.
-- [ ] Complete focused and canonical verification.
-- [ ] Complete preliminary specialists, parent review, final ReviewGPT, CI, and
-  conflict proof.
+- [x] Resolve the preliminary specialist's deferred-boundary coverage finding
+  and the parent review's definite-unbound Customer cleanup race.
+- [x] Complete focused, canonical, and acceptance verification.
+- [x] Complete preliminary specialists and parent review.
+- [ ] Complete final ReviewGPT, CI, and conflict proof.
+Completed: 2026-07-29
