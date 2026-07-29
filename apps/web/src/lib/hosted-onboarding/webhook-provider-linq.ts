@@ -104,7 +104,6 @@ import {
 } from "./linq-home-routing";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
-  hasActiveHostedLinqManagedLine,
 } from "./linq-line-store";
 import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import {
@@ -2506,22 +2505,24 @@ async function planHostedLinqGroupChatWebhook(input: {
       ? "phone-identity"
       : "verified-email"
     : "none";
-
-  if (!(await hasActiveHostedLinqManagedLine({
-    phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
-    prisma: input.prisma,
-  }))) {
-    return ignored("recipient-line-unmanaged", senderIdentityMatch);
+  let activeSenderMemberId: string | null = null;
+  if (sender) {
+    if (
+      isHostedMemberSuspended(sender.suspendedAt)
+      || !(await readHostedRuntimeAiAccessDecision({
+        memberId: sender.id,
+        prisma: input.prisma,
+      })).allowed
+    ) {
+      return ignored("sender-inactive", senderIdentityMatch);
+    }
+    activeSenderMemberId = sender.id;
+  } else if (participantContact.kind !== "phone") {
+    // Preserve the existing verified-email authority boundary. The prepared
+    // owner exception is for an unknown phone participant speaking first; an
+    // unverified email sender remains ineligible to start a group route.
+    return ignored("sender-identity-unresolved");
   }
-
-  const activeSenderMemberId = sender
-    && !isHostedMemberSuspended(sender.suspendedAt)
-    && (await readHostedRuntimeAiAccessDecision({
-      memberId: sender.id,
-      prisma: input.prisma,
-    })).allowed
-      ? sender.id
-      : null;
   const pendingSetupParticipantMemberIds = activeSenderMemberId
     ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
     : input.participantMemberIds;
@@ -2542,11 +2543,15 @@ async function planHostedLinqGroupChatWebhook(input: {
       tx: input.prisma,
     });
     if (preparedResult.kind !== "ensured") {
+      if (
+        preparedResult.pendingSetupResolution
+          === "recipient_line_unmanaged"
+      ) {
+        return ignored("recipient-line-unmanaged", senderIdentityMatch);
+      }
       return !sender
         ? ignored("sender-identity-unresolved")
-        : activeSenderMemberId === null
-          ? ignored("sender-inactive", senderIdentityMatch)
-          : ignored("provision-unavailable", senderIdentityMatch);
+        : ignored("provision-unavailable", senderIdentityMatch);
     }
     const ensureResult = preparedResult.ensure;
     createdContainerMemberId = ensureResult.created

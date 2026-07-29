@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   claimHostedPendingGroupSetupForParticipantsTx,
@@ -31,6 +31,26 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
       kind: "none",
       reason: "no_candidates",
     });
+  });
+
+  it("distinguishes a non-managed recipient line before reading candidates", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const queryRaw = vi.fn();
+
+    await expect(claimHostedPendingGroupSetupForParticipantsTx({
+      participantMemberIds: ["member_owner"],
+      recipientPhoneLookupKeys: ["line_lookup_key"],
+      senderMemberId: "member_owner",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedLinqLine: { findFirst },
+      } as never,
+    })).resolves.toEqual({
+      kind: "none",
+      reason: "recipient_line_unmanaged",
+    });
+    expect(findFirst).toHaveBeenCalledOnce();
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   it("selects the only roster-matched pending setup even when someone else speaks first", () => {

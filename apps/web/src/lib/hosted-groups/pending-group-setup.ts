@@ -71,6 +71,7 @@ export type HostedPendingGroupSetupClaimReason =
   | "invalid_payload"
   | "no_candidates"
   | "only_candidate"
+  | "recipient_line_unmanaged"
   | "sender_wins_conflict";
 
 export type HostedPendingGroupSetupClaimResult =
@@ -87,7 +88,11 @@ export type HostedPendingGroupSetupClaimResult =
       kind: "none";
       reason: Extract<
         HostedPendingGroupSetupClaimReason,
-        "ambiguous" | "claim_raced" | "invalid_payload" | "no_candidates"
+        | "ambiguous"
+        | "claim_raced"
+        | "invalid_payload"
+        | "no_candidates"
+        | "recipient_line_unmanaged"
       >;
     };
 
@@ -311,7 +316,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
     phoneNumberLookupKeys: recipientPhoneLookupKeys,
     prisma: input.tx,
   }))) {
-    return { kind: "none", reason: "no_candidates" };
+    return { kind: "none", reason: "recipient_line_unmanaged" };
   }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {

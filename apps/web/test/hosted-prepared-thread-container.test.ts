@@ -199,4 +199,30 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     );
     expect(mocks.upsertPreferences).not.toHaveBeenCalled();
   });
+
+  it("does not apply the fallback owner when the recipient line is unmanaged", async () => {
+    mocks.claimPendingSetup.mockResolvedValue({
+      kind: "none",
+      reason: "recipient_line_unmanaged",
+    });
+
+    await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey: "hplk_unknown_line",
+      fallbackOwnerMemberId: "member_first_sender",
+      mailboxDedupeKey: "event_group",
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      participantMemberIds: ["member_first_sender"],
+      recipientPhoneLookupKeys: ["hplk_unknown_line"],
+      senderMemberId: "member_first_sender",
+      threadId: "chat_group",
+      tx,
+    })).resolves.toEqual({
+      kind: "owner_unavailable",
+      pendingSetupResolution: "recipient_line_unmanaged",
+    });
+
+    expect(mocks.ensureThreadContainer).not.toHaveBeenCalled();
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
+    expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
+  });
 });

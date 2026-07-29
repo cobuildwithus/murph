@@ -67,6 +67,15 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     senderMemberId: input.senderMemberId,
     tx: input.tx,
   });
+  if (
+    pendingSetupClaim.kind === "none"
+    && pendingSetupClaim.reason === "recipient_line_unmanaged"
+  ) {
+    return {
+      kind: "owner_unavailable",
+      pendingSetupResolution: pendingSetupClaim.reason,
+    };
+  }
   const fallbackOwnerMemberId = normalizeNullableString(
     input.fallbackOwnerMemberId,
   );
