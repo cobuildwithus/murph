@@ -1,5 +1,3 @@
-import { Cli } from 'incur'
-
 import {
   groupChallengeScoreResultSchema,
   scoreGroupChallengeJson,
@@ -16,8 +14,8 @@ import {
 export const knowledgeChallengeScoreCommandDescription =
   'Apply one frozen additive challenge scorecard to model-normalized participant quantities. This command performs validation and deterministic arithmetic only; it does not read health data, infer metric rules, or write challenge state.'
 
-export function registerKnowledgeChallengeScoreCommand(knowledge: Cli.Cli): void {
-  knowledge.command('score-challenge', {
+export function createKnowledgeChallengeScoreCommandDefinition() {
+  return {
     args: emptyArgsSchema,
     description: knowledgeChallengeScoreCommandDescription,
     hint:
@@ -26,7 +24,7 @@ export function registerKnowledgeChallengeScoreCommand(knowledge: Cli.Cli): void
       input: inputFileOptionSchema,
     },
     output: groupChallengeScoreResultSchema,
-    async run({ options }) {
+    async run({ options }: { options: { input: string } }) {
       const input = await loadJsonInputObject(
         options.input,
         'group challenge scorecard input',
@@ -40,5 +38,5 @@ export function registerKnowledgeChallengeScoreCommand(knowledge: Cli.Cli): void
         )
       }
     },
-  })
+  }
 }

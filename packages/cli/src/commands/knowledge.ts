@@ -27,7 +27,7 @@ import {
   knowledgeUpsertResultSchema,
 } from '@murphai/query'
 import {
-  registerKnowledgeChallengeScoreCommand,
+  createKnowledgeChallengeScoreCommandDefinition,
 } from './knowledge-challenge-score.js'
 
 export function registerKnowledgeCommands(cli: Cli.Cli) {
@@ -36,7 +36,10 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       'Manage and inspect Murph\'s non-canonical derived knowledge wiki under derived/knowledge/**.',
   })
 
-  registerKnowledgeChallengeScoreCommand(knowledge)
+  knowledge.command(
+    'score-challenge',
+    createKnowledgeChallengeScoreCommandDefinition(),
+  )
 
   knowledge.command('upsert', {
     description:
