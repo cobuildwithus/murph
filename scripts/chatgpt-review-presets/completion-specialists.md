@@ -23,8 +23,9 @@ The three lenses are conditional:
   components, rendered interactions, or design-system-facing UI. The
   repository's meaning-preserving tiny static-copy fast path should not reach
   this review.
-- Apply the coverage lens when the routed verification includes truthful
-  `pnpm test:diff` coverage or an owner-level coverage command.
+- Apply the coverage lens when executable behavior, tests, fixtures, config, or
+  direct-proof scaffolding changed in a way that needs truthful proof review.
+  Applicability does not depend on a local coverage umbrella command.
 
 State `applicable` or `not applicable` for each lens with one sentence of
 evidence. Apply every applicable lens together; do not split them into separate
@@ -138,8 +139,8 @@ The patch must:
 Do not create a patch for prompt or frontend corrections. If a coverage fix
 requires production changes or broader authority, report the finding without a
 patch. The parent agent will treat any artifact as untrusted intent, inspect its
-paths and hunks, decide whether to apply it, and rerun the canonical verification
-command. Returning a patch never means it has landed.
+paths and hunks, decide whether to apply it, rerun focused local proof, and push
+it through required exact-head CI. Returning a patch never means it has landed.
 
 # Finding bar
 

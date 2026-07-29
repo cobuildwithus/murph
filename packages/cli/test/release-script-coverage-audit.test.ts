@@ -1500,14 +1500,29 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
       'utf8',
     )
-    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
-    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    expect(agentsGuide).toContain(
+      'do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance`',
+    )
+    expect(completionWorkflow).toContain(
+      'exact-head GitHub\n   Actions own the broad suite',
+    )
+    expect(verificationAndRuntime).toContain(
+      '## Verification Ownership By Delivery Path',
+    )
+    expect(verificationAndRuntime).toMatch(
+      /run\s+`pnpm verify:acceptance` before pushing/u,
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'Applicability does not depend on a local coverage umbrella command',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'push\nit through required exact-head CI',
+    )
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
     expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'does not require a ten-minute local admission wait',
     )
-    expect(agentsGuide).toContain('required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
@@ -1705,7 +1720,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
     expect(completionWorkflow).toContain(
-      'repo code/test/config changes whose verification lane includes owner-level coverage',
+      'repo code/test/config changes that alter executable behavior or its proof activate the coverage lens',
     )
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',

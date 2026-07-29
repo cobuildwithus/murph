@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-07-22
+Last verified: 2026-07-29
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -73,15 +73,16 @@ Run one preliminary specialist pass when any of these lenses apply:
   or prompt regression behavior changed;
 - frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
   path; or
-- coverage: the routed verification includes truthful `pnpm test:diff` or an
-  owner-level coverage command.
+- coverage: executable behavior, tests, fixtures, config, or direct-proof
+  scaffolding changed in a way that needs a truthful proof review.
 
 The task must use a clean worktree/PR lane. Commit and push the review candidate,
 open or update the PR, and run
 `scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>`. The PR body must
-declare each lens `applicable` or `not applicable`, name the coverage-bearing
-command and outcome, and list the redacted rendered-evidence files for every
-applicable frontend state and viewport.
+declare each lens `applicable` or `not applicable`, name the focused local proof
+and current exact-head CI status, and list the redacted rendered-evidence files
+for every applicable frontend state and viewport. CI may still be `pending`;
+the preliminary pass runs concurrently with it.
 
 Do not add `ReviewGPT first-reviewed head` to the PR body yet. The preliminary
 pass does not consume the final gate's baseline.
@@ -153,7 +154,8 @@ or direct-proof scaffold; reject production, prompt, UI, config, schema,
 workflow, dependency, lockfile, generated, or docs hunks. Run
 `git apply --check audit-packages/pr-<number>-specialists/reviewgpt-coverage.patch`
 only after that inspection, then apply that same named file deliberately and
-rerun the canonical coverage-bearing command. Never pipe a downloaded artifact
+rerun the focused local proof for the affected behavior. Push the result so the
+required exact-head CI surface evaluates it. Never pipe a downloaded artifact
 directly into `git apply`, and never treat the attachment as landed code.
 
 Resolve accepted prompt/frontend findings in the parent, rerun focused proof,
