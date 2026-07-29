@@ -24,7 +24,7 @@ describe("changelog routes", () => {
   it("publishes every item from the two newest editions with canonical links", async () => {
     const response = await getChangelogFeed(
       new Request(
-        "https://join.example.test/api/changelog?from=2026-07-26&to=2026-07-28&featureLimit=100&improvementLimit=25",
+        "https://join.example.test/api/changelog?from=2026-07-28&to=2026-07-30&featureLimit=100&improvementLimit=25",
       ),
     );
     const body = await response.json();
@@ -35,18 +35,19 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(15);
+    expect(items).toHaveLength(22);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 3 }, () => "2026-07-27"),
-      ...Array.from({ length: 12 }, () => "2026-07-26"),
+      ...Array.from({ length: 9 }, () => "2026-07-29"),
+      ...Array.from({ length: 13 }, () => "2026-07-28"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
-        "overnight-imessage-reminders",
-        "iphone-consent-recovery",
-        "group-room-memory",
-        "recognized-members-always-get-an-answer",
-        "contact-card-after-invite-signup",
+        "post-onboarding-choice-point",
+        "imessage-edits-become-corrections",
+        "clubs-challenge-pilot-page",
+        "imessage-instant-start",
+        "current-sender-group-disclosure",
+        "generated-media-private-path",
       ]),
     );
     for (const item of items) {

@@ -52,6 +52,100 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "post-onboarding-choice-point": (
+    <CalendarMock
+      label="One-time follow-up"
+      entries={[
+        {
+          day: "Week 3",
+          time: "1:30 PM",
+          what: "What feels worth handling now?",
+        },
+      ]}
+    />
+  ),
+  "clubs-challenge-pilot-page": (
+    <ChecklistMock
+      label="Plan a club pilot"
+      items={[
+        { label: "Runs in iMessage", done: true },
+        { label: "Supported wearable inputs", done: true },
+        { label: "Automatic scoring", done: true },
+        { label: "Choose a challenge format", done: false },
+      ]}
+    />
+  ),
+  "imessage-edits-become-corrections": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Actually, I meant Tuesday." },
+        {
+          from: "murph",
+          body: "Got it — Tuesday. That changes the timing, so I’ll use the corrected date.",
+        },
+      ]}
+    />
+  ),
+  "imessage-instant-start": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Can you help me understand my sleep trend?" },
+        {
+          from: "murph",
+          body: "Yes. Send me what you’re looking at and I’ll help make sense of it.",
+        },
+      ]}
+    />
+  ),
+  "current-sender-group-disclosure": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "Murph, tell them about my sleep this week." },
+        {
+          from: "murph",
+          body: "Your sleep was steadier this week, with fewer short nights than the week before.",
+        },
+      ]}
+    />
+  ),
+  "group-sponsorship-moments": (
+    <PreferenceCard
+      label="Sponsor this group"
+      meta="One-time"
+      entries={[
+        { label: "About 100 messages", value: "$5" },
+        { label: "About 200 messages", value: "$10" },
+        { label: "About 400 messages", value: "$20" },
+      ]}
+    />
+  ),
+  "generated-media-private-path": (
+    <div className="mt-5 w-full max-w-[320px]">
+      <ImagePreview
+        alt="A generated image delivered as a private attachment"
+        caption="Private attachment"
+      />
+    </div>
+  ),
+  "overall-ai-usage-bar": (
+    <StatBlock
+      label="AI usage available"
+      value="62%"
+      caption="Monthly allowance + added usage"
+    />
+  ),
+  "group-humans-get-first-refusal": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "You lot remember this place?" },
+        { from: "user", body: "First trip together." },
+      ]}
+    />
+  ),
   "overnight-imessage-reminders": (
     <CalendarMock
       label="Scheduled reminders"
@@ -2682,28 +2776,36 @@ async function resolveTryItByItemId({
   authenticated: boolean;
   editions: readonly { items: readonly ChangelogItem[] }[];
 }): Promise<Map<string, ResolvedChangelogTryIt>> {
-  const itemsWithPrompt = editions
+  const itemsWithTryIt = editions
     .flatMap((edition) => edition.items)
-    .filter((item) => item.tryIt?.prompt && !item.tryIt.href);
+    .filter((item) => item.tryIt);
 
   const entries = await Promise.all(
-    itemsWithPrompt.map(async (item) => {
-      const prompt = item.tryIt!.prompt!;
+    itemsWithTryIt.map(async (item) => {
+      const tryIt = item.tryIt!;
+      if (tryIt.href) {
+        const resolved: ResolvedChangelogTryIt = {
+          authenticated,
+          label: tryIt.label,
+          options: [],
+        };
+        return [item.id, resolved] as const;
+      }
+
+      const prompt = tryIt.prompt!;
       const options = await resolveHostedMurphContactOptions({
         message: {
           body: prompt,
           subject: `Try it: ${item.title}`,
         },
       });
-      return [
-        item.id,
-        {
-          authenticated,
-          label: item.tryIt!.label,
-          options,
-          prompt,
-        } satisfies ResolvedChangelogTryIt,
-      ] as const;
+      const resolved: ResolvedChangelogTryIt = {
+        authenticated,
+        label: tryIt.label,
+        options,
+        prompt,
+      };
+      return [item.id, resolved] as const;
     }),
   );
 

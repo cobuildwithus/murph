@@ -1,6 +1,7 @@
 import type { ChangelogEdition } from "@/src/lib/changelog";
 
 import { ChangelogEditionSection } from "../changelog/changelog-edition-section";
+import { PhoneMock } from "../changelog/phone-mock";
 import { CalendarMock, ChecklistMock, ContactCardMock } from "../changelog/visuals";
 
 const DESIGN_CHANGELOG_EDITION: ChangelogEdition = {
@@ -42,10 +43,29 @@ const DESIGN_CHANGELOG_EDITION: ChangelogEdition = {
       relevanceTags: ["design"],
       sourcePullRequests: [],
     },
+    {
+      id: "design-correction",
+      kind: "improvement",
+      priority: 2,
+      title: "Corrections stay attached to the conversation",
+      summary:
+        "The archive can explain a conversational correction beside a compact phone example without overwhelming the release note.",
+      relevanceTags: ["design"],
+      sourcePullRequests: [],
+    },
   ],
 };
 
 const DESIGN_VISUALS = {
+  "design-correction": (
+    <PhoneMock
+      channel="Private conversation"
+      messages={[
+        { from: "user", body: "Actually, I meant Tuesday." },
+        { from: "murph", body: "Got it — I’ll use Tuesday." },
+      ]}
+    />
+  ),
   "design-contact": (
     <ContactCardMock
       action="Add to Contacts"

@@ -39,13 +39,70 @@ describe("changelog registry", () => {
     );
   });
 
-  it("publishes the complete July 20 through July 27 shipment set", () => {
+  it("ties the Clubs launch note to both shipped page iterations", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "clubs-challenge-pilot-page",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1098, 1105],
+      tryIt: {
+        href: "/clubs",
+        label: "Explore club challenges",
+      },
+    });
+  });
+
+  it("bounds participant-change context to supported iMessage groups", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "group-participant-changes-in-context",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1100],
+      summary: expect.stringContaining("supported iMessage group"),
+    });
+  });
+
+  it("publishes the complete July 20 through July 29 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 8).map((edition) => ({
+      listChangelogEditions().slice(0, 10).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-29",
+        itemIds: [
+          "post-onboarding-choice-point",
+          "clubs-challenge-pilot-page",
+          "group-chat-title-on-demand",
+          "imessage-edits-become-corrections",
+          "group-participant-changes-in-context",
+          "confident-image-generation-status",
+          "home-experiment-history-hierarchy",
+          "homepage-private-murph-first",
+          "conflicting-contact-aliases-preserved",
+        ],
+      },
+      {
+        id: "2026-07-28",
+        itemIds: [
+          "imessage-instant-start",
+          "current-sender-group-disclosure",
+          "join-offer-private-continuation",
+          "group-sponsorship-moments",
+          "generated-media-private-path",
+          "saved-card-usage-topups",
+          "overall-ai-usage-bar",
+          "group-access-recovery-stays-private",
+          "group-humans-get-first-refusal",
+          "room-native-group-challenges",
+          "supportive-proactive-health-outreach",
+          "image-requests-stay-one-request",
+          "named-voice-memo-overrides",
+        ],
+      },
       {
         id: "2026-07-27",
         itemIds: [
@@ -270,8 +327,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-27");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-21");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-29");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-23");
   });
 
   it("resolves only known canonical edition cursors", () => {

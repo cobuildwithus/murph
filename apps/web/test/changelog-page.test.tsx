@@ -32,9 +32,12 @@ import { ChangelogArchiveStudy } from "../app/design/changelog-archive-study";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogPagePath,
   CHANGELOG_EDITIONS_PER_PAGE,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   listChangelogEditions,
+  resolveChangelogEditionPage,
+  resolveChangelogPage,
 } from "../src/lib/changelog";
 
 describe("ChangelogPage", () => {
@@ -54,6 +57,8 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("Corrections that carry forward");
+    expect(markup).toContain("A first text that goes somewhere");
     expect(markup).toContain("Reminders on your time, not ours");
     expect(markup).toContain("Group memory, clearer recovery");
     expect(markup).toContain("A Murph that knows when to speak");
@@ -61,8 +66,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       "Updated documents, honest reactions, usage you can see",
     );
-    expect(markup).toContain("Onboarding that sounds like a person");
-    expect(markup).toContain("Pick who Murph is");
+    expect(markup).not.toContain("Onboarding that sounds like a person");
+    expect(markup).not.toContain("Pick who Murph is");
     expect(markup).not.toContain(
       "Standings that explain themselves, payments that finish",
     );
@@ -77,9 +82,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-20"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-22"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-21#murph-personas"',
+      'href="/changelog?edition=2026-07-29#post-onboarding-choice-point"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
@@ -92,6 +97,8 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain("Ask about X");
     expect(markup).toContain("Turn it up");
+    expect(markup).toContain("Explore club challenges");
+    expect(markup).toContain('href="/clubs"');
     expect(markup).toMatch(/Ask what(?:&#x27;|')s new/u);
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
@@ -126,12 +133,14 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain("Add usage");
     expect(markup).toContain("Group texts per day");
-    expect(markup).toContain("Continue to Garmin");
     expect(markup).toContain("Add to Contacts");
     expect(markup).toContain("Try again");
     expect(markup).toContain("Scheduled reminders");
     expect(markup).toContain("Keep Murph going");
     expect(markup).toContain("Verified line after setup");
+    expect(markup).toContain("One-time follow-up");
+    expect(markup).toContain("Sponsor this group");
+    expect(markup).toContain("Private attachment");
   });
 
   it("renders the real archive section against synthetic design data", () => {
@@ -142,9 +151,11 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Follow-ups arrive where the work started");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
+    expect(markup).toContain("Corrections stay attached to the conversation");
     expect(markup).toContain("Scheduled follow-up");
     expect(markup).toContain("Stay in the app");
     expect(markup).toContain("Verified line after setup");
+    expect(markup).toContain("Private conversation");
     expect(markup).toContain('href="#design-follow-up"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
@@ -163,8 +174,8 @@ describe("ChangelogPage", () => {
       "Seven days of features and improvements from the full Murph archive.",
     );
     expect(markup).not.toContain("The latest seven days");
-    expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-06"');
+    expect(markup).toContain(`href="${buildChangelogPagePath(3)}"`);
+    expect(markup).toContain(`href="${buildChangelogPagePath(5)}"`);
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -182,10 +193,14 @@ describe("ChangelogPage", () => {
 
   it("publishes a canonical URL for each valid archive page", async () => {
     const editions = listChangelogEditions();
-    const pageThreeEditions = editions.slice(14, 21);
-    const pageThreeCardUrl = buildAbsoluteChangelogUrl(
+    const requestedEdition = "2026-07-08";
+    const requestedPage = resolveChangelogEditionPage(requestedEdition);
+    expect(requestedPage).not.toBeNull();
+    const requestedPageEditions = resolveChangelogPage(requestedPage ?? 0)?.editions;
+    expect(requestedPageEditions).toBeTruthy();
+    const requestedPageCardUrl = buildAbsoluteChangelogUrl(
       buildChangelogCardPath(
-        pageThreeEditions
+        (requestedPageEditions ?? [])
           .flatMap((edition) => edition.items)
           .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
           .map((item) => item.id),
@@ -203,7 +218,7 @@ describe("ChangelogPage", () => {
     const [pageOneMetadata, metadata] = await Promise.all([
       generateMetadata({ searchParams: Promise.resolve({}) }),
       generateMetadata({
-        searchParams: Promise.resolve({ edition: "2026-07-08" }),
+        searchParams: Promise.resolve({ edition: requestedEdition }),
       }),
     ]);
 
@@ -217,11 +232,13 @@ describe("ChangelogPage", () => {
     );
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-13" },
+        alternates: {
+          canonical: buildChangelogPagePath(requestedPage ?? 0),
+        },
         openGraph: expect.objectContaining({
-          images: [expect.objectContaining({ url: pageThreeCardUrl })],
+          images: [expect.objectContaining({ url: requestedPageCardUrl })],
         }),
-        title: "Murph Changelog, page 3",
+        title: `Murph Changelog, page ${requestedPage}`,
       }),
     );
     expect(metadata).not.toEqual(
