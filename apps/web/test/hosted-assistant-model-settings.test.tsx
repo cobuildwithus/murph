@@ -202,6 +202,82 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
   view.cleanup();
 });
 
+test("a combined provider and model save preserves both choices for retry", async () => {
+  const combinedPayload = {
+    model: HOSTED_ASSISTANT_SOL_MODEL,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+  };
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("temporary failure"))
+    .mockResolvedValueOnce({
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      updated: true,
+    });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  assert.ok(veniceInput);
+
+  await act(async () => {
+    veniceInput.click();
+    solInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  assert.equal(
+    view.container.querySelector('[role="alert"]')?.textContent,
+    "We couldn’t save this change. Try again.",
+  );
+  assert.ok(isRadioChecked(veniceInput));
+  assert.ok(isRadioChecked(solInput));
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  const statusLine = view.container.querySelector<HTMLElement>(
+    '[aria-live="polite"]',
+  );
+  assert.ok(statusLine);
+  assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
+  assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("non-Edge members can explicitly save Luna as their default model", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,

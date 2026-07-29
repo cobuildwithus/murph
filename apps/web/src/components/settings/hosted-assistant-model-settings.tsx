@@ -360,7 +360,6 @@ function HostedAssistantModelSettingsForm(
         <SettingsStatusLine
           message={status?.message ?? null}
           tone={status?.tone ?? "neutral"}
-          className="sm:whitespace-nowrap"
         />
       </div>
     </form>

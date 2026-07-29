@@ -230,7 +230,7 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
-  it("rejects model and reasoning updates for a synthetic thread-container", async () => {
+  it("rejects provider, model, and reasoning updates for a synthetic thread-container", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -242,6 +242,7 @@ describe("hosted member assistant model preference", () => {
 
     for (const update of [
       { model: "gpt-5.6-luna" as const },
+      { provider: "venice" as const },
       { reasoningEffort: "high" as const },
     ]) {
       await expect(updateHostedMemberAssistantConfigurationTx({
@@ -387,6 +388,34 @@ describe("hosted member assistant model preference", () => {
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
       data: {
         assistantProviderPreference: "venice",
+      },
+      where: {
+        id: "member_edge",
+      },
+    });
+  });
+
+  it("clears the stored provider override when switching back to OpenAI", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      assistantProviderPreference: "venice",
+    }));
+
+    const result = await updateHostedMemberAssistantConfigurationTx({
+      memberId: "member_edge",
+      prisma: tx,
+      provider: "openai",
+    });
+
+    expect(result).toMatchObject({
+      model: "gpt-5.6-terra",
+      updated: true,
+    });
+    expect(result).not.toHaveProperty("hostedAssistantProviderOverride");
+    expect(mocks.updateHostedMember).toHaveBeenCalledWith({
+      data: {
+        assistantProviderPreference: null,
       },
       where: {
         id: "member_edge",

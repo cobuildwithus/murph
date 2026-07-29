@@ -73,6 +73,9 @@ import {
 import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
+import {
+  HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
+} from "../src/runner-egress-venice.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -2343,6 +2346,58 @@ describe("hostedRunnerIntercept", () => {
         "zai-org-glm-4.7:include_venice_system_prompt=false&enable_web_search=off&enable_web_scraping=false",
       stream: true,
     });
+  });
+
+  it("rejects malformed and oversized Venice bodies before upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+    const env = createInterceptEnv({
+      HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+      HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+      HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+      VENICE_API_KEY: "venice-worker-secret",
+      validateRuntimeProviderEgressCredential,
+    });
+    const requestHeaders = {
+      authorization: `Bearer ${credential}`,
+      "content-type": "application/json",
+    };
+
+    const malformedResponse = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: "{malformed",
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+    const oversizedResponse = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: "{}",
+        headers: {
+          ...requestHeaders,
+          "content-length": String(
+            HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES + 1,
+          ),
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(malformedResponse.status).toBe(403);
+    expect(oversizedResponse.status).toBe(413);
+    expect(findFetchCall(fetchMock, "api.venice.ai")).toBeUndefined();
   });
 
   it("injects OpenAI authorization for deploy-smoke egress while the live model turn fence is open", async () => {
