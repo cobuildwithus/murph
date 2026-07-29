@@ -27,6 +27,7 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  type HostedExecutionAcceptedGroupMessageParticipant,
 } from "../contracts.ts";
 import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
@@ -161,6 +162,7 @@ import {
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
+  type HostedRuntimeGroupParticipantDisplayNameSource,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1192,6 +1194,24 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "read_participant_display_names") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqSenderHandles"]),
+      "Hosted runtime group tool read_participant_display_names request",
+    );
+    return {
+      action,
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label:
+            "Hosted runtime group tool read_participant_display_names request linqSenderHandles",
+        },
+      ),
+    };
+  }
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
@@ -1394,19 +1414,38 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "revoke_own_email_share") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "selfOptOut"]),
+      new Set(["action", "participant", "selfOptOut"]),
       "Hosted runtime group tool revoke_own_email_share request",
     );
-    if (record.selfOptOut === undefined || record.selfOptOut === null) {
-      return { action };
+    if (
+      record.participant !== undefined
+      && record.participant !== null
+      && record.selfOptOut !== undefined
+      && record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
+      );
     }
-    return {
-      action,
-      selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-        record.selfOptOut,
-        "Hosted runtime group tool revoke_own_email_share request selfOptOut",
-      ),
-    };
+    if (record.participant !== undefined && record.participant !== null) {
+      return {
+        action,
+        participant: parseHostedRuntimeGroupToolParticipant(
+          record.participant,
+          "Hosted runtime group tool revoke_own_email_share request participant",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
 }
@@ -1531,6 +1570,43 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
   return template;
 }
 
+function parseHostedRuntimeGroupToolParticipant(
+  value: unknown,
+  label: string,
+): HostedExecutionAcceptedGroupMessageParticipant {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["assistantInputId", "senderHandle", "source"]),
+    label,
+  );
+  const source = requireString(record.source, `${label} source`);
+  if (source !== "linq" && source !== "telegram") {
+    throw new TypeError("Hosted runtime group tool participant source is not supported.");
+  }
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    `${label} assistantInputId`,
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError("Hosted runtime group tool participant assistantInputId is invalid.");
+  }
+  const senderHandle = requireString(
+    record.senderHandle,
+    `${label} senderHandle`,
+  ).trim();
+  if (senderHandle.length === 0 || senderHandle.length > 512) {
+    throw new TypeError(
+      "Hosted runtime group tool participant senderHandle is invalid.",
+    );
+  }
+  return {
+    assistantInputId,
+    senderHandle,
+    source,
+  };
+}
+
 function parseHostedRuntimeGroupToolSelfOptOutContext(
   value: unknown,
   label: string,
@@ -1539,7 +1615,9 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
   if (source !== "email" && source !== "linq") {
-    throw new TypeError("Hosted runtime group tool self opt-out source is not supported.");
+    throw new TypeError(
+      "Hosted runtime group tool self opt-out source is not supported.",
+    );
   }
   return {
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
@@ -1743,6 +1821,109 @@ function parseHostedRuntimeGroupDisplayName(
     throw new TypeError(`${label} is too long.`);
   }
   return displayName;
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNamesResult(
+  value: unknown,
+): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "read_participant_display_names" }
+>["result"] {
+  const label =
+    "Hosted runtime group tool read_participant_display_names response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      `${label} unavailable`,
+    );
+    return {
+      status,
+      unavailableReason: requireString(
+        result.unavailableReason,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  if (status !== "ok") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  assertAllowedObjectKeys(
+    result,
+    new Set(["nameMissSenderHandles", "participants", "status"]),
+    label,
+  );
+  const entries = requireArray(result.participants, `${label} participants`);
+  if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+    throw new TypeError(
+      `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const senderHandles = new Set<string>();
+  const participants = entries.map((entry, index) => {
+    const participantLabel = `${label} participants[${index}]`;
+    const participant = requireObject(entry, participantLabel);
+    assertAllowedObjectKeys(
+      participant,
+      new Set(["displayName", "displayNameSource", "senderHandle"]),
+      participantLabel,
+    );
+    const displayName = parseHostedRuntimeGroupDisplayName(
+      participant.displayName,
+      `${participantLabel} displayName`,
+    );
+    if (displayName === null) {
+      throw new TypeError(`${participantLabel} displayName must not be null.`);
+    }
+    const senderHandle = parseHostedRuntimeGroupAskBoundedText({
+      label: `${participantLabel} senderHandle`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
+      value: participant.senderHandle,
+    });
+    if (senderHandles.has(senderHandle)) {
+      throw new TypeError(`${label} senderHandles must be unique.`);
+    }
+    senderHandles.add(senderHandle);
+    const displayNameSource = participant.displayNameSource === undefined
+      ? "profile-name"
+      : parseHostedRuntimeGroupParticipantDisplayNameSource(
+        participant.displayNameSource,
+        `${participantLabel} displayNameSource`,
+      );
+    return { displayName, displayNameSource, senderHandle };
+  });
+  const nameMissSenderHandles = result.nameMissSenderHandles === undefined
+    ? undefined
+    : parseHostedRuntimeGroupBoundedHandles(result.nameMissSenderHandles, {
+        allowEmpty: true,
+        label: `${label} nameMissSenderHandles`,
+      });
+  if (
+    nameMissSenderHandles?.some((senderHandle) =>
+      senderHandles.has(senderHandle)
+    )
+  ) {
+    throw new TypeError(
+      `${label} nameMissSenderHandles must not overlap participants.`,
+    );
+  }
+  return {
+    ...(nameMissSenderHandles === undefined ? {} : { nameMissSenderHandles }),
+    participants,
+    status,
+  };
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNameSource(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantDisplayNameSource {
+  if (value === "profile-name" || value === "unverified-owner-contact") {
+    return value;
+  }
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
@@ -2507,6 +2688,15 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_participant_display_names") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupParticipantDisplayNamesResult(
+        record.result,
+      ),
+    };
   }
 
   if (

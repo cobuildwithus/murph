@@ -84,6 +84,28 @@ describe("HostedUserRunner status", () => {
     });
   });
 
+  it("forwards an explicit zero diagnostic limit to the web status route", async () => {
+    const { runner } = createRunnerStatusHarness();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
+      search?: string | null;
+    }) => {
+      expect(input.search).toBe("?logLimit=0");
+      return Response.json({
+        mailboxLag: [],
+        recentLogs: [],
+        userId: "member_123",
+        workspace: null,
+      });
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runnerStatus({ logLimit: 0 })).resolves.toMatchObject({
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+    });
+  });
+
   it("reports workspace mailbox status from the hosted runtime status", async () => {
     const { runner } = createRunnerStatusHarness();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {

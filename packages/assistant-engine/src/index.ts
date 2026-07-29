@@ -37,6 +37,9 @@ export type {
 } from './assistant/group-phone-call-preview-authority.js'
 export * from './assistant/group-newsletter-automation.js'
 export type {
+  AssistantGroupParticipantDisplayName,
+  AssistantGroupParticipantDisplayNameSource,
+  AssistantHostedGroupParticipantDisplayNameReader,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedMember,

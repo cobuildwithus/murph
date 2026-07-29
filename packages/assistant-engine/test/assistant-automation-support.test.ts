@@ -167,6 +167,9 @@ function createInputSummary(
     text: capture.text,
     attachmentCount: capture.attachmentCount,
     actorIsSelf: capture.actorIsSelf,
+    deliveryTarget: overrides.deliveryTarget ?? capture.threadId,
+    groupRoomBatchingEligible: overrides.groupRoomBatchingEligible ?? false,
+    projectionReady: overrides.projectionReady ?? true,
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }

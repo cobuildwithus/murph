@@ -60,11 +60,19 @@ describe("hosted phone call contracts", () => {
   it("parses the server-owned start request", () => {
     expect(hostedPhoneCallStartRequestSchema.parse({
       brief: VALID_BRIEF,
-      inboundMailboxItemIds: ["mailbox_group_1", "mailbox_group_2"],
+      groupRequester: {
+        assistantInputId: "ain_22222222222222222222222222222222",
+        senderHandle: "7770001",
+        source: "telegram",
+      },
       originSessionId: "session_phone_call",
       requestKey: "turn-123:tool-1",
     })).toMatchObject({
-      inboundMailboxItemIds: ["mailbox_group_1", "mailbox_group_2"],
+      groupRequester: {
+        assistantInputId: "ain_22222222222222222222222222222222",
+        senderHandle: "7770001",
+        source: "telegram",
+      },
       originSessionId: "session_phone_call",
       requestKey: "turn-123:tool-1",
     });
@@ -72,7 +80,31 @@ describe("hosted phone call contracts", () => {
       brief: VALID_BRIEF,
       originSessionId: "session_direct_phone_call",
       requestKey: "turn-124:tool-1",
-    })).not.toHaveProperty("inboundMailboxItemIds");
+    })).not.toHaveProperty("groupRequester");
+  });
+
+  it("rejects malformed exact group requester evidence", () => {
+    expect(() => hostedPhoneCallStartRequestSchema.parse({
+      brief: VALID_BRIEF,
+      groupRequester: {
+        assistantInputId: "ain_not_exact",
+        senderHandle: "7770001",
+        source: "telegram",
+      },
+      originSessionId: "session_phone_call",
+      requestKey: "turn-123:tool-1",
+    })).toThrow();
+  });
+
+  it("keeps the legacy mailbox-evidence request additive during rollout", () => {
+    expect(hostedPhoneCallStartRequestSchema.parse({
+      brief: VALID_BRIEF,
+      inboundMailboxItemIds: ["mailbox_group_1"],
+      originSessionId: "session_phone_call",
+      requestKey: "turn-legacy:tool-1",
+    })).toMatchObject({
+      inboundMailboxItemIds: ["mailbox_group_1"],
+    });
   });
 
   it("keeps start responses bounded to transport lifecycle states", () => {
