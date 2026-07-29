@@ -135,6 +135,9 @@ export function buildAssistantAutoReplyPrompt(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -208,6 +211,9 @@ export async function prepareAssistantAutoReplyInput(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -396,8 +402,28 @@ export function renderAssistantInputGroupContextPrompt(input: {
   return sections.length > 0 ? sections.join('\n\n') : null
 }
 
+export function renderAssistantInputLinqCorrectionContext(
+  metadata: AssistantInputSourceMetadata | null,
+): string | null {
+  if (
+    metadata?.kind !== 'linq' ||
+    metadata.editedSourceInputId === undefined ||
+    metadata.editedTextPartIndex === undefined
+  ) {
+    return null
+  }
+
+  return [
+    `Trusted message correction for Message ref ${metadata.editedSourceInputId}:`,
+    `This input replaces text part ${metadata.editedTextPartIndex} of that accepted Linq message.`,
+    'Treat it as a correction, not a separate request. Only corrections with the same Message ref and part supersede one another; the newest accepted correction is authoritative.',
+    'If the referenced message already received a completed answer, send one concise follow-up only when this correction materially changes that answer or action; otherwise call `murph.finish_without_reply`.',
+  ].join('\n')
+}
+
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
+  correctionContext: string | null
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
   groupContext: string | null
@@ -426,6 +452,9 @@ function renderAssistantAutoReplyInputSection(input: {
   }
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)
+  }
+  if (input.correctionContext) {
+    sections.push(input.correctionContext)
   }
   const projectionNote = input.hasAttachmentContext && input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({
