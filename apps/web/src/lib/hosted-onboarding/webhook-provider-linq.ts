@@ -427,10 +427,10 @@ export async function planHostedLinqMessageEditedWebhook(input: {
   const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
     event.data.id,
   );
-  const sourceMessageLookupKeyLockCandidates =
+  const sourceMessageLookupKeyReadCandidates =
     createHostedLinqMessageLookupKeyReadCandidates(event.data.id);
   const sourceEntries = await readHostedMailboxSourceConversationEntriesTx({
-    sourceMessageLookupKeys: sourceMessageLookupKeyLockCandidates,
+    sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
     tx: input.prisma,
   });
   if (sourceEntries.length > HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS) {
@@ -636,7 +636,6 @@ export async function planHostedLinqMessageEditedWebhook(input: {
   const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
     envelope: correctionWake,
     sourceMessageLookupKey,
-    sourceMessageLookupKeyLockCandidates,
     tx: input.prisma,
   });
   if (mailboxAppend.dedupeConflict) {
@@ -1473,8 +1472,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
       envelope: mailboxWake,
       sourceMessageLookupKey,
-      sourceMessageLookupKeyLockCandidates:
-        createHostedLinqMessageLookupKeyReadCandidates(summary.messageId),
       tx: input.prisma,
     });
 
@@ -2225,8 +2222,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeWithSourceMessageTx({
       envelope: buildMailboxWake(),
       sourceMessageLookupKey,
-      sourceMessageLookupKeyLockCandidates:
-        createHostedLinqMessageLookupKeyReadCandidates(summary.messageId),
       tx: input.prisma,
     })).item;
     await input.prisma.hostedMailboxItem.updateMany({
@@ -2351,8 +2346,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
     envelope: mailboxEnvelope,
     sourceMessageLookupKey,
-    sourceMessageLookupKeyLockCandidates:
-      createHostedLinqMessageLookupKeyReadCandidates(summary.messageId),
     tx: input.prisma,
   });
   if (mailboxAppend.duplicate) {

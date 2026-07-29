@@ -38,16 +38,20 @@ Last verified: 2026-07-28
 ## Runtime Expectations
 
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
-  mailbox. A per-source advisory lock serializes the accepted original and its
-  correction lineage; provider event identity makes exact replay idempotent,
-  changed replay conflicts, stale edits cannot replace newer corrections, and
-  equal timestamps fail closed as ambiguous. One original plus the
-  provider-supported five corrections is the hard lineage bound. If an edit
-  arrives before its original, Web returns a retryable response only during
-  Linq's documented retry horizon and then terminates without inventing a
-  local pending queue. Roll out the nullable source index first, deploy readers
-  and ordinary-message writers next, wait through the maximum edit plus webhook
-  retry window, and enable the `2026-02-03` edit subscription last.
+  mailbox. A per-source advisory lock serializes correction planners from
+  lineage read through correction append; ordinary accepted messages write the
+  blind source index without taking that lock. An edit that races an
+  uncommitted original sees the source as missing and returns the existing
+  retryable response so a provider retry observes the committed original.
+  Provider event identity makes exact replay idempotent, changed replay
+  conflicts, stale edits cannot replace newer corrections, and equal
+  timestamps fail closed as ambiguous. One original plus the provider-supported
+  five corrections is the hard lineage bound. If an edit arrives before its
+  original, Web returns a retryable response only during Linq's documented
+  retry horizon and then terminates without inventing a local pending queue.
+  Roll out the nullable source index first, deploy readers and ordinary-message
+  writers next, wait through the maximum edit plus webhook retry window, and
+  enable the `2026-02-03` edit subscription last.
 - Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that identity during classifier latency, the admitted planner re-reads the winner under the shared participant-phone lock, cannot mint a token, and follows the ordinary signup-link path without attaching its event to the winner's invite. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
 
 - Define startup requirements, health checks, and critical invariants.

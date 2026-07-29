@@ -14,7 +14,6 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
-  acquireHostedMailboxSourceMessageLocksTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedMailboxItemTx,
   readHostedMailboxSourceConversationEntriesTx,
@@ -125,7 +124,7 @@ async function waitForBlockedBackend(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
-    it("serializes original and edit mailbox work on the blind source key", async () => {
+    it("serializes concurrent edit lineage reads on the blind source key", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
       const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -139,25 +138,40 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
       try {
         ownerTransaction = owner.$transaction(async (tx) => {
-          await acquireHostedMailboxSourceMessageLocksTx({
+          await expect(readHostedMailboxSourceConversationEntriesTx({
             sourceMessageLookupKeys: [sourceMessageLookupKey],
             tx,
-          });
+          })).resolves.toEqual([]);
           ownerLocked.resolve();
           await releaseOwner.promise;
         }, transactionOptions);
-        await ownerLocked.promise;
+        await Promise.race([
+          ownerLocked.promise,
+          ownerTransaction.then(() => {
+            throw new Error(
+              "Edit lineage owner completed before holding its source lock.",
+            );
+          }),
+        ]);
 
         contenderTransaction = contender.$transaction(async (tx) => {
           contenderPid.resolve(await readBackendPid(tx));
-          await acquireHostedMailboxSourceMessageLocksTx({
+          await expect(readHostedMailboxSourceConversationEntriesTx({
             sourceMessageLookupKeys: [sourceMessageLookupKey],
             tx,
-          });
+          })).resolves.toEqual([]);
         }, transactionOptions);
+        const pid = await Promise.race([
+          contenderPid.promise,
+          contenderTransaction.then(() => {
+            throw new Error(
+              "Edit lineage contender completed before exposing its backend.",
+            );
+          }),
+        ]);
         await waitForBlockedBackend({
           observer,
-          pid: await contenderPid.promise,
+          pid,
         });
 
         releaseOwner.resolve();
@@ -176,6 +190,114 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("retries an edit that races an uncommitted ordinary source append", async () => {
+      const original = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const edit = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_edit_race_${randomUUID()}`;
+      const messageId = `message_edit_race_${randomUUID()}`;
+      const sourceMessageLookupKey = requireString(
+        createHostedLinqMessageLookupKey(messageId),
+      );
+      const sourceMessageLookupKeyReadCandidates =
+        createHostedLinqMessageLookupKeyReadCandidates(messageId);
+      const accountLookupKey = requireString(
+        createHostedPhoneLookupKey("+15550000000"),
+      );
+      const contactLookupKey = requireString(
+        createHostedPhoneLookupKey("+15551112222"),
+      );
+      const originalAppended = createDeferred<string>();
+      const releaseOriginal = createDeferred();
+      let memberCreated = false;
+      let originalTransaction: Promise<string> | null = null;
+
+      try {
+        await original.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        memberCreated = true;
+
+        originalTransaction = original.$transaction(async (tx) => {
+          const originalWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: `event_edit_race_${randomUUID()}`,
+              linqMessage: {
+                chatId: `chat_edit_race_${randomUUID()}`,
+                from: "+15551112222",
+                isFromMe: false,
+                messageId,
+                parts: [{ type: "text", value: "Original wording" }],
+                service: "iMessage",
+                threadIsDirect: true,
+              },
+              occurredAt: new Date().toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const appended =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: originalWake,
+              sourceMessageLookupKey,
+              tx,
+            });
+          originalAppended.resolve(appended.item.id);
+          await releaseOriginal.promise;
+          return appended.item.id;
+        }, transactionOptions);
+
+        const originalItemId = await Promise.race([
+          originalAppended.promise,
+          originalTransaction.then(() => {
+            throw new Error(
+              "Original source append completed before exposing its uncommitted row.",
+            );
+          }),
+        ]);
+        await expect(edit.$transaction(async (tx) =>
+          readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          }), transactionOptions)).resolves.toEqual([]);
+
+        releaseOriginal.resolve();
+        await expect(originalTransaction).resolves.toBe(originalItemId);
+
+        await expect(edit.$transaction(async (tx) =>
+          readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          }), transactionOptions)).resolves.toMatchObject([{
+          contentAvailable: true,
+          itemId: originalItemId,
+          userId: memberId,
+          wake: {
+            message: {
+              linqMessage: {
+                messageId,
+              },
+            },
+          },
+        }]);
+      } finally {
+        releaseOriginal.resolve();
+        if (originalTransaction) {
+          await Promise.allSettled([originalTransaction]);
+        }
+        if (memberCreated) {
+          await original.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([original, edit]);
+      }
+    });
+
     it("round-trips original and correction lineage through the production mailbox store", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const memberId = `member_edit_lineage_${randomUUID()}`;
@@ -185,7 +307,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const sourceMessageLookupKey = requireString(
         createHostedLinqMessageLookupKey(messageId),
       );
-      const sourceMessageLookupKeyLockCandidates =
+      const sourceMessageLookupKeyReadCandidates =
         createHostedLinqMessageLookupKeyReadCandidates(messageId);
       const accountLookupKey = requireString(
         createHostedPhoneLookupKey("+15550000000"),
@@ -231,14 +353,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             await appendHostedMailboxEnvelopeWithSourceMessageTx({
               envelope: originalWake,
               sourceMessageLookupKey,
-              sourceMessageLookupKeyLockCandidates,
               tx,
             });
           expect(originalAppend.inserted).toBe(true);
 
           await expect(readHostedMailboxSourceConversationEntriesTx({
             sourceMessageLookupKeys:
-              sourceMessageLookupKeyLockCandidates,
+              sourceMessageLookupKeyReadCandidates,
             tx,
           })).resolves.toMatchObject([{
             contentAvailable: true,
@@ -276,7 +397,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             await appendHostedMailboxEnvelopeWithSourceMessageTx({
               envelope: correctionWake,
               sourceMessageLookupKey,
-              sourceMessageLookupKeyLockCandidates,
               tx,
             });
           expect(correctionAppend.inserted).toBe(true);
@@ -284,7 +404,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const acceptedLineage =
             await readHostedMailboxSourceConversationEntriesTx({
               sourceMessageLookupKeys:
-                sourceMessageLookupKeyLockCandidates,
+                sourceMessageLookupKeyReadCandidates,
               tx,
             });
           expect(acceptedLineage.map((entry) => ({
@@ -333,7 +453,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const retiredLineage =
             await readHostedMailboxSourceConversationEntriesTx({
               sourceMessageLookupKeys:
-                sourceMessageLookupKeyLockCandidates,
+                sourceMessageLookupKeyReadCandidates,
               tx,
             });
           expect(retiredLineage.map((entry) => ({

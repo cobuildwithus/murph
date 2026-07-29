@@ -1139,7 +1139,7 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
-  it("indexes accepted Linq input by a blind source-message key", async () => {
+  it("indexes accepted Linq input without an extra source-lock query", async () => {
     let insertedRow: HostedMailboxItemRow | null = null;
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       create: vi.fn<HostedMailboxCreate>(async (args) => {
@@ -1169,10 +1169,6 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     await expect(appendHostedMailboxEnvelopeWithSourceMessageTx({
       envelope,
       sourceMessageLookupKey: "hbidx:linq-message:v2:current",
-      sourceMessageLookupKeyLockCandidates: [
-        "hbidx:linq-message:v2:current",
-        "hbidx:linq-message:v1:previous",
-      ],
       tx,
     })).resolves.toMatchObject({
       inserted: true,
@@ -1183,7 +1179,11 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         sourceMessageLookupKey: "hbidx:linq-message:v2:current",
       }),
     });
-    expect(tx.$executeRaw).toHaveBeenCalled();
+    const executeRawMock = vi.mocked(tx.$executeRaw);
+    expect(executeRawMock).toHaveBeenCalledTimes(3);
+    expect(
+      executeRawMock.mock.calls.map(readHostedMailboxRawSql).join("\n"),
+    ).not.toContain("mailbox-source-message");
   });
 
   it("uses an explicit request identity and expiry without changing ordinary appends", async () => {

@@ -500,7 +500,6 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   sourceMessageLookupKey: string;
-  sourceMessageLookupKeyLockCandidates: readonly string[];
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   return appendHostedMailboxEnvelopeInternalTx(input);
@@ -524,16 +523,9 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
   expiresAt?: Date | string | null;
   itemId?: string;
   sourceMessageLookupKey?: string | null;
-  sourceMessageLookupKeyLockCandidates?: readonly string[];
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
-  await acquireHostedMailboxSourceMessageLocksTx({
-    sourceMessageLookupKeys:
-      input.sourceMessageLookupKeyLockCandidates
-      ?? (input.sourceMessageLookupKey ? [input.sourceMessageLookupKey] : []),
-    tx: input.tx,
-  });
   await assertHostedMailboxEnvelopeWorkspaceTargetTx({
     envelope,
     tx: input.tx,
@@ -1361,6 +1353,10 @@ export async function readHostedMailboxSourceConversationEntriesTx(input: {
     return [];
   }
 
+  // Edit planners hold this lock from the lineage read through correction
+  // append. Ordinary source-indexed appends do not take it: an edit that races
+  // an uncommitted original sees a missing source and uses the bounded provider
+  // retry path after the original commits.
   await acquireHostedMailboxSourceMessageLocksTx({
     sourceMessageLookupKeys,
     tx: input.tx,
