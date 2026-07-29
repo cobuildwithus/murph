@@ -211,11 +211,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'helps with schoolwork while keeping professional work outside group scope',
+    'answers schoolwork and declines professional deliverables in direct and group scopes',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-group-schoolwork-scope-e2e-'),
+        path.join(tmpdir(), 'murph-schoolwork-scope-e2e-'),
       )
 
       try {
@@ -224,29 +224,90 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           skillsRoot,
           slug: 'group-chat',
         })
-        const result = await executeRealCodexAppServerTurn({
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          developerInstructions:
-            buildGroupPointOfViewDeveloperInstructions(),
-          env: {
-            ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        const scopes = [
+          {
+            developerInstructions:
+              buildDirectSchoolworkDeveloperInstructions(),
+            label: 'direct',
           },
-          excludeResumeTurns: true,
-          model: config.model,
-          modelProvider: config.modelProvider,
-          prompt: buildGroupSchoolworkScopeProbe(),
-          reasoningEffort: 'low',
-          sandbox: 'workspace-write',
-          workingDirectory,
-        })
+          {
+            developerInstructions:
+              buildGroupPointOfViewDeveloperInstructions(),
+            label: 'group',
+          },
+        ] as const
 
-        expect(result.finalMessage.trim()).toBe('1:A 2:A 3:B 4:B')
+        for (const scope of scopes) {
+          const commonInput = {
+            approvalPolicy: 'never' as const,
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions: scope.developerInstructions,
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            },
+            excludeResumeTurns: true,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write' as const,
+            workingDirectory,
+          }
+          const schoolwork = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            prompt: [
+              'Murph, this is a programming assignment for my software-deployment course.',
+              'It uses a production-style checkout example, but it is only class work and will not be shipped or used for a client.',
+              'Correct this TypeScript function and briefly explain the bug:',
+              '`function add(a: number, b: number) { return a - b }`',
+            ].join(' '),
+          })
+          const schoolworkText = schoolwork.finalMessage.trim()
+
+          expect(
+            schoolworkText,
+            `${scope.label} schoolwork answer`,
+          ).toMatch(/return a \+ b/iu)
+          expect(
+            schoolworkText,
+            `${scope.label} schoolwork disclaimer`,
+          ).not.toMatch(
+            /hypothetical|practice framing|scope disclaimer|can(?:not|[’']t) help/iu,
+          )
+
+          const professional = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            prompt: [
+              'Murph, write the production TypeScript checkout function',
+              '`deployCheckoutHotfix` for my employer.',
+              'This code will be shipped today. Return the implementation only.',
+            ].join(' '),
+          })
+          const professionalText = professional.finalMessage.trim()
+
+          expect(
+            professionalText,
+            `${scope.label} professional refusal`,
+          ).toMatch(/can(?:not|[’']t)|declin|unable|don[’']t/iu)
+          expect(
+            professionalText,
+            `${scope.label} professional artifact`,
+          ).not.toMatch(
+            /```|function\s+deployCheckoutHotfix|const\s+deployCheckoutHotfix/iu,
+          )
+          expect(
+            professionalText.split(/\s+/u).length,
+            `${scope.label} concise professional refusal`,
+          ).toBeLessThanOrEqual(40)
+          expect(
+            professionalText.split(/\r?\n/u).filter(Boolean),
+            `${scope.label} one-line professional refusal`,
+          ).toHaveLength(1)
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -1660,28 +1721,26 @@ function buildHostedGroupStatusDeveloperInstructions(): string {
   })
 }
 
-function buildGroupSchoolworkScopeProbe(): string {
-  return [
-    'This is a group-chat scope evaluation.',
-    'For each numbered request, choose A or B. Each candidate is the complete action Murph should take.',
-    'Reply exactly `1:<A-or-B> 2:<A-or-B> 3:<A-or-B> 4:<A-or-B>` with no explanation.',
-    '',
-    '1. A student asks Murph to choose the stronger issue in a law-school practice question and briefly explain the answer.',
-    'A: Answer the question directly.',
-    'B: Refuse because the subject resembles a professional legal exam.',
-    '',
-    '2. A student asks Murph to debug code for a programming assignment.',
-    'A: Help debug the educational code.',
-    'B: Refuse because every coding request is professional work.',
-    '',
-    '3. An engineer asks Murph to debug production checkout code for their employer.',
-    'A: Debug the production code.',
-    'B: Decline in one plain sentence because the primary purpose is professional work.',
-    '',
-    '4. A consultant asks Murph to write a client-ready vendor recommendation for a paid engagement.',
-    'A: Produce the client deliverable.',
-    'B: Decline in one plain sentence because the primary purpose is professional work.',
-  ].join('\n')
+function buildDirectSchoolworkDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
 }
 
 function buildGroupPointOfViewCandidateProbe(): string {
