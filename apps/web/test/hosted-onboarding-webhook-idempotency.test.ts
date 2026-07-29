@@ -59,6 +59,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithSourceMessageTx: (input: {
+    envelope: unknown;
+    tx: unknown;
+  }) =>
+    mocks.appendHostedMailboxEnvelopeTx({
+      envelope: input.envelope,
+      tx: input.tx,
+    }),
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
 }));
