@@ -15,9 +15,12 @@ sender explicitly asks how to get more usage or what options exist, Murph treats
 that as an all-options request: it checks referral availability even when current
 usage is healthy and presents any returned earned path beside the separately
 authorized plan, top-up, or group-funding path. The sender does not need to know
-the feature name or explicitly ask for a mission. Describing a mission is not
-consent. Murph arms one only after that person explicitly chooses one exact
-server-returned policy.
+the feature name or explicitly ask for a mission. Murph makes at most one
+pre-action referral-availability read per user turn and reuses that result
+throughout the answer. The only extra read is the authoritative recovery
+required after an arm or cancellation commits but its refreshed snapshot is
+unavailable. Describing a mission is not consent. Murph arms one only after
+that person explicitly chooses one exact server-returned policy.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |

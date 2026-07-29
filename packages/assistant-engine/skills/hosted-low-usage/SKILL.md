@@ -98,7 +98,11 @@ say that Murph only checked status or that no billing change happened.
   only an assistant-initiated low-usage heads-up. Also call it on a trusted
   low-usage turn when an earned-continuity option would fit the moment. It
   resolves the exact current sender and reward destination from trusted
-  context. An unavailable result means do not offer a mission.
+  context. Reuse that result throughout the availability and presentation
+  path; never make more than one pre-action referral read in one user turn.
+  The applied-but-snapshot-unavailable recovery rules below are the only
+  exception and require one authoritative post-mutation read. An unavailable
+  result means do not offer a mission.
 - If the relevant read fails or is unavailable, keep the heads-up generic. Do
   not guess the plan, reset date, action, price, or funding link.
 
@@ -214,9 +218,11 @@ or group-funding path and any returned earned mission in one concise answer.
 Do not answer with only the paid or funding path or make the sender ask again
 using the word "mission."
 
-When the current sender asks about the earned option, call
-`read_usage_referral` again. Describe only the exact returned policies and
-reward labels. `new_person_activation_v1` means starting a fresh group with one
+When the current sender asks about the earned option, use this turn's
+`read_usage_referral` result. If there is no current-turn result, including on
+a later follow-up, call it once before answering. Describe only the exact
+returned policies and reward labels. `new_person_activation_v1` means starting
+a fresh group with one
 genuinely new person, helping them complete normal Murph setup, and having them
 say hi there. After arming that mission, explain the reciprocal setup path:
 start the fresh group, ask whether the other person wants their own personal
