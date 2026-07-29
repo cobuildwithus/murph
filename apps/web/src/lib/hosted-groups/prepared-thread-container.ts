@@ -64,7 +64,6 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedPreparedLinqThreadContainerResult> {
   const pendingSetupClaim = await claimHostedPendingGroupSetupForParticipantsTx({
-    now: input.occurredAt,
     participantMemberIds: input.participantMemberIds,
     recipientPhoneLookupKey: input.recipientPhoneLookupKey,
     senderMemberId: input.senderMemberId,
@@ -88,18 +87,32 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     };
   }
 
-  const ensure = await ensureHostedThreadContainerRouteTx({
-    accountLookupKey: input.accountLookupKey,
-    ...(input.accountLookupKeys
-      ? { accountLookupKeys: input.accountLookupKeys }
-      : {}),
-    channel: "linq",
-    mailboxDedupeKey: input.mailboxDedupeKey,
-    occurredAt: input.occurredAt,
-    ownerMemberId,
-    prisma: input.tx,
-    threadId: input.threadId,
-  });
+  let ensure: HostedThreadContainerRouteEnsureResult;
+  try {
+    ensure = await ensureHostedThreadContainerRouteTx({
+      accountLookupKey: input.accountLookupKey,
+      ...(input.accountLookupKeys
+        ? { accountLookupKeys: input.accountLookupKeys }
+        : {}),
+      channel: "linq",
+      mailboxDedupeKey: input.mailboxDedupeKey,
+      occurredAt: input.occurredAt,
+      ownerMemberId,
+      prisma: input.tx,
+      threadId: input.threadId,
+    });
+  } catch (error) {
+    // Some callers intentionally recover from known route-admission failures
+    // inside the surrounding transaction. Restore the one-shot setup before
+    // rethrowing so that recovery cannot silently consume an unrelated intent.
+    if (pendingSetupClaim.kind === "claimed") {
+      await restoreHostedPendingGroupSetupClaimTx({
+        claimToken: pendingSetupClaim.claimToken,
+        tx: input.tx,
+      });
+    }
+    throw error;
+  }
 
   // This service is intended for the unbound-thread admission path, but a
   // concurrent first message can commit the same route first. Preserve the
