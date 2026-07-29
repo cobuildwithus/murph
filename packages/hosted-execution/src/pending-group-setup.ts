@@ -26,7 +26,7 @@ const hostedRuntimePendingGroupSetupRoomContextSchema = z
     { message: "room context contains unsupported control characters" },
   )
   .refine(
-    (value) => !containsRawParticipantHandle(value),
+    (value) => !containsHostedRuntimeRawParticipantHandle(value),
     { message: "room context must not contain raw participant handles" },
   );
 
@@ -45,7 +45,7 @@ export const hostedExecutionInitialGroupRoomModelMarkdownSchema = z
     { message: "initial group room model contains unsupported control characters" },
   )
   .refine(
-    (value) => !containsRawParticipantHandle(value),
+    (value) => !containsHostedRuntimeRawParticipantHandle(value),
     { message: "initial group room model must not contain raw participant handles" },
   );
 
@@ -139,9 +139,12 @@ export function parseHostedExecutionInitialGroupRoomModelMarkdown(
   return hostedExecutionInitialGroupRoomModelMarkdownSchema.parse(value);
 }
 
-function containsRawParticipantHandle(value: string): boolean {
+export function containsHostedRuntimeRawParticipantHandle(
+  value: string,
+): boolean {
   return (
     /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(value)
+    || containsFormattedPhoneLikeValue(value)
     || /(?:^|[^\p{L}\p{N}])Sender(?![\p{L}\p{N}])[^\p{L}\p{N}\r\n]{0,16}\d{1,16}(?![\p{L}\p{N}])/iu.test(
       value,
     )
@@ -149,5 +152,30 @@ function containsRawParticipantHandle(value: string): boolean {
     || /\btelegram:[^\s`()[\]{}<>]+/iu.test(value)
     || /\bparticipant:[^\s`()[\]{}<>]+/iu.test(value)
     || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(value)
+  );
+}
+
+function containsFormattedPhoneLikeValue(value: string): boolean {
+  const candidates = value.matchAll(
+    /(?:^|[^\p{L}\p{N}])(?<candidate>\+?(?:\(\d{1,4}\)|\d)[\d\t .()-]{5,30}\d)(?![\p{L}\p{N}])/gu,
+  );
+  for (const match of candidates) {
+    const candidate = match.groups?.candidate;
+    if (!candidate || isCalendarDate(candidate)) {
+      continue;
+    }
+    const digitCount = candidate.match(/\d/gu)?.length ?? 0;
+    if (digitCount >= 7 && digitCount <= 15) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isCalendarDate(value: string): boolean {
+  const normalized = value.trim();
+  return (
+    /^\d{4}[-.]\d{1,2}[-.]\d{1,2}$/u.test(normalized)
+    || /^\d{1,2}[-.]\d{1,2}[-.]\d{2,4}$/u.test(normalized)
   );
 }

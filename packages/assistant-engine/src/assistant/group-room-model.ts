@@ -6,6 +6,9 @@ import {
   parseFrontmatterDocument,
   withCanonicalResourceLocks,
 } from '@murphai/core'
+import {
+  containsHostedRuntimeRawParticipantHandle,
+} from '@murphai/hosted-execution/pending-group-setup'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
@@ -144,7 +147,7 @@ export async function readAssistantGroupRoomModelState(
       !body ||
       !status ||
       !assistantGroupRoomModelBodyFitsPrompt(body) ||
-      assistantGroupRoomModelBodyContainsRawParticipantHandle(body)
+      containsHostedRuntimeRawParticipantHandle(body)
     ) {
       return { kind: 'unavailable' }
     }
@@ -359,7 +362,7 @@ function assertAssistantGroupRoomModelBodyValid(body: string): void {
       },
     )
   }
-  if (assistantGroupRoomModelBodyContainsRawParticipantHandle(body)) {
+  if (containsHostedRuntimeRawParticipantHandle(body)) {
     throw new VaultCliError(
       'group_room_model_participant_handle_forbidden',
       'Group room-model body must not contain raw participant handles.',
@@ -372,19 +375,6 @@ function assistantGroupRoomModelBodyFitsPrompt(body: string): boolean {
     assistantConversationHistoryUtf8Bytes(
       renderAssistantGroupRoomModelPrompt(body),
     ) <= ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES
-  )
-}
-
-function assistantGroupRoomModelBodyContainsRawParticipantHandle(
-  body: string,
-): boolean {
-  return (
-    /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(body) ||
-    /(?:^|[^\p{L}\p{N}])Sender(?![\p{L}\p{N}])[^\p{L}\p{N}\r\n]{0,16}\d{1,16}(?![\p{L}\p{N}])/iu.test(body) ||
-    /(?:^|[^\p{L}\p{N}])\d{5,16}(?!\d)/u.test(body) ||
-    /\btelegram:[^\s`()[\]{}<>]+/iu.test(body) ||
-    /\bparticipant:[^\s`()[\]{}<>]+/iu.test(body) ||
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(body)
   )
 }
 

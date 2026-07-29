@@ -123,6 +123,11 @@ describe("pending group setup payload", () => {
     })).toThrow();
     for (const roomContextMarkdown of [
       "Ask +15555550123 about it.",
+      "Ask (555) 123-4567 about it.",
+      "Ask 555-123-4567 about it.",
+      "Ask +1 (555) 123-4567 about it.",
+      "Ask +44 20 7946 0958 about it.",
+      "Ask 555.123.4567 about it.",
       "Ask member@example.test about it.",
       "Ask participant:secret-handle about it.",
       "Ask Sender #123 about it.",
@@ -132,6 +137,13 @@ describe("pending group setup payload", () => {
         roomContextMarkdown,
       })).toThrow();
     }
+    expect(parseHostedRuntimePendingGroupSetupInput({
+      roomContextMarkdown:
+        "The trip starts 2026-07-29; keep replies to 3 bullets.",
+    })).toEqual({
+      roomContextMarkdown:
+        "The trip starts 2026-07-29; keep replies to 3 bullets.",
+    });
     expect(() => parseHostedRuntimePendingGroupSetupInput({
       roomContextMarkdown:
         "x".repeat(HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES + 1),
