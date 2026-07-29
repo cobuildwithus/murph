@@ -1001,13 +1001,14 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it.each([
+    "disabled",
     "owner_suspended",
     "consent_unavailable",
     "projection_disabled",
     "no_safe_unique_label",
     "no_contact_match",
   ] as const satisfies readonly HostedAddressBookAdvisoryLookupOutcome[])(
-    "omits unresolved speaker labels when the advisory source is %s",
+    "keeps a completed empty advisory lookup status ok when the outcome is %s",
     async (outcome) => {
       mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
         candidates: [{
@@ -1055,7 +1056,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readHostedOwnerAddressBookAdvisoryNames).not.toHaveBeenCalled();
   });
 
-  it("omits automatic owner-contact labels when the advisory lookup times out", async () => {
+  it("returns unavailable when the automatic owner-contact lookup times out", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.useFakeTimers();
@@ -1086,7 +1087,10 @@ describe("handleHostedRuntimeGroupTool", () => {
 
       await expect(response).resolves.toEqual({
         action: "read_participant_display_names",
-        result: { participants: [], status: "ok" },
+        result: {
+          status: "unavailable",
+          unavailableReason: "participant_names_unavailable",
+        },
       });
       expect(info).toHaveBeenCalledExactlyOnceWith(
         "Hosted address-book advisory lookup unavailable.",
@@ -1106,7 +1110,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     }
   });
 
-  it("fails soft when the automatic owner-contact overlay fails", async () => {
+  it("returns unavailable when the automatic owner-contact lookup fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
       candidates: [{
@@ -1127,7 +1131,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     })).resolves.toEqual({
       action: "read_participant_display_names",
-      result: { participants: [], status: "ok" },
+      result: {
+        status: "unavailable",
+        unavailableReason: "participant_names_unavailable",
+      },
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(
       "sensitive storage failure",

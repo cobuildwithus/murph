@@ -1474,7 +1474,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
       prisma,
     });
   for (const participant of participants) {
-    const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+    const ownerAdvisoryName = ownerAdvisoryNames?.get(participant.handle);
     if (ownerAdvisoryName) {
       participant.ownerAdvisoryName = ownerAdvisoryName;
     }
@@ -1534,6 +1534,9 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
           phoneHandles: unresolvedPhoneHandles,
           prisma: getPrisma(),
         });
+    if (ownerContactLabels === null) {
+      return unavailable();
+    }
     for (const senderHandle of unresolvedPhoneHandles) {
       const displayName = ownerContactLabels.get(senderHandle);
       if (displayName) {
@@ -1556,7 +1559,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
 
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
-): Promise<ReadonlyMap<string, string>> {
+): Promise<ReadonlyMap<string, string> | null> {
   const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
     (result) => ({ kind: "completed" as const, result }),
     (error: unknown) => ({
@@ -1599,7 +1602,7 @@ async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
         outcome: "deadline_exceeded",
       });
     }
-    return new Map<string, string>();
+    return null;
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);

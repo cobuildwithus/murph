@@ -344,13 +344,19 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
-  it("suppresses a failed lookup for one operation without process-caching the failure", async () => {
+  it("suppresses an unavailable lookup for one operation without process-caching it", async () => {
     const senderHandle = "+15554440004";
     let round = 0;
     const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
       round += 1;
       if (round === 1) {
-        throw new Error("control plane unavailable");
+        return {
+          action: "read_participant_display_names",
+          result: {
+            status: "unavailable",
+            unavailableReason: "participant_names_unavailable",
+          },
+        };
       }
       return {
         action: "read_participant_display_names",
