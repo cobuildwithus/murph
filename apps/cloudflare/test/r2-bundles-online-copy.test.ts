@@ -210,7 +210,10 @@ describe("R2 online immutable copy", () => {
   it("rejects destination-active apply before issuing any R2 request", async () => {
     const copyObject = vi.fn();
     const headObject = vi.fn();
+    const inspectActiveOwners = vi.fn();
+    const inspectInfrastructure = vi.fn();
     const putMarker = vi.fn();
+    const readInventory = vi.fn();
 
     await expect(runR2BundlesOnlineCopy(
       options({
@@ -222,13 +225,16 @@ describe("R2 online immutable copy", () => {
       environment,
       {
         client: { copyObject, headObject, putMarker },
-        inspectActiveOwners: vi.fn(),
-        inspectInfrastructure: vi.fn(),
+        inspectActiveOwners,
+        inspectInfrastructure,
         log: vi.fn(),
-        readInventory: vi.fn(),
+        readInventory,
       },
     )).rejects.toThrow("--apply requires --phase source_active");
 
+    expect(inspectInfrastructure).not.toHaveBeenCalled();
+    expect(inspectActiveOwners).not.toHaveBeenCalled();
+    expect(readInventory).not.toHaveBeenCalled();
     expect(copyObject).not.toHaveBeenCalled();
     expect(headObject).not.toHaveBeenCalled();
     expect(putMarker).not.toHaveBeenCalled();
