@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
+  requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -47,6 +48,10 @@ const mocks = vi.hoisted(() => ({
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -136,6 +141,11 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
+  requestHostedGroupCurrentSenderAssistantAsk:
+    mocks.requestHostedGroupCurrentSenderAssistantAsk,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
   admitHostedGroupDisclosurePermissionAppendTx:
     mocks.admitHostedGroupDisclosurePermissionAppendTx,
@@ -154,6 +164,12 @@ vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  buildHostedGroupUsageFundingLocatorForRuntimeMember: (memberId: string) =>
+    `gf1.${memberId}.signature`,
+  buildHostedGroupUsageFundingUrl: (input: {
+    joinCode: string;
+    publicBaseUrl: string;
+  }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -265,6 +281,19 @@ const NEWSLETTER_DEFAULT_SCOPES = [
 ] as const;
 const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
 
+function addressBookLookupResult(
+  names: ReadonlyMap<string, string> = new Map(),
+  outcome = names.size === 0 ? "no_contact_match" : "matched",
+) {
+  return {
+    canonicalHandleCount: 2,
+    contactMatchCount: names.size,
+    names,
+    outcome,
+    requestedHandleCount: 2,
+  };
+}
+
 function groupSummaryWithOwnerEmailGrant() {
   return {
     ...GROUP_SUMMARY,
@@ -282,7 +311,9 @@ describe("handleHostedRuntimeGroupTool", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
     );
@@ -300,7 +331,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -317,6 +350,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           { projectionKind: "hrv-days.v0" },
         ],
         role: "member",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -375,6 +409,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -384,7 +422,10 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
+      ask_current_sender: "participant_aware",
       ask_member: "participant_aware",
+      arm_usage_referral: "participant_aware",
+      cancel_usage_referral: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
@@ -395,6 +436,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_current: "participant_aware",
       revoke_disclosure_grant: "personal_active",
       read_usage: "participant_aware",
+      read_usage_referral: "participant_aware",
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
@@ -460,6 +502,42 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
       mailboxItemId: "aask_req_one",
+    });
+  });
+
+  it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "aask_req_current_sender",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "ask_current_sender", origin },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+
+    expect(
+      mocks.requestHostedGroupCurrentSenderAssistantAsk,
+    ).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "aask_req_current_sender",
     });
   });
 
@@ -580,6 +658,9 @@ describe("handleHostedRuntimeGroupTool", () => {
             { projectionKind: "hrv-days.v0" },
           ],
           role: "member",
+          sponsorshipUrl: expect.stringMatching(
+            /^https:\/\/www\.withmurph\.ai\/groups\/fund\/gf1\./u,
+          ),
         }],
         status: "ok",
         truncated: false,
@@ -606,6 +687,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         ownerJoinCode: "join_runners",
         requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
         role: "owner",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -1326,6 +1408,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,
@@ -1348,6 +1431,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,
@@ -1641,7 +1725,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
@@ -1716,7 +1802,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -1729,7 +1816,57 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
       chatId: "chat_group_1",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    });
+  });
+
+  it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
+    const legacyIconUrl =
+      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: legacyIconUrl,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: { status: "requested" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      groupChatIconUrl: legacyIconUrl,
+    });
+  });
+
+  it("updates a preview group avatar only through the preview Worker origin", async () => {
+    const previewOrigin = "https://hosted-runner-staging.example.test";
+    const previewIconUrl =
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", previewOrigin);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: previewIconUrl,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: { status: "requested" },
+    });
+
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      groupChatIconUrl: previewIconUrl,
     });
   });
 
@@ -1777,7 +1914,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -1798,7 +1936,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -1994,7 +2133,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:v2:[a-f0-9]{40}$/u),
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -2023,6 +2162,51 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps the permissions link without promising or disclosing private outreach", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
+    await handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionKinds: ["sleep-duration-days.v0"] },
+        linqThread: LINQ_THREAD,
+      },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining(
+          "Murph may text you privately to help you join",
+        ),
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining(
+          "Like or heart this message to share",
+        ),
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "Like or heart this message if these default sharing choices look right:",
+        ),
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+        ),
+      }),
+    );
+  });
+
   it("uses the diagnostic disclosure for the exact frozen offer snapshot", async () => {
     const diagnosticScopes = [{ projectionKind: "device-sync-status.v0" as const }];
 
@@ -2046,7 +2230,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -2076,7 +2260,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps). To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps). To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2268,7 +2452,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name, steps, and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name, steps, and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -2305,7 +2489,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name, running minutes, and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name, running minutes, and health source connection status. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -2336,7 +2520,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2360,7 +2544,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name and email address. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name and email address. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2390,7 +2574,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2422,7 +2606,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2456,7 +2640,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name and recent running distance and session count. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name and recent running distance and session count. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
   });
@@ -2473,7 +2657,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like or heart this message to share the following with this group: your Murph profile name. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+          "Like or heart this message if these default sharing choices look right: your Murph profile name. To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -2589,7 +2773,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("classifies chat participants by durable Murph activation and skips the line and departed handles", async () => {
+  it("reconciles the SMS-admitted participant read before denying its effectful follow-up", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -2645,13 +2829,30 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         removedAt: null,
       },
     });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card" },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledTimes(1);
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
-  it("adds owner-only advisory names only to unregistered phone participants", async () => {
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map([
-      ["+15550000001", "Registered R."],
-      ["+15550000002", "Alex R."],
-    ]));
+  it("adds owner-only advisory names independently of Murph activation", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map([
+        ["+15550000001", "Registered R."],
+        ["+15550000002", "Alex R."],
+      ])),
+    );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
@@ -2670,7 +2871,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       action: "read_chat_participants",
       result: {
         participants: [
-          { handle: "+15550000001", hasOwnMurph: true },
+          {
+            handle: "+15550000001",
+            hasOwnMurph: true,
+            ownerAdvisoryName: "Registered R.",
+          },
           {
             handle: "+15550000002",
             hasOwnMurph: false,
@@ -2682,14 +2887,30 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     expect(mocks.readHostedOwnerAddressBookAdvisoryNames).toHaveBeenCalledWith({
       containerMemberId: "member_container",
-      phoneHandles: ["+15550000002"],
+      phoneHandles: ["+15550000001", "+15550000002"],
       prisma: expect.anything(),
     });
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 2,
+        contactMatchCount: 2,
+        labelMatchCount: 2,
+        outcome: "matched",
+        requestedHandleCount: 2,
+      },
+    );
+    const diagnostic = JSON.stringify(info.mock.calls);
+    expect(diagnostic).not.toContain("+15550000001");
+    expect(diagnostic).not.toContain("Registered R.");
+    expect(diagnostic).not.toContain("member_container");
+    info.mockRestore();
   });
 
   it("keeps the truthful roster available when advisory lookup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
-      new Error("advisory lookup unavailable"),
+      new Error("sensitive provider detail"),
     );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
@@ -2715,46 +2936,84 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "ok",
       },
     });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup unavailable.",
+      {
+        errorName: "Error",
+        outcome: "lookup_failed",
+      },
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "sensitive provider detail",
+    );
+    warn.mockRestore();
   });
 
-  it("returns the truthful roster when advisory lookup never settles", async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
-        new Promise(() => {}),
-      );
-      mocks.getHostedLinqChatHandles.mockResolvedValue([
-        { handle: "+15557770000", isMe: true, status: "active" },
-        { handle: "+15550000001", isMe: false, status: "active" },
-        { handle: "+15550000002", isMe: false, status: "active" },
-      ]);
-      mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
-        async ({ phoneNumber }) => phoneNumber === "+15550000001"
-          ? { core: { id: "member_participant", suspendedAt: null } }
-          : null,
-      );
+  it.each(["success", "failure"] as const)(
+    "records the deadline once when advisory lookup settles late with %s",
+    async (lateOutcome) => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.useFakeTimers();
+      try {
+        let resolveLookup:
+          ((value: ReturnType<typeof addressBookLookupResult>) => void) | undefined;
+        let rejectLookup: ((reason: Error) => void) | undefined;
+        mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
+          new Promise((resolve, reject) => {
+            resolveLookup = resolve;
+            rejectLookup = reject;
+          }),
+        );
+        mocks.getHostedLinqChatHandles.mockResolvedValue([
+          { handle: "+15557770000", isMe: true, status: "active" },
+          { handle: "+15550000001", isMe: false, status: "active" },
+          { handle: "+15550000002", isMe: false, status: "active" },
+        ]);
+        mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+          async ({ phoneNumber }) => phoneNumber === "+15550000001"
+            ? { core: { id: "member_participant", suspendedAt: null } }
+            : null,
+        );
 
-      const response = handleHostedRuntimeGroupTool({
-        memberId: "member_container",
-        request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
-      });
-      await vi.advanceTimersByTimeAsync(
-        HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
-      );
-      await expect(response).resolves.toEqual({
-        action: "read_chat_participants",
-        result: {
-          participants: [
-            { handle: "+15550000001", hasOwnMurph: true },
-            { handle: "+15550000002", hasOwnMurph: false },
-          ],
-          status: "ok",
-        },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        const response = handleHostedRuntimeGroupTool({
+          memberId: "member_container",
+          request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+        });
+        await vi.advanceTimersByTimeAsync(
+          HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+        );
+        await expect(response).resolves.toEqual({
+          action: "read_chat_participants",
+          result: {
+            participants: [
+              { handle: "+15550000001", hasOwnMurph: true },
+              { handle: "+15550000002", hasOwnMurph: false },
+            ],
+            status: "ok",
+          },
+        });
+        expect(info).toHaveBeenCalledExactlyOnceWith(
+          "Hosted address-book advisory lookup unavailable.",
+          { outcome: "deadline_exceeded" },
+        );
+        if (lateOutcome === "success") {
+          resolveLookup?.(addressBookLookupResult(new Map([
+            ["+15550000001", "Late R."],
+          ])));
+        } else {
+          rejectLookup?.(new Error("sensitive late provider detail"));
+        }
+        await Promise.resolve();
+        expect(info).toHaveBeenCalledTimes(1);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 
   it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

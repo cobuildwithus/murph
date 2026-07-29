@@ -28,6 +28,7 @@ import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function StudySection({
   children,
@@ -147,7 +148,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join actions and nutrition sharing consents">
+      <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
       </StudySection>
 
@@ -159,8 +160,14 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Personal usage credit states">
+      <StudySection title="Overall AI usage and fulfilled top-up">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private experiment results share">
+        <ExperimentResultsShareStudy />
       </StudySection>
 
       <Separator />

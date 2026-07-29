@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-07-23
+Last verified: 2026-07-28
 
 ## Purpose
 
@@ -41,11 +41,11 @@ The `POST` accept and revoke routes also enforce hosted mutation-origin checks b
 The companion route uses Privy bearer authentication with no cookie fallback
 and accepts only the two launch scopes. It reads and writes the same consent
 tables and current server-side document registry as the browser routes. The
-native client therefore does not persist a second consent decision or hardcode
-document versions, and the route assigns its own `ios-companion` audit source
-instead of trusting a client label. One native action may submit the currently
-missing launch scopes sequentially and resume only after the returned status is
-launch-granted.
+iOS and Android clients therefore do not persist a second consent decision or
+hardcode document versions, and the route assigns its own generic
+`native-companion` audit source instead of trusting a client platform label. One
+native action may submit the currently missing launch scopes sequentially and
+resume only after the returned status is launch-granted.
 
 ## Consent Scopes
 
@@ -77,9 +77,23 @@ Browser-vault session creation requires current launch-required consent before r
 
 A grant is current only when its recorded document-version snapshot exactly matches every document required by that scope. Publishing a new required version therefore preserves the old append-only acceptance event as historical evidence but makes the corresponding current grant stale. Members do not lose their account, subscription, data, device connection, or container when that happens.
 
-The authenticated dashboard layout reads consent status before starting the browser-vault provider. A member with both historical launch grants and stale document versions sees the current legal card alongside the requested dashboard route; the reminder does not replace or block the device-connect page. Members with zero or partial launch consent do not receive update-specific copy. Accepting both launch scopes reloads that exact route and restores protected vault-backed features. If the reminder status cannot be read, the layout omits the reminder instead of taking device connection down. The public `/design` catalog injects an in-memory acceptance handler and inert handoff into the production component, so its interactive preview never calls the consent API or writes consent state.
+The authenticated dashboard layout reads consent status before starting the
+browser-vault provider. While launch consent is absent or stale, the requested
+route stays mounted but the browser-vault provider exposes an empty context,
+starts no session request, and clears any decrypted warm snapshot that may have
+loaded before the server check. Except on `/records/connect`, the layout places
+the current consent card in a non-dismissible modal over the inert dashboard.
+A member with both historical launch grants and stale document versions sees
+update-specific copy; members with zero or partial launch consent see generic
+recovery copy. The reminder does not replace or block the device-connect page.
+Accepting both launch scopes reloads that exact route and restores protected
+vault-backed features. If the reminder status cannot be read, the layout omits
+the reminder and leaves the ordinary provider path enabled instead of taking
+device connection down. The public `/design` catalog injects an in-memory
+acceptance handler and inert handoff into the production component, so its
+interactive preview never calls the consent API or writes consent state.
 
-The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake, and current-conversation reply path do not use launch consent as an admission gate. Configured non-Strava device connection/reconnection and current companion device sync require both historical launch grants but not current document versions. A stale document version therefore does not stop an existing authorized member from texting Murph, receiving a reply in that active conversation, connecting an available device, or continuing current device sync. A member with zero or partial launch consent cannot start or use those health-data device paths. Native or chat-adjacent actions with no current-document consent UI of their own — reaction-based group joins, meal-photo enrollment and uploads, and iMessage mini-app proof actions — use the same historical-launch boundary as device sync. Meal-photo enrollment still requires a foreground verified Privy identity, active member access, explicit Photos opt-in, and a current private delivery route. Independently guarded browser-vault, clinical-record, export, billing, web group-join, and iMessage mini-app enrollment actions still fail closed with `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents. Strava remains disabled for new connections and reconnect offers as a separate provider product gate.
+The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake, and current-conversation reply path do not use launch consent as an admission gate. Country/prefix-gated Linq instant start may grant the existing no-card Pulse trial without launch consent solely so that same authenticated inbound conversation can receive a reply; it does not relax any independently consent-gated browser, connected-source, sharing, export, paid-billing/payment-method, or clinical-record action. Configured non-Strava device connection/reconnection and current companion device sync require both historical launch grants but not current document versions. A stale document version therefore does not stop an existing authorized member from texting Murph, receiving a reply in that active conversation, connecting an available device, or continuing current device sync. A member with zero or partial launch consent cannot start or use those health-data device paths. Native or chat-adjacent actions with no current-document consent UI of their own — reaction-based group joins, meal-photo enrollment and uploads, and iMessage mini-app proof actions — use the same historical-launch boundary as device sync. Meal-photo enrollment still requires a foreground verified Privy identity, active member access, explicit Photos opt-in, and a current private delivery route. Independently guarded browser-vault, clinical-record, export, billing, web group-join, and iMessage mini-app enrollment actions still fail closed with `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents. Strava remains disabled for new connections and reconnect offers as a separate provider product gate.
 
 If a companion health-data action encounters zero or partial historical launch
 consent, the native app keeps the Privy member session, closes Junction and

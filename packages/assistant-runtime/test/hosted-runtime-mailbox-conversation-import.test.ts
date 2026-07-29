@@ -1909,6 +1909,12 @@ describe("hosted mailbox conversation import adapter", () => {
     const contactLookupKey = "hbidx:phone:v1:participant";
     const groupReactionContext =
       "Participant +15551110000 added a like reaction on: first message\nParticipant +15552220000 added a laugh reaction on: second message";
+    const groupRunningBit = {
+      expiresAt: "2026-07-28T12:00:00.000Z",
+      publicAlias: "Fiscal Department",
+      requestedBit: "Treat me like the exhausted CFO.",
+      schema: "murph.group-sponsorship-bit.v1" as const,
+    };
     const decodedWake = createConversationWake({
       message: {
         accountLookupKey,
@@ -1953,6 +1959,7 @@ describe("hosted mailbox conversation import adapter", () => {
           dedupeKey: decodedWake.eventId,
           id: "mailbox_item_linq_group_identity_001",
         }),
+        groupRunningBit,
         usageRunningLow: true,
       },
       runtime: createRuntime(),
@@ -2029,6 +2036,10 @@ describe("hosted mailbox conversation import adapter", () => {
       groupReactionContext,
     );
     assert.equal(candidates.inputs[0]?.event.usageRunningLow, true);
+    assert.deepEqual(
+      candidates.inputs[0]?.event.groupRunningBit,
+      groupRunningBit,
+    );
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {
@@ -2073,10 +2084,18 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async prepareWakeContext() {},
-      item: createResolvedConversationMailboxItem({
-        dedupeKey: decodedWake.eventId,
-        id: "mailbox_item_linq_direct_identity_001",
-      }),
+      item: {
+        ...createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_linq_direct_identity_001",
+        }),
+        groupRunningBit: {
+          expiresAt: "2026-07-28T12:00:00.000Z",
+          publicAlias: "Fiscal Department",
+          requestedBit: "Treat me like the exhausted CFO.",
+          schema: "murph.group-sponsorship-bit.v1",
+        },
+      },
       runtime: createRuntime(),
       vaultRoot,
     });
@@ -2110,6 +2129,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const candidates = await source.listInputCandidates({ sourceId: "linq" });
     assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
+    assert.equal(candidates.inputs[0]?.event.groupRunningBit, undefined);
   });
 
   test("records hosted attachment evidence after successful inbox projection", async () => {

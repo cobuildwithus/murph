@@ -21,6 +21,7 @@ import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_DIRECT_UPLOAD_WINDOW_MS,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
@@ -113,7 +114,8 @@ import {
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
 const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
-const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS = 10 * 60;
+const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS =
+  HOSTED_WORKSPACE_SNAPSHOT_DIRECT_UPLOAD_WINDOW_MS / 1000;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
@@ -1910,11 +1912,11 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   userId: string;
 }): Promise<boolean> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const rememberReplacedSnapshotRef = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "rememberHostedWorkspaceSnapshotReplacedRef",
   );
-  return await rememberReplacedSnapshotRef({
+  return await stub.rememberHostedWorkspaceSnapshotReplacedRef({
     expectedSession: input.session,
     replacedSnapshotRef: input.replacedSnapshotRef,
   });
@@ -2451,11 +2453,11 @@ async function createWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const createSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "createHostedWorkspaceSnapshotUploadSession",
   );
-  return await createSession(input.session);
+  return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {
@@ -2464,11 +2466,11 @@ async function readWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const readSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "readHostedWorkspaceSnapshotUploadSession",
   );
-  return await readSession({
+  return await stub.readHostedWorkspaceSnapshotUploadSession({
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
@@ -2480,11 +2482,11 @@ async function deleteWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<void> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const deleteSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "deleteHostedWorkspaceSnapshotUploadSession",
   );
-  await deleteSession({
+  await stub.deleteHostedWorkspaceSnapshotUploadSession({
     snapshotId: input.snapshotId,
     userId: input.userId,
   });

@@ -19,6 +19,9 @@ import {
 import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  readHostedExecutionControlOrigin,
+} from "@/src/lib/hosted-execution/environment";
 import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   scheduleHostedMailboxWakeAfterResponse,
@@ -35,7 +38,9 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
-  const body = parseHostedRuntimeGroupToolRequest(payload);
+  const body = parseHostedRuntimeGroupToolRequest(payload, {
+    privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
+  });
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const executeTool = async () => filterHostedRuntimeGroupToolResponseProjectionScopes(

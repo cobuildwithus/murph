@@ -5,7 +5,10 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { registerExperimentCommands } from '../src/commands/experiment.js'
+import {
+  buildEffectiveSnapshotFromCommonsProtocol,
+  registerExperimentCommands,
+} from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
@@ -87,6 +90,29 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   assert.ok(value && !Array.isArray(value), `${label} must be a non-array object`)
   return value as Record<string, unknown>
 }
+
+test('Health Commons snapshot construction preserves protocol activity evidence', () => {
+  const baseProtocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+    (entry) =>
+      entry.key ===
+      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+  )
+  assert.ok(baseProtocol?.protocol)
+  const activitySessionEvidence = {
+    activityKinds: ['walking', 'cycling', 'rowing', 'elliptical'],
+    minimumDurationMinutes: 35,
+  }
+
+  const snapshot = buildEffectiveSnapshotFromCommonsProtocol({
+    ...baseProtocol,
+    protocol: {
+      ...baseProtocol.protocol,
+      activitySessionEvidence,
+    },
+  })
+
+  assert.deepEqual(snapshot.activitySessionEvidence, activitySessionEvidence)
+})
 
 async function rewriteVaultMetadataWithFormatVersion(
   vaultRoot: string,

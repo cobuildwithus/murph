@@ -6,15 +6,101 @@ import { expect, test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   findAssistantAutoReplyDeliveryIntentIds,
+  hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  writeAssistantAutoReplyReplyTerminalEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
 import {
   writeAssistantAutoReplyIntentProvenance,
 } from '../src/assistant/automation/intent-provenance.js'
+import {
+  createAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.js'
 import { createAssistantTurnReceipt } from '../src/assistant/turns.js'
+
+test('auto-reply delivery evidence stays incomplete while its committed outbox intent is pending', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    const intent = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      dedupeToken: 'pending-image-delivery',
+      explicitTarget: 'chat_pending_image',
+      identityId: 'participant_pending_image',
+      message: 'Generated image',
+      sessionId: 'session_pending_image',
+      threadId: 'thread_pending_image',
+      threadIsDirect: true,
+      turnId: 'turn_pending_image',
+      vault: vaultRoot,
+    })
+    await writeAssistantAutoReplyReplyTerminalEvidence({
+      captureIds: [],
+      deliveryIntentId: intent.intentId,
+      inputIds: ['ain_pending_image'],
+      outcome: 'deferred',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      sessionId: intent.sessionId,
+      terminalKind: 'reply_intent_committed',
+      vault: vaultRoot,
+    })
+
+    await expect(hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+      inputId: 'ain_pending_image',
+      vault: vaultRoot,
+    })).resolves.toBe(false)
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T00:01:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-04-08T00:02:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T00:01:00.000Z',
+    })
+    await expect(hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+      inputId: 'ain_pending_image',
+      vault: vaultRoot,
+    })).resolves.toBe(false)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...retryable,
+      lastError: null,
+      nextAttemptAt: null,
+      sentAt: '2026-04-08T00:03:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-08T00:03:00.000Z',
+    })
+    await expect(hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+      inputId: 'ain_pending_image',
+      vault: vaultRoot,
+    })).resolves.toBe(true)
+
+    await writeAssistantAutoReplyReplyTerminalEvidence({
+      captureIds: [],
+      deliveryIntentId: 'hao_missing_image_delivery',
+      inputIds: ['ain_missing_image_delivery'],
+      outcome: 'deferred',
+      recordedAt: '2026-04-08T00:04:00.000Z',
+      sessionId: intent.sessionId,
+      terminalKind: 'reply_intent_committed',
+      vault: vaultRoot,
+    })
+    await expect(hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+      inputId: 'ain_missing_image_delivery',
+      vault: vaultRoot,
+    })).resolves.toBe(false)
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
 
 test('auto-reply terminal evidence readers ignore malformed evidence files', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))

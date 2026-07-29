@@ -12,8 +12,8 @@ import {
   normalizeHostedOpaqueInput,
 } from "./contact-privacy";
 import {
+  acquireHostedLinqParticipantContactLockTx,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
-  normalizeHostedLinqParticipantContactValue,
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
@@ -234,9 +234,8 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
-    namespace: "participant-contact",
+  await acquireHostedLinqParticipantContactLockTx({
+    contact: input.contact,
     tx: input.prisma,
   });
   await assertHostedPendingLinqParticipantContactAvailableTx({
@@ -306,9 +305,8 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
-    namespace: "participant-contact",
+  await acquireHostedLinqParticipantContactLockTx({
+    contact: input.contact,
     tx: input.prisma,
   });
 
@@ -640,9 +638,8 @@ async function writeHostedMemberLinqBindingTx(input: {
     const participantContactLookupKeys = readHostedLinqParticipantContactLookupKeys(
       input.participantContact,
     );
-    await acquireHostedLinqRoutingWriteLockTx({
-      lockValue: buildHostedLinqParticipantContactLockValue(input.participantContact),
-      namespace: "participant-contact",
+    await acquireHostedLinqParticipantContactLockTx({
+      contact: input.participantContact,
       tx: input.prisma,
     });
     await assertHostedPendingLinqParticipantContactAvailableTx({
@@ -1054,7 +1051,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "participant-contact";
+  namespace: "chat";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
@@ -1062,20 +1059,10 @@ async function acquireHostedLinqRoutingWriteLockTx(input: {
     throw new TypeError("Hosted Linq routing lock requires a non-empty value.");
   }
 
-  if (input.namespace === "chat") {
-    await acquireHostedLinqChatOwnershipLockTx({
-      chatId: lockValue,
-      tx: input.tx,
-    });
-    return;
-  }
-
-  await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext(${`hosted-linq-routing:${input.namespace}`}),
-      hashtext(${lockValue})
-    )
-  `;
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: lockValue,
+    tx: input.tx,
+  });
 }
 
 function readHostedLinqParticipantContactLookupKeys(
@@ -1091,20 +1078,6 @@ function readHostedLinqParticipantContactLookupKeys(
   }
 
   return lookupKeys;
-}
-
-function buildHostedLinqParticipantContactLockValue(
-  contact: HostedLinqParticipantContact,
-): string {
-  const value = normalizeHostedLinqParticipantContactValue({
-    kind: contact.kind,
-    value: contact.value,
-  });
-  if (!value) {
-    throw new TypeError("Hosted Linq participant contact requires a valid contact value.");
-  }
-
-  return `${contact.kind}:${value}`;
 }
 
 async function assertHostedPendingLinqParticipantContactAvailableTx(input: {

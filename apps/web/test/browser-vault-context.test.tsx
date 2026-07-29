@@ -299,6 +299,129 @@ test("browser-vault provider keeps matching legacy replicas readable while refre
   await rendered.cleanup();
 });
 
+test("consent-blocked browser-vault provider clears warm data without requesting a session", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  await startBrowserVaultWarmLoad();
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  const rendered = await renderClientComponent(
+    <BrowserVaultProvider initialMemberId="member_123" loadEnabled={false}>
+      <BrowserVaultStatusProbe />
+    </BrowserVaultProvider>,
+    { requireButton: false },
+  );
+
+  assert.equal(rendered.container.textContent, "empty:none");
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  assert.equal(fetchMock.mock.calls.length, 1);
+
+  await rendered.cleanup();
+});
+
+test("disabling the browser-vault provider cannot restart an adopted warm request", async () => {
+  const requestSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        return;
+      }
+
+      requestSignals.push(signal);
+      signal.addEventListener("abort", () => {
+        const abortError = new Error("Browser vault request aborted.");
+        abortError.name = "AbortError";
+        reject(abortError);
+      }, { once: true });
+    });
+  });
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const landingLoad = startBrowserVaultWarmLoad();
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "landing warm fetch");
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    { requireButton: false },
+  );
+
+  await rendered.rerenderInTransition(
+    <AuthProvider authenticated>
+      <BrowserVaultProvider initialMemberId="member_123" loadEnabled={false}>
+        <BrowserVaultStatusProbe />
+      </BrowserVaultProvider>
+    </AuthProvider>,
+  );
+
+  assert.equal((await landingLoad).status, "superseded");
+  for (let flush = 0; flush < 4; flush += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  assert.equal(rendered.container.textContent, "empty:none");
+  assert.equal(fetchMock.mock.calls.length, 1);
+  assert.equal(requestSignals[0]?.aborted, true);
+  assert.equal(getBrowserVaultReadySnapshot(), null);
+
+  await rendered.cleanup();
+});
+
+test("reenabling the browser-vault provider starts behind fresh authority", async () => {
+  const ref = createReplicaRef();
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+    encryptedReplica: createReplicaEnvelope(),
+    replicaAad: createReplicaAad(),
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    state: "ready",
+  }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    <AuthProvider authenticated>
+      <BrowserVaultProvider initialMemberId="member_123" loadEnabled={false}>
+        <BrowserVaultStatusProbe />
+      </BrowserVaultProvider>
+    </AuthProvider>,
+    { requireButton: false },
+  );
+
+  assert.equal(rendered.container.textContent, "empty:none");
+  assert.equal(fetchMock.mock.calls.length, 0);
+
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+  );
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+
+  assert.equal(fetchMock.mock.calls.length, 1);
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  await rendered.cleanup();
+});
+
 test("fresh endpoint authority recovers cached-denied UI without exposing warm data", async () => {
   const ref = createReplicaRef();
   const authorityResponse = createDeferred<Response>();

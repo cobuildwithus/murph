@@ -328,7 +328,6 @@ describe("hosted local Linq webhook e2e", () => {
       homeLineAssigned: baseline.personal.homeLineAssigned,
       pendingChatBound: false,
       recipientAssigned: true,
-      workspaceVersion: baseline.personal.workspaceVersion,
     });
     expect(routedBeforeFirstRun.thread).toMatchObject({
       containerExists: true,
@@ -355,18 +354,17 @@ describe("hosted local Linq webhook e2e", () => {
       isReady: (state) =>
         state.personal.conversationMailboxCount
           === baseline.personal.conversationMailboxCount
-        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
         && state.thread?.containerMemberId === containerMemberId
         && state.thread.conversationMailboxCount === 1
         && BigInt(state.thread.workspaceVersion ?? "-1")
           > BigInt(routedBeforeFirstRun.thread?.workspaceVersion ?? "-1"),
       memberId: userId,
     });
+    // The personal runtime can finish a queued follow-up checkpoint after its
+    // completion status turns idle. Mailbox ownership, not its workspace
+    // version, is the durable routing-isolation invariant.
     expect(afterFirstGroup.personal.conversationMailboxCount).toBe(
       baseline.personal.conversationMailboxCount,
-    );
-    expect(afterFirstGroup.personal.workspaceVersion).toBe(
-      baseline.personal.workspaceVersion,
     );
     expect(afterFirstGroup.thread).toMatchObject({
       containerMemberId,
@@ -456,7 +454,6 @@ describe("hosted local Linq webhook e2e", () => {
       isReady: (state) =>
         state.personal.conversationMailboxCount
           === baseline.personal.conversationMailboxCount
-        && state.personal.workspaceVersion === baseline.personal.workspaceVersion
         && state.thread?.containerMemberId === containerMemberId
         && state.thread.conversationMailboxCount === 2
         && BigInt(state.thread.workspaceVersion ?? "-1")
@@ -465,9 +462,6 @@ describe("hosted local Linq webhook e2e", () => {
     });
     expect(afterGuestGroup.personal.conversationMailboxCount).toBe(
       baseline.personal.conversationMailboxCount,
-    );
-    expect(afterGuestGroup.personal.workspaceVersion).toBe(
-      baseline.personal.workspaceVersion,
     );
     expect(afterGuestGroup.personal).toMatchObject({
       homeChatBound: false,

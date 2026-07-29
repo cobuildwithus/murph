@@ -55,6 +55,17 @@ export interface HostedAssistantDeliveryImageMedia {
   url: string;
 }
 
+export interface HostedAssistantDeliveryVaultImageMedia {
+  alt: string | null;
+  contentType: "image/jpeg" | "image/png" | "image/webp";
+  filename: string;
+  kind: "vault_image";
+  ref: string;
+  sha256: string;
+  sizeBytes: number;
+  source: string | null;
+}
+
 export type HostedAssistantDeliveryVoiceMemoGeneration =
   | {
       kind: "elevenlabs_speech";
@@ -102,6 +113,7 @@ export interface HostedAssistantDeliveryVaultFileMedia {
 
 export type HostedAssistantDeliveryMedia =
   | HostedAssistantDeliveryImageMedia
+  | HostedAssistantDeliveryVaultImageMedia
   | HostedAssistantDeliveryVoiceMemoMedia
   | HostedAssistantDeliveryVaultFileMedia;
 
@@ -788,6 +800,9 @@ function parseHostedAssistantDeliveryMedia(
       url: requireHttpsUrl(record.url, `${label}.url`),
     };
   }
+  if (kind === "vault_image") {
+    return parseHostedAssistantDeliveryVaultImageMedia(record, label);
+  }
   if (kind === "voice_memo") {
     return parseHostedAssistantDeliveryVoiceMemoMedia(record, label);
   }
@@ -795,7 +810,71 @@ function parseHostedAssistantDeliveryMedia(
     return parseHostedAssistantDeliveryVaultFileMedia(record, label);
   }
 
-  throw new TypeError(`${label}.kind must be image, voice_memo, or vault_file.`);
+  throw new TypeError(
+    `${label}.kind must be image, vault_image, voice_memo, or vault_file.`,
+  );
+}
+
+function parseHostedAssistantDeliveryVaultImageMedia(
+  record: Record<string, unknown>,
+  label: string,
+): HostedAssistantDeliveryVaultImageMedia {
+  requireExactObjectKeys(
+    record,
+    {
+      required: ["contentType", "filename", "kind", "ref", "sha256", "sizeBytes"],
+      optional: ["alt", "source"],
+    },
+    label,
+  );
+  const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
+  if (!isNormalizedAssistantVaultFileRef(ref)) {
+    throw new TypeError(`${label}.ref must be a normalized supported vault-relative path.`);
+  }
+  const sha256 = requireString(record.sha256, `${label}.sha256`);
+  if (!/^[0-9a-f]{64}$/u.test(sha256)) {
+    throw new TypeError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
+  }
+  const contentType = requireString(record.contentType, `${label}.contentType`);
+  if (
+    contentType !== "image/jpeg" &&
+    contentType !== "image/png" &&
+    contentType !== "image/webp"
+  ) {
+    throw new TypeError(`${label}.contentType must be a supported image MIME type.`);
+  }
+  const filename = requireBoundedTrimmedString(
+    record.filename,
+    `${label}.filename`,
+    255,
+  );
+  if (/[\\/\u0000-\u001F\u007F]/u.test(filename)) {
+    throw new TypeError(
+      `${label}.filename must not contain path separators or control characters.`,
+    );
+  }
+  return {
+    alt: requireNullableBoundedTrimmedString(
+      record.alt ?? null,
+      `${label}.alt`,
+      500,
+    ),
+    contentType,
+    filename,
+    kind: "vault_image",
+    ref,
+    sha256,
+    sizeBytes: requirePositiveIntegerAtMost(
+      record.sizeBytes,
+      `${label}.sizeBytes`,
+      10 * 1024 * 1024,
+    ),
+    source: requireNullableBoundedTrimmedString(
+      record.source ?? null,
+      `${label}.source`,
+      200,
+    ),
+  };
 }
 
 function parseHostedAssistantDeliveryVaultFileMedia(
@@ -1183,6 +1262,18 @@ function requireNullableString(value: unknown, label: string): string | null {
   }
 
   return requireString(value, label);
+}
+
+function requireNullableBoundedTrimmedString(
+  value: unknown,
+  label: string,
+  maxLength: number,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireBoundedTrimmedString(value, label, maxLength);
 }
 
 function requireNullableNonNegativeInteger(value: unknown, label: string): number | null {

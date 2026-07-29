@@ -132,6 +132,29 @@ export async function hostedMealPhotoUserPrefix(input: {
   return `hosted-meal-photos/images/${resolveHostedStorageNamespaceId(input)}/`;
 }
 
+export async function hostedPrivateMediaObjectKey(input: {
+  sha256: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const sha256 = requireHostedPrivateMediaSha256(input.sha256);
+  const mediaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "private-media-path",
+    value: `private-media:${userSegment}:${sha256}`,
+  });
+
+  return `hosted-private-media/images/${userSegment}/${mediaSegment}.image.enc`;
+}
+
+export async function hostedPrivateMediaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-private-media/images/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
   storageNamespaceId?: string | null;
@@ -225,6 +248,17 @@ function requireHostedMealPhotoKey(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted meal photo key");
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(normalized)) {
     throw new TypeError("Hosted meal photo key is invalid.");
+  }
+  return normalized;
+}
+
+function requireHostedPrivateMediaSha256(value: string): string {
+  const normalized = requireStoragePathString(
+    value,
+    "Hosted private media sha256",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(normalized)) {
+    throw new TypeError("Hosted private media sha256 is invalid.");
   }
   return normalized;
 }

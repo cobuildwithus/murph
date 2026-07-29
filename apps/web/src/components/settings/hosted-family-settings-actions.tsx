@@ -155,6 +155,7 @@ export function HostedFamilyManager(props: {
     remaining: number;
     used: number;
   }>;
+  payerMemberId: string;
   seats: {
     active: number;
     billed: number;
@@ -642,6 +643,7 @@ export function HostedFamilyManager(props: {
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
                 deferTerminalRefreshUntilClose
                 offers={[]}
+                payerMemberId={props.payerMemberId}
                 purchaseReturn={
                   props.usageTopUpReturnMemberId === memberId
                     ? props.usageTopUpPurchaseReturn
@@ -920,6 +922,7 @@ export function HostedFamilyManager(props: {
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
                 contactOptions={props.usageTopUpContactOptions}
                 offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
+                payerMemberId={props.payerMemberId}
                 purchaseReturn={
                   props.usageTopUpReturnMemberId === pendingAction.id
                     ? props.usageTopUpPurchaseReturn

@@ -1,4 +1,10 @@
-import { act, createElement, Fragment, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  Fragment,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
@@ -34,6 +40,42 @@ vi.mock("next/link", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => window.location.pathname,
 }));
+
+vi.mock("@/src/components/ui/dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    Dialog: ({
+      children,
+      open,
+    }: {
+      children?: ReactNode;
+      open?: boolean;
+    }) =>
+      open ? React.createElement(React.Fragment, null, children) : null,
+    DialogContent: ({
+      children,
+      showCloseButton,
+      ...props
+    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
+      React.createElement(
+        "div",
+        {
+          ...props,
+          "data-show-close-button": String(showCloseButton),
+          "data-slot": "dialog-content",
+          role: "dialog",
+        },
+        children,
+      ),
+    DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+      React.createElement("p", props),
+    DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+      React.createElement("div", props),
+    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+      React.createElement("h2", props),
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({
@@ -89,6 +131,16 @@ test("dashboard consent reloads the exact route once after the accepted handoff"
   );
   cleanupRender = rendered.cleanup;
 
+  const consentDialog = rendered.container.querySelector(
+    '[role="dialog"][data-dashboard-legal-consent-gate="true"]',
+  );
+  expect(consentDialog).toBeTruthy();
+  expect(consentDialog?.getAttribute("data-show-close-button")).toBe("false");
+  expect(
+    rendered.container.querySelector(
+      'section[data-dashboard-legal-consent-gate="true"]',
+    ),
+  ).toBeNull();
   expectNoLaunchCheckboxes(rendered.container);
 
   const continueButton = findButton(rendered.container, "Consent");
@@ -97,7 +149,9 @@ test("dashboard consent reloads the exact route once after the accepted handoff"
     await flushPromises();
   });
 
-  expect(continueButton.textContent).toContain("Refreshing your dashboard");
+  expect(continueButton.textContent).toBe("Refreshing...");
+  expect(continueButton.disabled).toBe(true);
+  expect(continueButton.getAttribute("aria-busy")).toBe("true");
   expect(rendered.reload).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -180,7 +234,7 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
     await flushPromises();
   });
 
-  expect(continueButton.textContent).toContain("Refreshing your dashboard");
+  expect(continueButton.textContent).toBe("Refreshing...");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
   });

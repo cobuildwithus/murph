@@ -73,6 +73,13 @@ attribution:
 protocol:
   doseSignature: 3 sessions per week for 4 weeks; 35-60 minutes of easy conversational cardio per session
   target: sustainable easy aerobic volume
+  activitySessionEvidence:
+    activityKinds:
+      - walking
+      - cycling
+      - rowing
+      - elliptical
+    minimumDurationMinutes: 35
   frequency:
     sessionsPerWeek: 3
   sessionShape:

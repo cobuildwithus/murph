@@ -5,6 +5,7 @@ import {
 import {
   isHostedRunnerProviderEffectPath,
   HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+  HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
 } from "../runner-effects-contract.ts";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
@@ -40,6 +41,9 @@ import {
 import {
   handleRunnerGeneratedImageUploadRequest,
 } from "./generated-images.ts";
+import {
+  handleRunnerPrivateImageUrlPublishRequest,
+} from "./private-image-urls.ts";
 
 export async function handleRunnerResultsRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
@@ -74,6 +78,17 @@ export async function handleRunnerResultsRequest(input: {
 
   if (input.url.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH) {
     return handleRunnerGeneratedImageUploadRequest({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
+  if (
+    input.url.pathname
+    === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH
+  ) {
+    return handleRunnerPrivateImageUrlPublishRequest({
       env: input.env,
       request: input.request,
       userId: input.userId,

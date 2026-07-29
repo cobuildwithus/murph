@@ -15,9 +15,11 @@ import {
 import {
   assistantOutboxIntentSchema,
   assistantVaultFileMaxBytes,
+  assistantVaultImageMaxBytes,
   type AssistantOutboxIntent,
   type AssistantTurnTrigger,
   type AssistantVaultFileResponseMedia,
+  type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -294,6 +296,30 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_CHANGED_AFTER_APPROVAL',
       'The vault file changed after approval and was not sent.',
+    )
+  }
+  return snapshot.bytes
+}
+
+export async function readVerifiedAssistantVaultImageBytes(input: {
+  image: AssistantVaultImageResponseMedia
+  vaultRoot: string
+}): Promise<Uint8Array> {
+  const snapshot = await readAssistantVaultBytesSnapshot({
+    maxBytes: assistantVaultImageMaxBytes,
+    ref: input.image.ref,
+    vaultRoot: input.vaultRoot,
+  })
+  const contentType = detectAssistantVaultImageContentType(snapshot.bytes)
+  if (
+    sha256Hex(snapshot.bytes) !== input.image.sha256
+    || snapshot.bytes.byteLength !== input.image.sizeBytes
+    || snapshot.filename !== input.image.filename
+    || contentType !== input.image.contentType
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_IMAGE_CHANGED_AFTER_CAPTURE',
+      'The private image changed after capture and was not sent.',
     )
   }
   return snapshot.bytes
@@ -674,6 +700,35 @@ async function readAssistantVaultFileSnapshot(input: {
   bytes: Uint8Array
   file: AssistantVaultFileResponseMedia
 }> {
+  const snapshot = await readAssistantVaultBytesSnapshot({
+    maxBytes: assistantVaultFileMaxBytes,
+    ref: input.ref,
+    vaultRoot: input.vaultRoot,
+  })
+  return {
+    bytes: snapshot.bytes,
+    file: {
+      contentType: resolveAssistantVaultFileContentType(snapshot.filename),
+      filename: input.displayFilename ?? snapshot.filename,
+      kind: 'vault_file',
+      approvalGeneration: null,
+      approvalId: null,
+      ref: snapshot.ref,
+      sha256: sha256Hex(snapshot.bytes),
+      sizeBytes: snapshot.bytes.byteLength,
+    },
+  }
+}
+
+async function readAssistantVaultBytesSnapshot(input: {
+  maxBytes: number
+  ref: string
+  vaultRoot: string
+}): Promise<{
+  bytes: Uint8Array
+  filename: string
+  ref: string
+}> {
   const ref = normalizeVaultFileRef(input.ref)
   const absolutePath = await resolveAssistantVaultPath(
     input.vaultRoot,
@@ -692,29 +747,21 @@ async function readAssistantVaultFileSnapshot(input: {
     bytes = snapshot.bytes
   } else {
     metadata = await stat(absolutePath)
-    assertAssistantVaultFileMetadataSupported(metadata)
+    assertAssistantVaultFileMetadataSupported(metadata, input.maxBytes)
     bytes = await readFile(absolutePath)
   }
-  if (bytes.byteLength <= 0 || bytes.byteLength > assistantVaultFileMaxBytes) {
+  if (bytes.byteLength <= 0 || bytes.byteLength > input.maxBytes) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
-      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
+      `Vault files must be between 1 byte and ${input.maxBytes} bytes.`,
     )
   }
 
   const filename = path.posix.basename(ref)
   return {
     bytes,
-    file: {
-      contentType: resolveAssistantVaultFileContentType(filename),
-      filename: input.displayFilename ?? filename,
-      kind: 'vault_file',
-      approvalGeneration: null,
-      approvalId: null,
-      ref,
-      sha256: sha256Hex(bytes),
-      sizeBytes: bytes.byteLength,
-    },
+    filename,
+    ref,
   }
 }
 
@@ -784,17 +831,20 @@ async function assertAssistantGeneratedDeliveryPathMatchesHandle(input: {
   assertAdoptedAssistantGeneratedDeliveryMetadata(pathMetadata)
 }
 
-function assertAssistantVaultFileMetadataSupported(metadata: Stats): void {
+function assertAssistantVaultFileMetadataSupported(
+  metadata: Stats,
+  maxBytes = assistantVaultFileMaxBytes,
+): void {
   if (!metadata.isFile()) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_NOT_REGULAR_FILE',
       'The requested vault path is not a regular file.',
     )
   }
-  if (metadata.size <= 0 || metadata.size > assistantVaultFileMaxBytes) {
+  if (metadata.size <= 0 || metadata.size > maxBytes) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED',
-      `Vault files must be between 1 byte and ${assistantVaultFileMaxBytes} bytes.`,
+      `Vault files must be between 1 byte and ${maxBytes} bytes.`,
     )
   }
 }
@@ -865,6 +915,46 @@ function resolveAssistantVaultFileContentType(filename: string): string {
     )
   }
   return contentType
+}
+
+function detectAssistantVaultImageContentType(
+  bytes: Uint8Array,
+): AssistantVaultImageResponseMedia['contentType'] | null {
+  if (
+    bytes.length >= 8
+    && bytes[0] === 0x89
+    && bytes[1] === 0x50
+    && bytes[2] === 0x4e
+    && bytes[3] === 0x47
+    && bytes[4] === 0x0d
+    && bytes[5] === 0x0a
+    && bytes[6] === 0x1a
+    && bytes[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+  if (
+    bytes.length >= 3
+    && bytes[0] === 0xff
+    && bytes[1] === 0xd8
+    && bytes[2] === 0xff
+  ) {
+    return 'image/jpeg'
+  }
+  if (
+    bytes.length >= 12
+    && bytes[0] === 0x52
+    && bytes[1] === 0x49
+    && bytes[2] === 0x46
+    && bytes[3] === 0x46
+    && bytes[8] === 0x57
+    && bytes[9] === 0x45
+    && bytes[10] === 0x42
+    && bytes[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return null
 }
 
 function formatByteCount(value: number): string {

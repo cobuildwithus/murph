@@ -56,7 +56,10 @@ import {
   lookupHostedMemberForPrivyPrincipal,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
-import { type HostedLinqParticipantContact } from "./linq-participant-contact";
+import {
+  acquireHostedLinqParticipantPhoneLockTx,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 
 export {
   createHostedPrivyIdentityConflictError,
@@ -87,6 +90,18 @@ export async function ensureHostedMemberForPhoneTx(input: {
   phoneNumberVerifiedAt?: Date | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
+  const resolution = await ensureHostedMemberForPhoneResolutionTx(input);
+  return resolution.member;
+}
+
+export async function ensureHostedMemberForPhoneResolutionTx(input: {
+  phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  created: boolean;
+  member: HostedMemberCoreState;
+}> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
   if (!phoneLookupKey) {
@@ -97,19 +112,27 @@ export async function ensureHostedMemberForPhoneTx(input: {
     });
   }
 
+  await acquireHostedLinqParticipantPhoneLockTx({
+    phoneNumber: input.phoneNumber,
+    tx: input.prisma,
+  });
+
   const existingIdentity = await lookupHostedMemberIdentityByPhoneNumber({
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
   });
 
   if (existingIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: existingIdentity.identity,
-      member: existingIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: existingIdentity.identity,
+        member: existingIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   const phoneIdentityFields = {
@@ -134,7 +157,10 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (identityCreated) {
-    return createdMember;
+    return {
+      created: true,
+      member: createdMember,
+    };
   }
 
   await input.prisma.hostedMember.delete({
@@ -148,13 +174,16 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (concurrentIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: concurrentIdentity.identity,
-      member: concurrentIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: concurrentIdentity.identity,
+        member: concurrentIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   throw new Prisma.PrismaClientKnownRequestError(
@@ -346,6 +375,15 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
+  if (
+    shouldPersistHostedPrivyPhoneIdentity({ authMethod })
+    && input.identity.phone
+  ) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: input.identity.phone.number,
+      tx: input.prisma,
+    });
+  }
   const existingMemberLookup = await lookupHostedMemberForPrivyAuthAttempt({
     authMethod,
     identity: input.identity,
@@ -453,6 +491,18 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
+  if (
+    shouldPersistHostedPrivyPhoneIdentity({
+      authMethod,
+      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    })
+    && input.identity.phone
+  ) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: input.identity.phone.number,
+      tx: input.prisma,
+    });
+  }
 
   if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
     throw hostedOnboardingError({

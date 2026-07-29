@@ -28,6 +28,7 @@ import {
 
 const HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS =
   new Set<string>(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES);
+const HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV = "CF_PUBLIC_BASE_URL";
 
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
@@ -123,7 +124,17 @@ export function buildHostedRunnerContainerPlatformEnv(
     rewriteLoopbackUrlsForContainer?: boolean;
   } = {},
 ): Record<string, string> {
+  const privateMediaDeliveryOrigin = buildHostedRunnerPlatformEnv(
+    source,
+    options,
+  )[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV];
   return {
+    ...(privateMediaDeliveryOrigin
+      ? {
+          [HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV]:
+            privateMediaDeliveryOrigin,
+        }
+      : {}),
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),
   };

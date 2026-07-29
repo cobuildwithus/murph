@@ -1,9 +1,9 @@
 # Completion Workflow
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
-Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
+Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
 Prompt, frontend, and coverage audits run together in one preliminary
 `completion-specialists` ReviewGPT pass against an exact pushed PR head. That
@@ -55,7 +55,7 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
 preliminary specialist ReviewGPT pass when any lens applies, any required local
 `product-experience-review`, any required Claude Code UI double-check, parent
-final review, plan/ledger closure, and scoped commit. User-facing frontend UI
+final review, plan closure, and scoped commit. User-facing frontend UI
 work also requires the production component or section on the appropriate
 `/design` catalog tab and hosted desktop and mobile screenshots from that tab
 in the PR;
@@ -120,8 +120,8 @@ become fallback product-decision owners.
 1. Finish the functional implementation first.
    During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package, app, or low-risk repo-internal workflow/tooling work, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
    A truthful `pnpm test:diff <path ...>` already typechecks the touched owners and reverse dependents; do not run a separate root `pnpm typecheck` before it unless the verification matrix selects the full-workspace fallback.
-   Use those canonical commands unchanged. Automatic execution stays local; use explicit `MURPH_VERIFY_EXECUTOR=crabbox` only for the documented admission fallback or the required post-landing trust-root proof. Use the `:local` aliases only for executor diagnosis or an explicitly environment-bound check.
-   If a required canonical command spends 10 continuous minutes waiting only for the exclusive local shared-host slot, stop that task-owned waiter and rerun the same canonical command through Crabbox with `MURPH_VERIFY_EXECUTOR=crabbox`. The 10-minute limit covers admission wait only, not active verification. Never leave local and remote copies running together or fall back to another unbounded local wait. Follow the exact ownership, Git-state, secret-free environment, evidence, and cleanup rules in the verification doc.
+   Use those canonical commands unchanged. Automatic execution stays local. A configured dedicated Mac may be selected explicitly with `MURPH_VERIFY_EXECUTOR=ssh`; use the paid `MURPH_VERIFY_EXECUTOR=crabbox` only for the documented admission fallback or the required post-landing trust-root proof. Use the `:local` aliases only for executor diagnosis or an explicitly environment-bound check.
+   If a required canonical command spends 10 continuous minutes waiting only for the exclusive local shared-host slot, stop that task-owned waiter and rerun the same canonical command through the configured free SSH worker or, when that worker is unavailable, the paid Crabbox Testbox lane. The 10-minute limit covers admission wait only, not active verification. Never leave local and remote copies running together or fall back to another unbounded local wait. Follow the exact ownership, Git-state, secret-free environment, evidence, and cleanup rules in the verification doc.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
@@ -140,7 +140,7 @@ become fallback product-decision owners.
 10. Run the final review locally as the parent agent after preliminary findings are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent.
 11. Enter the review-resolution loop below for every required local or preliminary audit output. Completion means there are no unresolved accepted/actionable findings, not merely that a pass ran.
 12. Run or rerun the required canonical checks after implementation and preliminary remediation are stable. This keeps final proof on the same truthful command surface regardless of whether the executor is local or Crabbox.
-13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the ledger row is removed and the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
+13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
 14. When the final ReviewGPT gate is selected, start its immutable round-one baseline only now, after preliminary remediation, parent final review, final verification, plan closure, and the resulting push. Follow `agent-docs/operations/pr-reviewgpt-loop.md` until the exact patch returns `ROUND_OUTCOME: PASS` with zero accepted findings. Run each final-gate round concurrently with CI. Use `Final ReviewGPT Eligibility` above for proportional exemptions; never combine this final gate with local `deep-review`.
 15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
@@ -401,7 +401,7 @@ For each required local audit subagent, provide:
 - Current working-tree context and explicit review boundaries.
 - The declared review-only action mode. No audit worker may edit files, run
   commit helpers, or create commits.
-- Instruction to read `COORDINATION_LEDGER.md`, honor any explicit exclusive/refactor notes, and otherwise work carefully on top of overlapping rows.
+- Instruction to stay within the declared task and review boundaries and avoid unrelated worktree changes.
 
 For the required `product-experience-review` pass, also provide:
 

@@ -229,6 +229,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  allowedMailboxDedupeKeyPrefixes?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   assistantAskCompletionOccurredBefore?: string | null;
@@ -256,6 +257,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
+          )
+          && (
+            input.allowedMailboxDedupeKeyPrefixes == null
+            || input.allowedMailboxDedupeKeyPrefixes.some((prefix) =>
+              item.mailboxDedupeKey.startsWith(prefix)
+            )
           )
           && (
             input.allowedWakeKinds == null

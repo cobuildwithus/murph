@@ -20,12 +20,11 @@ Mode:
   ChatGPT autosends, or `thread wake` to satisfy this pass.
 
 Preflight:
-- Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
 - Read `agent-docs/PRODUCT_SENSE.md`,
   `agent-docs/PRODUCT_CONSTITUTION.md`, the applicable product spec, and the
   task's intended user outcome.
-- Inspect the full task diff and directly affected production path. Honor
-  explicit ledger ownership notes and preserve unrelated work.
+- Inspect the full task diff and directly affected production path. Stay within
+  the declared review boundary and preserve unrelated work.
 - Read `agent-docs/FRONTEND.md`, `PRODUCT.md`, and `DESIGN.md` when the changed
   experience includes `apps/web` UI.
 - Inspect the supplied direct scenario evidence. For frontend work, inspect

@@ -5,12 +5,13 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { appendHostedMailboxItemTx } from "@/src/lib/hosted-mailbox/store";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
@@ -21,7 +22,12 @@ import {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { updateHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
-import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
+import { buildHostedMemberIdentityPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  acquireHostedLinqParticipantPhoneLockTx,
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
@@ -32,6 +38,17 @@ import {
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly:
+      vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -180,6 +197,533 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer, owner, contender]);
       }
     });
+
+    it("keeps the uncommitted signup identity authoritative while an admitted inbound waits", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES",
+        "+1",
+      );
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const admitted = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const signup = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const uniqueDigits = randomUUID().replaceAll("-", "").slice(0, 7);
+      const numericSuffix = String(
+        Number.parseInt(uniqueDigits, 16) % 10_000_000,
+      ).padStart(7, "0");
+      const memberPhone = `+1555${numericSuffix}`;
+      const recipientPhone = `+1556${numericSuffix}`;
+      const memberPhoneLookupKey = createHostedPhoneLookupKey(memberPhone);
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
+      const chatId = `linq-classifier-window-${randomUUID()}`;
+      const admissionEventId =
+        `linq-classifier-window-admission-${randomUUID()}`;
+      const fallbackEventId =
+        `linq-classifier-window-fallback-${randomUUID()}`;
+      const memberId = `hbm_classifier_window_${randomUUID()}`;
+      const buildInboundEvent = (input: {
+        eventId: string;
+        service: "iMessage" | "sms";
+        text: string;
+      }) => parseHostedLinqWebhookEvent(JSON.stringify({
+        api_version: "v3",
+        created_at: "2026-07-28T12:00:00.000Z",
+        data: {
+          chat: {
+            id: chatId,
+            is_group: false,
+            owner_handle: {
+              handle: recipientPhone,
+              id: "owner-handle",
+              is_me: true,
+              service: input.service,
+            },
+          },
+          direction: "inbound",
+          id: `linq-message-${randomUUID()}`,
+          parts: [{ type: "text", value: input.text }],
+          sender_handle: {
+            handle: memberPhone,
+            id: "sender-handle",
+            service: input.service,
+          },
+          sent_at: "2026-07-28T12:00:00.000Z",
+          service: input.service,
+        },
+        event_id: input.eventId,
+        event_type: "message.received",
+        webhook_version: "2026-02-03",
+      }));
+      const admissionEvent = buildInboundEvent({
+        eventId: admissionEventId,
+        service: "iMessage",
+        text: "What can you help me with?",
+      });
+      const fallbackEvent = buildInboundEvent({
+        eventId: fallbackEventId,
+        service: "sms",
+        text: "Following up",
+      });
+      const signupIdentityCreated = createDeferred();
+      const releaseSignup = createDeferred();
+      const admittedPid = createDeferred<number>();
+      let lineCreated = false;
+      let admittedTransaction:
+        Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>>
+        | null = null;
+      let signupTransaction:
+        Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>>
+        | null = null;
+
+      if (!memberPhoneLookupKey || !recipientPhoneLookupKey) {
+        throw new Error("Expected valid classifier-window phone inputs.");
+      }
+
+      try {
+        await observer.hostedLinqLine.create({
+          data: {
+            configuredAt: new Date("2026-07-28T11:00:00.000Z"),
+            egressPolicy: "enabled",
+            healthStatus: "healthy",
+            phoneNumberEncrypted:
+              encryptHostedLinqLinePhoneNumber(recipientPhone),
+            phoneNumberHint: "*** test",
+            phoneNumberLookupKey: recipientPhoneLookupKey,
+            source: "test",
+          },
+        });
+        lineCreated = true;
+
+        const waitingPlan = await admitted.$transaction(
+          (tx) => planHostedOnboardingLinqWebhook({
+            event: admissionEvent,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          }),
+          transactionOptions,
+        );
+        expect(waitingPlan.firstContactAdmissionRequest).not.toBeNull();
+        await expect(observer.hostedMemberIdentity.count({
+          where: { phoneLookupKey: memberPhoneLookupKey },
+        })).resolves.toBe(0);
+
+        signupTransaction = signup.$transaction(async (tx) => {
+          await acquireHostedLinqParticipantPhoneLockTx({
+            phoneNumber: memberPhone,
+            tx,
+          });
+          await tx.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.not_started,
+              id: memberId,
+            },
+          });
+          const identityPrivate =
+            await buildHostedMemberIdentityPrivateColumns({
+              memberId,
+              phoneNumber: memberPhone,
+              prisma: tx,
+              privyUserId: null,
+              signupPhoneCodeSendAttemptId: null,
+              signupPhoneCodeSendAttemptStartedAt: null,
+              signupPhoneCodeSentAt: null,
+              signupPhoneNumber: null,
+            });
+          await tx.hostedMemberIdentity.create({
+            data: {
+              ...identityPrivate,
+              maskedPhoneNumberHint: "*** test",
+              memberId,
+              phoneLookupKey: memberPhoneLookupKey,
+              phoneNumberVerifiedAt:
+                new Date("2026-07-28T12:00:00.000Z"),
+            },
+          });
+          signupIdentityCreated.resolve();
+          await releaseSignup.promise;
+          return planHostedOnboardingLinqWebhook({
+            event: fallbackEvent,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await signupIdentityCreated.promise;
+
+        admittedTransaction = admitted.$transaction(async (tx) => {
+          admittedPid.resolve(await readBackendPid(tx));
+          return planHostedOnboardingLinqWebhook({
+            event: admissionEvent,
+            firstContactAdmissionDecision: {
+              confidence: 0.99,
+              kind: "allow",
+              source: "model",
+            },
+            instantStartAllowed: true,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await admittedPid.promise,
+        });
+        releaseSignup.resolve();
+
+        const fallbackPlan = await signupTransaction;
+        expect(fallbackPlan.response.reason).toBe("sent-signup-link");
+        expect(fallbackPlan.instantStartEnrollment).toBeUndefined();
+        const admittedPlan = await admittedTransaction;
+        expect(admittedPlan.response.reason).toBe("sent-signup-link");
+        expect(admittedPlan.instantStartEnrollment).toBeUndefined();
+        expect(admittedPlan.desiredSideEffects).toHaveLength(1);
+        expect(admittedPlan.desiredSideEffects[0]?.effectId).toBe(
+          fallbackPlan.desiredSideEffects[0]?.effectId,
+        );
+        await expect(observer.hostedInvite.findFirst({
+          select: {
+            instantStartAdmissionEventId: true,
+            sentAt: true,
+          },
+          where: { memberId },
+        })).resolves.toEqual({
+          instantStartAdmissionEventId: null,
+          sentAt: null,
+        });
+        await expect(observer.hostedLinqDailyState.findMany({
+          select: { inboundCount: true },
+          where: { memberId },
+        })).resolves.toEqual([{ inboundCount: 2 }]);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { phoneLookupKey: memberPhoneLookupKey },
+        })).resolves.toBe(1);
+      } finally {
+        releaseSignup.resolve();
+        await Promise.allSettled([
+          ...(admittedTransaction ? [admittedTransaction] : []),
+          ...(signupTransaction ? [signupTransaction] : []),
+        ]);
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        if (lineCreated) {
+          await observer.hostedLinqLine.deleteMany({
+            where: {
+              phoneNumberLookupKey: recipientPhoneLookupKey,
+            },
+          });
+        }
+        await disconnectClients([observer, admitted, signup]);
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it.each([
+      "fallback-first",
+      "activation-first",
+    ] as const)(
+      "keeps the admitted instant start authoritative for an overlapping SMS with %s lock order",
+      async (lockOrder) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const activation = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fallbackBase = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const uniqueDigits = randomUUID().replaceAll("-", "").slice(0, 7);
+        const numericSuffix = String(
+          Number.parseInt(uniqueDigits, 16) % 10_000_000,
+        ).padStart(7, "0");
+        const memberPhone = `+1555${numericSuffix}`;
+        const recipientPhone = `+1556${numericSuffix}`;
+        const recipientPhoneLookupKey =
+          createHostedPhoneLookupKey(recipientPhone);
+        const participantContact = createHostedLinqParticipantContact({
+          kind: "phone",
+          value: memberPhone,
+        });
+        const chatId = `linq-instant-start-${randomUUID()}`;
+        const admissionEventId =
+          `linq-instant-start-admission-${randomUUID()}`;
+        const followUpEventId =
+          `linq-instant-start-follow-up-${randomUUID()}`;
+        const inviteId = `invite_instant_start_${randomUUID()}`;
+        const inviteCode = `code_instant_start_${randomUUID()}`;
+        const followUpEvent = parseHostedLinqWebhookEvent(JSON.stringify({
+          api_version: "v3",
+          created_at: "2026-07-28T12:00:00.000Z",
+          data: {
+            chat: {
+              id: chatId,
+              is_group: false,
+              owner_handle: {
+                handle: recipientPhone,
+                id: "owner-handle",
+                is_me: true,
+                service: "sms",
+              },
+            },
+            direction: "inbound",
+            id: `linq-message-${randomUUID()}`,
+            parts: [{ type: "text", value: "one more question" }],
+            sender_handle: {
+              handle: memberPhone,
+              id: "sender-handle",
+              service: "sms",
+            },
+            sent_at: "2026-07-28T12:00:00.000Z",
+            service: "sms",
+          },
+          event_id: followUpEventId,
+          event_type: "message.received",
+          webhook_version: "2026-02-03",
+        }));
+        if (!participantContact || !recipientPhoneLookupKey) {
+          throw new Error("Expected valid instant-start concurrency inputs.");
+        }
+
+        const fallbackMarkerReadReached = createDeferred();
+        const releaseFallbackMarkerRead = createDeferred();
+        const activationLocked = createDeferred();
+        const releaseActivation = createDeferred();
+        const activationPid = createDeferred<number>();
+        const fallbackPid = createDeferred<number>();
+        const fallbackClient = fallbackBase.$extends({
+          query: {
+            hostedInvite: {
+              async findFirst({ args, query }) {
+                if (
+                  lockOrder === "fallback-first"
+                  && typeof args.where?.instantStartAdmissionEventId
+                    === "object"
+                ) {
+                  fallbackMarkerReadReached.resolve();
+                  await releaseFallbackMarkerRead.promise;
+                }
+                return query(args);
+              },
+            },
+          },
+        });
+        let activationTransaction: Promise<void> | null = null;
+        let fallbackTransaction:
+          Promise<Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>>
+          | null = null;
+        let memberId: string | null = null;
+        let lineCreated = false;
+
+        const runActivation = () => {
+          activationTransaction = activation.$transaction(async (tx) => {
+            const currentMemberId = requireString(memberId);
+            activationPid.resolve(await readBackendPid(tx));
+            await lockHostedMemberRow(tx, currentMemberId);
+            activationLocked.resolve();
+            if (lockOrder === "activation-first") {
+              await releaseActivation.promise;
+            }
+            await updateHostedMemberCoreState({
+              billingStatus: HostedBillingStatus.active,
+              memberId: currentMemberId,
+              prisma: tx,
+            });
+            await tx.hostedInvite.updateMany({
+              data: {
+                instantStartAdmissionEventId: null,
+              },
+              where: {
+                id: inviteId,
+                instantStartAdmissionEventId: admissionEventId,
+              },
+            });
+          }, transactionOptions);
+        };
+        const runFallback = () => {
+          fallbackTransaction = fallbackClient.$transaction(async (tx) => {
+            const prisma = tx as Prisma.TransactionClient;
+            fallbackPid.resolve(await readBackendPid(prisma));
+            return planHostedOnboardingLinqWebhook({
+              event: followUpEvent,
+              prisma,
+            });
+          }, transactionOptions);
+        };
+
+        try {
+          await observer.hostedLinqLine.create({
+            data: {
+              configuredAt: new Date("2026-07-28T11:00:00.000Z"),
+              egressPolicy: "enabled",
+              healthStatus: "healthy",
+              phoneNumberEncrypted:
+                encryptHostedLinqLinePhoneNumber(recipientPhone),
+              phoneNumberHint: "*** test",
+              phoneNumberLookupKey: recipientPhoneLookupKey,
+              source: "test",
+            },
+          });
+          lineCreated = true;
+          memberId = `hbm_instant_start_overlap_${randomUUID()}`;
+          await observer.$transaction(async (tx) => {
+            const phoneLookupKey = createHostedPhoneLookupKey(memberPhone);
+            if (!phoneLookupKey) {
+              throw new Error("Expected a valid member phone lookup key.");
+            }
+            await tx.hostedMember.create({
+              data: {
+                billingStatus: HostedBillingStatus.not_started,
+                id: requireString(memberId),
+              },
+            });
+            const identityPrivate =
+              await buildHostedMemberIdentityPrivateColumns({
+                memberId: requireString(memberId),
+                phoneNumber: memberPhone,
+                prisma: tx,
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+              });
+            await tx.hostedMemberIdentity.create({
+              data: {
+                ...identityPrivate,
+                maskedPhoneNumberHint: "*** test",
+                memberId: requireString(memberId),
+                phoneLookupKey,
+                phoneNumberVerifiedAt:
+                  new Date("2026-07-28T11:00:00.000Z"),
+              },
+            });
+            await upsertHostedMemberPendingLinqBindingTx({
+              homeLineAssignedAt: new Date("2026-07-28T11:00:00.000Z"),
+              linqChatId: chatId,
+              memberId: requireString(memberId),
+              participantContact,
+              participantContactObservedAt:
+                new Date("2026-07-28T11:00:00.000Z"),
+              prisma: tx,
+              recipientPhone,
+            });
+            await tx.hostedInvite.create({
+              data: {
+                channel: "linq",
+                expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+                id: inviteId,
+                instantStartAdmissionEventId: admissionEventId,
+                inviteCode,
+                memberId: requireString(memberId),
+              },
+            });
+            await tx.hostedLinqFirstContactAdmissionDecision.create({
+              data: {
+                confidence: 0.99,
+                decision: "allow",
+                eventId: admissionEventId,
+                source: "model",
+              },
+            });
+          }, transactionOptions);
+
+          if (lockOrder === "fallback-first") {
+            runFallback();
+            await fallbackMarkerReadReached.promise;
+            runActivation();
+            await waitForBlockedBackend({
+              observer,
+              pid: await activationPid.promise,
+            });
+            releaseFallbackMarkerRead.resolve();
+            await expect(fallbackTransaction).rejects.toMatchObject({
+              code: "HOSTED_LINQ_INSTANT_START_IN_PROGRESS",
+              retryable: true,
+            });
+            await activationTransaction;
+            fallbackTransaction = fallbackClient.$transaction(
+              (tx) => planHostedOnboardingLinqWebhook({
+                event: followUpEvent,
+                prisma: tx as Prisma.TransactionClient,
+              }),
+              transactionOptions,
+            );
+          } else {
+            runActivation();
+            await activationLocked.promise;
+            runFallback();
+            await waitForBlockedBackend({
+              observer,
+              pid: await fallbackPid.promise,
+            });
+            releaseActivation.resolve();
+            await activationTransaction;
+          }
+
+          if (!fallbackTransaction) {
+            throw new Error("Expected the fallback planner transaction.");
+          }
+          const finalPlan = await fallbackTransaction;
+          expect(finalPlan.response.reason).toBe(
+            "wake-appended-active-member",
+          );
+          expect(finalPlan.desiredSideEffects).toEqual([]);
+          await expect(observer.hostedMailboxItem.count({
+            where: {
+              dedupeKey: followUpEventId,
+              userId: memberId,
+            },
+          })).resolves.toBe(1);
+          await expect(observer.hostedLinqDailyState.findMany({
+            select: {
+              inboundCount: true,
+            },
+            where: {
+              memberId,
+            },
+          })).resolves.toEqual([
+            {
+              inboundCount: 1,
+            },
+          ]);
+          await expect(observer.hostedInvite.findUnique({
+            select: {
+              instantStartAdmissionEventId: true,
+              sentAt: true,
+            },
+            where: {
+              id: inviteId,
+            },
+          })).resolves.toEqual({
+            instantStartAdmissionEventId: null,
+            sentAt: null,
+          });
+        } finally {
+          releaseFallbackMarkerRead.resolve();
+          releaseActivation.resolve();
+          await Promise.allSettled([
+            ...(activationTransaction ? [activationTransaction] : []),
+            ...(fallbackTransaction ? [fallbackTransaction] : []),
+          ]);
+          await observer.hostedLinqFirstContactAdmissionDecision.deleteMany({
+            where: {
+              eventId: admissionEventId,
+            },
+          });
+          if (memberId) {
+            await observer.hostedMember.deleteMany({
+              where: {
+                id: memberId,
+              },
+            });
+          }
+          if (lineCreated) {
+            await observer.hostedLinqLine.deleteMany({
+              where: {
+                phoneNumberLookupKey: recipientPhoneLookupKey,
+              },
+            });
+          }
+          await disconnectClients([observer, activation, fallbackBase]);
+        }
+      },
+    );
 
     it.each([
       ["activation", "first-contact"],
@@ -722,6 +1266,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
 async function disconnectClients(clients: PrismaClient[]): Promise<void> {
   await Promise.all(clients.map((client) => client.$disconnect()));
+}
+
+function requireString(value: string | null): string {
+  if (!value) {
+    throw new Error("Expected the test member to exist.");
+  }
+  return value;
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {

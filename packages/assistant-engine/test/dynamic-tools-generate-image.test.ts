@@ -1,8 +1,13 @@
 import { Buffer } from 'node:buffer'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
-import { describe, expect, it, vi } from 'vitest'
+import { initializeVault } from '@murphai/core'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   executeMurphDynamicToolRequest,
@@ -18,6 +23,14 @@ import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-voice-memo.js'
 
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempRoots.splice(0).map((root) =>
+    rm(root, { force: true, recursive: true })
+  ))
+})
+
 describe('murph.generate_image dynamic tool schema', () => {
   it('requires a request, known preference, or owning flow for richer media', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
@@ -30,7 +43,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       'attach the generated image to the final response',
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'if generation and upload finish while the invocation remains live',
+      'private media is provided in a later trusted system input',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
@@ -44,6 +57,12 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('returns immediately when the hosted runtime launches image generation', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-private-image-launch-'))
+    tempRoots.push(vaultRoot)
+    await initializeVault({
+      createdAt: '2026-07-27T12:00:00.000Z',
+      vaultRoot,
+    })
     let releaseProvider = (): void => undefined
     const providerHeld = new Promise<void>((resolve) => {
       releaseProvider = resolve
@@ -65,6 +84,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     let generation: Promise<unknown> | null = null
     const launchedOperations = new Set<string>()
+    const scopeStatuses = new Map<string, 'pending' | 'queued'>()
     let releaseUsage = (): void => undefined
     const usageHeld = new Promise<void>((resolve) => {
       releaseUsage = resolve
@@ -77,17 +97,34 @@ describe('murph.generate_image dynamic tool schema', () => {
       currentAssistantInputId: () => 'input_image_origin',
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['input_image_origin'],
+        conversationId: 'conversation_1',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox_1'],
+        originSessionId: 'session_1',
+        recipientKey: 'recipient_1',
+      }),
       imageGenerationLauncher: {
         launch(input) {
           if (launchedOperations.has(input.operationId)) {
             return 'already-started' as const
           }
+          if (input.scopeId && scopeStatuses.has(input.scopeId)) {
+            return 'already-pending' as const
+          }
           launchedOperations.add(input.operationId)
+          if (input.scopeId) {
+            scopeStatuses.set(input.scopeId, 'pending')
+          }
           generation = input.run(
             new AbortController().signal,
             async (write) => await write(),
           )
           return 'started' as const
+        },
+        readStatus(scopeId) {
+          return scopeStatuses.get(scopeId) ?? null
         },
       },
       recordDetachedUsage,
@@ -97,19 +134,10 @@ describe('murph.generate_image dynamic tool schema', () => {
       }),
       vaultFileSendAvailable: false,
     } satisfies AssistantHostedToolContext
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async () => ({
-        alt: 'Generated image',
-        kind: 'image' as const,
-        source: 'gpt-image-1',
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
 
     const result = await executeMurphDynamicToolRequest({
       env: { OPENAI_API_KEY: 'test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -124,22 +152,40 @@ describe('murph.generate_image dynamic tool schema', () => {
         },
         kind: 'generate-image',
       },
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
     })
 
     expect(result.rpcResult).toMatchObject({
       success: true,
       contentItems: [{
-        text: expect.stringContaining('continue without waiting'),
+        text: expect.stringContaining('tell the user it is still generating'),
       }],
     })
-    expect(fetchImpl).toHaveBeenCalledOnce()
-    expect(uploader.uploadGeneratedImage).not.toHaveBeenCalled()
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('if it succeeds'),
+      }],
+    })
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'later user questions steered into this live turn',
+        ),
+      }],
+    })
+    expect(result.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('will appear'),
+      }],
+    })
+    await vi.waitFor(() => {
+      expect(fetchImpl).toHaveBeenCalledOnce()
+    })
 
     const duplicate = await executeMurphDynamicToolRequest({
       env: { OPENAI_API_KEY: 'test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       hostedToolContext,
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -154,12 +200,127 @@ describe('murph.generate_image dynamic tool schema', () => {
         },
         kind: 'generate-image',
       },
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
     })
     expect(duplicate.rpcResult).toMatchObject({
       success: true,
       contentItems: [{
-        text: 'image generation was already started for this operation',
+        text: expect.stringContaining(
+          'this exact image operation was already accepted',
+        ),
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    const sameConversationFollowup = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Restart the same sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+        toolCallId: 'followup-tool-call',
+      },
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+    expect(sameConversationFollowup.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining('new image request was not started'),
+      }],
+    })
+    expect(sameConversationFollowup.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('do not imply the new request was queued'),
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    scopeStatuses.set('session_1', 'queued')
+    const queuedExactDuplicate = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw a calm sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+    expect(queuedExactDuplicate.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining(
+          'do not infer its current state from another pending or queued image',
+        ),
+      }],
+    })
+    expect(queuedExactDuplicate.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'this exact image operation finished processing',
+        ),
+      }],
+    })
+
+    const queuedConversationFollowup = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Try the sunrise again.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+        toolCallId: 'queued-followup-tool-call',
+      },
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
+    })
+    expect(queuedConversationFollowup.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining('finished processing'),
+      }],
+    })
+    expect(queuedConversationFollowup.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'if trusted turn context includes `Trusted hosted image completion',
+        ),
+      }],
+    })
+    expect(queuedConversationFollowup.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('still in progress'),
       }],
     })
     expect(fetchImpl).toHaveBeenCalledOnce()
@@ -167,7 +328,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     releaseProvider()
     await expect(generation).resolves.toMatchObject({
       media: {
-        url: 'https://imagedelivery.net/account/generated/public',
+        contentType: 'image/webp',
+        kind: 'vault_image',
+        ref: expect.stringMatching(/^raw\/captures\/.+\.webp$/u),
       },
     })
     expect(recordDetachedUsage).toHaveBeenCalledOnce()
@@ -275,11 +438,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('describes the canonical Murph character sheet skill asset reference', () => {
+  it('describes the canonical Murph character sheet for generated messages and avatars', () => {
     const generateImageReferenceDescription =
       MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.referenceImageRefs.description
-    const groupReferenceDescription =
-      MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description
 
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'skill-assets/murph-character-sheet-v1.png',
@@ -293,11 +454,34 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(groupReferenceDescription).toContain(
-      'skill-assets/murph-character-sheet-v1.png',
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description)
+      .toContain('skill-assets/murph-character-sheet-v1.png')
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toContain(
+      'set_chat_avatar',
     )
-    expect(groupReferenceDescription).toContain(
-      'generated avatar',
-    )
+  })
+
+  it('accepts an exact private vault image descriptor from a trusted command', () => {
+    const media = {
+      alt: 'Private progress',
+      contentType: 'image/png',
+      filename: 'progress.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/progress.png',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1234,
+      source: 'murph.experiment-progress-card',
+    }
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: { media: [media] },
+        namespace: 'murph',
+        tool: MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+      },
+    })).toEqual({
+      kind: 'attach-response-media',
+      media: [media],
+    })
   })
 })

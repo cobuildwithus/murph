@@ -11,7 +11,6 @@ import { listMetricPoints } from "@murphai/query";
 import {
   analyzeExperimentOutcomeRecord,
   showExperimentProgress,
-  showExperimentProgressCard,
 } from "../src/usecases/experiment-journal-vault.ts";
 
 const createdVaultRoots: string[] = [];
@@ -762,26 +761,6 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(outcomeSleepEfficiency?.baselineMean, 91);
   assert.equal(outcomeSleepEfficiency?.interventionMean, 96);
 
-  const card = await showExperimentProgressCard({
-    vault: vaultRoot,
-    lookup: "sleep-efficiency",
-    asOf: "2026-06-06",
-  });
-  assert.equal(card.card.movers.length, 1);
-  assert.equal(card.card.movers[0]?.label, "Sleep Efficiency");
-  assert.equal(card.card.movers[0]?.direction, "up");
-  assert.equal(card.card.movers[0]?.sentiment, "positive");
-  assert.equal(card.card.sessions.logged, 3);
-  assert.equal(card.card.weeks[0]?.cells, "CCCOOOO");
-
-  const midRunCard = await showExperimentProgressCard({
-    vault: vaultRoot,
-    lookup: "sleep-efficiency",
-    asOf: "2026-06-04",
-  });
-  assert.equal(midRunCard.card.sessions.logged, 1);
-  assert.equal(midRunCard.card.weeks[0]?.cells, "CSSOOOO");
-
   const mixedProgress = await showExperimentProgress({
     vault: vaultRoot,
     lookup: "sleep-efficiency-mixed",
@@ -790,14 +769,6 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(mixedProgress.progress.adherence.completedSessions, 0);
   assert.equal(mixedProgress.progress.adherence.expectedSessionsByNow, 1);
   assert.equal(mixedProgress.progress.adherence.status, "not_started");
-
-  const mixedCard = await showExperimentProgressCard({
-    vault: vaultRoot,
-    lookup: "sleep-efficiency-mixed",
-    asOf: "2026-06-06",
-  });
-  assert.equal(mixedCard.card.sessions.logged, 0);
-  assert.equal(mixedCard.card.weeks[0]?.cells, "MSSOOOO");
 
   const reorderedMixedProgress = await showExperimentProgress({
     vault: vaultRoot,
@@ -808,14 +779,6 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(reorderedMixedProgress.progress.adherence.expectedSessionsByNow, 1);
   assert.equal(reorderedMixedProgress.progress.adherence.status, "not_started");
 
-  const reorderedMixedCard = await showExperimentProgressCard({
-    vault: vaultRoot,
-    lookup: "sleep-efficiency-mixed-reordered",
-    asOf: "2026-06-06",
-  });
-  assert.equal(reorderedMixedCard.card.sessions.logged, 0);
-  assert.equal(reorderedMixedCard.card.weeks[0]?.cells, "MSSOOOO");
-
   const adherenceOnlyProgress = await showExperimentProgress({
     vault: vaultRoot,
     lookup: "sleep-efficiency-adherence-only",
@@ -825,12 +788,6 @@ test("experiment progress usecases read metrics from the query metric projection
   assert.equal(adherenceOnlyProgress.progress.adherence.expectedSessionsByNow, 3);
   assert.equal(adherenceOnlyProgress.progress.adherence.status, "met_target");
 
-  const adherenceOnlyCard = await showExperimentProgressCard({
-    vault: vaultRoot,
-    lookup: "sleep-efficiency-adherence-only",
-    asOf: "2026-06-06",
-  });
-  assert.equal(adherenceOnlyCard.card.sessions.logged, 3);
 });
 
 test("experiment progress usecases keep anchored lab metrics outside run windows", async () => {

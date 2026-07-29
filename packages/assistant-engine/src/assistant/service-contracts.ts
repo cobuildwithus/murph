@@ -200,6 +200,7 @@ export interface AssistantTurnSharedPlan {
 export interface PersistedUserTurn {
   turnCreatedAt: string
   turnId: string
+  userContentReceivedAt?: string | null
   userTranscriptRef: AssistantAcceptedTurnInputItemInput['transcriptRef'] | null
   userPersisted: boolean
 }
@@ -253,9 +254,6 @@ export type { ResolvedAssistantSession }
 export type {
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
-  AssistantGeneratedImageContentType,
-  AssistantHostedGeneratedImageUploadInput,
-  AssistantHostedGeneratedImageUploader,
   AssistantHostedExecutionContext,
   AssistantHostedProgressDeliveryDependencies,
 } from './execution-context.js'

@@ -3,18 +3,21 @@ import "server-only";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  isHostedRuntimePrivateImageDeliveryUrl,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
   Chat,
   ChatCreateParams,
-  ChatCreateResponse,
   ChatUpdateParams,
   MessageSendParams,
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
 
 import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
+import {
+  readHostedExecutionControlOrigin,
+} from "../hosted-execution/environment";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -41,10 +44,9 @@ export async function createHostedLinqChat(input: {
     to: normalizeRequiredStringList(input.to, "recipient"),
   };
 
-  const response = await fetchHostedLinqApiOrThrow({
+  const response = await fetchHostedLinqJsonApiOrThrow({
     body: JSON.stringify(body),
     method: "POST",
-    operation: "chat create",
     path: "chats",
     signal: input.signal,
     timeoutMessage: "Linq chat create timed out.",
@@ -58,10 +60,13 @@ export async function createHostedLinqChat(input: {
     });
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<ChatCreateResponse>(response);
+  const chat = readHostedLinqJsonObjectField(response.payload, "chat");
+  const message = readHostedLinqJsonObjectField(chat, "message");
   return {
-    chatId: normalizeNullableString(payload?.chat?.id),
-    messageId: normalizeNullableString(payload?.chat?.message?.id),
+    chatId: normalizeNullableString(readHostedLinqJsonField(chat, "id")),
+    messageId: normalizeNullableString(
+      readHostedLinqJsonField(message, "id"),
+    ),
   };
 }
 
@@ -74,14 +79,13 @@ export async function sendHostedLinqChatMessage(input: {
 }): Promise<HostedLinqSendResult> {
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
 
-  const response = await fetchHostedLinqApiOrThrow({
+  const response = await fetchHostedLinqJsonApiOrThrow({
     body: JSON.stringify(buildHostedLinqTextMessageBody({
       idempotencyKey: input.idempotencyKey,
       message: input.message,
       replyToMessageId,
     })),
     method: "POST",
-    operation: "outbound reply",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`,
     signal: input.signal,
     timeoutMessage: "Linq outbound reply timed out.",
@@ -95,10 +99,14 @@ export async function sendHostedLinqChatMessage(input: {
     });
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(response);
+  const message = readHostedLinqJsonObjectField(response.payload, "message");
   return {
-    chatId: normalizeNullableString(payload?.chat_id),
-    messageId: normalizeNullableString(payload?.message?.id),
+    chatId: normalizeNullableString(
+      readHostedLinqJsonField(response.payload, "chat_id"),
+    ),
+    messageId: normalizeNullableString(
+      readHostedLinqJsonField(message, "id"),
+    ),
   };
 }
 
@@ -561,6 +569,7 @@ async function fetchHostedLinqApiOrThrow(input: {
 }
 
 async function fetchHostedLinqJsonApiOrThrow(input: {
+  body?: string;
   method: string;
   path: string;
   signal?: AbortSignal;
@@ -573,6 +582,7 @@ async function fetchHostedLinqJsonApiOrThrow(input: {
     return await fetchLinqApiJson({
       apiBaseUrl,
       apiToken,
+      body: input.body,
       method: input.method,
       path: input.path,
       signal: input.signal,
@@ -618,6 +628,23 @@ async function readHostedLinqOptionalJsonResponse<T>(response: Response): Promis
   }
 }
 
+function readHostedLinqJsonField(
+  input: unknown,
+  field: string,
+): unknown {
+  return input !== null && typeof input === "object"
+    ? Reflect.get(input, field)
+    : null;
+}
+
+function readHostedLinqJsonObjectField(
+  input: unknown,
+  field: string,
+): object | null {
+  const value = readHostedLinqJsonField(input, field);
+  return value !== null && typeof value === "object" ? value : null;
+}
+
 function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
 
@@ -645,17 +672,14 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
 function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
   const normalized = normalizeRequiredHttpsUrl(value, "group chat icon url");
   if (normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   const parsed = new URL(normalized);
-  const pathSegments = parsed.pathname.split("/").filter(Boolean);
-  if (
-    parsed.hostname !== "imagedelivery.net"
-    || parsed.search
-    || parsed.hash
-    || pathSegments.length < 3
-  ) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    readHostedExecutionControlOrigin() ?? undefined,
+  )) {
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   return normalized;
 }

@@ -192,6 +192,7 @@ function createHostedOnboardingEnvironment(
     linqFirstContactAdmissionMode: "off",
     linqFirstContactAdmissionModel: "gpt-5.4-nano",
     linqFirstContactAdmissionOpenAiApiKey: null,
+    linqInstantStartPhonePrefixes: ["+1"],
     linqMaxActiveMembersPerConversationPhone: null,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 300_000,
@@ -210,6 +211,7 @@ function createHostedOnboardingEnvironment(
     stripeUsageCreditPriceIdsByOffer: {
       usage_5_usd: null,
       usage_10_usd: null,
+      usage_20_usd: null,
       usage_25_usd: null,
     },
     stripeSecretKey: null,

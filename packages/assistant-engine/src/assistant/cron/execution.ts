@@ -133,6 +133,8 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR =
   'Managed automation owner no longer matches the live delivery route.'
+const HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH =
+  'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH'
 const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
   'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
@@ -149,6 +151,8 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
+  'murph-managed:monthly-improvement-coach',
+  // Legacy tag retained while existing records reconcile to the monthly seed.
   'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])
@@ -756,8 +760,7 @@ export async function executeClaimedAssistantCronJob(
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
-            : managedOwnerAuthorization.kind === 'authorized' &&
-                managedOwnerAuthorization.ownerScope === 'authenticated-group'
+            : managedOwnerAuthorization.kind === 'authorized'
               ? managedOwnerAuthorization.authorizedDelivery
               : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                   executionContext: input.executionContext ?? null,
@@ -2266,16 +2269,37 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'mismatch' }
   }
 
-  const authorizedDelivery = ownerScope === 'authenticated-group'
-    ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-        executionContext: input.executionContext,
-        signal: input.signal,
-        target: input.target,
-      })
-    : {
-        externalThreadRouteAuthority: null,
-        route: declaredRoute,
+  let authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  if (
+    ownerScope === 'authenticated-group'
+    || !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  ) {
+    try {
+      authorizedDelivery =
+        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+          executionContext: input.executionContext,
+          signal: input.signal,
+          target: input.target,
+        })
+    } catch (error) {
+      if (
+        ownerScope === 'member'
+        && input.target.channel === 'linq'
+        && readAssistantCronErrorCode(error)
+          === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
+      ) {
+        return { kind: 'mismatch' }
       }
+      throw error
+    }
+  } else {
+    authorizedDelivery = {
+      externalThreadRouteAuthority: null,
+      route: declaredRoute,
+    }
+  }
   const route = authorizedDelivery.route
   const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
   const target = normalizeNullableString(
