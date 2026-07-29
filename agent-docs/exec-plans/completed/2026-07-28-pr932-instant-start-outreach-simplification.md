@@ -1,6 +1,6 @@
 # PR 932 instant-start compatibility and outreach simplification
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -45,7 +45,7 @@ Updated: 2026-07-28
 2. [x] Ask ReviewGPT for a bounded patch covering compatibility, a 100+ opener bank, tests, and justified deletion.
 3. [x] Inspect the returned patch and implement only verified, proportional changes.
 4. [x] Run focused proof, product review, preliminary specialists, parent review, canonical verification, and acceptance.
-5. [ ] Close the plan, push the final head, complete ReviewGPT/CI/mergeability gates, and leave PR 932 open.
+5. [x] Close the plan and prepare the exact pushed head for the post-plan ReviewGPT/CI/mergeability gates, leaving PR 932 open.
 
 ## Decisions
 
@@ -78,3 +78,10 @@ Updated: 2026-07-28
 - Canonical `pnpm verify:acceptance`: passed all workspace typecheck, package
   coverage, Web/Cloudflare app verification, production-build, artifact, and
   package-boundary lanes.
+- Merged current `origin/main` at
+  `af2c260064a5fdb5472378aaeb09044a88b0f40d` through ordinary Git as
+  `cac47230c3dd602e7d77cdd9232e0f688ed08514`; no manual conflict resolution
+  or PR-owned behavior change was required.
+
+Completed: 2026-07-28
+Completed: 2026-07-28
