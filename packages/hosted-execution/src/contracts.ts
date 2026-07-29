@@ -133,6 +133,17 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
     channel: "telegram";
   };
 
+/**
+ * Provider-authenticated sender evidence for one exact accepted group message.
+ * The assistant runtime derives this after reloading the opaque assistant
+ * input id; the model never supplies a canonical member id.
+ */
+export interface HostedExecutionAcceptedGroupMessageParticipant {
+  assistantInputId: string;
+  senderHandle: string;
+  source: "linq" | "telegram";
+}
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -391,6 +402,11 @@ export interface HostedExecutionTelegramMessage {
   messageId: string;
   replyContextPreview?: string | null;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
+  /**
+   * Presentation-only display name from trusted Telegram ingress. Never
+   * identity, membership, routing, or effect authority.
+   */
+  senderDisplayName?: string | null;
   /**
    * Sending Telegram `@username`, carried only so the assistant can address
    * participants by name. Never identity authority: usernames are optional,

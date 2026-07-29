@@ -133,6 +133,12 @@ default destination for every goal or the definition of activation.
   private settings, health facts, memories, or contacts into the room. The
   setup applies only when the route is new; an existing group never changes
   owner or configuration because someone prepared another group.
+- Speaker labels should make authenticated group conversation easier to follow
+  without pretending uncertainty is identity. Prefer the member's current
+  authorized profile name. Use a human owner's explicitly shared contact label
+  only as an unmistakably unverified fallback, and leave the speaker unnamed
+  when neither source is safe. Convenience text never authorizes membership,
+  consent, routing, matching, delivery, or participant actions.
 
 ## First-Class Product Objects
 

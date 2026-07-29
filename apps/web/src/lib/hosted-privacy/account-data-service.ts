@@ -226,7 +226,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_account_deletion_cleanup",
     label: "Encrypted account-deletion cleanup receipt",
     deletion: "documented-retention",
-    note: "Creates a minimal encrypted retry receipt atomically with account deletion and removes it after Cloudflare, Stripe, and Privy cleanup converges.",
+    note: "Creates a minimal encrypted retry receipt atomically with account deletion and removes it after isolated runtime-log, Cloudflare, Stripe, and Privy cleanup converges.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -278,9 +278,15 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "prisma.hosted_runtime_log",
-    label: "Runtime logs",
+    label: "Legacy primary runtime logs",
     deletion: "live-delete",
-    note: "Deletes per-user hosted runtime logs and redacted runtime JSON. Export omits runtime log rows and counts.",
+    note: "Deletes pre-cutover per-user hosted runtime logs and redacted runtime JSON during the bounded migration window. Export omits runtime log rows and counts.",
+  },
+  {
+    slug: "postgres.hosted_runtime_log",
+    label: "Isolated runtime logs",
+    deletion: "best-effort-delete",
+    note: "The encrypted account-deletion cleanup receipt retries deleting isolated redacted runtime diagnostics until cleanup converges. Late writers recheck primary member authority after taking the same isolated advisory lock and cannot recreate rows after suspension or deletion.",
   },
   {
     slug: "prisma.hosted_user_crypto_envelope",

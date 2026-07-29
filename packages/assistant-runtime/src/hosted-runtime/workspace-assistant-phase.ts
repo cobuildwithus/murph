@@ -85,6 +85,7 @@ import {
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteConversationKey,
   resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
@@ -127,6 +128,7 @@ import {
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
+  createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
   normalizeHostedGroupSharedProjectionScopes,
 } from "./group-shared-reader.ts";
@@ -326,9 +328,10 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * contexts (the web DB stores hashed lookup keys). Inject them here so the
  * model never supplies its own thread target.
  *
- * Current-turn sender evidence is injected the same way and for the same
- * reason: it must come from the accepted inputs for this operation, never from
- * the model.
+ * Aggregate current-turn sender handles used by shared reads are injected the
+ * same way. Participant-specific effects arrive with exact accepted-message
+ * evidence already resolved by assistant-engine, so this wrapper does not
+ * infer one owner from the whole turn.
  */
 export function createHostedGroupToolWithCurrentTurnContext(input: {
   currentDeliveryRoute?: AssistantCurrentDeliveryRoute | null;
@@ -347,20 +350,8 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         && request.action !== "read_current"
         && request.action !== "read_usage"
         && request.action !== "read_shared"
-        && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
-      }
-      if (request.action === "revoke_own_email_share") {
-        if (emailIngressPresent) {
-          return await input.groupToolPort.request({ action: request.action });
-        }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
-          linqDeliveryContexts: input.linqDeliveryContexts,
-        });
-        return await input.groupToolPort.request(
-          selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
-        );
       }
       if (request.action === "read_shared") {
         const sharedReadRequest = {
@@ -464,8 +455,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       action:
         | "read_current"
         | "read_shared"
-        | "read_usage"
-        | "revoke_own_email_share";
+        | "read_usage";
     }
   >,
 ): HostedRuntimeGroupToolResponse {
@@ -500,6 +490,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
+    case "read_participant_display_names":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -509,6 +504,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "prepare_next_group":
     case "read_next_group":
     case "cancel_next_group":
+    case "revoke_own_email_share":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -525,29 +521,6 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
   }
-}
-
-function resolveHostedGroupToolSelfOptOutContext(input: {
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
-  // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
-  for (const context of input.linqDeliveryContexts) {
-    if (context.threadIsDirect !== false) {
-      continue;
-    }
-    const senderHandle = context.directRecipientPhoneNumber?.trim();
-    if (!senderHandle) {
-      continue;
-    }
-    eligible.set(JSON.stringify(["linq", senderHandle]), {
-      senderHandle,
-      source: "linq",
-    });
-  }
-
-  return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 
 /**
@@ -714,7 +687,9 @@ function createHostedAssistantAutomationOperationScope(
           && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
+        runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
+        vaultRoot: input.restored.vaultRoot,
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
@@ -849,7 +824,9 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupEmailIngress: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
+  vaultRoot: string;
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
     ? createHostedGroupToolWithCurrentTurnContext({
@@ -866,13 +843,36 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
   });
-  if (!sharedScopedExecutionContext.hosted || !scopedGroupToolPort) {
+  if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
   }
+  const routeChannel = normalizeAssistantRouteString(
+    input.currentDeliveryRoute?.channel,
+  )?.toLowerCase();
+  const routeConversationKey =
+    routeChannel === "linq"
+    && input.currentDeliveryRoute?.threadIsDirect === false
+      ? resolveAssistantDeliveryRouteConversationKey({
+          ...input.currentDeliveryRoute,
+          channel: routeChannel,
+        })
+      : null;
+  const groupParticipantDisplayNameReader =
+    input.groupSharedReadAvailable && routeConversationKey && input.groupToolPort
+      ? createHostedGroupParticipantDisplayNameReader({
+          groupToolPort: input.groupToolPort,
+          routeConversationKey,
+          runtimeMemberId: input.runtimeMemberId,
+          vaultRoot: input.vaultRoot,
+        })
+      : null;
   return {
     hosted: {
       ...sharedScopedExecutionContext.hosted,
-      groupTool: scopedGroupToolPort,
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
+      ...(scopedGroupToolPort ? { groupTool: scopedGroupToolPort } : {}),
     },
   };
 }

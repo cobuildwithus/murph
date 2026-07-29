@@ -43,6 +43,9 @@ export type {
   AssistantGroupRoomModelInitializeResult,
 } from './assistant/group-room-model.js'
 export type {
+  AssistantGroupParticipantDisplayName,
+  AssistantGroupParticipantDisplayNameSource,
+  AssistantHostedGroupParticipantDisplayNameReader,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedMember,
