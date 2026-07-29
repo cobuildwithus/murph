@@ -100,6 +100,7 @@ type HostedUsageReferralPolicyDefinition = {
   };
   requirementsLabel: string;
   rewardUsdMicros: bigint;
+  title: string;
 };
 
 const POLICIES = {
@@ -112,6 +113,7 @@ const POLICIES = {
     requirementsLabel:
       "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+    title: "Bring someone new to Murph",
   },
   active_group_v1: {
     code: "active_group_v1",
@@ -122,11 +124,27 @@ const POLICIES = {
     requirementsLabel:
       "Start a fresh group and make it genuinely active, with multiple people actually talking.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+    title: "Start an active group",
   },
 } as const satisfies Record<
   HostedUsageReferralPolicyCode,
   HostedUsageReferralPolicyDefinition
 >;
+
+export interface HostedUsageReferralPolicyDisplay {
+  requirementsLabel: string;
+  title: string;
+}
+
+export function getHostedUsageReferralPolicyDisplay(
+  policyCode: HostedUsageReferralPolicyCode,
+): HostedUsageReferralPolicyDisplay {
+  const policy = POLICIES[policyCode];
+  return {
+    requirementsLabel: policy.requirementsLabel,
+    title: policy.title,
+  };
+}
 
 interface HostedUsageReferralActor {
   beneficiaryMemberId: string;
@@ -178,6 +196,12 @@ function outstandingHostedUsageReferralCommitmentWhere(
       status: "target_bound",
     },
   ];
+}
+
+export function buildHostedUsageReferralOutstandingWhere(
+  now: Date,
+): Prisma.HostedUsageReferralWhereInput[] {
+  return outstandingHostedUsageReferralCommitmentWhere(now);
 }
 
 interface HostedUsageReferralLockedRow {

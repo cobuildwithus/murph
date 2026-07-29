@@ -2,11 +2,13 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedUsageReferralOutstandingWhere,
   buildHostedUsageReferralRewardLabel,
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
   buildHostedUsageReferralCelebrationWake,
+  getHostedUsageReferralPolicyDisplay,
   hostedUsageReferralDestinationMatchesSourceConversation,
   observeHostedUsageReferralInboundTx,
   qualifiesHostedActiveGroupReferral,
@@ -84,6 +86,39 @@ describe("hosted usage referral policy", () => {
     })).toBe(
       "bonus usage on the model your Murph is using now",
     );
+  });
+
+  it("shares display copy and outstanding semantics with read-only projections", () => {
+    expect(getHostedUsageReferralPolicyDisplay("new_person_activation_v1")).toEqual({
+      requirementsLabel:
+        "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
+      title: "Bring someone new to Murph",
+    });
+    expect(getHostedUsageReferralPolicyDisplay("active_group_v1")).toEqual({
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      title: "Start an active group",
+    });
+
+    const now = new Date("2026-07-29T12:00:00.000Z");
+    expect(buildHostedUsageReferralOutstandingWhere(now)).toEqual([
+      {
+        expiresAt: { gt: now },
+        status: "armed",
+      },
+      {
+        expiresAt: {
+          gt: new Date(
+            now.getTime() - HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
+          ),
+        },
+        status: "target_bound",
+      },
+      {
+        qualifiedAt: { not: null },
+        status: "target_bound",
+      },
+    ]);
   });
 
   it("accepts only the frozen personal source conversation", () => {

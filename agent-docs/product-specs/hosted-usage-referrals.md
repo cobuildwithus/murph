@@ -179,6 +179,23 @@ generic current-home fallback cannot move delivery after queueing. The source
 locator is cleared once the celebration is durably queued; later authority loss
 records ordinary terminal outbox failure without moving or revoking the reward.
 
+## Settings projection
+
+Settings keeps the existing combined AI usage meter as the aggregate balance
+owner. Its detail surface is a read-only projection:
+
+- purchase rows come only from immutable `purchase_grant` entries and do not
+  expose aggregate or per-grant remaining capacity;
+- mission rows include only the referrer's canonical outstanding commitments and
+  rewarded history;
+- the surface never creates another balance, mission lifecycle, qualification
+  counter, participant list, or group-name store;
+- the action opens the member's existing Murph channel with a prefilled question
+  about available missions; opening or sending that question does not arm a
+  mission by itself;
+- disabling new referrals hides that action but does not hide current
+  commitments or already-earned history.
+
 Provider timing references:
 
 - [Linq webhook delivery guarantees](https://docs.linqapp.com/guides/webhooks/)
