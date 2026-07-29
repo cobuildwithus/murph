@@ -857,7 +857,11 @@ describe('assistant Codex turn planning', () => {
     expect(plan.systemPrompt).toContain(
       'do not call `murph.generate_image` while this status is present, even for a different image',
     )
-    expect(plan.systemPrompt).toContain('do not guarantee success')
+    expect(plan.systemPrompt).toContain(
+      'will return here separately when it is ready',
+    )
+    expect(plan.systemPrompt).not.toContain('if generation succeeds')
+    expect(plan.systemPrompt).not.toContain('do not guarantee success')
     expect(plan.systemPrompt).not.toContain('it failed')
 
     imageStatus = 'queued'
