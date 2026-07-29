@@ -7,14 +7,23 @@ import {
 } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  handleHostedRuntimeIMessageContactTool,
+} from "@/src/lib/hosted-execution/imessage-contact-tool";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
   appendHostedMailboxEnvelopeWithSourceMessageTx,
+  appendHostedMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   readHostedMailboxSourceConversationEntriesTx,
 } from "@/src/lib/hosted-mailbox/store";
@@ -26,6 +35,7 @@ import {
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
+  readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -49,6 +59,16 @@ import {
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
+
+vi.mock("@/src/lib/prisma", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/prisma")>();
+  return {
+    ...actual,
+    getPrisma: () => handlerPrismaClients.shift() ?? actual.getPrisma(),
+  };
+});
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -565,6 +585,235 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
         await disconnectClients([observer, owner, contender]);
+      }
+    });
+
+    it("converges concurrent Telegram contact requests on one persisted home-line assignment", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const uniqueDigits = randomUUID().replaceAll("-", "").slice(0, 7);
+      const numericSuffix = String(
+        Number.parseInt(uniqueDigits, 16) % 10_000_000,
+      ).padStart(7, "0");
+      const memberPhone = `+1555${numericSuffix}`;
+      const recipientPhone = `+1556${numericSuffix}`;
+      const memberPhoneLookupKey = requireString(
+        createHostedPhoneLookupKey(memberPhone),
+      );
+      const recipientPhoneLookupKey = requireString(
+        createHostedPhoneLookupKey(recipientPhone),
+      );
+      const memberId = `hbm_imessage_contact_${randomUUID()}`;
+      const telegramUserId = String(
+        Number.parseInt(
+          randomUUID().replaceAll("-", "").slice(0, 12),
+          16,
+        ),
+      );
+      const telegramThreadId = telegramUserId;
+      const wake = buildHostedExecutionTelegramConversationMessageWake({
+        eventId: `telegram-contact-request-${randomUUID()}`,
+        occurredAt: "2026-07-29T12:00:00.000Z",
+        telegramMessage: {
+          messageId: String(
+            Number.parseInt(
+              randomUUID().replaceAll("-", "").slice(0, 12),
+              16,
+            ),
+          ),
+          schema: "murph.hosted-telegram-message.v1",
+          text: "What number can I use for iMessage?",
+          threadId: telegramThreadId,
+          threadIsDirect: true,
+        },
+        userId: memberId,
+      });
+      const assistantInputId = createHostedMailboxAssistantInputId({
+        dedupeKey: wake.eventId,
+        eventId: wake.eventId,
+        lane: "conversation",
+        secret: readHostedConversationAssistantIdentifierSecret(wake),
+        userId: memberId,
+      });
+      const blockerLocked = createDeferred();
+      const releaseBlocker = createDeferred();
+      let blockerTransaction: Promise<void> | null = null;
+      let firstRequest:
+        ReturnType<typeof handleHostedRuntimeIMessageContactTool> | null = null;
+      let secondRequest:
+        ReturnType<typeof handleHostedRuntimeIMessageContactTool> | null = null;
+      let memberCreated = false;
+      let lineCreated = false;
+
+      try {
+        await observer.$transaction(async (tx) => {
+          await tx.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+          memberCreated = true;
+          const identityPrivate =
+            await buildHostedMemberIdentityPrivateColumns({
+              memberId,
+              phoneNumber: memberPhone,
+              prisma: tx,
+              privyUserId: null,
+              signupPhoneCodeSendAttemptId: null,
+              signupPhoneCodeSendAttemptStartedAt: null,
+              signupPhoneCodeSentAt: null,
+              signupPhoneNumber: null,
+            });
+          await tx.hostedMemberIdentity.create({
+            data: {
+              ...identityPrivate,
+              maskedPhoneNumberHint: "*** test",
+              memberId,
+              phoneLookupKey: memberPhoneLookupKey,
+              phoneNumberVerifiedAt:
+                new Date("2026-07-29T11:00:00.000Z"),
+            },
+          });
+          await upsertHostedMemberTelegramRoutingBindingTx({
+            memberId,
+            prisma: tx,
+            telegramThreadId,
+            telegramUserId,
+          });
+          await appendHostedMailboxEnvelopeTx({
+            envelope: wake,
+            tx,
+          });
+          await tx.hostedLinqLine.create({
+            data: {
+              assignmentWeight: 2_147_483_647,
+              configuredAt: new Date("2026-07-29T11:00:00.000Z"),
+              egressPolicy: "enabled",
+              healthStatus: "healthy",
+              phoneNumberEncrypted:
+                encryptHostedLinqLinePhoneNumber(recipientPhone),
+              phoneNumberHint: "*** test",
+              phoneNumberLookupKey: recipientPhoneLookupKey,
+              source: "test",
+            },
+          });
+          lineCreated = true;
+        }, transactionOptions);
+
+        const firstPid = await first.$transaction(
+          readBackendPid,
+          transactionOptions,
+        );
+        const secondPid = await second.$transaction(
+          readBackendPid,
+          transactionOptions,
+        );
+        blockerTransaction = blocker.$transaction(async (tx) => {
+          await acquireHostedMemberHomeLinqRouteLockTx({
+            memberId,
+            prisma: tx,
+          });
+          blockerLocked.resolve();
+          await releaseBlocker.promise;
+        }, transactionOptions);
+        await Promise.race([
+          blockerLocked.promise,
+          blockerTransaction.then(() => {
+            throw new Error(
+              "Route-lock blocker completed before holding the member owner.",
+            );
+          }),
+        ]);
+
+        handlerPrismaClients.push(first, second);
+        firstRequest = handleHostedRuntimeIMessageContactTool({
+          memberId,
+          request: { assistantInputId },
+        });
+        secondRequest = handleHostedRuntimeIMessageContactTool({
+          memberId,
+          request: { assistantInputId },
+        });
+
+        await Promise.all([
+          waitForBlockedBackend({ observer, pid: firstPid }),
+          waitForBlockedBackend({ observer, pid: secondPid }),
+        ]);
+        releaseBlocker.resolve();
+
+        const responses = await Promise.all([firstRequest, secondRequest]);
+        expect(responses.map((response) => response.status).sort()).toEqual([
+          "assigned",
+          "existing",
+        ]);
+        for (const response of responses) {
+          expect(response).toMatchObject({
+            phoneNumber: recipientPhone,
+            verifiedSenderPhoneHint: `*** ${memberPhone.slice(-4)}`,
+          });
+        }
+
+        await expect(readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        })).resolves.toMatchObject({
+          linqChatId: null,
+          linqHomeLineAssignedAt: expect.any(Date),
+          linqRecipientPhone: recipientPhone,
+          pendingLinqChatId: null,
+          pendingLinqRecipientPhone: null,
+          telegramThreadId,
+          telegramUserId,
+        });
+        await expect(observer.hostedMemberRouting.findUnique({
+          select: {
+            linqChatIdEncrypted: true,
+            linqChatLookupKey: true,
+            linqRecipientPhoneEncrypted: true,
+            linqRecipientPhoneLookupKey: true,
+          },
+          where: { memberId },
+        })).resolves.toEqual({
+          linqChatIdEncrypted: null,
+          linqChatLookupKey: null,
+          linqRecipientPhoneEncrypted: expect.any(String),
+          linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+        });
+        await expect(observer.hostedMemberRouting.count({
+          where: { linqRecipientPhoneLookupKey: recipientPhoneLookupKey },
+        })).resolves.toBe(1);
+        await expect(observer.hostedLinqLine.findUnique({
+          select: {
+            proactiveConversationCount: true,
+            proactiveConversationDayUtc: true,
+          },
+          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        })).resolves.toEqual({
+          proactiveConversationCount: null,
+          proactiveConversationDayUtc: null,
+        });
+      } finally {
+        handlerPrismaClients.length = 0;
+        releaseBlocker.resolve();
+        await Promise.allSettled([
+          ...(blockerTransaction ? [blockerTransaction] : []),
+          ...(firstRequest ? [firstRequest] : []),
+          ...(secondRequest ? [secondRequest] : []),
+        ]);
+        if (memberCreated) {
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        if (lineCreated) {
+          await observer.hostedLinqLine.deleteMany({
+            where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+          });
+        }
+        await disconnectClients([observer, blocker, first, second]);
       }
     });
 
