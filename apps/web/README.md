@@ -162,6 +162,12 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+For a runnable public protocol, Start opens the member's connected channel with
+one human-readable sentence naming the experiment. The draft does not expose
+Health Commons keys or revision hashes. Murph resolves that name through the
+generated protocol discovery surface, then the protocol-backed run owner stores
+the exact key and revisions used at creation.
+
 ## Saved biomarker reference context
 
 Saved lab-result pages keep the imported source flag and per-result laboratory

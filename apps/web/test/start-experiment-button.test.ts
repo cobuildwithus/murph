@@ -14,12 +14,6 @@ import { MURPH_EXPERIMENT_TELEGRAM_URL } from "@/src/lib/experiments/start-exper
 
 import { renderClientComponent } from "./render-client-component";
 
-const TEST_PROTOCOL_REF = {
-  key: "protocol_variant:dry-sauna/murph-standard-3x-week",
-  pageRevisionId: `sha256:${"1".repeat(64)}`,
-  runSpecRevisionId: `sha256:${"2".repeat(64)}`,
-};
-
 const mocks = vi.hoisted(() => ({
   authButtonClicksEnabled: true,
 }));
@@ -111,7 +105,6 @@ describe("StartExperimentButton", () => {
         },
         murphPhoneNumber: "+15550100001",
         protocolDays: 14,
-        protocolRef: TEST_PROTOCOL_REF,
         protocolTitle: "Finnish Dry Sauna",
       }),
     );
@@ -121,12 +114,10 @@ describe("StartExperimentButton", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
-    expect(container.textContent).toContain("Choose where to start.");
-    expect(container.textContent).toContain("Nothing is sent until you send it.");
-    expect(container.textContent).toContain("Ways to start");
-    expect(container.textContent).toContain("3 available");
+    expect(container.textContent).toContain("Choose an app");
+    expect(container.textContent).toContain("Review the message, then send when you're ready.");
     expect(container.textContent).toContain("Finnish Dry Sauna");
-    expect(container.textContent).toContain("Text");
+    expect(container.textContent).toContain("Messages");
     expect(container.textContent).toContain("Telegram");
     expect(container.textContent).toContain("Email");
 
@@ -136,7 +127,8 @@ describe("StartExperimentButton", () => {
     expect(links.some((href) => href.startsWith(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`))).toBe(true);
     expect(links.some((href) => href.startsWith("mailto:murph@mail.withmurph.ai"))).toBe(true);
     expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
-      .toContain(TEST_PROTOCOL_REF.runSpecRevisionId);
+      .toContain("I want to start the Finnish Dry Sauna experiment.");
+    expect(links.join("\n")).not.toContain("sha256");
 
     const renderedContactSurface = [
       container.textContent ?? "",
@@ -169,7 +161,7 @@ describe("StartExperimentButton", () => {
     });
 
     expect(assign).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("Choose where to start.");
+    expect(container.textContent).not.toContain("Choose an app");
   });
 
   it("uses initial channel flags without needing raw linked accounts in props", async () => {
@@ -195,8 +187,7 @@ describe("StartExperimentButton", () => {
 
     const links = Array.from(container.querySelectorAll("a"))
       .map((anchor) => (anchor as HTMLAnchorElement).href);
-    expect(container.textContent).toContain("Choose where to start.");
-    expect(container.textContent).toContain("2 available");
+    expect(container.textContent).toContain("Choose an app");
     expect(container.textContent).not.toContain("member@example.test");
     expect(links).toEqual([
       expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
@@ -262,7 +253,7 @@ describe("StartExperimentButton", () => {
       "noreferrer",
     );
     expect(assign).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("Choose where to start.");
+    expect(container.textContent).not.toContain("Choose an app");
   });
 
   it("falls back to Telegram when no connected channel is available", async () => {
