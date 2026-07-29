@@ -352,6 +352,7 @@ type UsageResetPrismaFixture = {
   };
   hostedThreadRoute: {
     findMany: MockedFunction;
+    groupBy: MockedFunction;
     updateMany: MockedFunction;
   };
 };
@@ -792,6 +793,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   };

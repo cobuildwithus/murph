@@ -73,6 +73,14 @@ export function buildHostedThreadDeliveryRoute(input: {
   };
 }
 
+export function projectHostedThreadDeliveryRouteAccountLookupKey(
+  route: HostedThreadDeliveryRouteV1,
+): string {
+  return route.channel === "linq"
+    ? route.accountLookupKey
+    : HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY;
+}
+
 export function serializeHostedThreadDeliveryRouteV1(
   value: HostedThreadDeliveryRouteV1,
 ): string {
