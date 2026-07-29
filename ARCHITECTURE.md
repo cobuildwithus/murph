@@ -1478,36 +1478,51 @@ and other non-invite paths bypass the classifier.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable
-`HostedLinqLine`'s UTC-day proactive-conversation counter, selects the preferred
-line or a lower-volume fallback, and conditionally claims one slot before
-appending activation work. Linq route owners take that member row `FOR NO KEY
+`HostedLinqLine`'s UTC-day proactive-conversation counter, and derives one
+on-demand planning snapshot from the two canonical route owners: active direct
+member bindings count as 10 planned messages each, while provisioned non-direct
+Linq `HostedThreadRoute` rows count as 25 each by their blinded
+`accountLookupKey`. Group load follows the canonical delivery account written
+with the encrypted route; it never follows the container owner's home line and
+the assignment read never decrypts route material. New direct placement prefers
+otherwise eligible lines below 5,000 planned messages. If every eligible line
+is at or above that soft target, selection falls back to the least-loaded line;
+the target does not reject assignment, inbound group provisioning, inbound
+messages, or replies in an existing conversation. A healthy line contacted by a
+member-initiated first inbound keeps that conversation on the contacted line
+without consulting planning load or proactive pacing; weighted selection only
+balances proactive placement and a genuinely degraded-line fallback. Legacy
+route rows with a null projection are surfaced as incomplete coverage and add a
+common conservative unknown weight during assignment until the bounded one-shot
+encrypted-route backfill reaches readiness. Linq route owners take the member row `FOR NO KEY
 UPDATE`: this still serializes them with activation and each other, while
 remaining compatible with the foreign-key `KEY SHARE` taken when Linq, Telegram,
 or another channel appends mailbox work after changing the shared routing row.
 This avoids a second lock namespace and avoids a routing-row/member-row
-cross-channel deadlock. Active-member targets guide selection but are
-advisory: when every line is at its target, the preferred or least-loaded
-daily-eligible line remains assignable and concurrent requests may create a
-small overshoot. The
-effective proactive limit is the lower of the hard 50-conversation ceiling and
-the line's configured `maxNewConversationsPerDay`; the line row lazily rolls
-its counter to the new UTC day. The conditional row update is the only atomic
-shared-pool capacity gate. If a claim loses, activation retries it once for a
-day-rollover race and then tries another eligible line inside the same request.
-If no line has welcome capacity, web still assigns a healthy home line but
-omits the participant-target welcome, preserving the member-initiated Text
-Murph path. Same-line inbound first binds and existing-thread replies do not
-consume this proactive budget. A degraded incoming line may fall back to a
-different line only after the final member route agrees with the selected line
-and that line's capacity is atomically claimed, because the fallback creates a
-new participant-target chat; without capacity, web accepts the inbound event
-but sends no fallback chat. For an unknown phone on a degraded incoming line,
-web materializes the member identity before that final claim so concurrently
-created route authority can be re-read. A rejected claim commits that inbound
-identity but creates no home or pending route, invite, delivery, fallback chat,
-or line-count increment; a later inbound resolves the same member and retries
-normal routing. Member deletion cannot erase line-level capacity already
-claimed that day.
+cross-channel deadlock. The effective proactive limit is the lower of the hard
+50-conversation ceiling and the line's configured
+`maxNewConversationsPerDay`; the line row lazily rolls its counter to the new
+UTC day. The conditional row update is the only atomic shared-pool capacity
+gate. If a claim loses, activation retries it once for a day-rollover race and
+then tries another eligible line inside the same request. If no line has welcome
+capacity, web still assigns a healthy home line but omits the participant-target
+welcome, preserving the member-initiated Text Murph path. Same-line inbound
+first binds and existing-thread replies do not consume this proactive budget. A
+degraded incoming line may fall back to a different line only after the final
+member route agrees with the selected line and that line's capacity is
+atomically claimed, because the fallback creates a new participant-target chat;
+without capacity, web accepts the inbound event but sends no fallback chat. For
+an unknown phone on a degraded incoming line, web materializes the member
+identity before that final claim so concurrently created route authority can be
+re-read. A rejected claim commits that inbound identity but creates no home or
+pending route, invite, delivery, fallback chat, or line-count increment; a later
+inbound resolves the same member and retries normal routing. Member deletion
+cannot erase line-level capacity already claimed that day. Linq's 7,000 combined
+inbound-plus-outbound messages per line per UTC day remains a provider
+performance guideline, not this planning score and not a new runtime rejection
+threshold. Exact line-level traffic evidence continues to belong to
+`HostedLinqProviderEvent` and `HostedLinqDelivery`, separate from assignment
+planning and proactive-conversation pacing.
 
 A private direct Telegram member may explicitly ask for Murph's iMessage
 number before a home line exists. The hosted assistant exposes a

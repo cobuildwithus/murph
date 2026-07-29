@@ -26,7 +26,10 @@ import {
   chooseHostedLinqSignupWelcomeLine,
   resolveHostedLinqSignupWelcomeDailyLimit,
 } from "../hosted-onboarding/linq-routing-policy";
-import { countHostedMemberHomeLinqBindingsByRecipientPhone } from "../hosted-onboarding/hosted-member-routing-linq";
+import {
+  buildHostedLinqAssignmentPlanningMessages,
+  readHostedLinqLinePlanningLoadSnapshot,
+} from "../hosted-onboarding/linq-line-planning-load";
 import {
   acquireHostedLinqParticipantPhoneLockTx,
 } from "../hosted-onboarding/linq-participant-contact";
@@ -674,16 +677,17 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqAssignableHomeLine | null> {
   // Reuse the shared proactive line policy instead of re-deriving one here. It
-  // balances on both durable home-line load and today's new-conversation count,
+  // balances on weighted durable line load and today's new-conversation count,
   // and applies the per-line warmup limit itself, so pre-member outreach spreads
   // across the pool the same way signup welcomes do.
   const dayUtc = startOfUtcDay(input.now);
-  const activeMembersByRecipientPhone =
-    await countHostedMemberHomeLinqBindingsByRecipientPhone({
-      now: input.now,
-      prisma: input.tx,
-      recipientPhones: input.lines.map((line) => line.phoneNumber),
-    });
+  const planningLoad = await readHostedLinqLinePlanningLoadSnapshot({
+    lines: input.lines,
+    now: input.now,
+    prisma: input.tx,
+  });
+  const plannedMessagesByRecipientPhone =
+    buildHostedLinqAssignmentPlanningMessages(planningLoad);
   const newAssignmentsByRecipientPhone = new Map(
     input.lines.map((line) => [
       line.phoneNumber,
@@ -700,9 +704,9 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   let candidates = [...input.lines];
   while (candidates.length > 0) {
     const line = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
       lines: candidates,
       newAssignmentsByRecipientPhone,
+      plannedMessagesByRecipientPhone,
       preferredRecipientPhone: null,
     });
     if (!line) {
