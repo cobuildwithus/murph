@@ -1489,7 +1489,7 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
-  it("prefers one explicitly reusable card over a subscription-only default", async () => {
+  it("uses the subscription default even when another card is redisplayable", async () => {
     const fake = createFakePrisma();
     mocks.stripePaymentMethodsList.mockResolvedValueOnce({
       data: [
@@ -1560,7 +1560,7 @@ describe("createHostedUsageCreditCheckout", () => {
 
     expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        payment_method: "pm_reusable_topup",
+        payment_method: "pm_subscription_default",
       }),
       expect.any(Object),
     );
@@ -1571,12 +1571,12 @@ describe("createHostedUsageCreditCheckout", () => {
     ["limited", { allow_redisplay: "limited" }],
     ["unspecified", {}],
   ] as const)(
-    "keeps a %s v4 default card in Checkout",
+    "reuses a %s subscription default for a v4 top-up",
     async (_redisplayState, paymentMethodState) => {
       const fake = createFakePrisma();
       mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
         id: "cus_group_payer",
-        invoice_settings: { default_payment_method: "pm_legacy_default" },
+        invoice_settings: { default_payment_method: null },
         livemode: false,
         object: "customer",
       });
@@ -1593,8 +1593,39 @@ describe("createHostedUsageCreditCheckout", () => {
         object: "list",
         url: "/v1/payment_methods",
       });
-      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
-        buildStripeSession(request)
+      mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+        data: [{
+          customer: "cus_group_payer",
+          default_payment_method: "pm_legacy_default",
+          livemode: false,
+          object: "subscription",
+          status: "active",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/subscriptions",
+      });
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(
+        async (request: Record<string, unknown>) => ({
+          amount: request.amount,
+          amount_received: 0,
+          currency: request.currency,
+          customer: request.customer,
+          id: "pi_saved_card_123",
+          latest_charge: null,
+          livemode: false,
+          metadata: request.metadata,
+          object: "payment_intent",
+          status: "requires_confirmation",
+        }),
+      );
+      mocks.stripePaymentIntentConfirm.mockImplementationOnce(
+        async () => buildSavedCardPaymentIntent({
+          amountReceived: 1_000,
+          latestCharge: "ch_saved_card_123",
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status: "succeeded",
+        }),
       );
 
       await expect(createHostedGroupUsageCreditCheckout({
@@ -1604,23 +1635,20 @@ describe("createHostedUsageCreditCheckout", () => {
         offerCode: "usage_10_usd",
         payerMemberId: MEMBER_ID,
         prisma: fake.prisma as never,
-      })).resolves.toMatchObject({ status: "checkout_open" });
+      })).resolves.toMatchObject({ status: "payment_pending" });
 
-      expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
-      expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
-      expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+      expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          saved_payment_method_options: {
-            allow_redisplay_filters: ["always"],
-            payment_method_save: "enabled",
-          },
+          payment_method: "pm_legacy_default",
         }),
         expect.any(Object),
       );
+      expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledOnce();
+      expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
     },
   );
 
-  it("uses the reusable default when several reusable cards are attached", async () => {
+  it("uses the customer default when several cards are attached", async () => {
     const fake = createFakePrisma();
     mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
       id: "cus_group_payer",
@@ -1774,7 +1802,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
 
-  it("uses Checkout instead of guessing among reusable cards", async () => {
+  it("uses Checkout instead of guessing among attached cards", async () => {
     const fake = createFakePrisma();
     mocks.stripePaymentMethodsList.mockResolvedValueOnce({
       data: [

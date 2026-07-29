@@ -193,17 +193,19 @@ Last verified: 2026-07-28
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
-- Current-policy saved-card personal, Family, and group funding may select only
-  one `allow_redisplay=always` card already attached to the authenticated
-  payer's verified Stripe Customer. Multiple reusable methods require one
-  consistent reusable Customer or nonterminal Subscription default; no
-  reusable method or an ambiguous reusable choice stays in Checkout. Frozen v2
-  purchases retain the legacy behavior for group targets only, frozen v3
-  purchases retain it for all targets, and v1 retains no saved-card path.
-  The browser cannot supply a PaymentMethod. Limited, unspecified, conflicting,
-  or ambiguous attached cards must use Checkout. Current-policy Checkout enables
-  Stripe's explicit payment-method save choice; Murph does not upgrade or
-  broadly redisplay historical methods. The server creates the PaymentIntent
+- Current-policy saved-card personal, Family, and group funding may select one
+  unambiguous card already attached to the authenticated payer's verified
+  Stripe Customer. Murph prefers one consistent Customer or nonterminal
+  Subscription default and otherwise requires exactly one attached method;
+  conflicting defaults or multiple non-default methods stay in Checkout.
+  Frozen v2 purchases retain the legacy behavior for group targets only,
+  frozen v3 purchases retain it for all targets, and v1 retains no saved-card
+  path. The browser cannot supply a PaymentMethod. `allow_redisplay` governs
+  whether Stripe may present a method again inside Checkout, not whether the
+  attached subscription card can fund the payer's explicit one-time top-up.
+  Current-policy Checkout enables Stripe's explicit payment-method save choice;
+  Murph does not upgrade or broadly redisplay historical methods. The server
+  creates the PaymentIntent
   unconfirmed, stores its encrypted exact reference on the frozen purchase,
   then confirms it off session. The payer-row lock rechecks that the payer is
   active and the purchase is still `created`; a deletion or terminal-state
