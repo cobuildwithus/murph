@@ -926,6 +926,47 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
   });
 
+  it("marks current WAU incomplete when retired content affects the current week", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const retiredCurrentPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_current" }])
+      .mockResolvedValueOnce([{ userId: "member_previous" }])
+      .mockResolvedValueOnce([
+        { userId: "member_current" },
+        { userId: "member_previous" },
+      ]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      retireGroupMailboxRow(buildLinqGroupMailboxRow({
+        contact: retiredCurrentPhone,
+        containerMemberId: "thread_container_current",
+        occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      trailing30Days: 2,
+      trailing30DaysComplete: false,
+      trailing7Days: 1,
+      trailing7DaysComplete: false,
+      wowComparisonComplete: false,
+      wowPercent: null,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+  });
+
   it("still rejects missing group content without a retirement marker", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const missingPhone = requireLinqContact("phone", "+15550000001");
