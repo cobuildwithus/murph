@@ -584,7 +584,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
                   participantMemberId: senderMemberId,
                 },
               },
-            },
+            })
           : null,
         readHostedRuntimeAiAccessDecision({
           memberId: sourceUserId,
