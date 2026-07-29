@@ -639,6 +639,8 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
           initialAcceptedInputJournal.inputs
+        let providerRequestAcceptedInputIds: readonly string[] =
+          initialAcceptedInputJournal.inputIds
         let beforeHostedToolExecution = async (): Promise<void> => {}
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
@@ -667,9 +669,24 @@ export async function sendAssistantMessageLocal(
                       'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
+                  const sendLinq = dependencies.sendLinq
+                  const progressDependencies = sendLinq
+                    ? {
+                        ...dependencies,
+                        sendLinq: (
+                          sendInput: Parameters<typeof sendLinq>[0],
+                        ) =>
+                          sendLinq({
+                            ...sendInput,
+                            acceptedAssistantInputIds: [
+                              ...providerRequestAcceptedInputIds,
+                            ],
+                          }),
+                      }
+                    : dependencies
                   const result = await deliverAssistantProgressUpdate({
                     ...progressInput,
-                    dependencies,
+                    dependencies: progressDependencies,
                   })
                   refreshTypingIndicatorAfterProgress()
                   return result
@@ -1034,8 +1051,7 @@ export async function sendAssistantMessageLocal(
         > = null
         let providerRequestContinuation:
           ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
-        let providerRequestAcceptedInputIds: readonly string[] =
-          acceptedInputIdsForProviderRequest
+        providerRequestAcceptedInputIds = acceptedInputIdsForProviderRequest
         let providerRequestAcceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[] =
           acceptedInputItemsForProviderRequest
         let providerRequestStartedAtMs: number | null = null

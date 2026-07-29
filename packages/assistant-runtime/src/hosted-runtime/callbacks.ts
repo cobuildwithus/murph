@@ -1670,8 +1670,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome" | "sendEmail"
   > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
-  latencyTraceContext?: HostedAssistantMilestoneTraceContext | null;
-  readLatencyTraceContext?: (() => HostedAssistantMilestoneTraceContext | null) | null;
+  latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1711,12 +1710,18 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
-      onProviderAccepted: (acceptedAt) => {
-        const latencyTraceContext = input.readLatencyTraceContext
-          ? input.readLatencyTraceContext()
-          : input.latencyTraceContext;
+      onProviderAccepted: ({
+        acceptedAssistantInputIds,
+        acceptedAt,
+      }) => {
         recordHostedAssistantMilestonesBestEffort({
-          context: latencyTraceContext,
+          context:
+            input.latencyTrace && acceptedAssistantInputIds.length > 0
+              ? {
+                  ...input.latencyTrace,
+                  assistantInputIds: acceptedAssistantInputIds,
+                }
+              : null,
           milestones: [{
             at: acceptedAt.toISOString(),
             milestone: "progress_update_accepted",
@@ -3457,7 +3462,10 @@ function createHostedAssistantLinqSendDependency(input: {
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
-  onProviderAccepted?: (acceptedAt: Date) => void;
+  onProviderAccepted?: (input: {
+    acceptedAssistantInputIds: readonly string[];
+    acceptedAt: Date;
+  }) => void;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -3702,7 +3710,10 @@ function createHostedAssistantLinqSendDependency(input: {
       throw error;
     }
     const acceptedAt = new Date();
-    input.onProviderAccepted?.(acceptedAt);
+    input.onProviderAccepted?.({
+      acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
+      acceptedAt,
+    });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({

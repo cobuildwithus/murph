@@ -121,6 +121,13 @@ describe("hosted runtime latency health", () => {
           providerStartAt: "2026-07-26T15:59:05.000Z",
           runtimeAttemptId: "attempt_progress_1",
         }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.500Z",
+          progressUpdateAcceptedAt: "2026-07-26T15:59:10.000Z",
+          providerRequestOrdinal: 0,
+          providerStartAt: "2026-07-26T15:59:05.000Z",
+          runtimeAttemptId: "attempt_progress_1",
+        }),
       ],
     });
 

@@ -49,7 +49,6 @@ import {
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
-  type HostedAssistantMilestoneTraceContext,
 } from "../src/hosted-runtime/assistant-latency-trace.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -656,8 +655,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
       LINQ_API_TOKEN: "platform-linq-token",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
     },
-    latencyTraceContext: {
-      assistantInputIds: ["input_progress_trace_1"],
+    latencyTrace: {
       latencyTracePort: {
         record: latencyTraceRecord,
       },
@@ -675,6 +673,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
 
   await delivery.sendLinq?.({
+    acceptedAssistantInputIds: ["input_progress_trace_1"],
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",
     homeRouteFallbackAllowed: false,
@@ -773,75 +772,6 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   );
 });
 
-test("hosted progress delivery snapshots the current provider-owned input set", async () => {
-  const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
-    matchedCount: 1,
-    recorded: true,
-    unmatchedCount: 0,
-  }));
-  let currentContext: HostedAssistantMilestoneTraceContext | null = {
-    assistantInputIds: ["input_conversation_a"],
-    latencyTracePort: {
-      record: latencyTraceRecord,
-    },
-    runtimeAttemptId: "attempt_progress_dynamic_1",
-    source: "linq",
-  };
-  const delivery = createHostedAssistantProgressDeliveryDependencies({
-    effectsPort: {
-      async assertLinqRecentInboundEngagement(request) {
-        return buildClaimedLinqEngagementResult(request);
-      },
-      sendEmail: mocks.sendEmail,
-    },
-    forwardedEnv: {
-      LINQ_API_TOKEN: "platform-linq-token",
-    },
-    providerFetch: vi.fn<typeof fetch>(),
-    readLatencyTraceContext: () => currentContext,
-  });
-
-  await delivery.sendLinq?.({
-    message: "Checking the first conversation.",
-    target: "linq-thread-a",
-    targetKind: "thread",
-  });
-  currentContext = {
-    assistantInputIds: [
-      "input_conversation_a",
-      "input_live_steered_successor",
-    ],
-    latencyTracePort: {
-      record: latencyTraceRecord,
-    },
-    runtimeAttemptId: "attempt_progress_dynamic_1",
-    source: "linq",
-  };
-  await delivery.sendLinq?.({
-    message: "Checking the updated conversation.",
-    target: "linq-thread-a",
-    targetKind: "thread",
-  });
-
-  await vi.waitFor(() => {
-    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
-  });
-  const recordedInputIds = latencyTraceRecord.mock.calls.map(([request]) => {
-    expect(request.event.type).toBe("assistant_milestone");
-    if (request.event.type !== "assistant_milestone") {
-      throw new Error("Expected an assistant milestone latency trace.");
-    }
-    return request.event.assistantInputIds;
-  });
-  expect(recordedInputIds).toEqual([
-    ["input_conversation_a"],
-    ["input_conversation_a", "input_live_steered_successor"],
-  ]);
-  expect(JSON.stringify(latencyTraceRecord.mock.calls)).not.toContain(
-    "input_unrelated_conversation_b",
-  );
-});
-
 test("hosted progress delivery traces only accepted Linq sends", async () => {
   const latencyTraceRecord = vi.fn(async (_request: HostedRuntimeLatencyTraceRequest) => ({
     matchedCount: 1,
@@ -861,8 +791,7 @@ test("hosted progress delivery traces only accepted Linq sends", async () => {
     forwardedEnv: {
       LINQ_API_TOKEN: "platform-linq-token",
     },
-    latencyTraceContext: {
-      assistantInputIds: ["input_progress_failed_1"],
+    latencyTrace: {
       latencyTracePort: {
         record: latencyTraceRecord,
       },
@@ -873,6 +802,7 @@ test("hosted progress delivery traces only accepted Linq sends", async () => {
   });
 
   await expect(delivery.sendLinq?.({
+    acceptedAssistantInputIds: ["input_progress_failed_1"],
     message: "Still checking.",
     target: "linq-thread",
     targetKind: "thread",

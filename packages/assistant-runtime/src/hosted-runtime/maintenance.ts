@@ -154,9 +154,6 @@ export async function runHostedAssistantAutomationLane(input: {
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-  onProviderMilestoneTraceContextChanged?: (
-    context: HostedAssistantMilestoneTraceContext | null,
-  ) => void;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -215,12 +212,6 @@ export async function runHostedAssistantAutomationLane(input: {
           runtimeAttemptId: input.runtimeAttemptId ?? null,
           ...(input.beforeProviderAcceptedInputs
             ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
-            : {}),
-          ...(input.onProviderMilestoneTraceContextChanged
-            ? {
-                onProviderMilestoneTraceContextChanged:
-                  input.onProviderMilestoneTraceContextChanged,
-              }
             : {}),
           ...(input.shouldYieldBackgroundMaintenance
             ? {
@@ -295,9 +286,6 @@ export async function runHostedAssistantAutomation(
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-    onProviderMilestoneTraceContextChanged?: (
-      context: HostedAssistantMilestoneTraceContext | null,
-    ) => void;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -525,9 +513,6 @@ export async function runHostedAssistantAutomation(
               source,
             }
           : null;
-        options?.onProviderMilestoneTraceContextChanged?.(
-          activeProviderMilestoneTraceContext,
-        );
         recordHostedAssistantProviderStartLatencyTraceBestEffort({
           ...event,
           latencyTracePort: options?.latencyTracePort ?? null,
