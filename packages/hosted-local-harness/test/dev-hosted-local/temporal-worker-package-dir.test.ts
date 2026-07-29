@@ -17,7 +17,7 @@ describe("hosted-local Temporal worker package directory", () => {
   it("accepts one trimmed external package directory", () => {
     expect(resolveHostedLocalTemporalWorkerPackageDir({
       MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
-        "  ../murph-hosted/packages/hosted-orchestrator-temporal  ",
-    })).toBe("../murph-hosted/packages/hosted-orchestrator-temporal");
+        "  ../murph-cloud/packages/hosted-orchestrator-temporal  ",
+    })).toBe("../murph-cloud/packages/hosted-orchestrator-temporal");
   });
 });
