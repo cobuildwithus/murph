@@ -1,0 +1,34 @@
+name: Agent full source export
+
+on:
+  push:
+    branches:
+      - agent/linq-chat-health-preflight
+  workflow_dispatch:
+
+concurrency:
+  group: agent-full-source-export-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Pack tracked repository source
+        run: git ls-files -z | tar --null --zstd -cf full-source.tar.zst --files-from=-
+
+      - name: Upload tracked repository source
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: agent-full-source-${{ github.sha }}
+          path: full-source.tar.zst
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
