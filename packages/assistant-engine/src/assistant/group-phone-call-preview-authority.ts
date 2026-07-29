@@ -16,41 +16,72 @@ export const ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING =
 export const ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE =
   'Transfer to a participant: no'
 
+export interface AssistantGroupPhoneCallPreviewAuthority {
+  assistantInputId: string
+  inboundMailboxItemId: string
+}
+
 export async function hasDeliveredAssistantGroupPhoneCallPreview(input: {
   acceptedInputIds: readonly string[]
   brief?: HostedPhoneCallBrief
   channel?: string | null
+  confirmationInputId?: string
   sessionId: string
   vault: string
 }): Promise<boolean> {
+  return await resolveDeliveredAssistantGroupPhoneCallPreviewAuthority(input)
+    !== null
+}
+
+export async function resolveDeliveredAssistantGroupPhoneCallPreviewAuthority(
+  input: {
+    acceptedInputIds: readonly string[]
+    brief?: HostedPhoneCallBrief
+    channel?: string | null
+    confirmationInputId?: string
+    sessionId: string
+    vault: string
+  },
+): Promise<AssistantGroupPhoneCallPreviewAuthority | null> {
   const channel = input.channel?.trim().toLowerCase() ?? ''
   if (channel !== 'linq' && channel !== 'telegram') {
-    return false
+    return null
   }
 
-  const currentInputId = input.acceptedInputIds.at(-1)
-  if (!currentInputId) {
-    return false
+  const confirmationInputId =
+    input.confirmationInputId ?? input.acceptedInputIds.at(-1)
+  if (
+    !confirmationInputId
+    || input.acceptedInputIds.at(-1) !== confirmationInputId
+  ) {
+    return null
   }
-  const currentInput = await readAssistantInputEvent({
-    inputId: currentInputId,
+  const confirmationInput = await readAssistantInputEvent({
+    inputId: confirmationInputId,
     vault: input.vault,
   })
-  if (!currentInput) {
-    return false
-  }
-  const currentConversation = currentInput.conversation
-  const currentThreadId = currentConversation?.threadId?.trim() ?? ''
   if (
-    currentConversation?.source?.trim().toLowerCase() !== channel
-    || currentConversation.threadIsDirect !== false
-    || !currentThreadId
+    !confirmationInput
+    || confirmationInput.sourceRef.kind !== 'hosted-mailbox'
+    || confirmationInput.sourceRef.lane !== 'conversation'
   ) {
-    return false
+    return null
   }
-  const currentInputReceivedAtMs = Date.parse(currentInput.receivedAt ?? '')
-  if (!Number.isFinite(currentInputReceivedAtMs)) {
-    return false
+  const confirmationConversation = confirmationInput.conversation
+  const confirmationThreadId =
+    confirmationConversation?.threadId?.trim() ?? ''
+  if (
+    confirmationConversation?.source?.trim().toLowerCase() !== channel
+    || confirmationConversation.threadIsDirect !== false
+    || !confirmationThreadId
+  ) {
+    return null
+  }
+  const confirmationReceivedAtMs = Date.parse(
+    confirmationInput.receivedAt ?? '',
+  )
+  if (!Number.isFinite(confirmationReceivedAtMs)) {
+    return null
   }
 
   const routeIntents = (await listAssistantOutboxIntents(input.vault))
@@ -59,7 +90,7 @@ export async function hasDeliveredAssistantGroupPhoneCallPreview(input: {
       && intent.operation === null
       && intent.threadIsDirect === false
       && intent.channel?.trim().toLowerCase() === channel
-      && intent.threadId === currentThreadId
+      && intent.threadId === confirmationThreadId
     )
   const previewTurns = groupAssistantOutboxIntentsByTurn(routeIntents)
     .filter((turn) =>
@@ -73,7 +104,7 @@ export async function hasDeliveredAssistantGroupPhoneCallPreview(input: {
     )
   const latestPreviewTurn = previewTurns[0]
   if (!latestPreviewTurn) {
-    return false
+    return null
   }
 
   const answeredInputIds = new Set(
@@ -81,22 +112,31 @@ export async function hasDeliveredAssistantGroupPhoneCallPreview(input: {
   )
   if (
     answeredInputIds.size === 0
-    || answeredInputIds.has(currentInputId)
+    || answeredInputIds.has(confirmationInput.sourceRef.itemId)
     || latestPreviewTurn.some((intent) => {
       const sentAtMs = intent.sentAt ? Date.parse(intent.sentAt) : Number.NaN
       return intent.status !== 'sent'
         || !Number.isFinite(sentAtMs)
-        || sentAtMs > currentInputReceivedAtMs
+        || sentAtMs >= confirmationReceivedAtMs
     })
   ) {
-    return false
+    return null
   }
 
-  return input.brief === undefined
-    || assistantOutboxTurnContainsPhoneCallBrief(
+  if (
+    input.brief !== undefined
+    && !assistantOutboxTurnContainsPhoneCallBrief(
       latestPreviewTurn,
       input.brief,
     )
+  ) {
+    return null
+  }
+
+  return {
+    assistantInputId: confirmationInputId,
+    inboundMailboxItemId: confirmationInput.sourceRef.itemId,
+  }
 }
 
 function groupAssistantOutboxIntentsByTurn(
@@ -143,34 +183,40 @@ function assistantOutboxTurnContainsPhoneCallBrief(
   if (brief.allowTransferToUser) {
     return false
   }
-  const normalizedPreview = normalizePreviewText(
-    joinAssistantOutboxTurnMessages(intents),
-  )
-  const requiredValues = [
-    ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
-    ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE,
-    brief.to.label,
-    brief.to.phoneNumber,
-    brief.callerName,
-    brief.goal,
-    ...brief.instructions,
-    ...Object.entries(brief.shareableFacts).flatMap(([key, value]) => [
-      key,
-      value,
-    ]),
-    brief.successCriteria,
-    brief.timeZone,
-  ].filter((value): value is string => typeof value === 'string')
+  return normalizePreviewText(joinAssistantOutboxTurnMessages(intents))
+    === normalizePreviewText(renderAssistantGroupPhoneCallPreview(brief))
+}
 
-  return requiredValues.every((value) =>
-    normalizedPreview.includes(normalizePreviewText(value))
+export function renderAssistantGroupPhoneCallPreview(
+  brief: HostedPhoneCallBrief,
+): string {
+  return [
+    ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
+    `Destination label: ${JSON.stringify(brief.to.label ?? null)}`,
+    `Destination phone number: ${JSON.stringify(brief.to.phoneNumber)}`,
+    `Caller name: ${JSON.stringify(brief.callerName ?? null)}`,
+    `Goal: ${JSON.stringify(brief.goal)}`,
+    `Instructions: ${JSON.stringify(brief.instructions)}`,
+    `Shareable facts: ${JSON.stringify(sortRecord(brief.shareableFacts))}`,
+    `Success criteria: ${JSON.stringify(brief.successCriteria)}`,
+    `Time zone: ${JSON.stringify(brief.timeZone)}`,
+    ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE,
+  ].join('\n')
+}
+
+function sortRecord(
+  value: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(value).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0
+    ),
   )
 }
 
 function normalizePreviewText(value: string): string {
   return value
     .normalize('NFKC')
-    .toLowerCase()
-    .replace(/\s+/gu, ' ')
+    .replace(/\r\n?/gu, '\n')
     .trim()
 }

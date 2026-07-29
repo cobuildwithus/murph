@@ -53,13 +53,19 @@ describe('assistant capability policy skills', () => {
       'ordinary shared-life logistics task',
     )
     expect(normalized).toContain(
-      'For a hosted group call, first deliver one complete preview headed exactly `GROUP CALL PREVIEW`, then stop without invoking `murph.create_phone_call`.',
+      'For a hosted group call, first deliver one complete canonical preview, then stop without invoking `murph.create_phone_call`.',
+    )
+    expect(normalized).toContain(
+      'Render exactly these ten lines, with each value encoded as compact JSON',
     )
     expect(normalized).toContain(
       'Only a later inbound message received after that preview was successfully delivered may confirm it.',
     )
     expect(normalized).toContain(
-      'The runtime uses that visible preview plus the existing outbox delivery receipt as call authority',
+      'The runtime compares the entire delivered preview with this canonical rendering',
+    )
+    expect(normalized).toContain(
+      'Set `confirmationMessageRef` to that confirming inbound message\'s visible `ain_...` reference.',
     )
     expect(normalized).toContain(
       'If any term or disclosure changes, deliver the complete revised preview and stop again.',

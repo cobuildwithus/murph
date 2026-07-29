@@ -22,6 +22,7 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'allowTransferToUser',
   'callerName',
+  'confirmationMessageRef',
   'goal',
   'instructions',
   'shareableFacts',
@@ -30,13 +31,21 @@ const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'to',
 ] as const
 const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
+const ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
+const phoneCallDynamicToolArgumentsSchema = hostedPhoneCallBriefSchema.extend({
+  confirmationMessageRef: z
+    .string()
+    .trim()
+    .regex(ASSISTANT_INPUT_ID_PATTERN)
+    .optional(),
+})
 
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
   name: 'create_phone_call',
   description: [
     'Before preparing a preview for a real call or placing one, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
-    'For a hosted group call, start one outbound phone call only when the current requester explicitly confirms an exact GROUP CALL PREVIEW that Murph successfully delivered before that confirmation message was received.',
+    'For a hosted group call, start one outbound phone call only when the current requester explicitly confirms an exact GROUP CALL PREVIEW that Murph successfully delivered before that confirmation message was received; set confirmationMessageRef to that later confirming message\'s visible ain_... reference.',
     'Never deliver a group preview and start the call in the same provider turn; after a new group request or any changed term, deliver the complete preview with the skill\'s exact heading and values, then stop.',
     'The group confirming message must explicitly approve any requester name or contact fact used in the call; one participant cannot approve another participant\'s private facts.',
     'Resolve relative dates and times before creating the brief.',
@@ -45,12 +54,15 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
     'Do not put a participant transfer phone number in shareableFacts; Murph resolves eligible verified transfer numbers server-side for private calls.',
   ].join(' '),
-  inputSchema: z.toJSONSchema(hostedPhoneCallBriefSchema, { io: 'input' }),
+  inputSchema: z.toJSONSchema(phoneCallDynamicToolArgumentsSchema, {
+    io: 'input',
+  }),
 } as const
 
 export type PhoneCallDynamicToolRequest =
   | {
       brief: HostedPhoneCallBrief
+      confirmationMessageRef: string | null
       kind: 'create-phone-call'
     }
   | {
@@ -67,15 +79,25 @@ export function readPhoneCallDynamicToolRequest(input: {
   }
 
   const parsed = parseDynamicToolArguments({
-    schema: hostedPhoneCallBriefSchema,
+    schema: phoneCallDynamicToolArgumentsSchema,
     schemaRootKeys: PHONE_CALL_BRIEF_ROOT_KEYS,
     toolName: 'murph.create_phone_call',
     value: input.arguments,
   })
 
-  return parsed.ok
-    ? { brief: parsed.args, kind: 'create-phone-call' }
-    : { kind: 'invalid-phone-call-arguments', validationDigest: parsed.validationDigest }
+  if (!parsed.ok) {
+    return {
+      kind: 'invalid-phone-call-arguments',
+      validationDigest: parsed.validationDigest,
+    }
+  }
+
+  const { confirmationMessageRef, ...brief } = parsed.args
+  return {
+    brief,
+    confirmationMessageRef: confirmationMessageRef ?? null,
+    kind: 'create-phone-call',
+  }
 }
 
 export function createPhoneCallRequestKey(input: {

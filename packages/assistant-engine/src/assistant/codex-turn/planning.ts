@@ -462,7 +462,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     authenticatedGroupChatRuntime &&
     input.hostedToolContext?.phoneCalls != null &&
     await input.hostedToolContext
-      .currentGroupPhoneCallPreviewAuthority?.() === true
+      .currentGroupPhoneCallPreviewAuthority?.() != null
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&

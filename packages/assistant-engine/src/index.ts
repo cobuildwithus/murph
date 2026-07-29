@@ -27,6 +27,11 @@ export {
   ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE,
   ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
   hasDeliveredAssistantGroupPhoneCallPreview,
+  renderAssistantGroupPhoneCallPreview,
+  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
+} from './assistant/group-phone-call-preview-authority.js'
+export type {
+  AssistantGroupPhoneCallPreviewAuthority,
 } from './assistant/group-phone-call-preview-authority.js'
 export * from './assistant/group-newsletter-automation.js'
 export type {

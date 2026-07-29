@@ -2411,7 +2411,10 @@ describe('assistant Codex turn planning', () => {
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
-      currentGroupPhoneCallPreviewAuthority: vi.fn(async () => true),
+      currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
+        assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+        inboundMailboxItemId: 'group-phone-confirmation',
+      })),
       subscriptionTool: { request: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
@@ -2833,7 +2836,10 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        currentGroupPhoneCallPreviewAuthority: vi.fn(async () => true),
+        currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
+          assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+          inboundMailboxItemId: 'group-phone-confirmation',
+        })),
         phoneCalls: { start: vi.fn() },
       },
       input: {
@@ -2873,7 +2879,7 @@ describe('assistant Codex turn planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
-    const currentGroupPhoneCallPreviewAuthority = vi.fn(async () => false)
+    const currentGroupPhoneCallPreviewAuthority = vi.fn(async () => null)
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
         id: 'linq-group-phone-request',

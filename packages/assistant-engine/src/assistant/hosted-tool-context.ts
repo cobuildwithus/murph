@@ -50,7 +50,8 @@ import {
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
 import {
-  hasDeliveredAssistantGroupPhoneCallPreview,
+  type AssistantGroupPhoneCallPreviewAuthority,
+  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
 } from './group-phone-call-preview-authority.js'
 
 export interface AssistantHostedDeliveryContext {
@@ -122,9 +123,10 @@ export interface AssistantHostedToolContext {
   claimSubscriptionAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
-  currentGroupPhoneCallPreviewAuthority?(
-    brief?: HostedPhoneCallBrief,
-  ): Promise<boolean>
+  currentGroupPhoneCallPreviewAuthority?(input?: {
+    brief?: HostedPhoneCallBrief
+    confirmationInputId?: string
+  }): Promise<AssistantGroupPhoneCallPreviewAuthority | null>
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -343,13 +345,18 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
-    currentGroupPhoneCallPreviewAuthority: async (brief) => {
+    currentGroupPhoneCallPreviewAuthority: async (authorityInput) => {
       const deliveryContext = readDeliveryContext()
-      return await hasDeliveredAssistantGroupPhoneCallPreview({
+      return await resolveDeliveredAssistantGroupPhoneCallPreviewAuthority({
         acceptedInputIds:
           input.getUserActionAcceptedInputIds?.() ?? [],
-        ...(brief === undefined ? {} : { brief }),
+        ...(authorityInput?.brief === undefined
+          ? {}
+          : { brief: authorityInput.brief }),
         channel: deliveryContext.messageInput.channel,
+        ...(authorityInput?.confirmationInputId === undefined
+          ? {}
+          : { confirmationInputId: authorityInput.confirmationInputId }),
         sessionId: deliveryContext.session.sessionId,
         vault: deliveryContext.messageInput.vault,
       })

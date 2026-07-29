@@ -9,9 +9,9 @@ import type {
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE,
-  ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
   hasDeliveredAssistantGroupPhoneCallPreview,
+  renderAssistantGroupPhoneCallPreview,
+  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
 } from '../src/assistant/group-phone-call-preview-authority.js'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.js'
 import {
@@ -75,6 +75,7 @@ describe('group phone-call preview authority', () => {
         acceptedInputIds: [confirmationInputId],
         brief: BRIEF,
         channel,
+        confirmationInputId,
         sessionId: SESSION_ID,
         vault: context.vaultRoot,
       })).resolves.toBe(true)
@@ -193,9 +194,194 @@ describe('group phone-call preview authority', () => {
       acceptedInputIds: [confirmationInputId],
       brief: BRIEF,
       channel: 'linq',
+      confirmationInputId,
       sessionId: SESSION_ID,
       vault: context.vaultRoot,
     })).resolves.toBe(false)
+  })
+
+  it('returns the exact confirming assistant input and hosted mailbox item', async () => {
+    const context = await createContext()
+    const confirmationInputId = await createConfirmationInput({
+      itemId: 'exact-confirmation-mailbox-item',
+      receivedAt: '2026-08-01T12:00:10.000Z',
+      vault: context.vaultRoot,
+    })
+    await createPreviewIntent({
+      sentAt: '2026-08-01T12:00:05.000Z',
+      vault: context.vaultRoot,
+    })
+
+    await expect(resolveDeliveredAssistantGroupPhoneCallPreviewAuthority({
+      acceptedInputIds: [confirmationInputId],
+      brief: BRIEF,
+      channel: 'linq',
+      confirmationInputId,
+      sessionId: SESSION_ID,
+      vault: context.vaultRoot,
+    })).resolves.toEqual({
+      assistantInputId: confirmationInputId,
+      inboundMailboxItemId: 'exact-confirmation-mailbox-item',
+    })
+  })
+
+  it('rejects a referenced confirmation when any newer input has been accepted', async () => {
+    const context = await createContext()
+    const confirmationInputId = await createConfirmationInput({
+      itemId: 'confirmation-mailbox-item',
+      receivedAt: '2026-08-01T12:00:10.000Z',
+      vault: context.vaultRoot,
+    })
+    const cancellationInputId = await createConfirmationInput({
+      itemId: 'cancellation-mailbox-item',
+      receivedAt: '2026-08-01T12:00:11.000Z',
+      text: 'Cancel that request.',
+      vault: context.vaultRoot,
+    })
+    await createPreviewIntent({
+      sentAt: '2026-08-01T12:00:05.000Z',
+      vault: context.vaultRoot,
+    })
+
+    await expect(hasDeliveredAssistantGroupPhoneCallPreview({
+      acceptedInputIds: [confirmationInputId, cancellationInputId],
+      brief: BRIEF,
+      channel: 'linq',
+      confirmationInputId,
+      sessionId: SESSION_ID,
+      vault: context.vaultRoot,
+    })).resolves.toBe(false)
+  })
+
+  it('does not borrow a later unrelated input for a pre-delivery confirmation', async () => {
+    const context = await createContext()
+    const earlyConfirmationInputId = await createConfirmationInput({
+      itemId: 'early-confirmation-mailbox-item',
+      receivedAt: '2026-08-01T12:00:04.000Z',
+      vault: context.vaultRoot,
+    })
+    const unrelatedInputId = await createConfirmationInput({
+      itemId: 'unrelated-mailbox-item',
+      receivedAt: '2026-08-01T12:00:10.000Z',
+      text: 'What time does the place close?',
+      vault: context.vaultRoot,
+    })
+    await createPreviewIntent({
+      sentAt: '2026-08-01T12:00:05.000Z',
+      vault: context.vaultRoot,
+    })
+
+    await expect(hasDeliveredAssistantGroupPhoneCallPreview({
+      acceptedInputIds: [earlyConfirmationInputId, unrelatedInputId],
+      brief: BRIEF,
+      channel: 'linq',
+      confirmationInputId: earlyConfirmationInputId,
+      sessionId: SESSION_ID,
+      vault: context.vaultRoot,
+    })).resolves.toBe(false)
+  })
+
+  it.each([
+    {
+      name: 'omitted instructions',
+      preview: renderAssistantGroupPhoneCallPreview({
+        ...BRIEF,
+        instructions: [],
+      }),
+    },
+    {
+      name: 'emptied shareable facts',
+      preview: renderAssistantGroupPhoneCallPreview({
+        ...BRIEF,
+        shareableFacts: {},
+      }),
+    },
+    {
+      name: 'omitted caller and destination label',
+      preview: renderAssistantGroupPhoneCallPreview({
+        ...BRIEF,
+        callerName: undefined,
+        to: {
+          phoneNumber: BRIEF.to.phoneNumber,
+        },
+      }),
+    },
+    {
+      name: 'swapped goal and success criteria',
+      preview: renderAssistantGroupPhoneCallPreview({
+        ...BRIEF,
+        goal: BRIEF.successCriteria,
+        successCriteria: BRIEF.goal,
+      }),
+    },
+    {
+      name: 'swapped fact associations',
+      preview: renderAssistantGroupPhoneCallPreview({
+        ...BRIEF,
+        shareableFacts: {
+          party_size: BRIEF.shareableFacts.requester_name!,
+          requester_name: BRIEF.shareableFacts.party_size!,
+        },
+      }),
+    },
+    {
+      name: 'extra contradictory terms',
+      preview: `${renderAssistantGroupPhoneCallPreview(BRIEF)}\nDeposit limit: $75`,
+    },
+  ])('rejects a canonical preview with $name', async ({ preview }) => {
+    const context = await createContext()
+    const confirmationInputId = await createConfirmationInput({
+      receivedAt: '2026-08-01T12:00:10.000Z',
+      vault: context.vaultRoot,
+    })
+    await createPreviewIntent({
+      message: preview,
+      sentAt: '2026-08-01T12:00:05.000Z',
+      vault: context.vaultRoot,
+    })
+
+    await expect(hasDeliveredAssistantGroupPhoneCallPreview({
+      acceptedInputIds: [confirmationInputId],
+      brief: BRIEF,
+      channel: 'linq',
+      confirmationInputId,
+      sessionId: SESSION_ID,
+      vault: context.vaultRoot,
+    })).resolves.toBe(false)
+  })
+
+  it('accepts one exact canonical preview delivered across ordered message bubbles', async () => {
+    const context = await createContext()
+    const confirmationInputId = await createConfirmationInput({
+      receivedAt: '2026-08-01T12:00:10.000Z',
+      vault: context.vaultRoot,
+    })
+    const previewLines = renderAssistantGroupPhoneCallPreview(BRIEF).split('\n')
+    await createPreviewIntent({
+      createdAt: '2026-08-01T12:00:00.000Z',
+      deliveryIdempotencyKey: 'group-preview:bubble:0',
+      message: previewLines.slice(0, 5).join('\n'),
+      sentAt: '2026-08-01T12:00:05.000Z',
+      turnId: 'turn_group_phone_preview_split',
+      vault: context.vaultRoot,
+    })
+    await createPreviewIntent({
+      createdAt: '2026-08-01T12:00:01.000Z',
+      deliveryIdempotencyKey: 'group-preview:bubble:1',
+      message: previewLines.slice(5).join('\n'),
+      sentAt: '2026-08-01T12:00:06.000Z',
+      turnId: 'turn_group_phone_preview_split',
+      vault: context.vaultRoot,
+    })
+
+    await expect(hasDeliveredAssistantGroupPhoneCallPreview({
+      acceptedInputIds: [confirmationInputId],
+      brief: BRIEF,
+      channel: 'linq',
+      confirmationInputId,
+      sessionId: SESSION_ID,
+      vault: context.vaultRoot,
+    })).resolves.toBe(true)
   })
 })
 
@@ -211,16 +397,19 @@ async function createContext(): Promise<{
 
 async function createConfirmationInput(input: {
   channel?: 'linq' | 'telegram'
+  itemId?: string
   receivedAt: string | null
+  text?: string
   vault: string
 }): Promise<string> {
   const channel = input.channel ?? 'linq'
+  const itemId = input.itemId ?? 'confirmation-mailbox-item'
   const occurredAt = input.receivedAt ?? '2026-08-01T12:00:10.000Z'
   const event = await upsertAssistantInputEvent({
     event: {
       content: {
         attachmentDescriptors: [],
-        text: 'I confirm the exact delivered group call preview.',
+        text: input.text ?? 'I confirm the exact delivered group call preview.',
       },
       conversation: {
         accountId: 'linq-account',
@@ -246,12 +435,12 @@ async function createConfirmationInput(input: {
             replyContext: null,
           },
       sourceRef: {
-        dedupeKey: 'confirmation-dedupe',
-        eventId: 'confirmation-event',
-        itemId: 'confirmation-mailbox-item',
+        dedupeKey: `${itemId}-dedupe`,
+        eventId: `${itemId}-event`,
+        itemId,
         kind: 'hosted-mailbox',
         lane: 'conversation',
-        laneSeq: '2',
+        laneSeq: input.receivedAt ?? '2',
         payloadSchema: 'murph.hosted-payload.v1',
         payloadSource: 'sidecar',
         source: 'hosted-mailbox',
@@ -266,6 +455,7 @@ async function createConfirmationInput(input: {
 async function createPreviewIntent(input: {
   channel?: 'linq' | 'telegram'
   createdAt?: string
+  deliveryIdempotencyKey?: string
   message?: string
   sentAt?: string
   status?: Exclude<AssistantOutboxIntent['status'], 'sent'>
@@ -278,7 +468,10 @@ async function createPreviewIntent(input: {
     channel,
     createdAt: input.createdAt ?? '2026-08-01T12:00:00.000Z',
     dedupeToken:
-      input.turnId ?? 'turn_group_phone_preview',
+      input.deliveryIdempotencyKey
+      ?? input.turnId
+      ?? 'turn_group_phone_preview',
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     explicitTarget: 'group-thread',
     identityId: 'group-assistant',
     message: input.message ?? buildPreviewMessage(),
@@ -319,19 +512,5 @@ async function createPreviewIntent(input: {
 }
 
 function buildPreviewMessage(): string {
-  return [
-    ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
-    `Destination: ${BRIEF.to.label} ${BRIEF.to.phoneNumber}`,
-    `Caller name: ${BRIEF.callerName}`,
-    `Goal: ${BRIEF.goal}`,
-    ...BRIEF.instructions.map((instruction) =>
-      `Instruction: ${instruction}`
-    ),
-    ...Object.entries(BRIEF.shareableFacts).map(([key, value]) =>
-      `Shareable fact ${key}: ${value}`
-    ),
-    `Success criteria: ${BRIEF.successCriteria}`,
-    `Time zone: ${BRIEF.timeZone}`,
-    ASSISTANT_GROUP_PHONE_CALL_NO_TRANSFER_LINE,
-  ].join('\n')
+  return renderAssistantGroupPhoneCallPreview(BRIEF)
 }

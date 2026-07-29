@@ -21,15 +21,29 @@ explicit consent or ready-to-act gate. Use a separate preview and confirmation
 when the user still needs to inspect material terms, but do not add an extra
 round trip when the existing private-call gate is already satisfied.
 
-For a hosted group call, first deliver one complete preview headed exactly
-`GROUP CALL PREVIEW`, then stop without invoking `murph.create_phone_call`. Use
-the exact values that the later call brief will contain, without paraphrasing:
-official destination label and phone number, caller name or its omission, goal,
-every instruction, every shareable-fact key and value, success criteria,
-timezone, concrete dates/times, commitment and fee bounds, and cancellation
-terms. Include the exact line `Transfer to a participant: no`. The runtime uses
-that visible preview plus the existing outbox delivery receipt as call
-authority, so a missing value or changed wording will fail closed.
+For a hosted group call, first deliver one complete canonical preview, then stop
+without invoking `murph.create_phone_call`. Render exactly these ten lines, with
+each value encoded as compact JSON (including JSON `null`, arrays, and objects),
+and sort shareable-fact keys alphabetically:
+
+```text
+GROUP CALL PREVIEW
+Destination label: <JSON string or null>
+Destination phone number: <JSON string>
+Caller name: <JSON string or null>
+Goal: <JSON string>
+Instructions: <JSON array of strings>
+Shareable facts: <JSON object with alphabetically sorted keys>
+Success criteria: <JSON string>
+Time zone: <JSON string>
+Transfer to a participant: no
+```
+
+Use the exact values that the later call brief will contain, without
+paraphrasing. Concrete dates/times, commitment and fee bounds, and cancellation
+terms must be represented in the bounded brief. The runtime compares the entire
+delivered preview with this canonical rendering, so omitted, reordered,
+relabeled, changed, or extra terms fail closed.
 
 Only a later inbound message received after that preview was successfully
 delivered may confirm it. Offering to call, asking what Murph would share, the
@@ -41,13 +55,16 @@ attempt, an ambiguous result, or a failed delivery as proof that the room saw
 the preview.
 
 On the later group confirmation turn, compare the current message with the exact
-delivered preview. Confirmation covers only the concrete room-owned task and
-stated bounds. The current confirmation message must itself explicitly approve
-any requester name or contact fact used in the call. One participant's
-acknowledgement never authorizes a different participant's identity, account,
-contact details, or private facts. If any term or disclosure changes, deliver
-the complete revised preview and stop again. Do not imply the call started until
-the tool result says so.
+delivered preview. Set `confirmationMessageRef` to that confirming inbound
+message's visible `ain_...` reference. It must remain the newest accepted
+message when the runtime starts the call; an intervening correction,
+cancellation, or unrelated message invalidates the attempt. Confirmation covers
+only the concrete room-owned task and stated bounds. The current confirmation
+message must itself explicitly approve any requester name or contact fact used
+in the call. One participant's acknowledgement never authorizes a different
+participant's identity, account, contact details, or private facts. If any term
+or disclosure changes, deliver the complete revised preview and stop again. Do
+not imply the call started until the tool result says so.
 
 For a hosted-group reservation, availability check, or service call, do not load
 `appointment-scheduling` unless health care is involved. Resolve the official

@@ -2926,15 +2926,28 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope: requestKeyScope.conversationScope,
         })
-        if (
-          requestKeyScope.conversationScope === 'group'
-          && await hostedToolContext
-            .currentGroupPhoneCallPreviewAuthority?.(brief) !== true
-        ) {
-          return toolTextResult(
-            false,
-            'group phone calling requires an exact preview that was successfully delivered before the current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
-          )
+        let effectiveRequestKeyScope = requestKeyScope
+        if (requestKeyScope.conversationScope === 'group') {
+          const confirmationInputId =
+            input.request.confirmationMessageRef
+          const previewAuthority = confirmationInputId
+            ? await hostedToolContext
+              .currentGroupPhoneCallPreviewAuthority?.({
+                brief,
+                confirmationInputId,
+              })
+            : null
+          if (!previewAuthority) {
+            return toolTextResult(
+              false,
+              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
+            )
+          }
+          effectiveRequestKeyScope = {
+            ...requestKeyScope,
+            acceptedInputIds: [previewAuthority.assistantInputId],
+            inboundMailboxItemIds: [previewAuthority.inboundMailboxItemId],
+          }
         }
         const result = await phoneCalls.start({
           brief,
@@ -2942,14 +2955,14 @@ export async function executeMurphDynamicToolRequest(input: {
             ? {
                 inboundMailboxItemIds:
                   resolvePhoneCallRequesterInboundMailboxItemIds(
-                    requestKeyScope,
+                    effectiveRequestKeyScope,
                   ),
               }
             : {}),
           originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief,
-            scope: requestKeyScope,
+            scope: effectiveRequestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,
