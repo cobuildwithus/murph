@@ -1042,7 +1042,7 @@ it("calls the hosted-local alarm test route with the bound user headers", async 
 
 it("calls the hosted-local activity-expiry route with bound user headers and a timeout", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, stopped: true });
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -1057,7 +1057,10 @@ it("calls the hosted-local activity-expiry route with bound user headers and a t
   });
 
   try {
-    await expect(harness.expireRunnerActivityForTest("member_expire")).resolves.toEqual({ ok: true });
+    await expect(harness.expireRunnerActivityForTest("member_expire")).resolves.toEqual({
+      ok: true,
+      stopped: true,
+    });
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;

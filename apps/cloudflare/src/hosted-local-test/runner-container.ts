@@ -114,9 +114,16 @@ export class RunnerContainer extends BaseRunnerContainer {
     };
   }
 
-  async expireActivityForTest(_input: { userId: string }): Promise<{ ok: true }> {
+  async expireActivityForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true; stopped: boolean }> {
     await this.onActivityExpired();
-    return { ok: true };
+    const state = await this.getState();
+    return {
+      ok: true,
+      stopped:
+        state.status === "stopped" || state.status === "stopped_with_code",
+    };
   }
 
   async dropActiveOperationForTest(_input: { userId: string }): Promise<{ ok: true }> {

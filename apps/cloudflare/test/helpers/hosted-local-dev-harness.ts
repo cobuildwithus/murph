@@ -47,7 +47,9 @@ export interface HostedLocalDevHarness {
   armSnapshotPublicationCorruptionForTest(userId: string): Promise<{ ok: true }>;
   armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
   beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
-  expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
+  expireRunnerActivityForTest(
+    userId: string,
+  ): Promise<{ ok: true; stopped: boolean }>;
   dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
   readShutdownCheckpointPublicationBarrierForTest(
     userId: string,
@@ -525,9 +527,11 @@ export async function startHostedLocalDevHarness(input: {
     }
   }
 
-  async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
+  async function expireRunnerActivityForTest(
+    userId: string,
+  ): Promise<{ ok: true; stopped: boolean }> {
     assertHostedLocalTestControlsAvailable("expireRunnerActivityForTest");
-    return await requestJsonForRuntime<{ ok: true }>(
+    return await requestJsonForRuntime<{ ok: true; stopped: boolean }>(
       `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
       {
         headers: {

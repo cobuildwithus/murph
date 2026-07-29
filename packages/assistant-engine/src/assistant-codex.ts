@@ -3531,6 +3531,18 @@ async function runCodexAppServerTurnOnProcess(
       patch.owner === 'vault-file' &&
       hasReplyRequiredPatchThrough(deliveryContextOrdinal)
     ) {
+      finalActionPatches = [
+        ...finalActionPatches.filter(
+          (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+        ),
+        {
+          deliveryContextOrdinal,
+          patch: { kind: 'reply-required', owner: 'vault-file' },
+        },
+      ]
+      replyTargetPatches = replyTargetPatches.filter(
+        (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+      )
       return true
     }
     if (
@@ -3839,8 +3851,7 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequestDeliveryContextOrdinal,
         )
         const vaultFileOwnsFinalAction =
-          existingFinalAction?.kind === 'none' &&
-          existingFinalAction.owner === 'vault-file'
+          existingFinalAction?.owner === 'vault-file'
         const vaultFileMayClassifyAfterGenericNoReply =
           dynamicToolRequest.kind === 'send-vault-file' &&
           !vaultFileOwnsFinalAction
@@ -3861,8 +3872,11 @@ async function runCodexAppServerTurnOnProcess(
           }
         }
         if (
-          shouldSuppressDeliveryContext(
-            dynamicToolRequestDeliveryContextOrdinal,
+          (
+            shouldSuppressDeliveryContext(
+              dynamicToolRequestDeliveryContextOrdinal,
+            ) ||
+            vaultFileOwnsFinalAction
           ) &&
           !vaultFileMayClassifyAfterGenericNoReply &&
           isResponseMediaDynamicToolRequest(dynamicToolRequest)

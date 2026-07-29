@@ -124,8 +124,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     });
     const attachmentUploadBaseline = countAttachmentUploadLogs();
     const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
-    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
-    const baselineIdleShutdownCompletionCount = countContainerDestroyCompletedLogs();
     const preTurnStatus = await requireScenario().harness.readUserStatus(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
@@ -179,8 +177,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     expect(countAttachmentUploadLogs()).toBe(attachmentUploadBaseline);
     const approvalEffectId = buildApprovalOutcomeEffectId(challenge);
     const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
-      baselineCleanupCount: baselineIdleShutdownCleanupCount,
-      baselineCompletionCount: baselineIdleShutdownCompletionCount,
       previousWorkspaceVersion: requireWorkspaceVersion(preTurnStatus),
     });
     expect(readHostedExecutionSnapshotHotRef(
@@ -335,11 +331,10 @@ function buildApprovalOutcomeEffectId(
 }
 
 async function waitForIdleShutdownCheckpoint(input: {
-  baselineCleanupCount: number;
-  baselineCompletionCount: number;
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
+  let containerStopped = false;
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
   let lastStatusReadError: unknown = null;
@@ -369,14 +364,15 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
-      && countContainerDestroyCompletedLogs() > input.baselineCompletionCount
+      && containerStopped
     ) {
       return status;
     }
 
     try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
+      const result =
+        await requireScenario().harness.expireRunnerActivityForTest(userId);
+      containerStopped ||= result.stopped;
       lastActivityExpiryError = null;
     } catch (error) {
       lastActivityExpiryError = error;
@@ -402,57 +398,6 @@ function requireWorkspaceVersion(status: HostedRunnerStatusResponse): string {
     throw new Error("Hosted status did not include a workspace version.");
   }
   return version;
-}
-
-function countActivityExpiredDestroyRequestLogs(): number {
-  return countStructuredLogMessage(
-    "Hosted execution container destroy requested.",
-    (record) => record.details?.destroyRequestReason === "activity-expired",
-  );
-}
-
-function countContainerDestroyCompletedLogs(): number {
-  return countStructuredLogMessage(
-    "Hosted execution container destroy completed.",
-  );
-}
-
-function countStructuredLogMessage(
-  message: string,
-  predicate: (record: HostedStructuredLogRecord) => boolean = () => true,
-): number {
-  const output = [
-    requireScenario().harness.stdoutTail(2_000_000),
-    requireScenario().harness.stderrTail(2_000_000),
-  ].join("\n");
-  let count = 0;
-  for (const line of output.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== "object") {
-      continue;
-    }
-    const record = parsed as HostedStructuredLogRecord;
-    if (record.message === message && predicate(record)) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-interface HostedStructuredLogRecord {
-  details?: {
-    destroyRequestReason?: unknown;
-  };
-  message?: unknown;
 }
 
 function countAssistantProviderResponsesApiRequests(): number {

@@ -69,7 +69,9 @@ interface HostedLocalTestRunnerContainerStubLike {
     input: { userId: string },
   ): Promise<{ ok: true }>;
   dropActiveOperationForTest?(input: { userId: string }): Promise<{ ok: true }>;
-  expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
+  expireActivityForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true; stopped: boolean }>;
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
@@ -145,7 +147,9 @@ function hasHostedLocalTestRunnerContainerActiveOperationControl(
 function hasHostedLocalTestRunnerContainerActivityControl(
   stub: object,
 ): stub is HostedLocalTestRunnerContainerStubLike & {
-  expireActivityForTest(input: { userId: string }): Promise<{ ok: true }>;
+  expireActivityForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true; stopped: boolean }>;
 } {
   return "expireActivityForTest" in stub
     && typeof stub.expireActivityForTest === "function";

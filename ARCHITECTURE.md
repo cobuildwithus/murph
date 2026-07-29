@@ -961,7 +961,10 @@ representations. A failed or schema-invalid media replacement clears the
 current response-media batch and establishes a visible-reply obligation. That
 obligation remains authoritative for the rest of the turn, across later steer
 contexts and successful outputs, so neither `finish_without_reply` nor a
-vault-file completion can turn recovery into silence. Stateful media and
+vault-file completion can turn recovery into silence. When an approved
+vault-file send shares that obligation, the same final-action patch retains
+vault-file ownership so later response-media tools cannot create a second
+competing delivery while recovery text remains available. Stateful media and
 final-action tools apply in request order; receiving a later no-reply request
 cannot suppress an earlier queued media mutation or its recovery obligation.
 

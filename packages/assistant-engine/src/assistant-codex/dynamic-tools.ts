@@ -1892,6 +1892,7 @@ export type MurphDynamicToolFinalActionPatch =
     }
   | {
       kind: 'reply-required'
+      owner?: 'vault-file'
     }
 
 export type MurphDynamicToolReactionPatch = {

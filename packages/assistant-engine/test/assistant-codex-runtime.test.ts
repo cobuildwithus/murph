@@ -19694,6 +19694,27 @@ describe('steered final segments', () => {
         kind: 'send-vault-file',
         ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
       },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'vault-file sending cannot be combined with other response media',
+        id: 113,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/second-report.pdf`,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'response media cannot be changed after a vault-file send',
+        id: 114,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unsupported additional attachment',
+          kind: 'image',
+          source: 'mixed-output-extra',
+          url: 'https://cdn.example.test/assistant/mixed-output-extra.png',
+        }],
+      },
       completedItemEvent({
         id: 'assistant-mixed-output-recovery',
         type: 'assistant_message',
