@@ -1231,13 +1231,19 @@ message id. A verified `message.edited` webhook locks that source lineage,
 finds the already-accepted original, and revalidates its direct home route or
 current group sender, chat, route, and participant authority before appending a
 structured correction through the ordinary mailbox and wake handoff. The
-replacement text stays user-authored data; only the separate part index and
-correction framing are trusted runtime metadata. Corrections accepted before
-planning may join the current turn, corrections accepted during an eligible
-active turn may steer it, and later corrections remain ordinary pending
-conversation work. The owner keeps at most the provider-supported five
-corrections, rejects conflicting replay, ignores stale or ambiguous ordering,
-and retries a missing original only within the provider delivery window. It
+replacement text stays user-authored data; only the separate part index,
+deterministic opaque reference to the original accepted assistant input, and
+correction framing are trusted runtime metadata. That reference distinguishes
+corrections to different originals without exposing provider identifiers.
+Corrections accepted before planning may join the current turn, corrections
+accepted during an eligible active turn may steer it, and later corrections
+remain ordinary pending conversation work. The owner keeps at most the
+provider-supported five corrections, rejects conflicting replay, ignores stale
+or ambiguous ordering, and retries a missing original only within the provider
+delivery window. If the referenced input already received a completed answer,
+the assistant sends one concise follow-up only when the correction materially
+changes that answer or action; immaterial wording changes end with the existing
+durable `finish_without_reply` policy. It
 does not rewrite history, cancel a turn, rerun onboarding, fetch the message
 from Linq, create a second queue, or use the provider diagnostic ledger as
 correctness state. Outbound edit events are diagnostic only.

@@ -407,15 +407,17 @@ export function renderAssistantInputLinqCorrectionContext(
 ): string | null {
   if (
     metadata?.kind !== 'linq' ||
+    metadata.editedSourceInputId === undefined ||
     metadata.editedTextPartIndex === undefined
   ) {
     return null
   }
 
   return [
-    'Trusted message correction:',
-    `This input replaces text part ${metadata.editedTextPartIndex} of the person's earlier accepted Linq message.`,
-    'Treat it as a correction, not a separate request. For the same part, the newest accepted correction is authoritative.',
+    `Trusted message correction for Message ref ${metadata.editedSourceInputId}:`,
+    `This input replaces text part ${metadata.editedTextPartIndex} of that accepted Linq message.`,
+    'Treat it as a correction, not a separate request. Only corrections with the same Message ref and part supersede one another; the newest accepted correction is authoritative.',
+    'If the referenced message already received a completed answer, send one concise follow-up only when this correction materially changes that answer or action; otherwise call `murph.finish_without_reply`.',
   ].join('\n')
 }
 

@@ -1,6 +1,6 @@
 # Handle Linq message edits as conversational input
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -97,9 +97,11 @@ Updated: 2026-07-28
   Edits cannot create members, rerun first-contact classification, renew group
   access, consume quotas, send read receipts, or select a new conversation
   owner.
-- Add one optional structured correction marker to the existing Linq
-  conversation-message contract. Keep trusted edit semantics separate from the
-  replacement text supplied by the person.
+- Add optional structured correction markers to the existing Linq
+  conversation-message contract: the provider part index and a deterministic
+  opaque reference to the original accepted assistant input. Keep trusted edit
+  semantics separate from the replacement text supplied by the person, and
+  keep provider identifiers out of prompts.
 - Do not mutate or supersede the original input, cancel a running turn, fetch
   mutable provider state, or add a pending-edit queue. Existing causal
   selection, live-input admission, pending recovery, and terminality remain the
@@ -130,10 +132,32 @@ Updated: 2026-07-28
 - Completed direct proof:
   - Fresh-schema `prisma migrate deploy` applied all migrations, including the
     nullable blind source-message index.
-  - The full real-PostgreSQL Linq concurrency suite passed 14/14, including
-    original/edit serialization on the blind source key.
+  - The full real-PostgreSQL Linq concurrency suite passed 15/15, including
+    original/edit serialization on the blind source key and production-store
+    hydration of ordered original/correction lineage with retired content.
   - Focused ingress, execution-contract, mailbox-import, prompt/live-turn,
     local-subscription, hosted mailbox/planner/provider-event, and dispatch
     suites passed.
   - Typechecks passed for messaging ingress, hosted execution, assistant
     runtime, assistant engine, hosted local harness, and hosted Web.
+  - Preliminary specialists returned four accepted findings: distinguish the
+    exact original in prompt framing, prove direct/group revocation branches,
+    prove changed-replay/equal-time failures, and exercise the production
+    source-lineage writer/reader seam. The remediation and direct proofs are
+    included in the final candidate; the preliminary pass is not rerun.
+  - Product-experience review found one accepted post-reply policy gap. The
+    correction prompt now requires one concise follow-up only for a material
+    answer/action change and the existing durable `finish_without_reply` path
+    for immaterial wording changes. The focused re-review marked the finding
+    resolved.
+  - The final local `pnpm test:diff` cleared architecture/privacy/dependency
+    guards, all affected typechecks, and the assistant-engine, assistant-cli,
+    assistant-runtime, assistantd, hosted-execution, and other completed
+    package suites. Its broad CLI aggregate reproduced eight unrelated
+    subprocess timeouts on the shared host and did not terminate by itself.
+    The hosted-local harness initially failed because its required ignored
+    assistant-runtime build artifact was absent; after preparing that artifact,
+    the full harness passed 410/410 tests. One clean, secret-free remote
+    `pnpm verify:acceptance` remains the exact-head completion proof after the
+    final local commit.
+Completed: 2026-07-28

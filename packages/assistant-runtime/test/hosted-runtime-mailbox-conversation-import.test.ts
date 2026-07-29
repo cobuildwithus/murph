@@ -2144,6 +2144,7 @@ describe("hosted mailbox conversation import adapter", () => {
         contactLookupKey: "hbidx:phone:v1:edit-contact",
         linqMessage: {
           chatId: "chat_edit",
+          editedSourceInputId: "ain_11111111111111111111111111111111",
           editedTextPartIndex: 0,
           from: "+15551110000",
           isFromMe: false,
@@ -2178,6 +2179,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.ok(event);
     assert.equal(event.content.text, "corrected wording");
     assert.equal(event.sourceMetadata?.kind, "linq");
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.editedSourceInputId
+        : undefined,
+      "ain_11111111111111111111111111111111",
+    );
     assert.equal(
       event.sourceMetadata?.kind === "linq"
         ? event.sourceMetadata.editedTextPartIndex

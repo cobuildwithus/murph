@@ -1566,6 +1566,12 @@ function createHostedConversationAssistantInputSourceMetadata(
             editedTextPartIndex:
               wake.message.linqMessage.editedTextPartIndex,
           }),
+      ...(wake.message.linqMessage.editedSourceInputId === undefined
+        ? {}
+        : {
+            editedSourceInputId:
+              wake.message.linqMessage.editedSourceInputId,
+          }),
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,

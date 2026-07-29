@@ -5,6 +5,9 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import {
+  buildHostedExecutionLinqConversationMessageWake,
+} from "@murphai/hosted-execution";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,9 +15,15 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
   acquireHostedMailboxSourceMessageLocksTx,
+  appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedMailboxItemTx,
+  readHostedMailboxSourceConversationEntriesTx,
 } from "@/src/lib/hosted-mailbox/store";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
@@ -161,6 +170,193 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           ),
         );
         await disconnectClients([observer, owner, contender]);
+      }
+    });
+
+    it("round-trips original and correction lineage through the production mailbox store", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `member_edit_lineage_${randomUUID()}`;
+      const messageId = `message_edit_lineage_${randomUUID()}`;
+      const originalEventId = `event_edit_original_${randomUUID()}`;
+      const correctionEventId = `event_edit_correction_${randomUUID()}`;
+      const sourceMessageLookupKey = requireString(
+        createHostedLinqMessageLookupKey(messageId),
+      );
+      const sourceMessageLookupKeyLockCandidates =
+        createHostedLinqMessageLookupKeyReadCandidates(messageId);
+      const accountLookupKey = requireString(
+        createHostedPhoneLookupKey("+15550000000"),
+      );
+      const contactLookupKey = requireString(
+        createHostedPhoneLookupKey("+15551112222"),
+      );
+      const originalOccurredAt = new Date();
+      const correctionOccurredAt =
+        new Date(originalOccurredAt.getTime() + 1);
+      let memberCreated = false;
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        memberCreated = true;
+
+        await prisma.$transaction(async (tx) => {
+          const originalWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: originalEventId,
+              linqMessage: {
+                chatId: `chat_edit_lineage_${randomUUID()}`,
+                from: "+15551112222",
+                isFromMe: false,
+                messageId,
+                parts: [{ type: "text", value: "Original wording" }],
+                service: "iMessage",
+                threadIsDirect: true,
+              },
+              occurredAt: originalOccurredAt.toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const originalAppend =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: originalWake,
+              sourceMessageLookupKey,
+              sourceMessageLookupKeyLockCandidates,
+              tx,
+            });
+          expect(originalAppend.inserted).toBe(true);
+
+          await expect(readHostedMailboxSourceConversationEntriesTx({
+            sourceMessageLookupKeys:
+              sourceMessageLookupKeyLockCandidates,
+            tx,
+          })).resolves.toMatchObject([{
+            contentAvailable: true,
+            itemId: originalAppend.item.id,
+            userId: memberId,
+            wake: {
+              eventId: originalEventId,
+              message: {
+                linqMessage: {
+                  messageId,
+                  parts: [{ type: "text", value: "Original wording" }],
+                },
+              },
+            },
+          }]);
+
+          const correctionWake =
+            buildHostedExecutionLinqConversationMessageWake({
+              accountLookupKey,
+              contactKind: "phone",
+              contactLookupKey,
+              eventId: correctionEventId,
+              linqMessage: {
+                ...originalWake.message.linqMessage,
+                editedSourceInputId:
+                  "ain_11111111111111111111111111111111",
+                editedTextPartIndex: 0,
+                parts: [{ type: "text", value: "Corrected wording" }],
+              },
+              occurredAt: correctionOccurredAt.toISOString(),
+              phoneLookupKey: contactLookupKey,
+              userId: memberId,
+            });
+          const correctionAppend =
+            await appendHostedMailboxEnvelopeWithSourceMessageTx({
+              envelope: correctionWake,
+              sourceMessageLookupKey,
+              sourceMessageLookupKeyLockCandidates,
+              tx,
+            });
+          expect(correctionAppend.inserted).toBe(true);
+
+          const acceptedLineage =
+            await readHostedMailboxSourceConversationEntriesTx({
+              sourceMessageLookupKeys:
+                sourceMessageLookupKeyLockCandidates,
+              tx,
+            });
+          expect(acceptedLineage.map((entry) => ({
+            contentAvailable: entry.contentAvailable,
+            editedTextPartIndex:
+              entry.wake?.message.channel === "linq"
+                ? entry.wake.message.linqMessage.editedTextPartIndex
+                : undefined,
+            eventId: entry.wake?.eventId,
+            itemId: entry.itemId,
+            text: entry.wake?.message.channel === "linq"
+              ? entry.wake.message.linqMessage.parts.find(
+                  (part) => part.type === "text",
+                )?.value
+              : undefined,
+          }))).toEqual([
+            {
+              contentAvailable: true,
+              editedTextPartIndex: undefined,
+              eventId: originalEventId,
+              itemId: originalAppend.item.id,
+              text: "Original wording",
+            },
+            {
+              contentAvailable: true,
+              editedTextPartIndex: 0,
+              eventId: correctionEventId,
+              itemId: correctionAppend.item.id,
+              text: "Corrected wording",
+            },
+          ]);
+
+          await tx.hostedMailboxPayload.deleteMany({
+            where: { mailboxItemId: originalAppend.item.id },
+          });
+          await tx.hostedMailboxItem.update({
+            data: {
+              contentRetiredAt: new Date(),
+              payloadInlineCiphertext: null,
+              payloadRef: null,
+              retentionDisposition: "test-content-retired",
+            },
+            where: { id: originalAppend.item.id },
+          });
+
+          const retiredLineage =
+            await readHostedMailboxSourceConversationEntriesTx({
+              sourceMessageLookupKeys:
+                sourceMessageLookupKeyLockCandidates,
+              tx,
+            });
+          expect(retiredLineage.map((entry) => ({
+            contentAvailable: entry.contentAvailable,
+            eventId: entry.wake?.eventId ?? null,
+            itemId: entry.itemId,
+          }))).toEqual([
+            {
+              contentAvailable: false,
+              eventId: null,
+              itemId: originalAppend.item.id,
+            },
+            {
+              contentAvailable: true,
+              eventId: correctionEventId,
+              itemId: correctionAppend.item.id,
+            },
+          ]);
+        }, transactionOptions);
+      } finally {
+        if (memberCreated) {
+          await prisma.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([prisma]);
       }
     });
 

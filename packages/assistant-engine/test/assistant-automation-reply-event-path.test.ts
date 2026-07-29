@@ -151,6 +151,7 @@ describe('assistant auto-reply event-first path', () => {
       optionalInboxCaptureId: null,
       source: 'linq',
       sourceMetadata: {
+        editedSourceInputId: initial.event.inputId,
         editedTextPartIndex: 0,
         externalThreadRouteAuthorityPresent: false,
         kind: 'linq',
@@ -220,7 +221,15 @@ describe('assistant auto-reply event-first path', () => {
         source: 'assistant-input',
       }],
       kind: 'accepted',
-      prompt: expect.stringContaining('Trusted message correction:'),
+      prompt: expect.stringMatching(
+        new RegExp([
+          `Trusted message correction for Message ref ${initial.event.inputId}:`,
+          '[\\s\\S]*',
+          'send one concise follow-up only when this correction materially changes that answer or action',
+          '[\\s\\S]*',
+          'otherwise call `murph\\.finish_without_reply`',
+        ].join('')),
+      ),
     })
   })
 

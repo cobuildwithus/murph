@@ -125,6 +125,7 @@ describe("hosted execution wake guards", () => {
         eventId: "linq-edit-wake-1",
         linqMessage: {
           chatId: "chat_edit",
+          editedSourceInputId: "ain_11111111111111111111111111111111",
           editedTextPartIndex: 0,
           from: "+15551234567",
           isFromMe: false,
@@ -154,6 +155,18 @@ describe("hosted execution wake guards", () => {
         }),
       ).toThrow("editedTextPartIndex");
     }
+    expect(() =>
+      parseHostedExecutionWake({
+        ...wake,
+        message: {
+          ...wake.message,
+          linqMessage: {
+            ...wake.message.linqMessage,
+            editedSourceInputId: "msg_provider_private",
+          },
+        },
+      }),
+    ).toThrow("editedSourceInputId");
   });
 
   it("parses member preferences updated wakes with strict shared preference ids", () => {

@@ -6,6 +6,10 @@ import {
   isHostedLinqConversationMessageWake,
   readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
@@ -700,6 +704,15 @@ function buildHostedLinqMessageEditedWake(input: {
     eventId: input.event.event_id,
     linqMessage: {
       chatId: originalLinqMessage.chatId,
+      editedSourceInputId: createHostedMailboxAssistantInputId({
+        dedupeKey: input.originalWake.eventId,
+        eventId: input.originalWake.eventId,
+        lane: "conversation",
+        secret: readHostedConversationAssistantIdentifierSecret(
+          input.originalWake,
+        ),
+        userId: input.originalWake.userId,
+      }),
       editedTextPartIndex: input.event.data.part.index,
       from: originalLinqMessage.from,
       isFromMe: false,
@@ -747,6 +760,7 @@ function hasSameHostedLinqMessageEdit(
     && existingWake.occurredAt === requestedWake.occurredAt
     && existing.chatId === requested.chatId
     && existing.messageId === requested.messageId
+    && existing.editedSourceInputId === requested.editedSourceInputId
     && existing.editedTextPartIndex === requested.editedTextPartIndex
     && existing.parts.length === 1
     && requested.parts.length === 1

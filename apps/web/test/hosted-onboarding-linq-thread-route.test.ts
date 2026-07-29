@@ -2,6 +2,10 @@ import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -237,6 +241,7 @@ beforeEach(() => {
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
     mailboxConsumedAt: null,
   });
+  vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockReset();
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -404,6 +409,39 @@ function buildAcceptedGroupLinqOriginalWake() {
     senderMemberId: "member_active_participant_123",
     occurredAt: "2026-06-24T12:00:00.000Z",
     userId: "member_thread_container_123",
+  });
+}
+
+function buildAcceptedDirectLinqOriginalWake() {
+  return buildHostedExecutionLinqConversationMessageWake({
+    accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+    contactKind: "phone",
+    contactLookupKey: requireTestPhoneLookupKey("+15551112222"),
+    eventId: "evt_direct_original_123",
+    linqMessage: {
+      chatId: "chat_group_123",
+      from: "+15551112222",
+      isFromMe: false,
+      messageId: "msg_group_123",
+      parts: [{ type: "text", value: "Original question" }],
+      service: "iMessage",
+      threadIsDirect: true,
+    },
+    phoneLookupKey: requireTestPhoneLookupKey("+15551112222"),
+    occurredAt: "2026-06-24T12:00:00.000Z",
+    userId: "member_direct_123",
+  });
+}
+
+function createAcceptedEditSourceInputId(
+  originalWake: ReturnType<typeof buildAcceptedGroupLinqOriginalWake>,
+): string {
+  return createHostedMailboxAssistantInputId({
+    dedupeKey: originalWake.eventId,
+    eventId: originalWake.eventId,
+    lane: "conversation",
+    secret: readHostedConversationAssistantIdentifierSecret(originalWake),
+    userId: originalWake.userId,
   });
 }
 
@@ -1318,6 +1356,8 @@ describe("Linq message edit correction planning", () => {
           channel: "linq",
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
+            editedSourceInputId:
+              createAcceptedEditSourceInputId(originalWake),
             editedTextPartIndex: 0,
             messageId: "msg_group_123",
             parts: [{ type: "text", value: "Corrected question" }],
@@ -1330,6 +1370,115 @@ describe("Linq message edit correction planning", () => {
       }),
       sourceMessageLookupKey: createHostedLinqMessageLookupKey("msg_group_123"),
     }));
+  });
+
+  it("appends a direct correction only while the bound home route is active", async () => {
+    const prisma = createPrisma();
+    const originalWake = buildAcceptedDirectLinqOriginalWake();
+    const sourceEntry = {
+      contentAvailable: true,
+      itemId: "mailbox_direct_original_123",
+      userId: originalWake.userId,
+      wake: originalWake,
+    };
+    vi.mocked(memberRoutingStore.readHostedMemberRoutingState)
+      .mockResolvedValueOnce({
+        linqChatId: "chat_group_123",
+        linqHomeLineAssignedAt: new Date("2026-06-24T11:00:00.000Z"),
+        linqParticipantContact: {
+          kind: "phone",
+          lookupKey: requireTestPhoneLookupKey("+15551112222"),
+        },
+        linqRecipientPhone: "+15550000000",
+        memberId: originalWake.userId,
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      } as Awaited<
+        ReturnType<typeof memberRoutingStore.readHostedMemberRoutingState>
+      >)
+      .mockResolvedValueOnce({
+        linqChatId: "chat_rebound_elsewhere",
+        linqHomeLineAssignedAt: new Date("2026-06-24T11:00:00.000Z"),
+        linqParticipantContact: {
+          kind: "phone",
+          lookupKey: requireTestPhoneLookupKey("+15551112222"),
+        },
+        linqRecipientPhone: "+15550000000",
+        memberId: originalWake.userId,
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      } as Awaited<
+        ReturnType<typeof memberRoutingStore.readHostedMemberRoutingState>
+      >);
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([sourceEntry])
+      .mockResolvedValueOnce([sourceEntry]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        reason: "wake-appended-message-edit",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).toHaveBeenCalledOnce();
+
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx)
+      .mockClear();
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent({
+        eventId: "evt_direct_edit_after_rebind",
+      }),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: true,
+        reason: "message-edit-direct-route-inactive",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group correction after participant authority is revoked", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: false,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: true,
+        reason: "message-edit-group-route-inactive",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("fails closed for stale revisions and sender authority mismatches", async () => {
@@ -1530,6 +1679,7 @@ describe("Linq message edit correction planning", () => {
       eventId: "evt_group_edit_123",
       linqMessage: {
         ...originalWake.message.linqMessage,
+        editedSourceInputId: createAcceptedEditSourceInputId(originalWake),
         editedTextPartIndex: 0,
         parts: [{ type: "text", value: "Corrected question" }],
       },
@@ -1569,6 +1719,118 @@ describe("Linq message edit correction planning", () => {
         mailboxItemId: "mailbox_group_edit_accepted",
         userId: "member_thread_container_123",
       }],
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed replay that reuses an accepted edit event id", async () => {
+    const prisma = createPrisma();
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    const conflictingCorrectionWake =
+      buildHostedExecutionLinqConversationMessageWake({
+        accountLookupKey: originalWake.message.accountLookupKey,
+        contactKind: originalWake.message.contactKind,
+        contactLookupKey: originalWake.message.contactLookupKey,
+        eventId: "evt_group_edit_123",
+        linqMessage: {
+          ...originalWake.message.linqMessage,
+          editedSourceInputId: createAcceptedEditSourceInputId(originalWake),
+          editedTextPartIndex: 0,
+          parts: [{ type: "text", value: "Different accepted content" }],
+        },
+        occurredAt: "2026-06-24T12:01:00.000Z",
+        phoneLookupKey: originalWake.message.phoneLookupKey,
+        routeAuthority: originalWake.message.routeAuthority,
+        senderMemberId: originalWake.message.senderMemberId,
+        userId: originalWake.userId,
+      });
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([
+        {
+          contentAvailable: true,
+          itemId: "mailbox_group_original_123",
+          userId: originalWake.userId,
+          wake: originalWake,
+        },
+        {
+          contentAvailable: true,
+          itemId: "mailbox_group_edit_conflict",
+          userId: originalWake.userId,
+          wake: conflictingCorrectionWake,
+        },
+      ]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        duplicate: true,
+        ignored: true,
+        reason: "message-edit-event-conflict",
+      },
+      wakeHandoffs: [{
+        eventId: "evt_group_edit_123",
+        mailboxItemId: "mailbox_group_edit_conflict",
+      }],
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects distinct edits with the same provider revision timestamp", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    const equalTimestampCorrectionWake =
+      buildHostedExecutionLinqConversationMessageWake({
+        accountLookupKey: originalWake.message.accountLookupKey,
+        contactKind: originalWake.message.contactKind,
+        contactLookupKey: originalWake.message.contactLookupKey,
+        eventId: "evt_group_edit_equal_existing",
+        linqMessage: {
+          ...originalWake.message.linqMessage,
+          editedSourceInputId: createAcceptedEditSourceInputId(originalWake),
+          editedTextPartIndex: 0,
+          parts: [{ type: "text", value: "Already accepted correction" }],
+        },
+        occurredAt: "2026-06-24T12:01:00.000Z",
+        phoneLookupKey: originalWake.message.phoneLookupKey,
+        routeAuthority: originalWake.message.routeAuthority,
+        senderMemberId: originalWake.message.senderMemberId,
+        userId: originalWake.userId,
+      });
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([
+        {
+          contentAvailable: true,
+          itemId: "mailbox_group_original_123",
+          userId: originalWake.userId,
+          wake: originalWake,
+        },
+        {
+          contentAvailable: true,
+          itemId: "mailbox_group_edit_equal_existing",
+          userId: originalWake.userId,
+          wake: equalTimestampCorrectionWake,
+        },
+      ]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent({
+        eventId: "evt_group_edit_equal_requested",
+      }),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: true,
+        reason: "message-edit-revision-ambiguous",
+      },
     });
     expect(
       mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,

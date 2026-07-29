@@ -45,8 +45,11 @@ Last verified: 2026-07-28
   accepted inbound conversation item through the private versioned blind
   source-message key, then must reattest the original sender, chat, direction,
   and current direct or group route authority before appending a correction.
-  The edited text remains quoted user data; the runtime-injected part index and
-  correction framing are the only trusted prompt metadata. Provider
+  The edited text remains quoted user data; the runtime-injected part index,
+  opaque original assistant-input reference, and correction framing are the
+  only trusted prompt metadata. The reference is deterministically derived
+  from the already-accepted envelope and must never expose the provider
+  message id. Provider
   diagnostics may retain event identity, timing, direction, and blinded
   correlation keys, but never replacement text or raw message, sender, or chat
   identifiers. Outbound edits are diagnostic facts and never runtime work.
