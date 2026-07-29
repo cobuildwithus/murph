@@ -206,6 +206,7 @@ import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
+  resolvePhoneCallRequesterInboundMailboxItemIds,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
@@ -2929,9 +2930,10 @@ export async function executeMurphDynamicToolRequest(input: {
           brief,
           ...(requestKeyScope.conversationScope === 'group'
             ? {
-                inboundMailboxItemIds: [
-                  ...requestKeyScope.inboundMailboxItemIds,
-                ],
+                inboundMailboxItemIds:
+                  resolvePhoneCallRequesterInboundMailboxItemIds(
+                    requestKeyScope,
+                  ),
               }
             : {}),
           originSessionId: requestKeyScope.originSessionId,

@@ -99,6 +99,13 @@ export function createPhoneCallRequestKey(input: {
   return `phone_call_${digest}`
 }
 
+export function resolvePhoneCallRequesterInboundMailboxItemIds(
+  scope: AssistantHostedToolRequestKeyScope,
+): string[] {
+  const requesterMailboxItemId = scope.inboundMailboxItemIds.at(-1)
+  return requesterMailboxItemId ? [requesterMailboxItemId] : []
+}
+
 export function normalizePhoneCallBriefForConversationScope(input: {
   brief: HostedPhoneCallBrief
   conversationScope: AssistantConversationScope

@@ -31,10 +31,11 @@ until the tool result says so.
 For a hosted-group reservation, availability check, or service call, do not load
 `appointment-scheduling` unless health care is involved. Resolve the official
 destination, concrete date/time bounds, party size or resource count, duration,
-acceptable price or fees, cancellation terms, and the minimum name or contact
-facts the destination actually requires. Ask one narrow question before calling
-when a missing term could create a charge, commitment, or materially different
-booking. An information-only call must stay non-mutating.
+acceptable price or fees, cancellation terms, and whether the destination
+requires a requester name or contact fact. Ask one narrow question before
+calling when a missing term or required requester fact could create a charge,
+commitment, materially different booking, or failed reservation. An
+information-only call must stay non-mutating.
 
 Do not place prank, harassment, impersonation, unsolicited sales, recruiting, or
 bulk-outreach calls. This skill never expands the conversation's scope boundary
@@ -56,9 +57,10 @@ appointment readiness.
   to identify who it is calling for. In a group, use only a name the requester
   explicitly authorized for this call; omit it when no one may be represented.
 - Put only call-relevant, disclosable facts approved by the requester in
-  `shareableFacts`. In a group, room-visible logistical facts may be used; never
-  infer or disclose one participant's private identity, account, contact, or
-  health facts.
+  `shareableFacts`. In a group, room-visible logistical facts may be used. Only
+  the current requester's explicitly supplied or approved name or contact fact
+  may be disclosed when the destination requires it; never infer or disclose
+  another participant's private identity, account, contact, or health facts.
 - Never include unrelated health details, identifiers, payment information,
   credentials, or a participant's transfer phone number. Murph resolves an
   eligible verified transfer number server-side for private calls; group calls

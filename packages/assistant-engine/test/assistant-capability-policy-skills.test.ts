@@ -63,7 +63,7 @@ describe('assistant capability policy skills', () => {
     )
     expect(normalized).toContain('party size or resource count')
     expect(normalized).toContain(
-      'charge, commitment, or materially different booking',
+      'charge, commitment, materially different booking, or failed reservation',
     )
     expect(normalized).toContain(
       'This skill never expands the conversation\'s scope boundary or authorizes code production or work, school, or professional operations.',
@@ -75,6 +75,12 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('satisfy its ready-to-act gate')
     expect(normalized).toContain('Set `callerName`')
     expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
+    expect(normalized).toContain(
+      'Only the current requester\'s explicitly supplied or approved name or contact fact may be disclosed when the destination requires it',
+    )
+    expect(normalized).toContain(
+      'never infer or disclose another participant\'s private identity, account, contact, or health facts',
+    )
     expect(normalized).toContain('Never include unrelated health details')
     expect(normalized).toContain('Set `allowTransferToUser: true`')
     expect(normalized).toContain('Set it to `false` for information-only calls')

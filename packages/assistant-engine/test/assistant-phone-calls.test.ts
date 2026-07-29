@@ -8,6 +8,7 @@ import {
   MURPH_CREATE_PHONE_CALL_TOOL,
   createPhoneCallRequestKey,
   resolveAssistantUserActionAcceptedInputIds,
+  resolvePhoneCallRequesterInboundMailboxItemIds,
 } from "../src/assistant-codex/dynamic-tools/phone-calls.js";
 import {
   executeMurphDynamicToolRequest,
@@ -203,6 +204,18 @@ describe("assistant phone calls", () => {
     })).toThrow("accepted user input");
   });
 
+  it("binds group requester authority to the newest accepted mailbox item", () => {
+    expect(resolvePhoneCallRequesterInboundMailboxItemIds({
+      ...BASE_SCOPE,
+      acceptedInputIds: ["assistant_input_1", "assistant_input_2"],
+      inboundMailboxItemIds: ["mailbox_item_1", "mailbox_item_2"],
+    })).toEqual(["mailbox_item_2"]);
+    expect(resolvePhoneCallRequesterInboundMailboxItemIds({
+      ...BASE_SCOPE,
+      inboundMailboxItemIds: [],
+    })).toEqual([]);
+  });
+
   it("fails closed when a hidden phone-call request has transport but no execution authority", async () => {
     const start = vi.fn();
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -295,7 +308,14 @@ describe("assistant phone calls", () => {
     };
     const phoneCallScope = {
       ...BASE_SCOPE,
-      acceptedInputIds: ["group_phone_call_input"],
+      acceptedInputIds: [
+        "earlier_group_input",
+        "group_phone_call_input",
+      ],
+      inboundMailboxItemIds: [
+        "earlier_group_mailbox_item",
+        "mailbox_item_1",
+      ],
       conversationScope: "group" as const,
       originSessionId: "session_group_phone_call",
     };
