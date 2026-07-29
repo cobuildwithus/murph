@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-07-25
+Last verified: 2026-07-29
 
 ## Current State
 
@@ -84,6 +84,15 @@ Before Murph writes a private run, it should already know the exact Health Commo
   dry run and real start. If either differs from the current protocol, stop and
   ask the member to refresh or reopen it rather than substituting the current
   revision.
+- If the selected protocol is no longer public or runnable, it is unavailable,
+  not a refreshable revision mismatch. A planned or paused private run remains
+  unchanged and cannot activate. Explain the withdrawal in the originating
+  conversation and offer a currently runnable alternative. If the member
+  accepts, start that alternative as a distinct experiment with a new id and
+  lineage; never rewrite the withdrawn run's protocol references, effective
+  snapshot, run plan, or analysis plan in place. Mark the old run `abandoned`
+  only after the member separately agrees. Never direct the member back to a
+  page that is intentionally no longer public.
 - Preserve `commonsProtocolRef.key`, `commonsProtocolRef.pageRevisionId`, `commonsProtocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record. Store a private `protocolRef` only when the run uses a saved private adaptation.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, measurement plan, and compact experiment-onboarding deltas. Copy edits, generic assistant-policy wording, vault-read behavior, or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.

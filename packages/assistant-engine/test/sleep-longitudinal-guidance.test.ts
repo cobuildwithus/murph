@@ -368,6 +368,24 @@ describe('experiment start and support mechanics', () => {
     expect(resolution).toContain('do not retry without the revision flags')
     expect(resolution).toContain('ask them to refresh or reopen it')
     expect(resolution).toMatch(/do not silently start (?:from )?current protocol content/u)
+    expect(resolution).toMatch(
+      /treat it as withdrawn or\s+unavailable rather than as a refreshable revision mismatch/u,
+    )
+    expect(resolution).toMatch(
+      /leave any planned or paused record\s+unchanged/u,
+    )
+    expect(resolution).toMatch(
+      /start it as a distinct experiment with its own id and\s+protocol lineage/u,
+    )
+    expect(resolution).toMatch(
+      /never edit the old run's `commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or `analysisPlan`/u,
+    )
+    expect(resolution).toMatch(
+      /Mark the old run `abandoned` only after the user\s+separately and explicitly agrees/u,
+    )
+    expect(resolution).toMatch(
+      /Never tell them to refresh\s+or reopen a\s+page that is no longer public/u,
+    )
   })
 
   it('uses typed session fields and lifecycle-owned finite support only with consent', async () => {

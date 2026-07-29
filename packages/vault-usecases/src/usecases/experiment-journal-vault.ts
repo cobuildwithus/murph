@@ -570,7 +570,10 @@ async function assertHealthCommonsProtocolStartAllowed(input: {
     )
   }
 
-  const protocol = await resolveCurrentHealthCommonsProtocol(input.commonsProtocolRef)
+  const protocol = await resolveCurrentHealthCommonsProtocol(
+    input.commonsProtocolRef,
+    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to start. Choose a currently runnable protocol instead.`,
+  )
   if (input.status === 'active') {
     assertHealthCommonsProtocolSafetyAllowsActivation({
       protocol,
@@ -587,7 +590,10 @@ async function assertHealthCommonsProtocolActivationAllowed(input: {
     return
   }
 
-  const protocol = await resolveCurrentHealthCommonsProtocol(input.commonsProtocolRef)
+  const protocol = await resolveCurrentHealthCommonsProtocol(
+    input.commonsProtocolRef,
+    `Health Commons protocol ${input.commonsProtocolRef.key} is no longer available to activate. This experiment remains unchanged. Start any currently runnable alternative as a new experiment; never replace this run's protocol lineage. Mark this run abandoned only after the member separately agrees.`,
+  )
   assertHealthCommonsProtocolSafetyAllowsActivation({
     protocol,
     onboarding: input.onboarding,
@@ -596,19 +602,12 @@ async function assertHealthCommonsProtocolActivationAllowed(input: {
 
 async function resolveCurrentHealthCommonsProtocol(
   reference: CommonsProtocolRefValue,
+  unavailableMessage: string,
 ): Promise<HealthCommonsProtocolActivationRecord> {
-  const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
-    '@murphai/health-commons/runtime',
-  )
-  const protocol = runtime
-    .getGeneratedHealthCommonsProtocolRunSpecReader()
-    .findByLookup(reference.key)
+  const protocol = await findCurrentHealthCommonsProtocol(reference)
 
   if (!protocol) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `Health Commons protocol ${reference.key} is not currently runnable. Refresh or reopen the protocol before starting this experiment.`,
-    )
+    throw new VaultCliError('invalid_payload', unavailableMessage)
   }
 
   if (
@@ -628,6 +627,17 @@ async function resolveCurrentHealthCommonsProtocol(
   }
 
   return protocol
+}
+
+async function findCurrentHealthCommonsProtocol(
+  reference: CommonsProtocolRefValue,
+): Promise<HealthCommonsProtocolActivationRecord | null> {
+  const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
+    '@murphai/health-commons/runtime',
+  )
+  return runtime
+    .getGeneratedHealthCommonsProtocolRunSpecReader()
+    .findByLookup(reference.key)
 }
 
 function assertHealthCommonsProtocolSafetyAllowsActivation(input: {
@@ -1266,6 +1276,37 @@ export async function updateExperimentRecord(input: {
         nextProtocolRef,
         frontmatter.protocolRef,
       )
+      const nextRunPlan = input.runPlan === undefined
+        ? frontmatter.runPlan
+        : input.runPlan ?? undefined
+      const changesRunPlan = !isDeepStrictEqual(
+        nextRunPlan,
+        frontmatter.runPlan,
+      )
+      const nextAnalysisPlan = input.analysisPlan === undefined
+        ? frontmatter.analysisPlan
+        : input.analysisPlan ?? undefined
+      const changesAnalysisPlan = !isDeepStrictEqual(
+        nextAnalysisPlan,
+        frontmatter.analysisPlan,
+      )
+      if (
+        (frontmatter.status === 'planned' || frontmatter.status === 'paused') &&
+        (
+          changesCommonsProtocolRef ||
+          changesProtocolRef ||
+          changesEffectiveProtocolSnapshot ||
+          changesRunPlan ||
+          changesAnalysisPlan
+        ) &&
+        frontmatter.commonsProtocolRef &&
+        !(await findCurrentHealthCommonsProtocol(frontmatter.commonsProtocolRef))
+      ) {
+        throw new VaultCliError(
+          'invalid_payload',
+          'This experiment is linked to a withdrawn Health Commons protocol, so its protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place. Start the alternative as a new experiment; this run remains unchanged until the member separately agrees to abandon it.',
+        )
+      }
       if (
         frontmatter.status !== 'planned' &&
         (
@@ -1280,12 +1321,6 @@ export async function updateExperimentRecord(input: {
         )
       }
       const nextStatus = input.status ?? frontmatter.status
-      const nextRunPlan = input.runPlan === undefined
-        ? frontmatter.runPlan
-        : input.runPlan ?? undefined
-      const nextAnalysisPlan = input.analysisPlan === undefined
-        ? frontmatter.analysisPlan
-        : input.analysisPlan ?? undefined
       const nextActivationOnboarding = changesCommonsProtocolRef
         ? input.onboarding ?? undefined
         : input.onboarding === undefined
