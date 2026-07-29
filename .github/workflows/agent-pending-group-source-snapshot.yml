@@ -1,0 +1,26 @@
+name: Pending Group Source Snapshot
+
+on:
+  push:
+    branches:
+      - agent/pending-group-setup
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Pack source
+        run: |
+          git archive --format=zip --output=pending-group-source.zip HEAD
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: pending-group-source
+          path: pending-group-source.zip
+          if-no-files-found: error
+          retention-days: 1
