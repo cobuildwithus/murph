@@ -10,6 +10,7 @@ import {
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
@@ -34,6 +35,7 @@ const TARGET_TOOL_DESCRIPTION_BUDGETS = [
   ["group send_progress_update", groupProgressTool, 240],
   ["family_plan", MURPH_FAMILY_PLAN_TOOL, 330],
   ["plan_usage", MURPH_PLAN_USAGE_TOOL, 380],
+  ["imessage_contact", MURPH_IMESSAGE_CONTACT_TOOL, 160],
   ["subscription", MURPH_SUBSCRIPTION_TOOL, 520],
   ["group shared read", MURPH_GROUP_SHARED_READ_TOOL, 360],
   [
@@ -69,6 +71,6 @@ describe("assistant tool description call contracts", () => {
       0,
     );
 
-    expect(total).toBeLessThanOrEqual(5_000);
+    expect(total).toBeLessThanOrEqual(5_200);
   });
 });
