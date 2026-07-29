@@ -71,6 +71,7 @@ describe("Linq participant-add owner authority", () => {
     ).resolves.toMatchObject({
       containerMemberId: CONTAINER_MEMBER_ID,
       created: false,
+      ownerCorrected: true,
     });
 
     expect(prisma.hostedThreadContainer.updateMany).toHaveBeenCalledWith({

@@ -155,7 +155,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
         prisma: input.prisma,
         threadId: evidence.chatId,
       });
-    if (ensured.created) {
+    if (ensured.created || ensured.ownerCorrected) {
       await bindArmedHostedUsageReferralToNewContainerTx({
         occurredAt,
         ownerMemberId: actor.id,

@@ -347,6 +347,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
   it("ignores non-message Linq webhooks without direct sends or wake handoff", async () => {
     const prisma = createPrismaStub();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
     mocks.getPrisma.mockReturnValue(prisma);
 
     await expect(
@@ -567,6 +570,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(persistedProviderEvent).not.toContain("+15551234567");
     expect(persistedProviderEvent).not.toContain("+15550000000");
+    expect(
+      prisma.hostedThreadRoute.updateMany,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.stageHostedLinqGroupParticipantContext,
+    ).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
     prisma.hostedLinqProviderEvent.createMany.mockResolvedValueOnce({

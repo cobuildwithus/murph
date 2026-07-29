@@ -1126,11 +1126,13 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      await applyHostedLinqParticipantChangeToRouteTx({
-        event: input.participantChange,
-        prisma: transaction,
-        route,
-      });
+      if (!ownerCandidate) {
+        await applyHostedLinqParticipantChangeToRouteTx({
+          event: input.participantChange,
+          prisma: transaction,
+          route,
+        });
+      }
       return providerResult;
     },
   );

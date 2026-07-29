@@ -4930,12 +4930,7 @@ describe("Linq group chat auto-provision", () => {
     expect(containerCreate.data.ownerMemberId).toBe("member_owner_123");
     expect(containerCreate.data.monthlyUsageLimitUsdMicros).toBe(7_500_000n);
     expect(usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx)
-      .toHaveBeenCalledExactlyOnceWith({
-        occurredAt: new Date("2026-06-24T12:00:00.000Z"),
-        ownerMemberId: "member_owner_123",
-        targetContainerMemberId: containerCreate.data.memberId,
-        tx: prisma,
-      });
+      .not.toHaveBeenCalled();
     expect(usageReferralMocks.observeHostedUsageReferralInboundTx)
       .toHaveBeenCalledExactlyOnceWith({
         containerMemberId: containerCreate.data.memberId,

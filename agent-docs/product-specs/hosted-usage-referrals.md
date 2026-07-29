@@ -75,7 +75,10 @@ Arming freezes the referrer, beneficiary, policy code and version, reward,
 seven-day window, and—only for a personal destination—the blinded source
 conversation. The referrer's next newly created thread container binds only
 when its durable owner is that exact referrer and creation happened after
-arming. Existing rooms cannot bind.
+arming. Existing rooms cannot bind. For Linq, a compatibility first-message
+fallback may provision a provisional route but cannot bind a referral. The
+signed managed-line `participant.added` actor binds only the final owner's
+eligible mission when it creates that route or corrects the provisional owner.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,

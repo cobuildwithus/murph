@@ -163,14 +163,19 @@ Last verified: 2026-07-28
   route-to-chat lock order but grants no authority; the unique provider-ledger
   insertion then fences actor resolution and managed-line revalidation before
   the route mutation in the same transaction. This avoids a participant-chat
-  versus new-route lock cycle. The authoritative ensure may correct only the
-  same account-scoped route's existing `ownerMemberId`, so reversed
+  versus new-route lock cycle. The managed self-add does not set the generic
+  participant-addition prompt hint. The authoritative ensure may correct only
+  the same account-scoped route's existing `ownerMemberId`, so reversed
   participant/message delivery converges without a second owner field. Set
   `HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED=1` only after Linq is delivering
   that field: eligible unbound first messages then fail retryably until the
   participant event establishes the route instead of assigning the speaker.
   Keep the gate off during the compatibility deploy; actor-bearing events still
   establish or correct ownership while the old fallback remains available.
+  That provisional first-message path does not bind usage referrals. The
+  participant-add path binds only the final owner's eligible mission after a
+  create or correction, preserving referral-owner consistency under either
+  webhook delivery order.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at

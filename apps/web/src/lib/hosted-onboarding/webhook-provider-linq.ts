@@ -159,7 +159,6 @@ import {
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
 import {
-  bindArmedHostedUsageReferralToNewContainerTx,
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
 import type { HostedOnboardingReadClient } from "./shared";
@@ -2548,14 +2547,10 @@ async function planHostedLinqGroupChatWebhook(input: {
     createdContainerMemberId = ensureResult.created
       ? ensureResult.containerMemberId
       : null;
-    if (ensureResult.created) {
-      await bindArmedHostedUsageReferralToNewContainerTx({
-        occurredAt: new Date(occurredAt),
-        ownerMemberId: sender.id,
-        targetContainerMemberId: ensureResult.containerMemberId,
-        tx: input.prisma,
-      });
-    }
+    // This compatibility path can create a provisional first-speaker owner,
+    // but it cannot attribute a referral. The signed participant-add actor
+    // binds the final owner's eligible mission after creating or correcting
+    // the route, so reversed webhook delivery cannot reward the wrong member.
     demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (

@@ -62,6 +62,7 @@ export interface HostedThreadContainerRouteEnsureResult {
   containerMemberId: string;
   created: boolean;
   demotedMailboxConsumedAt: Date | null;
+  ownerCorrected: boolean;
 }
 
 export interface HostedThreadContainerRouteEnsureInput {
@@ -494,6 +495,7 @@ async function ensureHostedThreadContainerRouteInternalTx(
       containerMemberId: existing.containerMemberId,
       created: false,
       demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
+      ownerCorrected: ownerChanged,
     };
   }
 
@@ -574,6 +576,7 @@ async function ensureHostedThreadContainerRouteInternalTx(
     containerMemberId,
     created: true,
     demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
+    ownerCorrected: false,
   };
 }
 

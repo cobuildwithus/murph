@@ -71,6 +71,7 @@ beforeEach(() => {
       containerMemberId: CONTAINER_MEMBER_ID,
       created: true,
       demotedMailboxConsumedAt: null,
+      ownerCorrected: false,
     });
   mocks.hasActiveHostedLinqManagedLine.mockResolvedValue(true);
   mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
@@ -112,6 +113,54 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
       targetContainerMemberId: CONTAINER_MEMBER_ID,
       tx: prisma,
     });
+  });
+
+  it("binds the adder's referral after correcting a provisional owner", async () => {
+    mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx
+      .mockResolvedValueOnce({
+        activationEventId: null,
+        activationMailboxItemId: null,
+        containerMemberId: CONTAINER_MEMBER_ID,
+        created: false,
+        demotedMailboxConsumedAt: null,
+        ownerCorrected: true,
+      });
+
+    const prisma = {} as never;
+    await provisionHostedLinqParticipantAddedOwnerTx({
+      event: buildParticipantAddedEvent(),
+      prisma,
+    });
+
+    expect(
+      mocks.bindArmedHostedUsageReferralToNewContainerTx,
+    ).toHaveBeenCalledWith({
+      occurredAt: OCCURRED_AT,
+      ownerMemberId: OWNER_MEMBER_ID,
+      targetContainerMemberId: CONTAINER_MEMBER_ID,
+      tx: prisma,
+    });
+  });
+
+  it("does not bind an old room again when ownership was already correct", async () => {
+    mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx
+      .mockResolvedValueOnce({
+        activationEventId: null,
+        activationMailboxItemId: null,
+        containerMemberId: CONTAINER_MEMBER_ID,
+        created: false,
+        demotedMailboxConsumedAt: null,
+        ownerCorrected: false,
+      });
+
+    await provisionHostedLinqParticipantAddedOwnerTx({
+      event: buildParticipantAddedEvent(),
+      prisma: {} as never,
+    });
+
+    expect(
+      mocks.bindArmedHostedUsageReferralToNewContainerTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("accepts a managed line even when the provider omits participant is_me", async () => {

@@ -1339,9 +1339,16 @@ order while establishing the canonical route for the active Murph member named
 by `added_by_handle`, or correcting that same route when the legacy
 first-speaker fallback committed first. The preflight that selects this lock
 order grants no authority; the transaction revalidates the active managed line.
-The route retains one `ownerMemberId`; no actor evidence is persisted. For a
-routed group, Web then locks the current group owner before mutating the route
-or reading optional context. A unique event may append one bounded
+That managed self-add is consumed as routing authority and is not also staged
+as a human participant-addition hint for the assistant.
+The route retains one `ownerMemberId`; no actor evidence is persisted. The
+legacy first-message fallback may create the container while the rollout gate
+is off, but it does not bind a usage referral. Only the authoritative
+participant-add path binds the final owner's eligible referral after creating
+the container or correcting that provisional owner, so webhook delivery order
+cannot split route and referral ownership. For a routed group, Web then locks
+the current group owner before mutating the route or reading optional context.
+A unique event may append one bounded
 participant-attributed item to the route's existing encrypted transient
 group-event buffer in that same transaction. The item says which canonical
 handle was added or removed and may include the human group owner's unverified

@@ -33,9 +33,12 @@ the first eligible member who later sends a message.
 3. Reuse the canonical route ensure. Its participant-add-only entrypoint may
    correct the same account-scoped route's existing `ownerMemberId` when the
    legacy first-speaker fallback committed first.
-4. Keep actor and line handles request-local. Persist no new ownership,
+4. Bind a Linq group referral only from that authoritative participant-add
+   path, after route creation or provisional-owner correction. The legacy
+   first-message fallback does not attribute a referral.
+5. Keep actor and line handles request-local. Persist no new ownership,
    provenance, queue, or pending-event state.
-5. Ship compatibly with
+6. Ship compatibly with
    `HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED=0`. Once Linq confirms the
    actor-bearing webhook is live, set it to `1`; eligible unbound messages then
    fail retryably until the participant event establishes the route.
@@ -48,7 +51,8 @@ the first eligible member who later sends a message.
 - unmanaged lines, unresolved/inactive actors, and cross-account routes fail
   closed;
 - participant-first and message-first delivery converge on the attributed
-  actor, while ordinary route ensures cannot replace an owner;
+  actor and that actor's eligible referral, while ordinary route ensures cannot
+  replace an owner or attribute a provisional speaker's referral;
 - required-mode first messages create no route, mailbox work, or wake before
   actor evidence arrives;
 - existing routed-group participant context and ordinary actor-less fallback
