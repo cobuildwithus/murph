@@ -28,17 +28,19 @@
 - Other awaited latency: <!-- Added or moved-on-path work, or None -->
 - Before/after proof: <!-- Call-count test, trace, benchmark, or other focused evidence -->
 
-## Murph runtime system prompt impact
+## Murph initial provider input impact
 
-<!-- Report the final assembled system-prompt change for individual and group Murph separately. For a prompt-affecting PR, render the base and head with identical representative inputs that exercise the changed path; shared prompt changes count in both runtimes. Report character counts, the signed character delta, and the signed percentage change (`delta / base * 100`). If no system-prompt surface changed, record a zero delta and explain why measurement was unnecessary. -->
+<!-- Report the complete first provider-visible input assembled by Murph and Codex for representative individual and group turns. Include final instructions/messages, eager tool definitions and schemas, deferred-tool metadata, and Codex-generated tool or code-mode guidance. Do not report only authored system-prompt text. Use identical base/head fixtures and the target model tokenizer; serialize the same provider-visible fields for byte counts. If no provider-input surface changed, write "Not applicable" and name the reason instead of claiming a measured zero. -->
 
-| Runtime | Base characters | Head characters | Delta | Percent |
-| --- | ---: | ---: | ---: | ---: |
-| Individual Murph | <!-- count, or Not measured --> | <!-- count, or Not measured --> | <!-- signed count, or 0 --> | <!-- signed percent, or 0% --> |
-| Group Murph | <!-- count, or Not measured --> | <!-- count, or Not measured --> | <!-- signed count, or 0 --> | <!-- signed percent, or 0% --> |
+| Runtime | Base input tokens | Head input tokens | Delta | Percent | Base bytes | Head bytes | Byte delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Individual Murph | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> | <!-- signed percent, or Not applicable --> | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> |
+| Group Murph | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> | <!-- signed percent, or Not applicable --> | <!-- count, or Not applicable --> | <!-- count, or Not applicable --> | <!-- signed count, or Not applicable --> |
 
-- Prompt surfaces changed: <!-- Files/builders/layers changed, or None — reason -->
-- Measurement method: <!-- Base/head refs plus the identical fixture, command, or deterministic method; or Not run — no prompt-affecting surface -->
+- Assembled instructions: <!-- Base/head characters or tokens for individual and group, plus changed files/builders/layers; or Unchanged -->
+- Tool/schema/generated guidance: <!-- Base/head tokens or bytes for individual and group, naming eager/deferred changes; or Unchanged -->
+- Other provider-visible input: <!-- Base/head tokens or bytes for any changed wrapper/history/fixture content; or Unchanged -->
+- Measurement method: <!-- Base/head refs, model and tokenizer/version, identical fixtures, command or capture method, included fields, and any exclusions; or Not run — no provider-input surface changed -->
 
 ## Design proof
 
