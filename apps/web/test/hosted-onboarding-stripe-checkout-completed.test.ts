@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedMemberPulseTrialBillingDecisionSnapshot: vi.fn(),
   readHostedMemberStripeBillingLookupState: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   cancelStripeSubscription: vi.fn(),
@@ -69,6 +70,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+    readHostedMemberPulseTrialBillingDecisionSnapshot:
+      mocks.readHostedMemberPulseTrialBillingDecisionSnapshot,
     upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx:
       mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
     upsertHostedMemberStripeCheckoutEmailIfFreshTx:
@@ -214,6 +217,9 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.readHostedMemberCoreState.mockResolvedValue(
       makeMemberSnapshot().core,
+    );
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot.mockResolvedValue(
+      makePulseTrialDecisionSnapshot(),
     );
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue({
@@ -1070,40 +1076,60 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
-  it("does not activate Pulse Trial checkout after a trial has already been redeemed", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        memberId: "member_123",
-        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_123",
-      },
-    }));
+  it("revalidates a core-only Pulse lookup against the redeemed billing identity under lock", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(
+      makeMemberSnapshot({
+        billingRef: null,
+        billingStatus: HostedBillingStatus.incomplete,
+      }),
+    );
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          pulseTrialRedeemedAt:
+            new Date("2025-04-12T00:00:00.000Z"),
+          stripeSubscriptionId: "sub_auto_trial",
+        }),
+      );
 
     await expect(
       applyStripeCheckoutCompleted(
-        makePulseTrialCheckoutSession() as never,
+        {
+          ...makePulseTrialCheckoutSession(),
+          subscription: "sub_delayed_checkout",
+        } as never,
         {} as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
-      welcomeEmailMemberId: "member_123",
+      welcomeEmailMemberId: null,
     });
 
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith({}, "member_123");
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0])
+      .toBeLessThan(
+        mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+          .mock.invocationCallOrder[0] ?? 0,
+      );
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("returns a valid delayed Pulse Trial checkout subscription for loser cleanup", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        memberId: "member_123",
-        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_auto_trial",
-      },
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          pulseTrialRedeemedAt:
+            new Date("2025-04-12T00:00:00.000Z"),
+          stripeSubscriptionId: "sub_auto_trial",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -1131,15 +1157,13 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("returns an exact Pulse Trial checkout for cleanup when active non-trial access has no subscription", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: null,
-      },
-      billingStatus: HostedBillingStatus.active,
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.active,
+          stripeSubscriptionId: null,
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -1161,16 +1185,13 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("allows an incomplete member to replace a stale incomplete subscription with a new Pulse Trial", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        pulseTrialRedeemedAt: null,
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_incomplete_old",
-      },
-      billingStatus: HostedBillingStatus.incomplete,
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          stripeSubscriptionId: "sub_incomplete_old",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_trial_replacement",
@@ -1189,11 +1210,49 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(outcome).not.toHaveProperty("cleanupPulseTrialStripeSubscriptionId");
     expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        allowBillingIdentityReplacement: true,
         preparedCompletion: expect.objectContaining({
           stripeSubscriptionId: "sub_trial_replacement",
         }),
       }),
     );
+  });
+
+  it("aborts after acceptance when the billing policy changes unexpectedly", async () => {
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          stripeSubscriptionId: "sub_incomplete",
+        }),
+      );
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          metadata: {
+            ...makePulseTrialMetadata(),
+            checkoutAttemptId: "attempt_123",
+            checkoutIntentHash: "intent_123",
+          },
+          subscription: "sub_trial_replacement",
+        } as never,
+        {} as never,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_POLICY_CHANGED",
+      retryable: true,
+    });
+
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).toHaveBeenCalledOnce();
+    expect(
+      mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("ignores and returns a subscription-created Pulse Trial loser for cleanup", async () => {
@@ -1445,18 +1504,14 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("does not let a stale trial checkout overwrite an already paid billing phase", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: "paid",
-        currentBillingPlanCode: "launch_monthly",
-        currentCheckoutOffer: "standard",
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_paid_123",
-      },
-      billingStatus: HostedBillingStatus.active,
-    }));
-    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.active,
+          currentBillingPhase: "paid",
+          stripeSubscriptionId: "sub_paid_123",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -1556,5 +1611,28 @@ function makeMemberSnapshot(overrides?: {
       suspendedAt: null,
       updatedAt: new Date("2025-04-12T00:00:00.000Z"),
     },
+  };
+}
+
+function makePulseTrialDecisionSnapshot(input?: {
+  billingStatus?: HostedBillingStatus;
+  currentBillingPhase?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
+  stripeSubscriptionId?: string | null;
+}) {
+  const stripeSubscriptionId =
+    input && "stripeSubscriptionId" in input
+      ? input.stripeSubscriptionId
+      : "sub_123";
+  return {
+    core: makeMemberSnapshot({
+      ...(input?.billingStatus
+        ? { billingStatus: input.billingStatus }
+        : {}),
+    }).core,
+    currentBillingPhase: input?.currentBillingPhase ?? null,
+    pulseTrialRedeemedAt: input?.pulseTrialRedeemedAt ?? null,
+    stripeSubscriptionLookupKey:
+      createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
   };
 }

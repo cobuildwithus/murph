@@ -11,6 +11,9 @@ import {
   type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import {
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 } from "./billing-plan-switch-to-pulse-service";
@@ -1107,15 +1110,32 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
   };
 }
 
-async function processHostedStripeEventWithVerifiedMemberLock(input: {
+type HostedStripeEventWithVerifiedMemberLockInput = {
   memberId: string;
   preflightProcessingContext?: HostedStripeEventProcessingContext;
   prisma: PrismaClient;
   stripeEvent: Stripe.Event;
-}): Promise<{
+};
+
+type HostedStripeEventWithVerifiedMemberLockResult = {
   memberId: string;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
-}> {
+};
+
+async function processHostedStripeEventWithVerifiedMemberLock(
+  input: HostedStripeEventWithVerifiedMemberLockInput,
+): Promise<HostedStripeEventWithVerifiedMemberLockResult> {
+  if (input.stripeEvent.type !== "checkout.session.completed") {
+    return processHostedStripeEventWithVerifiedMemberLockCore(input);
+  }
+  return runWithHostedDomainRootUnwrapCache(
+    () => processHostedStripeEventWithVerifiedMemberLockCore(input),
+  );
+}
+
+async function processHostedStripeEventWithVerifiedMemberLockCore(
+  input: HostedStripeEventWithVerifiedMemberLockInput,
+): Promise<HostedStripeEventWithVerifiedMemberLockResult> {
   const preflightProcessingContext =
     input.preflightProcessingContext
     ?? await prepareHostedStripeEventProcessingContext(input.stripeEvent);

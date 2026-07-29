@@ -2,6 +2,7 @@ import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "../prisma";
 import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
@@ -109,18 +110,32 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
 }
 
-async function applyHostedCheckoutSessionSuccess(input: {
+type HostedCheckoutSessionSuccessInput = {
   memberId: string;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
-}): Promise<{
+};
+
+type HostedCheckoutSessionSuccessOutcome = {
   activatedMemberId: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupStandardCheckoutStripeSubscriptionId?: string | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
-}> {
+};
+
+async function applyHostedCheckoutSessionSuccess(
+  input: HostedCheckoutSessionSuccessInput,
+): Promise<HostedCheckoutSessionSuccessOutcome> {
+  return runWithHostedDomainRootUnwrapCache(
+    () => applyHostedCheckoutSessionSuccessWithinUnwrapCache(input),
+  );
+}
+
+async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
+  input: HostedCheckoutSessionSuccessInput,
+): Promise<HostedCheckoutSessionSuccessOutcome> {
   const preparedCryptoDomainRoots =
     input.session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
       ? await prepareHostedCryptoDomainRootCandidates({
@@ -134,14 +149,7 @@ async function applyHostedCheckoutSessionSuccess(input: {
       prisma: input.prisma,
       session: input.session,
     });
-  let activationOutcome: {
-    activatedMemberId: string | null;
-    cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
-    hostedExecutionEventId: string | null;
-    welcomeEmailMemberId: string | null;
-  } = {
+  let activationOutcome: HostedCheckoutSessionSuccessOutcome = {
     activatedMemberId: null,
     hostedExecutionEventId: null,
     welcomeEmailMemberId: null,

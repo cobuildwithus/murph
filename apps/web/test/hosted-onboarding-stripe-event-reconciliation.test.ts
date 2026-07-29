@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import {
   HostedStripeCheckoutLoserCleanupPendingError,
 } from "@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup";
 
@@ -1854,9 +1857,19 @@ describe("hosted Stripe event reconciliation", () => {
       [checkoutEvent.id, checkoutEvent],
       [subscriptionEvent.id, subscriptionEvent],
     ]);
+    let cacheWasActiveDuringPreparation = false;
+    let cacheWasActiveDuringLockedProcessing = false;
     let providerStatus: Stripe.Subscription.Status = "trialing";
     mocks.applyStripeCheckoutCompleted.mockImplementation(
-      actualBillingEvents.applyStripeCheckoutCompleted,
+      (
+        ...args: Parameters<
+          typeof actualBillingEvents.applyStripeCheckoutCompleted
+        >
+      ) => {
+        cacheWasActiveDuringLockedProcessing =
+          getHostedDomainRootUnwrapCache() !== undefined;
+        return actualBillingEvents.applyStripeCheckoutCompleted(...args);
+      },
     );
     mocks.applyStripeSubscriptionUpdated.mockImplementation(
       actualBillingEvents.applyStripeSubscriptionUpdated,
@@ -1865,21 +1878,25 @@ describe("hosted Stripe event reconciliation", () => {
       actualBillingEvents.cancelHostedPulseTrialCheckoutLoserSubscription,
     );
     mocks.prepareHostedStripeCheckoutCompletion.mockImplementation(
-      async () => ({
-        billingCompletion: {
+      async () => {
+        cacheWasActiveDuringPreparation =
+          getHostedDomainRootUnwrapCache() !== undefined;
+        return {
+          billingCompletion: {
+            memberId: "member_123",
+            stripeCustomerId: "cus_checkout",
+            stripeCustomerIdEncrypted: "encrypted-customer",
+            stripeCustomerLookupKey: "customer-lookup",
+            stripeSubscriptionId: "sub_checkout_123",
+            stripeSubscriptionIdEncrypted: "encrypted-subscription",
+            stripeSubscriptionLookupKey: "subscription-lookup",
+          },
+          canonicalSubscription:
+            await mocks.stripe.subscriptions.retrieve("sub_checkout_123"),
           memberId: "member_123",
-          stripeCustomerId: "cus_checkout",
-          stripeCustomerIdEncrypted: "encrypted-customer",
-          stripeCustomerLookupKey: "customer-lookup",
-          stripeSubscriptionId: "sub_checkout_123",
-          stripeSubscriptionIdEncrypted: "encrypted-subscription",
-          stripeSubscriptionLookupKey: "subscription-lookup",
-        },
-        canonicalSubscription:
-          await mocks.stripe.subscriptions.retrieve("sub_checkout_123"),
-        memberId: "member_123",
-        stripeCheckoutEmail: null,
-      }),
+          stripeCheckoutEmail: null,
+        };
+      },
     );
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(member);
     mocks.findMemberForStripeSubscription.mockResolvedValue(member);
@@ -1916,6 +1933,8 @@ describe("hosted Stripe event reconciliation", () => {
     expect(member.core.billingStatus).toBe(HostedBillingStatus.active);
     expect(member.billingRef?.stripeSubscriptionId).toBeNull();
     expect(member.billingRef?.pulseTrialRedeemedAt).toBeNull();
+    expect(cacheWasActiveDuringPreparation).toBe(true);
+    expect(cacheWasActiveDuringLockedProcessing).toBe(true);
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledOnce();
     expect(prisma.rows).toEqual([

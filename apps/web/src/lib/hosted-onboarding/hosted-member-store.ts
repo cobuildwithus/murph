@@ -396,6 +396,52 @@ export async function readHostedMemberBillingSnapshot(input: {
   );
 }
 
+export interface HostedMemberPulseTrialBillingDecisionSnapshot {
+  core: HostedMemberCoreState;
+  currentBillingPhase: string | null;
+  pulseTrialRedeemedAt: Date | null;
+  stripeSubscriptionLookupKey: string | null;
+}
+
+/**
+ * Reads only the durable fields needed to classify a Pulse completion. Stripe
+ * identity comparison uses the deterministic lookup key, so this locked read
+ * never needs a KMS unwrap.
+ */
+export async function readHostedMemberPulseTrialBillingDecisionSnapshot(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPulseTrialBillingDecisionSnapshot | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      ...hostedMemberCoreStateSelect,
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          pulseTrialRedeemedAt: true,
+          stripeSubscriptionLookupKey: true,
+        },
+      },
+    },
+  });
+  if (!memberRecord) {
+    return null;
+  }
+
+  return {
+    core: projectHostedMemberCoreState(memberRecord),
+    currentBillingPhase:
+      memberRecord.billingRef?.currentBillingPhase ?? null,
+    pulseTrialRedeemedAt:
+      memberRecord.billingRef?.pulseTrialRedeemedAt ?? null,
+    stripeSubscriptionLookupKey:
+      memberRecord.billingRef?.stripeSubscriptionLookupKey ?? null,
+  };
+}
+
 export async function readHostedMemberEmailAuthorization(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;

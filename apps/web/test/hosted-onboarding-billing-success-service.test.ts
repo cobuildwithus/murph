@@ -8,6 +8,9 @@ import {
   HOSTED_PULSE_TRIAL_OFFER,
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 
 const mocks = vi.hoisted(() => {
   const stripe = {
@@ -315,14 +318,19 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   });
 
   it("prepares direct Checkout bindings before opening the member transaction", async () => {
+    let cacheWasActiveDuringPreparation = false;
+    let cacheWasActiveDuringTransaction = false;
     const tx = {
       __tag: "tx",
       $queryRaw: vi.fn(async () => []),
     };
     const prisma = {
       $transaction: vi.fn(
-        async (callback: (innerTx: typeof tx) => Promise<unknown>) =>
-          callback(tx),
+        async (callback: (innerTx: typeof tx) => Promise<unknown>) => {
+          cacheWasActiveDuringTransaction =
+            getHostedDomainRootUnwrapCache() !== undefined;
+          return callback(tx);
+        },
       ),
     };
     const preparedCheckoutCompletion = {
@@ -339,8 +347,12 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       stripeCheckoutEmail: null,
     };
-    mocks.prepareHostedStripeCheckoutCompletion.mockResolvedValueOnce(
-      preparedCheckoutCompletion,
+    mocks.prepareHostedStripeCheckoutCompletion.mockImplementationOnce(
+      async () => {
+        cacheWasActiveDuringPreparation =
+          getHostedDomainRootUnwrapCache() !== undefined;
+        return preparedCheckoutCompletion;
+      },
     );
 
     await reconcileHostedBillingCheckoutSuccess({
@@ -354,6 +366,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       mocks.prepareHostedStripeCheckoutCompletion
         .mock.invocationCallOrder[0],
     ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(cacheWasActiveDuringPreparation).toBe(true);
+    expect(cacheWasActiveDuringTransaction).toBe(true);
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       expect.objectContaining({ id: "cs_123" }),
       tx,

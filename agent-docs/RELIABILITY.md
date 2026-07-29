@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Guardrails
 
@@ -129,9 +129,18 @@ Last verified: 2026-07-28
   together. Direct Checkout completion prepares its live provider snapshot,
   encrypted billing identifiers, and email before taking the member lock; the
   transaction only revalidates durable ownership, accepts the existing attempt,
-  and writes the prepared values. Stripe event reconciliation likewise
-  prepares its canonical provider snapshot before the lock and revalidates the
-  database owner inside it. After Stripe creates a session, Checkout creation
+  and writes the prepared values. Pulse Session metadata resolves only the
+  member ID: after taking that lock, completion rereads the authoritative
+  redemption, phase, status, and subscription lookup key before deciding
+  whether an identity is replaceable. That decision read selects no encrypted
+  fields and therefore cannot call KMS. A loser preserves the current identity
+  and is canceled after commit; an unexpected policy rejection after acceptance
+  aborts the transaction. Browser and webhook completion retain the preflight
+  domain-root cache through the short transaction, so prepared identifiers can
+  be read without another KMS unwrap while the lock is held. Stripe event
+  reconciliation likewise prepares its canonical provider snapshot before the
+  lock and revalidates the database owner inside it. After Stripe creates a
+  session, Checkout creation
   re-locks the owner and returns the URL only after binding that reference; if
   suspension or deletion won, it expires the session instead. Account deletion
   suspends first, re-reads all direct attempts and Family billing owners,

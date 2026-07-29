@@ -49,6 +49,7 @@ import {
   type HostedMemberBillingSnapshot,
   readHostedMemberBillingSnapshot,
   readHostedMemberCoreState,
+  readHostedMemberPulseTrialBillingDecisionSnapshot,
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
 } from "./hosted-member-store";
@@ -81,6 +82,7 @@ import {
 } from "./runtime";
 import {
   classifyHostedPulseTrialCandidateDisposition,
+  classifyHostedPulseTrialCandidateDispositionByLookupKey,
   cancelHostedPulseTrialLoserSubscriptionsForMember,
   isHostedPulseTrialSubscriptionForKnownPolicy,
 } from "./pulse-trial-subscription-cleanup";
@@ -352,7 +354,7 @@ export async function applyStripeCheckoutCompleted(
     }
     const outcome = await applyPulseTrialCheckoutCompletedTx({
       dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
-      member: memberSnapshot,
+      memberId: memberSnapshot.core.id,
       preparedCheckoutCompletion,
       ...(preparedCryptoDomainRoots
         ? { preparedCryptoDomainRoots }
@@ -537,13 +539,13 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
 
 export async function applyPulseTrialCheckoutCompletedTx(input: {
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberBillingSnapshot;
+  memberId: string;
   preparedCheckoutCompletion: PreparedHostedStripeCheckoutCompletion;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<HostedStripeActivationOutcome> {
-  if (!isPulseTrialCheckoutSessionEntitlementCandidate(input.session, input.member.core.id)) {
+  if (!isPulseTrialCheckoutSessionEntitlementCandidate(input.session, input.memberId)) {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
@@ -555,7 +557,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     prisma: input.tx,
     session: input.session,
   });
-  if (candidateMemberIds.length !== 1 || candidateMemberIds[0] !== input.member.core.id) {
+  if (candidateMemberIds.length !== 1 || candidateMemberIds[0] !== input.memberId) {
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
@@ -563,25 +565,12 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     };
   }
 
-  const billingRefSubscriptionId = input.member.billingRef?.stripeSubscriptionId ?? null;
-  const isCurrentPulseTrialSubscription = isHostedStripeSamePulseTrialCheckoutSubscription({
-    billingRefSubscriptionId,
-    session: input.session,
-  });
-  if (input.member.billingRef?.pulseTrialRedeemedAt && isCurrentPulseTrialSubscription) {
-    return {
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: input.member.core.id,
-    };
-  }
-
   if (
-    input.preparedCheckoutCompletion.memberId !== input.member.core.id
+    input.preparedCheckoutCompletion.memberId !== input.memberId
     || (
       input.preparedCheckoutCompletion.billingCompletion
       && input.preparedCheckoutCompletion.billingCompletion.memberId !==
-        input.member.core.id
+        input.memberId
     )
   ) {
     throw new TypeError(
@@ -608,7 +597,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   if (
     !pulseTrialPriceId ||
     !isHostedPulseTrialSubscriptionForKnownPolicy({
-      memberId: input.member.core.id,
+      memberId: input.memberId,
       priceId: pulseTrialPriceId,
       subscription,
     })
@@ -619,24 +608,6 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
       welcomeEmailMemberId: null,
     };
   }
-  if (
-    classifyHostedPulseTrialCandidateDisposition({
-      billingStatus: input.member.core.billingStatus,
-      currentBillingPhase: input.member.billingRef?.currentBillingPhase ?? null,
-      currentStripeSubscriptionId:
-        input.member.billingRef?.stripeSubscriptionId ?? null,
-      pulseTrialRedeemedAt: input.member.billingRef?.pulseTrialRedeemedAt ?? null,
-      subscriptionId: subscription.id,
-    }) === "loser"
-  ) {
-    return {
-      activatedMemberId: null,
-      cleanupPulseTrialStripeSubscriptionId: subscription.id,
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: null,
-    };
-  }
-
   const currentPeriodStart = readHostedStripeSubscriptionDate(subscription, "current_period_start");
   const currentPeriodEnd = readHostedStripeSubscriptionDate(subscription, "current_period_end");
   const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
@@ -674,6 +645,49 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
       retryable: true,
     });
   }
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const currentMember =
+    await readHostedMemberPulseTrialBillingDecisionSnapshot({
+      memberId: input.memberId,
+      prisma: input.tx,
+    });
+  if (!currentMember) {
+    return {
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: subscription.id,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    };
+  }
+
+  const candidateDisposition =
+    classifyHostedPulseTrialCandidateDispositionByLookupKey({
+      billingStatus: currentMember.core.billingStatus,
+      currentBillingPhase: currentMember.currentBillingPhase,
+      currentStripeSubscriptionLookupKey:
+        currentMember.stripeSubscriptionLookupKey,
+      pulseTrialRedeemedAt: currentMember.pulseTrialRedeemedAt,
+      subscriptionId: subscription.id,
+    });
+  if (
+    currentMember.pulseTrialRedeemedAt
+    && candidateDisposition === "current"
+  ) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: currentMember.core.id,
+    };
+  }
+  if (candidateDisposition === "loser") {
+    return {
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: subscription.id,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    };
+  }
+
   const checkoutAcceptance =
     await acceptHostedMemberStripeCheckoutCompletionTx({
       allowBillingIdentityReplacement: true,
@@ -686,7 +700,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
       checkoutSessionId: input.session.id,
       currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
       eventCreatedAt: input.dispatchContext.eventCreatedAt,
-      memberId: input.member.core.id,
+      memberId: input.memberId,
       preparedCompletion,
       tx: input.tx,
     });
@@ -699,7 +713,8 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     };
   }
 
-  const hadActiveBilling = input.member.core.billingStatus === HostedBillingStatus.active;
+  const hadActiveBilling =
+    currentMember.core.billingStatus === HostedBillingStatus.active;
   const updatedMember = await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.active,
     canonicalBillingStatus: HostedBillingStatus.active,
@@ -711,7 +726,10 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     currentTrialStartedAt,
     dispatchContext: input.dispatchContext,
     freshnessPolicy: "trial-checkout-entitlement",
-    member: input.member,
+    member: {
+      billingRef: null,
+      core: currentMember.core,
+    },
     pulseTrialPolicyVersion:
       parseHostedPulseTrialPolicyVersion(input.session.metadata?.trialPolicyVersion)
       ?? HOSTED_PULSE_TRIAL_POLICY_VERSION,
@@ -719,10 +737,19 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     tx: input.tx,
   });
 
-  if (!updatedMember || hadActiveBilling) {
+  if (!updatedMember) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_POLICY_CHANGED",
+      httpStatus: 409,
+      message:
+        "Murph could not confirm this Stripe Checkout against the current billing state. Try again.",
+      retryable: true,
+    });
+  }
+
+  if (hadActiveBilling) {
     if (
-      updatedMember
-      && input.preparedCheckoutCompletion.stripeCheckoutEmail
+      input.preparedCheckoutCompletion.stripeCheckoutEmail
     ) {
       await upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx({
         collectedAt: input.dispatchContext.eventCreatedAt,
@@ -810,19 +837,6 @@ function isHostedStripeActivationWelcomeCandidate(input: {
   hostedExecutionEventId: string | null;
 }): boolean {
   return input.activated || Boolean(input.hostedExecutionEventId);
-}
-
-function isHostedStripeSamePulseTrialCheckoutSubscription(input: {
-  billingRefSubscriptionId?: string | null;
-  session: Stripe.Checkout.Session;
-}): boolean {
-  const sessionSubscriptionId = coerceStripeSubscriptionId(input.session.subscription);
-
-  return Boolean(
-    input.billingRefSubscriptionId &&
-    sessionSubscriptionId &&
-    input.billingRefSubscriptionId === sessionSubscriptionId,
-  );
 }
 
 export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {

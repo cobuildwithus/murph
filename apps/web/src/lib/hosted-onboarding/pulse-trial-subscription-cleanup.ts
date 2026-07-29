@@ -10,6 +10,9 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import {
+  createHostedStripeSubscriptionLookupKeyReadCandidates,
+} from "./contact-privacy";
+import {
   HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
   HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
 } from "./legacy-usage-price";
@@ -35,7 +38,52 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
   pulseTrialRedeemedAt: Date | null;
   subscriptionId: string;
 }): HostedPulseTrialCandidateDisposition {
-  if (input.currentStripeSubscriptionId === input.subscriptionId) {
+  return classifyHostedPulseTrialCandidateDispositionForIdentity({
+    billingStatus: input.billingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentSubscriptionIdentity:
+      input.currentStripeSubscriptionId === input.subscriptionId
+        ? "candidate"
+        : input.currentStripeSubscriptionId
+          ? "different"
+          : "none",
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+  });
+}
+
+export function classifyHostedPulseTrialCandidateDispositionByLookupKey(input: {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  currentStripeSubscriptionLookupKey: string | null;
+  pulseTrialRedeemedAt: Date | null;
+  subscriptionId: string;
+}): HostedPulseTrialCandidateDisposition {
+  const candidateLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.subscriptionId,
+    );
+  return classifyHostedPulseTrialCandidateDispositionForIdentity({
+    billingStatus: input.billingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentSubscriptionIdentity:
+      input.currentStripeSubscriptionLookupKey === null
+        ? "none"
+        : candidateLookupKeys.includes(
+            input.currentStripeSubscriptionLookupKey,
+          )
+          ? "candidate"
+          : "different",
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+  });
+}
+
+function classifyHostedPulseTrialCandidateDispositionForIdentity(input: {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  currentSubscriptionIdentity: "candidate" | "different" | "none";
+  pulseTrialRedeemedAt: Date | null;
+}): HostedPulseTrialCandidateDisposition {
+  if (input.currentSubscriptionIdentity === "candidate") {
     return "current";
   }
   if (
@@ -45,7 +93,7 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
       input.billingStatus === HostedBillingStatus.active &&
       (
         input.currentBillingPhase !== "trial" ||
-        Boolean(input.currentStripeSubscriptionId)
+        input.currentSubscriptionIdentity === "different"
       )
     )
   ) {
