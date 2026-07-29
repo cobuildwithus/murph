@@ -587,6 +587,7 @@ describe("hosted execution coverage gaps", () => {
       "./legacy-dashboard-replica",
       "./orchestration-control",
       "./parsers",
+      "./pending-group-setup",
       "./phone-calls",
       "./plan-usage",
       "./return-contact",
