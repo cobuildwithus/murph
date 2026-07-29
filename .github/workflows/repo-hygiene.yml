@@ -13,38 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  repair-pr1117:
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1117 }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Apply prepared-owner admission repair
-        run: python .github/scripts/repair-pr1117.py
-
-      - name: Commit clean repair
-        run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}"
-          git checkout "origin/${{ github.event.pull_request.base.ref }}" -- .github/workflows/repo-hygiene.yml
-          git rm -f .github/workflows/agent-apply-pending-group-first-speaker-fix.yml 2>/dev/null || true
-          git rm -f .github/pending-group-workflow-trigger 2>/dev/null || true
-          git rm -f .github/scripts/repair-pr1117.py
-          git config user.name "Codex"
-          git config user.email "codex@openai.com"
-          git add apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
-            apps/web/test/hosted-onboarding-linq-thread-route.test.ts \
-            .github/workflows/repo-hygiene.yml
-          git diff --check
-          git commit -m "fix(linq): admit prepared owner before sender fallback"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
   tracked-artifacts:
     name: Tracked private/build artifacts
     runs-on: ubuntu-24.04
