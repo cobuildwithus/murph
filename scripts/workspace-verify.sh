@@ -181,6 +181,40 @@ detect_logical_cpu_count() {
   normalize_positive_integer "$cpu_count" "4"
 }
 
+detect_physical_memory_mib() {
+  local memory_bytes=""
+  local memory_kib=""
+
+  if command -v sysctl >/dev/null 2>&1; then
+    memory_bytes="$(sysctl -n hw.memsize 2>/dev/null || true)"
+  fi
+
+  if [[ "$memory_bytes" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$((memory_bytes / 1048576))"
+    return
+  fi
+
+  if [[ -r /proc/meminfo ]]; then
+    memory_kib="$(awk '$1 == "MemTotal:" { print $2; exit }' /proc/meminfo 2>/dev/null || true)"
+  fi
+
+  if [[ "$memory_kib" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$((memory_kib / 1024))"
+    return
+  fi
+
+  printf '0\n'
+}
+
+static_ssh_composed_acceptance_available() {
+  local cpu_count
+  local memory_mib
+  cpu_count="$(detect_logical_cpu_count)"
+  memory_mib="$(detect_physical_memory_mib)"
+
+  [[ "$cpu_count" -ge 10 && "$memory_mib" -ge 24576 ]]
+}
+
 local_concurrency_default() {
   local cap="$1"
   local fallback="$2"
@@ -209,13 +243,17 @@ local_worker_budget_default() {
 resolve_composed_acceptance_parallel_default() {
   local cpu_count
 
-  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+  if [[ -n "${CI:-}" || "$verification_command" != "verify:acceptance" ]]; then
     printf '0\n'
     return
   fi
 
-  if [[ -n "${CI:-}" || "$verification_command" != "verify:acceptance" ]]; then
-    printf '0\n'
+  if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
+    if static_ssh_composed_acceptance_available; then
+      printf '1\n'
+    else
+      printf '0\n'
+    fi
     return
   fi
 
@@ -232,7 +270,11 @@ readonly composed_acceptance_parallel="$(resolve_composed_acceptance_parallel_de
 
 resolve_package_coverage_concurrency_default() {
   if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
-    printf '2\n'
+    if [[ "$composed_acceptance_parallel" == "1" ]]; then
+      printf '3\n'
+    else
+      printf '2\n'
+    fi
     return
   fi
 
@@ -318,6 +360,14 @@ resolve_package_coverage_cli_vitest_max_workers_default() {
   local worker_budget
 
   if [[
+    "${verification_profile:-default}" == "static-ssh"
+    && "$composed_acceptance_parallel" == "1"
+  ]]; then
+    printf '3\n'
+    return
+  fi
+
+  if [[
     "$composed_acceptance_parallel" != "1"
     || -n "${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS+x}"
   ]]; then
@@ -338,7 +388,11 @@ resolve_acceptance_app_vitest_max_workers_default() {
   local worker_budget
 
   if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
-    printf '2\n'
+    if [[ "$composed_acceptance_parallel" == "1" ]]; then
+      printf '1\n'
+    else
+      printf '2\n'
+    fi
     return
   fi
 
@@ -349,7 +403,7 @@ resolve_acceptance_app_vitest_max_workers_default() {
 
 resolve_local_parallel_default() {
   if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
-    printf '0\n'
+    printf '%s\n' "$composed_acceptance_parallel"
     return
   fi
 
@@ -382,7 +436,11 @@ resolve_acceptance_app_verify_delay_default() {
 
 resolve_package_coverage_cli_active_concurrency_default() {
   if [[ "${verification_profile:-default}" == "static-ssh" ]]; then
-    printf '1\n'
+    if [[ "$composed_acceptance_parallel" == "1" ]]; then
+      printf '2\n'
+    else
+      printf '1\n'
+    fi
     return
   fi
 
@@ -1734,7 +1792,7 @@ run_verify_cli_with_workspace_artifact_lock() {
 }
 
 log_acceptance_resource_plan() {
-  verify_log "resources cpus=$(detect_logical_cpu_count) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
+  verify_log "resources cpus=$(detect_logical_cpu_count) memory_mib=$(detect_physical_memory_mib) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
 }
 
 main() {
