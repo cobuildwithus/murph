@@ -971,7 +971,7 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
       stringifyHostedDeliveryIdempotencyKeyParts([
         channel,
         identityId,
-        actorId,
+        threadIsDirect === false ? null : actorId,
         threadId,
         threadIsDirect,
       ]),
@@ -985,7 +985,7 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
         explicitTarget,
         bindingDelivery?.target,
         identityId,
-        actorId,
+        threadIsDirect === false ? null : actorId,
         threadId,
       ]),
     userId: memberId,

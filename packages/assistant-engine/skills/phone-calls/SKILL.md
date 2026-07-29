@@ -55,7 +55,7 @@ attempt, an ambiguous result, or a failed delivery as proof that the room saw
 the preview.
 
 On the later group confirmation turn, compare the current message with the exact
-delivered preview. Set `confirmationMessageRef` to that confirming inbound
+delivered preview. Set `message_ref` to that confirming inbound
 message's visible `ain_...` reference. It must remain the newest accepted
 message when the runtime starts the call; an intervening correction,
 cancellation, or unrelated message invalidates the attempt. Confirmation covers
@@ -111,6 +111,14 @@ Set `allowTransferToUser: true` when live identity verification, personal
 consent, or in-the-moment judgment is likely unless the user says not to
 transfer. Set it to `false` for information-only calls, simple status checks,
 group calls, or any call where a transfer would surprise the user.
+
+For a group-chat call, that confirmation `message_ref` is also the requester
+selector. Do not infer one requester from every message in the turn, reuse
+another participant's ref, or supply a canonical member id. The host reloads
+that exact accepted input and Web revalidates the provider sender's current
+room membership and Murph activation. If exact participant authority is
+unavailable, do not place the call; the normal conversational reply may still
+continue.
 
 ## Interpret results truthfully
 

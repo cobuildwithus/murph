@@ -570,6 +570,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               // username keeps the case the room sees; only the separate
               // lookup key is lowercased for identity matching.
               from: "456",
+              senderDisplayName: "Alice",
               senderUsername: "Alice_Example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
