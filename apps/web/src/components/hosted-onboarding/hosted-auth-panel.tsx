@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -40,7 +40,7 @@ export type HostedResumableAuth = {
   method: HostedResumableAuthMethod;
 };
 
-export type HostedAuthPanelView = "auth" | "consent";
+export type HostedAuthPanelView = "auth" | "auth-active" | "consent";
 
 export function HostedAuthPanel({
   inviteCode,
@@ -97,8 +97,10 @@ export function HostedAuthPanel({
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
-    : "auth";
-  useEffect(() => {
+    : authJourneyActive
+      ? "auth-active"
+      : "auth";
+  useLayoutEffect(() => {
     onViewChange?.(view);
   }, [onViewChange, view]);
 

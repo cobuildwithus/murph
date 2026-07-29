@@ -163,9 +163,10 @@ export function AuthDialog({
   const resolvedDescription = panelView === "consent"
     ? "Review how Murph uses health data before continuing."
     : description;
+  const dismissLocked = panelView !== "auth";
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen && panelView === "consent") {
+    if (!nextOpen && dismissLocked) {
       return;
     }
 
@@ -182,7 +183,7 @@ export function AuthDialog({
           "max-w-md gap-6 p-6 md:p-7",
           panelView === "consent" ? "rounded-2xl" : null,
         )}
-        showCloseButton={panelView !== "consent"}
+        showCloseButton={!dismissLocked}
       >
         <DialogHeader
           className={cn({
