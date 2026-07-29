@@ -648,6 +648,67 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps out-of-request name-miss evidence operation-local", async () => {
+    const vaultRoot = await createTestVaultRoot();
+    const senderHandle = "+15556660007";
+    const unexpectedHandle = "+15556669998";
+    let round = 0;
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => {
+      round += 1;
+      if (round === 1) {
+        return {
+          action: "read_participant_display_names",
+          result: {
+            nameMissSenderHandles: [senderHandle, unexpectedHandle],
+            participants: [],
+            status: "ok",
+          },
+        };
+      }
+      return {
+        action: "read_participant_display_names",
+        result: {
+          participants: [{
+            displayName: "Resolved After Invalid Miss",
+            displayNameSource: "profile-name",
+            senderHandle,
+          }],
+          status: "ok",
+        },
+      };
+    });
+    const createReader = () => createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request },
+      routeConversationKey: "linq\0room-unexpected-name-miss",
+      runtimeMemberId: "member-unexpected-name-miss",
+      vaultRoot,
+    });
+    const firstOperation = createReader();
+
+    await expect(firstOperation.read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([]);
+    await expect(firstOperation.read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([]);
+    expect(request).toHaveBeenCalledTimes(1);
+    await expect(access(
+      resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot),
+    )).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([{
+      displayName: "Resolved After Invalid Miss",
+      displayNameSource: "profile-name",
+      senderHandle,
+    }]);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it("fails soft when presentation lookup is unavailable", async () => {
     const vaultRoot = await createTestVaultRoot();
     const absent = createHostedGroupParticipantDisplayNameReader({

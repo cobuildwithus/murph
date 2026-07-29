@@ -69,3 +69,19 @@ Updated: 2026-07-29
 - Expected outcomes: both name sources remain cached through 14 days minus one
   millisecond and refresh at 14 days; a true unnamed result remains cached
   through six hours minus one millisecond and refreshes at six hours.
+
+## Progress
+
+- Focused proof passed: 16 Assistant Runtime, 63 Hosted Execution, 117 Web, and
+  3 Cloudflare tests plus Assistant Engine, Assistant Runtime, Hosted Execution,
+  Web, and Cloudflare typechecks.
+- Product-experience review found and then cleared two negative-cache gaps:
+  inferred policy omissions and batch-context contact-label ambiguity now stay
+  operation-local.
+- The preliminary ReviewGPT specialist pass returned two coverage findings.
+  Its test-only patch was inspected and applied: the reader now directly proves
+  out-of-request misses cannot persist, and the real-model group-call test
+  requires the exact confirmation message reference.
+- The focused real-model group-call command is locally blocked because
+  `OPENAI_API_KEY` is absent. The test parses and typechecks; exact-head CI or a
+  configured real-model lane owns execution.
