@@ -8,9 +8,13 @@ import {
   formatTimeZoneDateTimeParts,
   isValidIanaTimeZone,
 } from '@murphai/contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import type { MurphManagedAutomationSeed } from './managed-automations.js'
-import { readAssistantOnboardingState } from './onboarding-state.js'
+import {
+  isAssistantOnboardingStateReadError,
+  readAssistantOnboardingState,
+} from './onboarding-state.js'
 
 export const MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID =
   'automation_01K6A8F2Q9T3V7W4X5Y6Z8BCDE'
@@ -192,11 +196,18 @@ export async function runOnboardingGoalCheckinAuthorityPrecondition(input: {
   let onboardingState: AssistantOnboardingState
   try {
     onboardingState = await readAssistantOnboardingState(input.vault)
-  } catch {
-    return {
-      kind: 'skip',
-      reason: 'Onboarding goal check-in authority could not be revalidated.',
+  } catch (error) {
+    if (!isAssistantOnboardingStateReadError(error)) {
+      throw error
     }
+    throw new VaultCliError(
+      'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+      'Onboarding goal check-in authority could not be revalidated.',
+      {
+        reason: error.reason,
+        retryable: true,
+      },
+    )
   }
   if (!onboardingStateSupportsGoalCheckin(onboardingState)) {
     return {

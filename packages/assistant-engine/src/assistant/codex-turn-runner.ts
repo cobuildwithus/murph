@@ -490,6 +490,8 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'group-room-model' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const restrictedOneShotTurn =
+      groupRoomModelMaintenanceTurn || readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
     const groupConversation =
       resolveAssistantConversationScope(audience) === 'group'
@@ -585,7 +587,7 @@ async function executeAssistantCodexAttempt(input: {
           productFeedbackCandidateSink:
             executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
         }),
-        providerThreadEphemeral: groupRoomModelMaintenanceTurn
+        providerThreadEphemeral: restrictedOneShotTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
@@ -598,7 +600,7 @@ async function executeAssistantCodexAttempt(input: {
             : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : null,
-        ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
+        ...(systemNotificationTurn || restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
         providerFetch: outputOnlyTurn || readOnlyAutomationTurn
@@ -613,10 +615,10 @@ async function executeAssistantCodexAttempt(input: {
           !nativeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
+        runtimeWorkspaceRoots: restrictedOneShotTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
-        resume: attemptPlan.routePlan.resume,
+        resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,
         sessionContext: attemptPlan.routePlan.sessionContext

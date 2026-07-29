@@ -4230,6 +4230,84 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('replays committed history into a fresh onboarding check-in thread while preserving the ordinary resume candidate', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-onboarding-checkin-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        routeFingerprint: 'route-before-checkin',
+        threadId: 'ordinary-provider-thread',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'I want to make weekday lunches easier.',
+        },
+        {
+          kind: 'assistant',
+          text: 'We can keep that practical and low pressure.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          scheduledInvocationAuthority: {
+            automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+            occurrenceAt: '2026-07-12T13:00:00.000Z',
+          },
+          scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+          turnTrigger: 'automation-cron',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-12',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.codexContinuation).toEqual({
+        kind: 'thread-start',
+      })
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'I want to make weekday lunches easier.',
+          role: 'user',
+        },
+        {
+          content: 'We can keep that practical and low pressure.',
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('does not resume or replay transcript messages for isolated notification maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

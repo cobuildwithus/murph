@@ -336,6 +336,50 @@ describe('onboarding goal check-in automation', () => {
     ).resolves.toEqual({ kind: 'continue' })
   })
 
+  it.each([
+    {
+      corrupt: async (statePath: string) => {
+        await writeFile(statePath, '{not valid json', 'utf8')
+      },
+      reason: 'invalid-json',
+    },
+    {
+      corrupt: async (statePath: string) => {
+        await writeFile(statePath, '{}', 'utf8')
+      },
+      reason: 'invalid-schema',
+    },
+    {
+      corrupt: async (statePath: string) => {
+        await rm(statePath, { force: true })
+        await mkdir(statePath)
+      },
+      reason: 'read-failed',
+    },
+  ])('makes $reason authority failures retryable', async ({ corrupt, reason }) => {
+    const vaultRoot = await createVaultRoot()
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T23:59:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    await corrupt(resolveAssistantOnboardingStatePath(vaultRoot))
+
+    await expect(
+      runOnboardingGoalCheckinAuthorityPrecondition({
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        occurrenceAt: '2026-06-22T13:30:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+      context: {
+        reason,
+        retryable: true,
+      },
+    })
+  })
+
   it('keeps unrelated managed automation setup alive when onboarding state is malformed', async () => {
     const vaultRoot = await createVaultRoot()
     const statePath = resolveAssistantOnboardingStatePath(vaultRoot)

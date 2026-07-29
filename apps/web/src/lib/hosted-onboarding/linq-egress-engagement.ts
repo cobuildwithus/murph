@@ -17,6 +17,9 @@ import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import {
+  normalizeHostedLinqParticipantContactKind,
+} from "./linq-participant-contact";
+import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
@@ -375,6 +378,8 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     select: {
       linqChatIdEncrypted: true,
       linqChatLookupKey: true,
+      linqParticipantContactKind: true,
+      linqParticipantContactLookupKey: true,
       linqRecipientPhoneEncrypted: true,
       linqRecipientPhoneLookupKey: true,
       memberId: true,
@@ -421,14 +426,24 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     if (homeChatId) {
       // Session identity follows the member/contact blind used by ordinary
       // direct inbound and notification routing, not the assigned Murph line.
-      const identity = await input.prisma.hostedMemberIdentity.findUnique({
-        select: { phoneLookupKey: true },
-        where: { memberId: input.memberId },
-      });
+      const canonicalParticipantKind =
+        normalizeHostedLinqParticipantContactKind(
+          routing.linqParticipantContactKind,
+        );
+      const canonicalContactLookupKey = canonicalParticipantKind
+        ? normalizeNullable(routing.linqParticipantContactLookupKey)
+        : null;
+      const legacyIdentity = canonicalContactLookupKey
+        ? null
+        : await input.prisma.hostedMemberIdentity.findUnique({
+            select: { phoneLookupKey: true },
+            where: { memberId: input.memberId },
+          });
       const conversationThreadId =
         resolveHostedLinqConversationThreadId({
+          linqContactLookupKey:
+            canonicalContactLookupKey ?? legacyIdentity?.phoneLookupKey,
           memberId: input.memberId,
-          memberPhoneLookupKey: identity?.phoneLookupKey,
           threadId: homeChatId,
         });
       return {
@@ -446,23 +461,24 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
 }
 
 function resolveHostedLinqConversationThreadId(input: {
+  linqContactLookupKey: string | null | undefined;
   memberId: string;
-  memberPhoneLookupKey: string | null | undefined;
   threadId: string;
 }): string | null {
+  const linqContactLookupKey = normalizeNullable(input.linqContactLookupKey);
   const memberId = normalizeNullable(input.memberId);
-  const memberPhoneLookupKey = normalizeNullable(input.memberPhoneLookupKey);
   const threadId = normalizeNullable(input.threadId);
-  if (!memberId || !memberPhoneLookupKey || !threadId) {
+  if (!linqContactLookupKey || !memberId || !threadId) {
     return null;
   }
 
   const messaging = resolveHostedMemberMessagingState({
-    identity: { phoneLookupKey: memberPhoneLookupKey },
+    identity: null,
     routing: { linqChatId: threadId },
   });
   const route = resolveHostedMemberAssistantNotificationRoute({
     linqChatId: threadId,
+    linqContactLookupKey,
     memberId,
     messaging,
   });

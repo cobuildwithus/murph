@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
@@ -346,6 +350,64 @@ describe("hosted Linq egress authority", () => {
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      identityPhone: undefined,
+      label: "email-only",
+    },
+    {
+      identityPhone: "+15550100001",
+      label: "dual-identity",
+    },
+  ])("uses the canonical email participant for a $label home route", async ({
+    identityPhone,
+  }) => {
+    const contactLookupKey = "hbidx:email:v1:current-home";
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: contactLookupKey,
+      userId: "member-1",
+    });
+    const expectedConversationThreadId =
+      hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "chat-current-email-home",
+      );
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-email-home",
+      homeParticipantContactKind: "email",
+      homeParticipantContactLookupKey: contactLookupKey,
+      ...(identityPhone ? { identityPhone } : {}),
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-email-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-stale-home",
+      targetKind: "explicit",
+    })).resolves.toEqual({
+      targetOverride: {
+        conversationThreadId: expectedConversationThreadId,
+        target: "chat-current-email-home",
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    });
+
+    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
   });
 
   it("does not retarget a stale bare Linq target at provider entry", async () => {
@@ -1394,6 +1456,8 @@ function createPrismaStub(input: {
   activeMemberAccess?: boolean;
   homeChatId?: string;
   homeLinePhone?: string;
+  homeParticipantContactKind?: "email" | "phone" | null;
+  homeParticipantContactLookupKey?: string | null;
   identityPhone?: string;
   pendingChatId?: string;
   threadRouteContainerMemberId?: string;
@@ -1419,6 +1483,10 @@ function createPrismaStub(input: {
       findUnique: vi.fn().mockResolvedValue({
         linqChatIdEncrypted: input.homeChatId ? "encrypted-home-chat" : null,
         linqChatLookupKey: createRequiredLinqChatLookupKey(input.homeChatId),
+        linqParticipantContactKind:
+          input.homeParticipantContactKind ?? null,
+        linqParticipantContactLookupKey:
+          input.homeParticipantContactLookupKey ?? null,
         linqRecipientPhoneEncrypted: input.homeLinePhone ? "encrypted-home-line" : null,
         linqRecipientPhoneLookupKey: createRequiredPhoneLookupKey(input.homeLinePhone),
         memberId: "member-1",

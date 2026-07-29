@@ -4773,6 +4773,166 @@ describe('assistant cron runtime orchestration', () => {
     ).toBe('archived')
   })
 
+  it.each([
+    'initial',
+    'pre-provider',
+    'pre-tool',
+    'pre-delivery',
+    'pre-commit',
+  ] as const)(
+    'keeps an onboarding check-in retryable when authority is unreadable at the %s gate',
+    async (failureGate) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        `assistant-cron-runtime-onboarding-authority-${failureGate}-`,
+      )
+      await completeAssistantOnboarding({
+        completedAt: '2025-11-03T14:00:00.000Z',
+        reason: 'user_answered',
+        vault: vaultRoot,
+      })
+      getVaultAutomationStore(vaultRoot).push({
+        activeUntil: '2026-07-13T13:30:00.000Z',
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        continuityPolicy: 'preserve',
+        createdAt: '2026-07-01T12:00:00.000Z',
+        instructions: 'Offer one low-pressure health direction choice.',
+        route: {
+          channel: 'telegram',
+          deliverySource: null,
+          deliveryTarget: 'member-thread',
+          identityId: null,
+          participantId: null,
+          threadId: 'member-thread',
+          threadIsDirect: true,
+        },
+        schedule: { at: '2026-07-06T13:30:00.000Z', kind: 'at' },
+        slug: 'onboarding-goal-checkin',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled', 'murph-managed'],
+        title: 'First health direction check-in',
+        updatedAt: '2026-07-01T12:00:00.000Z',
+      })
+      const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+      const makeAuthorityUnreadable = async () => {
+        await writeFile(
+          resolveAssistantOnboardingStatePath(vaultRoot),
+          '{ invalid onboarding json',
+          'utf8',
+        )
+      }
+      if (failureGate === 'initial') {
+        await makeAuthorityUnreadable()
+      } else {
+        cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+          async (notificationInput: {
+            beforeCommit?: (context: {
+              decision: {
+                kind: 'send_message'
+                privateSummary: string
+                text: string
+              }
+              deliveryOutcome: null
+              response: string
+            }) => Promise<void>
+            beforeDelivery?: (context: {
+              decision: {
+                kind: 'send_message'
+                privateSummary: string
+                text: string
+              }
+              deliveryOutcome: null
+              response: string
+            }) => Promise<void>
+            beforeProviderAcceptedInputs?: () => Promise<void>
+            beforeToolExecution?: () => Promise<void>
+          }) => {
+            const context = {
+              decision: {
+                kind: 'send_message' as const,
+                privateSummary: 'Prepared a health direction choice.',
+                text: 'Does anything feel worth focusing on now?',
+              },
+              deliveryOutcome: null,
+              response: 'Does anything feel worth focusing on now?',
+            }
+            if (failureGate === 'pre-provider') {
+              await makeAuthorityUnreadable()
+            }
+            await notificationInput.beforeProviderAcceptedInputs?.()
+            if (failureGate === 'pre-tool') {
+              await makeAuthorityUnreadable()
+            }
+            await notificationInput.beforeToolExecution?.()
+            if (failureGate === 'pre-delivery') {
+              await makeAuthorityUnreadable()
+            }
+            await notificationInput.beforeDelivery?.(context)
+            if (failureGate === 'pre-commit') {
+              await makeAuthorityUnreadable()
+            }
+            await notificationInput.beforeCommit?.(context)
+            return {
+              ...context,
+              session: { sessionId: 'session-onboarding-authority-retry' },
+            }
+          },
+        )
+      }
+
+      const failed = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(failed.removedAfterRun).toBe(false)
+      expect(failed.run).toMatchObject({
+        outcome: 'failed',
+        reason: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+        status: 'failed',
+      })
+      expect(failed.runErrorCode).toBe(
+        'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+      )
+      expect(
+        findCanonicalAutomation(
+          vaultRoot,
+          MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        )?.status,
+      ).toBe('active')
+
+      await completeAssistantOnboarding({
+        completedAt: '2025-11-03T14:00:00.000Z',
+        reason: 'user_answered',
+        vault: vaultRoot,
+      })
+      const retryAt = failed.job.state.nextRunAt
+      if (!retryAt) {
+        throw new Error('Expected a retained next run for unavailable authority.')
+      }
+      vi.setSystemTime(new Date(retryAt))
+
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+      expect(
+        findCanonicalAutomation(
+          vaultRoot,
+          MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        )?.status,
+      ).toBe('archived')
+    },
+  )
+
   it('retries final-results lifecycle cleanup before stale one-shot expiry', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:59:50.000Z'))

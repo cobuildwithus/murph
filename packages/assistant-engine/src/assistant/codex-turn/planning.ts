@@ -481,7 +481,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
-    input.profile.promptProfile === 'creative-notification'
+    input.profile.promptProfile === 'creative-notification' ||
+    onboardingGoalCheckinTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
