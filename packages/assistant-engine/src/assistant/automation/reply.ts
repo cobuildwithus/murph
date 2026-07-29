@@ -1741,7 +1741,16 @@ function promptInputCorrectionTargetsAcceptedLiveInput(input: {
   ) {
     return true
   }
+  return isAcceptedLiveInputCorrection(input)
+}
+
+function isAcceptedLiveInputCorrection(input: {
+  acceptedLiveInputIds: ReadonlySet<string>
+  candidate: AssistantInputCandidate
+}): boolean {
+  const metadata = input.candidate.event.sourceMetadata
   return (
+    metadata?.kind === 'linq' &&
     metadata.editedSourceInputId !== undefined &&
     metadata.editedTextPartIndex !== undefined &&
     input.acceptedLiveInputIds.has(metadata.editedSourceInputId)
@@ -2538,6 +2547,7 @@ async function listAutoReplyActiveTurnInputs(input: {
       sourceId: expectedChannel,
     })
     return selectAutoReplyRouteInput({
+      acceptedLiveInputIds: input.context.inputIds,
       afterCursor: input.afterCursor,
       candidates: exact.inputs,
       conversation: input.conversation,
@@ -2571,6 +2581,7 @@ async function listAutoReplyActiveTurnInputs(input: {
     sourceId: expectedChannel,
   })
   return selectAutoReplyRouteInput({
+    acceptedLiveInputIds: input.context.inputIds,
     afterCursor: input.afterCursor,
     candidates: [...strict.inputs, ...route.inputs],
     conversation: input.conversation,
@@ -2583,6 +2594,7 @@ async function listAutoReplyActiveTurnInputs(input: {
 }
 
 function selectAutoReplyRouteInput(input: {
+  acceptedLiveInputIds: readonly string[]
   afterCursor: AssistantInputCandidate['event']['cursor']
   anchorSummary: AssistantAutomationInputSummary
   candidates: readonly AssistantInputCandidate[]
@@ -2591,6 +2603,7 @@ function selectAutoReplyRouteInput(input: {
   expectedChannel: string
   knownProjectionCaptureIds: readonly string[]
 }): AssistantInputCandidateBatch {
+  const acceptedLiveInputIds = new Set(input.acceptedLiveInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
   let nextCursor = input.afterCursor
 
@@ -2608,6 +2621,8 @@ function selectAutoReplyRouteInput(input: {
     }
     const candidateSummary =
       assistantAutomationInputSummaryFromCandidate(candidate)
+    // A trusted edit follows the exact accepted input it corrects rather than
+    // the provider reply anchor. The admission gate revalidates the same link.
     if (
       !shouldGroupAdjacentConversationInput(
         input.anchorSummary,
@@ -2618,6 +2633,10 @@ function selectAutoReplyRouteInput(input: {
         candidateSummary,
         expected: input.conversation,
         first: input.anchorSummary,
+      }) &&
+      !isAcceptedLiveInputCorrection({
+        acceptedLiveInputIds,
+        candidate,
       })
     ) {
       break
