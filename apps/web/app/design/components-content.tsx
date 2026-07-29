@@ -148,27 +148,24 @@ function resolveDesignPhoneCountryOption(value: string) {
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
-    description: "Open Messages with the note ready to send.",
-    href: "sms:?body=I%20want%20to%20start%20the%20Finnish%20Dry%20Sauna%20experiment.",
+    description: "Open a ready-to-send text to Murph.",
+    href: "sms:?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
     kind: "text",
-    label: "Text",
-    meta: "Messages",
+    label: "Messages",
   },
   {
     connected: true,
-    description: "Open Telegram with Murph.",
-    href: MURPH_TELEGRAM_URL,
+    description: "Open @withmurph_bot with the experiment name ready.",
+    href: `${MURPH_TELEGRAM_URL}?text=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.`,
     kind: "telegram",
     label: "Telegram",
-    meta: "Telegram",
   },
   {
     connected: true,
-    description: "Open an email draft to Murph.",
-    href: "mailto:murph@mail.withmurph.ai",
+    description: "Open a ready-to-send email to Murph.",
+    href: "mailto:murph@mail.withmurph.ai?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
     kind: "email",
     label: "Email",
-    meta: "Email",
   },
 ];
 
@@ -1075,12 +1072,11 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
-                Start from the app you already use
+                Continue in the app you already use
               </p>
               <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                If several apps are connected, choose where this experiment
-                begins. Murph opens the app and prepares a note when the
-                channel supports it.
+                The compact picker keeps the selected experiment visible and
+                prepares a short message for review.
               </p>
             </div>
             <Button onClick={() => setChannelPickerOpen(true)}>
@@ -1092,7 +1088,7 @@ export function ComponentsContent() {
             open={channelPickerOpen}
             options={EXPERIMENT_START_CHANNEL_OPTIONS}
             protocolDays={14}
-            protocolTitle="Finnish Dry Sauna"
+            protocolTitle="Standard, Tiny, And Fallback Bedtime Transition"
           />
         </Section>
 

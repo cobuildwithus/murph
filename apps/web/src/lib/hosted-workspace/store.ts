@@ -837,64 +837,8 @@ export function readHostedWorkspaceBrowserVaultSourceStateHash(
     ?? null;
 }
 
-export async function recordHostedRuntimeLog(input: {
-  at?: Date | string | null;
-  attemptId?: string | null;
-  checkpointVersion?: bigint | number | string | null;
-  component: HostedRuntimeLogComponent | string;
-  errorCode?: string | null;
-  eventCode: HostedRuntimeLogEventCode | string;
-  id?: string | null;
-  leaseGeneration?: bigint | number | string | null;
-  level: HostedRuntimeLogLevel | string;
-  mailboxLane?: HostedMailboxLane | string | null;
-  mailboxSeqEnd?: bigint | number | string | null;
-  mailboxSeqStart?: bigint | number | string | null;
-  outboxIntentRef?: string | null;
-  phase: HostedRuntimeLogPhase | string;
-  prisma?: HostedWorkspaceStoreClient;
-  redacted?: HostedRuntimeRedactedJson | null;
-  userId: string;
-  workspaceVersion?: bigint | number | string | null;
-}): Promise<HostedRuntimeLogRecord> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return recordHostedRuntimeLogTx({
-    ...input,
-    tx: prisma,
-  });
-}
-
-export async function recordHostedRuntimeLogTx(input: {
-  at?: Date | string | null;
-  attemptId?: string | null;
-  checkpointVersion?: bigint | number | string | null;
-  component: HostedRuntimeLogComponent | string;
-  errorCode?: string | null;
-  eventCode: HostedRuntimeLogEventCode | string;
-  id?: string | null;
-  leaseGeneration?: bigint | number | string | null;
-  level: HostedRuntimeLogLevel | string;
-  mailboxLane?: HostedMailboxLane | string | null;
-  mailboxSeqEnd?: bigint | number | string | null;
-  mailboxSeqStart?: bigint | number | string | null;
-  outboxIntentRef?: string | null;
-  phase: HostedRuntimeLogPhase | string;
-  redacted?: HostedRuntimeRedactedJson | null;
-  tx: HostedWorkspaceStoreClient;
-  userId: string;
-  workspaceVersion?: bigint | number | string | null;
-}): Promise<HostedRuntimeLogRecord> {
-  const row = await input.tx.hostedRuntimeLog.create({
-    data: buildHostedRuntimeLogCreateData(input),
-  });
-
-  return projectHostedRuntimeLog(row);
-}
-
 /**
- * Normalizes one runtime log entry into its row shape. Shared by the single-row
- * and bulk writers so both validate identically.
+ * Normalizes one runtime log entry into the legacy primary row shape.
  */
 function buildHostedRuntimeLogCreateData(
   input: HostedRuntimeLogEntryInput & { userId: string },

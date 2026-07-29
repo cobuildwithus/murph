@@ -22,22 +22,18 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'allowTransferToUser',
   'callerName',
-  'confirmationMessageRef',
   'goal',
   'instructions',
   'shareableFacts',
   'successCriteria',
   'timeZone',
   'to',
+  'message_ref',
 ] as const
 const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
-const ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
-const phoneCallDynamicToolArgumentsSchema = hostedPhoneCallBriefSchema.extend({
-  confirmationMessageRef: z
-    .string()
-    .trim()
-    .regex(ASSISTANT_INPUT_ID_PATTERN)
-    .optional(),
+const ACCEPTED_MESSAGE_REF_PATTERN = /^ain_[0-9a-f]{32}$/u
+const phoneCallArgumentsSchema = hostedPhoneCallBriefSchema.extend({
+  message_ref: z.string().regex(ACCEPTED_MESSAGE_REF_PATTERN).optional(),
 })
 
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
@@ -45,25 +41,24 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
   name: 'create_phone_call',
   description: [
     'Before preparing a preview for a real call or placing one, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
-    'For a hosted group call, start one outbound phone call only when the current requester explicitly confirms an exact GROUP CALL PREVIEW that Murph successfully delivered before that confirmation message was received; set confirmationMessageRef to that later confirming message\'s visible ain_... reference.',
+    'For a hosted group call, start one outbound phone call only when the current requester explicitly confirms an exact GROUP CALL PREVIEW that Murph successfully delivered before that confirmation message was received; set message_ref to that later confirming message\'s visible ain_... reference.',
     'Never deliver a group preview and start the call in the same provider turn; after a new group request or any changed term, deliver the complete preview with the skill\'s exact heading and values, then stop.',
     'The group confirming message must explicitly approve any requester name or contact fact used in the call; one participant cannot approve another participant\'s private facts.',
     'Resolve relative dates and times before creating the brief.',
     'Before a real health care appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Put only requester-approved, call-relevant, disclosable facts in shareableFacts.',
     'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
+    'In a group chat, message_ref is required and must be the exact opaque Message ref beside the accepted message whose sender confirmed the preview. The host reloads that message and derives the provider sender; never supply a canonical member id.',
     'Do not put a participant transfer phone number in shareableFacts; Murph resolves eligible verified transfer numbers server-side for private calls.',
   ].join(' '),
-  inputSchema: z.toJSONSchema(phoneCallDynamicToolArgumentsSchema, {
-    io: 'input',
-  }),
+  inputSchema: z.toJSONSchema(phoneCallArgumentsSchema, { io: 'input' }),
 } as const
 
 export type PhoneCallDynamicToolRequest =
   | {
       brief: HostedPhoneCallBrief
-      confirmationMessageRef: string | null
       kind: 'create-phone-call'
+      messageRef: string | null
     }
   | {
       kind: 'invalid-phone-call-arguments'
@@ -79,7 +74,7 @@ export function readPhoneCallDynamicToolRequest(input: {
   }
 
   const parsed = parseDynamicToolArguments({
-    schema: phoneCallDynamicToolArgumentsSchema,
+    schema: phoneCallArgumentsSchema,
     schemaRootKeys: PHONE_CALL_BRIEF_ROOT_KEYS,
     toolName: 'murph.create_phone_call',
     value: input.arguments,
@@ -92,11 +87,11 @@ export function readPhoneCallDynamicToolRequest(input: {
     }
   }
 
-  const { confirmationMessageRef, ...brief } = parsed.args
+  const { message_ref: messageRef = null, ...brief } = parsed.args
   return {
     brief,
-    confirmationMessageRef: confirmationMessageRef ?? null,
     kind: 'create-phone-call',
+    messageRef,
   }
 }
 
@@ -121,13 +116,6 @@ export function createPhoneCallRequestKey(input: {
     }))
     .digest('hex')
   return `phone_call_${digest}`
-}
-
-export function resolvePhoneCallRequesterInboundMailboxItemIds(
-  scope: AssistantHostedToolRequestKeyScope,
-): string[] {
-  const requesterMailboxItemId = scope.inboundMailboxItemIds.at(-1)
-  return requesterMailboxItemId ? [requesterMailboxItemId] : []
 }
 
 export function normalizePhoneCallBriefForConversationScope(input: {

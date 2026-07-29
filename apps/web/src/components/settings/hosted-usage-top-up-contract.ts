@@ -289,14 +289,17 @@ function readStatusContent(input: {
 
   switch (input.status) {
     case "fulfilled":
-      return content(
-        "Usage added",
-        input.scope === "group"
-          ? "This group's available usage has been updated."
-          : input.scope === "family" && input.targetLabel
-            ? `The available usage for ${input.targetLabel} has been updated.`
-          : "Your available usage has been updated.",
-      );
+      return input.scope === "group"
+        ? content(
+            "This group has more Murph",
+            "Your contribution landed. The group has more room to talk.",
+          )
+        : content(
+            "Usage added",
+            input.scope === "family" && input.targetLabel
+              ? `The available usage for ${input.targetLabel} has been updated.`
+              : "Your available usage has been updated.",
+          );
     case "expired":
       return content("Checkout canceled", "Checkout canceled. No usage was added.");
     case "payment_failed":

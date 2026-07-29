@@ -5,7 +5,7 @@ key: protocol_variant:bedtime-transition/standard-tiny-fallback-transition
 slug: protocols/bedtime-transition/standard-tiny-fallback-transition
 title: Standard, Tiny, And Fallback Bedtime Transition
 summary: One prechosen cue followed by a standard, tiny, or fallback bedtime transition, reducing the friction between deciding to stop and actually attempting sleep.
-status: field-testing
+status: draft
 quality: usable
 aliases:
   - tiny bedtime transition

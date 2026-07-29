@@ -350,6 +350,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : {
         ...telegramMessage,
         from: summary.senderTelegramUserId,
+        ...(summary.senderTelegramDisplayName
+          ? { senderDisplayName: summary.senderTelegramDisplayName }
+          : {}),
         ...(summary.senderTelegramDisplayUsername
           ? { senderUsername: summary.senderTelegramDisplayUsername }
           : {}),
