@@ -8,6 +8,7 @@ import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANT_COUNT,
   isHostedLinqGroupLineRecoverySourceRefForSameIntent,
   parseHostedLinqGroupLineRecoverySourceRef,
+  readHostedLinqGroupLineRecoveryInstructionSeed,
   readHostedLinqGroupLineRecoveryVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-line-recovery";
 
@@ -113,6 +114,10 @@ describe("Hosted Linq group line recovery copy", () => {
 
     expect(firstAttempt).toBe(effectId);
     expect(secondAttempt).toBe(`${effectId}:attempt:2`);
+    expect(readHostedLinqGroupLineRecoveryInstructionSeed(firstAttempt))
+      .toBe(effectId);
+    expect(readHostedLinqGroupLineRecoveryInstructionSeed(secondAttempt))
+      .toBe(effectId);
     expect(firstSource).not.toBe(secondSource);
     expect(parseHostedLinqGroupLineRecoverySourceRef(firstSource)).toMatchObject({
       intentDigest: expect.stringMatching(/^[0-9a-f]{32}$/u),

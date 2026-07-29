@@ -58,6 +58,7 @@ import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS,
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
   isHostedLinqGroupLineRecoverySourceRefForSameIntent,
+  readHostedLinqGroupLineRecoveryInstructionSeed,
   type HostedLinqGroupLineRecoveryParticipantContact,
 } from "./linq-group-line-recovery";
 import {
@@ -1388,6 +1389,7 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
   let persistedIntent: (typeof persistedIntents)[number] | null = null;
   let dispatchSourceRef = sourceRef;
   let currentSourceAlreadyFailed = false;
+  let failedSenderLookupKey: string | null = null;
   for (const candidateEffectId of attemptEffectIds) {
     const candidateLookupKey =
       createHostedLinqDeliveryIdempotencyLookupKey(candidateEffectId);
@@ -1416,6 +1418,13 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
     }
     if (candidateIntent.providerCorrelated) {
       if (candidateIntent.status === "failed") {
+        if (
+          failedSenderLookupKey
+          && failedSenderLookupKey !== candidateIntent.phoneNumberLookupKey
+        ) {
+          return { status: "target_unauthorized" };
+        }
+        failedSenderLookupKey = candidateIntent.phoneNumberLookupKey;
         currentSourceAlreadyFailed ||= candidateIntent.sourceRef === sourceRef;
         continue;
       }
@@ -1437,6 +1446,12 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
       await listHostedLinqHealthyProactiveLines({ prisma: input.prisma })
     ).find((line) =>
       line.phoneNumberLookupKey === persistedIntent.phoneNumberLookupKey
+    )?.phoneNumber ?? null;
+  } else if (failedSenderLookupKey) {
+    assignedRecipientPhone = (
+      await listHostedLinqHealthyProactiveLines({ prisma: input.prisma })
+    ).find((line) =>
+      line.phoneNumberLookupKey === failedSenderLookupKey
     )?.phoneNumber ?? null;
   } else {
     const reservation = await reserveHostedLinqHealthyProactiveLineTx({
@@ -1855,7 +1870,7 @@ async function buildHostedLinqSideEffectMessage(
       }
       return buildHostedLinqGroupLineRecoveryMessage({
         backupPhoneNumber: effect.payload.assignedRecipientPhone,
-        seed: effect.effectId,
+        seed: readHostedLinqGroupLineRecoveryInstructionSeed(effect.effectId),
       });
     case "conversation_home_redirect": {
       const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);

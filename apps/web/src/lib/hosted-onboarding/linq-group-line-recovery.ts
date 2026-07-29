@@ -8,6 +8,8 @@ export const HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS = 5;
 const BACKUP_NUMBER_PLACEHOLDER = "{backupNumber}";
 const HOSTED_LINQ_GROUP_LINE_RECOVERY_EFFECT_ID_PATTERN =
   /^linq-group-line-recovery:([0-9a-f]{32})$/u;
+const HOSTED_LINQ_GROUP_LINE_RECOVERY_ATTEMPT_EFFECT_ID_PATTERN =
+  /^linq-group-line-recovery:([0-9a-f]{32})(?::attempt:[2-5])?$/u;
 const HOSTED_LINQ_GROUP_LINE_RECOVERY_SOURCE_REF_PATTERN =
   /^linq-group-line-recovery-source:([0-9a-f]{32}):([0-9a-f]{32})$/u;
 
@@ -116,6 +118,20 @@ export function buildHostedLinqGroupLineRecoveryAttemptEffectId(input: {
   return input.attempt === 1
     ? input.effectId
     : `linq-group-line-recovery:${match[1]}:attempt:${input.attempt}`;
+}
+
+export function readHostedLinqGroupLineRecoveryInstructionSeed(
+  effectId: string,
+): string {
+  const match = HOSTED_LINQ_GROUP_LINE_RECOVERY_ATTEMPT_EFFECT_ID_PATTERN.exec(
+    effectId,
+  );
+  if (!match) {
+    throw new TypeError(
+      "Hosted Linq group-line recovery requires a valid attempt identity.",
+    );
+  }
+  return `linq-group-line-recovery:${match[1]}`;
 }
 
 export function buildHostedLinqGroupLineRecoverySourceRef(input: {
