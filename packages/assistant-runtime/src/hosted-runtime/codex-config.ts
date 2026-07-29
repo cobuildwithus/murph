@@ -572,15 +572,6 @@ export function buildHostedCodexConfigToml(input: {
     "plugins = false",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
     "",
-    // Murph dynamic tools are dispatched through the app-server item/tool/call
-    // path. Keep the "murph" namespace advertised as structured function tools
-    // even when a model enables code_mode_only (e.g. gpt-5.6-terra in Codex
-    // >= 0.144), instead of being folded into the exec tool's description.
-    // Codex reads this under [features.code_mode]; a top-level [code_mode]
-    // table is silently ignored.
-    "[features.code_mode]",
-    'direct_only_tool_namespaces = ["murph"]',
-    "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",

@@ -24,7 +24,7 @@ Read and apply this guide when touching any of these surfaces:
 1. Optimize for recipient replies early.
    - Design each new conversation to earn a real recipient reply within the first three outbound messages.
    - Prefer genuine questions over one-way statements.
-   - For one-way use cases like reminders or alerts, establish the thread first with an explicit confirmation such as "Reply YES to confirm" before sending repeated notifications.
+   - For one-way use cases like reminders or alerts, establish the thread with an explicit natural confirmation before sending repeated notifications. Ask a real question about the proposed cadence or purpose; never force a keyword or turn the conversation into a status interface.
 
 2. Avoid broadcast-shaped behavior.
    - Do not send many new conversations from one line without replies.
@@ -151,7 +151,6 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 
 - Ask questions. "Hey, is this still a good number for you?" beats "Here's your update." Questions get replies. Replies build trust.
 - Avoid one-way broadcast patterns. If you are sending 50 messages and getting 0 replies, Apple's ML is scoring every one of those as spam-like. Even 1 reply per 10 outbound messages changes the math.
-- If your use case is inherently one-way, such as notifications or alerts, have the recipient reply once to establish the thread. A simple "Reply YES to confirm" at onboarding is enough.
 
 #### Volume and Pacing
 

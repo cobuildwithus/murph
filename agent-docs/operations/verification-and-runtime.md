@@ -1,7 +1,6 @@
 # Verification And Runtime
 
 Last verified: 2026-07-29
-
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -367,6 +366,10 @@ pass, the review-only Fable or Opus UI pass, and the separate final ReviewGPT ga
 before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
+
+The pull-request body proof workflow requires the four concrete `Architecture
+and reuse` bullets on every PR. It validates rendered GitHub Markdown so hidden
+comments, code blocks, and raw HTML cannot satisfy the requirement.
 
 For every user-facing `apps/web` UI diff, verification also includes
 `pnpm test:frontend-design-proof`, a production-component update on
