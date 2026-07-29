@@ -9,6 +9,7 @@ import {
 import {
   listHostedLinqChatHealthInventory,
   parseHostedLinqChatHealthInventoryRecord,
+  syncHostedLinqChatHealthInventory,
 } from "@/src/lib/hosted-onboarding/linq-chat-health-inventory";
 import {
   evaluateHostedLinqEgressPolicy,
@@ -16,6 +17,9 @@ import {
 import {
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import {
+  syncHostedLinqPhoneNumberInventory,
+} from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import {
   parseHostedLinqProviderHealthEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
@@ -31,6 +35,7 @@ import {
 
 const inventoryMocks = vi.hoisted(() => ({
   fetchLinqApi: vi.fn(),
+  upsertHostedLinqLineForPhoneTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/linq/api", () => ({
@@ -45,8 +50,14 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  upsertHostedLinqLineForPhoneTx:
+    inventoryMocks.upsertHostedLinqLineForPhoneTx,
+}));
+
 beforeEach(() => {
   inventoryMocks.fetchLinqApi.mockReset();
+  inventoryMocks.upsertHostedLinqLineForPhoneTx.mockReset();
 });
 
 describe("Linq provider status parsing", () => {
@@ -65,14 +76,14 @@ describe("Linq provider status parsing", () => {
         changed_at: "2026-07-29T16:00:00.000Z",
         new_reputation: "AT_RISK",
         new_status: "ACTIVE",
-        phone_number: "+1 (404) 379-0351",
+        phone_number: "+1 (202) 555-0123",
       },
       eventType: "phone_number.status_updated",
     }))).toEqual({
       chat: null,
       line: {
         eventId: "event-health",
-        phoneNumber: "+14043790351",
+        phoneNumber: "+12025550123",
         providerUpdatedAt: new Date("2026-07-29T16:00:00.000Z"),
         reputationStatus: "AT_RISK",
         serviceStatus: "ACTIVE",
@@ -91,7 +102,7 @@ describe("Linq provider status parsing", () => {
           id: "chat-health",
           is_group: false,
           owner_handle: {
-            handle: "+1 (404) 379-0351",
+            handle: "+1 (202) 555-0123",
           },
           service: "iMessage",
         },
@@ -104,7 +115,7 @@ describe("Linq provider status parsing", () => {
       chat: {
         chatId: "chat-health",
         isGroup: false,
-        linePhoneNumber: "+14043790351",
+        linePhoneNumber: "+12025550123",
         providerStatus: "AT_RISK",
         providerUpdatedAt: new Date("2026-07-29T16:01:00.000Z"),
         service: "iMessage",
@@ -118,7 +129,7 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
   it("projects the documented chat health and one unambiguous sending line", () => {
     expect(parseHostedLinqChatHealthInventoryRecord({
       handles: [
-        { handle: "+14043790351", is_me: true },
+        { handle: "+12025550123", is_me: true },
         { handle: "+15550100001", is_me: false },
       ],
       health_status: {
@@ -131,7 +142,7 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
     })).toEqual({
       chatId: "chat-1",
       isGroup: true,
-      linePhoneNumber: "+14043790351",
+      linePhoneNumber: "+12025550123",
       providerStatus: "HEALTHY",
       providerUpdatedAt: new Date("2026-07-29T16:02:00.000Z"),
       service: "iMessage",
@@ -141,7 +152,7 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
   it("keeps health while dropping an ambiguous sending-line attribution", () => {
     expect(parseHostedLinqChatHealthInventoryRecord({
       handles: [
-        { handle: "+14043790351", is_me: true },
+        { handle: "+12025550123", is_me: true },
         { handle: "+15550100002", is_me: true },
       ],
       health_status: {
@@ -202,6 +213,95 @@ describe("listHostedLinqChatHealthInventory", () => {
     })).rejects.toMatchObject({
       code: "LINQ_CHAT_HEALTH_INVENTORY_LIMIT_EXCEEDED",
       retryable: false,
+    });
+  });
+});
+
+describe("Linq provider health inventory synchronization", () => {
+  it("projects independent provider state for every inventoried line", async () => {
+    const observedAt = new Date("2026-07-29T16:08:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      hostedLinqLine: { updateMany },
+    } as never;
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      phone_numbers: [{
+        id: "line-1",
+        phone_number: "+1 (202) 555-0123",
+        reputation: { status: "AT_RISK" },
+        status: "ACTIVE",
+      }],
+    }));
+    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
+      phoneNumberLookupKey: "line-key",
+    });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      observedAt,
+      prisma,
+    })).resolves.toEqual({ syncedCount: 1 });
+
+    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).toHaveBeenCalledWith({
+      observedAt,
+      phoneNumber: "+12025550123",
+      prisma,
+      providerPhoneNumberId: "line-1",
+      source: "provider",
+    });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
+        providerUpdatedAt: observedAt,
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: "line-key",
+      }),
+    }));
+  });
+
+  it("associates inventoried chat health with its resolved sending line", async () => {
+    const observedAt = new Date("2026-07-29T16:09:00.000Z");
+    const createMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      hostedLinqChatHealth: {
+        createMany,
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn(),
+      },
+    } as never;
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      chats: [buildChatInventoryRecord("chat-1")],
+      next_cursor: null,
+    }));
+    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
+      phoneNumberLookupKey: "line-key",
+    });
+
+    await expect(syncHostedLinqChatHealthInventory({
+      observedAt,
+      prisma,
+    })).resolves.toEqual({
+      skippedCount: 0,
+      syncedCount: 1,
+    });
+
+    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).toHaveBeenCalledWith({
+      observedAt,
+      phoneNumber: "+12025550123",
+      prisma,
+      source: "provider",
+    });
+    expect(createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        isGroup: false,
+        phoneNumberLookupKey: "line-key",
+        providerObservedAt: observedAt,
+        providerStatus: "HEALTHY",
+        providerUpdatedAt: new Date("2026-07-29T16:02:00.000Z"),
+        service: "iMessage",
+      }),
+      skipDuplicates: true,
     });
   });
 });
@@ -420,11 +520,14 @@ describe("evaluateHostedLinqEgressPolicy", () => {
   });
 
   it.each([
+    ["operator_disabled", { chatHealthStatus: "HEALTHY", lineEgressPolicy: "disabled", newConversation: false }],
     ["line_flagged", { chatHealthStatus: "HEALTHY", lineServiceStatus: "FLAGGED", newConversation: false }],
     ["line_critical", { chatHealthStatus: "HEALTHY", lineReputationStatus: "CRITICAL", newConversation: false }],
     ["line_at_risk_new_conversation", { chatHealthStatus: null, lineReputationStatus: "AT_RISK", newConversation: true }],
     ["chat_critical", { chatHealthStatus: "CRITICAL", newConversation: false }],
     ["chat_opted_out", { chatHealthStatus: "OPTED_OUT", newConversation: false }],
+    ["delivery_unhealthy", { chatHealthStatus: "HEALTHY", lineDeliveryHealthStatus: "unhealthy", newConversation: false }],
+    ["delivery_warning_new_conversation", { chatHealthStatus: null, lineDeliveryHealthStatus: "warning", newConversation: true }],
   ] as const)("blocks %s deterministically", (code, override) => {
     expect(evaluateHostedLinqEgressPolicy({
       ...healthyLine,
@@ -488,7 +591,7 @@ function buildProviderEvent(input: {
 
 function buildChatInventoryRecord(id: string) {
   return {
-    handles: [{ handle: "+14043790351", is_me: true }],
+    handles: [{ handle: "+12025550123", is_me: true }],
     health_status: {
       status: "HEALTHY",
       updated_at: "2026-07-29T16:02:00.000Z",

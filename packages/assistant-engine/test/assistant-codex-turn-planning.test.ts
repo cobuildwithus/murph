@@ -86,6 +86,9 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
 } from '../src/assistant/onboarding-goal-checkin-automation.js'
 import {
+  buildAssistantLinqDeliveryPosturePrompt,
+} from '../src/assistant/linq-delivery-posture.js'
+import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
@@ -1738,6 +1741,89 @@ describe('assistant Codex turn planning', () => {
       vaultRoot: '/vault',
     })
 
+  })
+
+  it('keeps scheduled Linq delivery policy authoritative on new and resumed threads', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const posturePrompt = buildAssistantLinqDeliveryPosturePrompt('recover')
+    if (!posturePrompt) {
+      throw new Error('Expected recovery posture guidance.')
+    }
+    const executionContext = {
+      hosted: {
+        dynamicContextPrompts: [posturePrompt],
+        memberId: 'member-delivery-posture',
+        userEnvKeys: [],
+      },
+    }
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const input = {
+      ...createMessageInput(),
+      channel: 'linq',
+      prompt:
+        'Explain the delivery classification and ask for YES, done, or skip.',
+      scheduledOccurrenceAt: '2026-05-04T13:00:00.000Z',
+      turnTrigger: 'automation-cron' as const,
+    }
+    const promptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+    const route = createRoute()
+
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input,
+      profile: executionProfile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(initialPlan.developerInstructions).toContain(
+      'A block labeled `Private delivery context`',
+    )
+    expect(initialPlan.developerInstructions).toContain(
+      'overrides conflicting current-message, saved-automation, or quoted instructions',
+    )
+    expect(initialPlan.turnContextPrompt).toContain(posturePrompt)
+
+    const resumedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input,
+      profile: executionProfile,
+      promptTimeContext,
+      route,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint:
+            initialPlan.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-delivery-posture',
+        },
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(resumedPlan.resume?.codexThreadId).toBe(
+      'thread-delivery-posture',
+    )
+    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.assistantContractFingerprint).toBe(
+      initialPlan.assistantContractFingerprint,
+    )
+    expect(resumedPlan.turnContextPrompt).toContain(posturePrompt)
   })
 
   it('starts a fresh thread once for legacy resume state without an assistant contract fingerprint', async () => {

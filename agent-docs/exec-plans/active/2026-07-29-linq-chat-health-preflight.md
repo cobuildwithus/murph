@@ -97,5 +97,22 @@ Updated: 2026-07-29
   scheduled-warning and hard-block flow is the smallest complete user
   experience; full rendered model-output and one live/staging end-to-end run
   remain post-deploy evidence gaps.
-- Exact-head CI, preliminary/final ReviewGPT gates, and merge-base
-  reconciliation remain pending on the next pushed implementation head.
+- Preliminary `completion-specialists` review returned three findings: make
+  the private delivery context authoritative over saved automation, exercise
+  both reconciliation owners directly, and cover the remaining pure-policy and
+  cautious-prompt branches. All three were accepted and remediated. Its
+  test-only patch was inspected but not applied because a fixture contained a
+  direct identifier; equivalent tests were added with reserved fixture data.
+- Focused remediation tests passed: Web 32/32 and assistant-engine 74/74. Web
+  and assistant-engine typechecks passed after the fallback E2E seed was
+  changed to establish local warning/healthy state through the delivery-receipt
+  projection.
+- The first pushed exact-head CI attempt found two primary regressions: the new
+  migration was absent from the migration inventory fixture, and the fallback
+  E2E seed still relied on legacy generic provider status to establish local
+  delivery health. Both are corrected. The targeted local E2E retry did not
+  reach its assertion because cold stack startup exceeded its fixed
+  300-second `beforeAll` timeout; canonical exact-head CI remains the required
+  proof for that path.
+- Final parent review, plan closure, final ReviewGPT, and exact-head CI remain
+  pending on the next pushed implementation head.
