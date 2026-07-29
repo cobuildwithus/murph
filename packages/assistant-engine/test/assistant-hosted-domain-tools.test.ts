@@ -23,6 +23,7 @@ describe('hosted domain dynamic tools', () => {
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
+    expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
