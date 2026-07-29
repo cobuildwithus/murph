@@ -1,0 +1,114 @@
+import { randomUUID } from "node:crypto";
+
+import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import { describe, expect, it } from "vitest";
+
+import {
+  armHostedPendingGroupSetupTx,
+  claimHostedPendingGroupSetupForParticipantsTx,
+} from "@/src/lib/hosted-groups/pending-group-setup";
+import { createPrismaClient } from "@/src/lib/prisma";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresConcurrencyProof =
+  process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+if (
+  runPostgresConcurrencyProof
+  && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))
+) {
+  throw new Error(
+    "The pending-group concurrency proof requires a local DATABASE_URL.",
+  );
+}
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted pending group setup PostgreSQL concurrency",
+  () => {
+    it("allows one group to claim an intent and cascades replacement state with its owner", async () => {
+      const fixtureId = randomUUID();
+      const ownerMemberId = `member_pending_group_${fixtureId}`;
+      const recipientPhoneLookupKey = `pending-group-line:${fixtureId}`;
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+
+      try {
+        await observer.hostedLinqLine.create({
+          data: {
+            configuredAt: new Date("2026-07-29T18:00:00.000Z"),
+            healthStatus: "healthy",
+            phoneNumberEncrypted: "test-only-encrypted-line",
+            phoneNumberHint: "0000",
+            phoneNumberLookupKey: recipientPhoneLookupKey,
+          },
+        });
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: ownerMemberId,
+            routing: {
+              create: { linqRecipientPhoneLookupKey: recipientPhoneLookupKey },
+            },
+          },
+        });
+        await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
+          now: new Date("2026-07-29T18:00:00.000Z"),
+          ownerMemberId,
+          tx,
+        }));
+
+        const claim = (client: PrismaClient) => client.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: new Date("2026-07-29T18:01:00.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+            tx,
+          })
+        );
+        const results = await Promise.all([
+          claim(firstClient),
+          claim(secondClient),
+        ]);
+
+        expect(results.filter((result) => result.kind === "claimed")).toHaveLength(1);
+        expect(await observer.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(0);
+
+        await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
+          now: new Date("2026-07-29T18:02:00.000Z"),
+          ownerMemberId,
+          tx,
+        }));
+        await observer.hostedMember.delete({ where: { id: ownerMemberId } });
+        expect(await observer.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(0);
+      } finally {
+        await observer.hostedMember.deleteMany({
+          where: { id: ownerMemberId },
+        });
+        await observer.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        });
+        await Promise.all([
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+          observer.$disconnect(),
+        ]);
+      }
+    });
+  },
+);
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "postgresql:"
+      && ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}

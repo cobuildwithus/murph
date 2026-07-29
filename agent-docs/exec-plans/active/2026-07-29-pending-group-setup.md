@@ -1,4 +1,4 @@
-# Prepare the next Murph group
+# Prepare ownership of the next Murph group
 
 Status: active
 Created: 2026-07-29
@@ -6,136 +6,106 @@ Updated: 2026-07-29
 
 ## Goal
 
-- Let an active member prepare the style and lightweight social context for the
-  next new Linq group containing them, without creating a draft group, second
-  ownership model, or provider-actor dependency.
-- Match that explicit short-lived intent against the first new-group roster;
-  when several roster members prepared a setup, the current authenticated
-  sender's own setup is the only automatic tie-breaker.
+- Let an active member explicitly prepare ownership of the next new Linq group
+  that contains them, without relying on unreliable provider add-actor data.
+- Preserve one canonical owner, one route-provisioning primitive, and the
+  existing first-active-sender fallback when no intent can be selected safely.
 
 ## Success criteria
 
-- One encrypted, expiring setup exists per member and is scoped to the Murph
-  Linq line from which it was prepared.
-- One roster-matched candidate owns and initializes the new synthetic group
-  runtime even when another participant sends the first message.
-- With several candidates, the sender's setup wins only when the sender owns one;
-  otherwise no setup is guessed and the existing sender-owner fallback remains.
-- One setup can initialize at most one newly created route, including under
-  concurrent first messages or simultaneous new groups.
-- Group style reuses the existing hosted-member preference owner and mailbox
-  convergence path. Qualitative context targets the existing fixed group room
-  model; there is no second prompt or preference store.
-- Existing routes never consume a pending setup or change owner.
+- One 30-minute, one-use intent exists per person member and is scoped to that
+  member's current managed Murph Linq line.
+- A lone roster-matched prepared member owns the new synthetic group runtime
+  even when another active member sends the first message.
+- When several roster members prepared an intent, the current sender wins only
+  when the sender has one; otherwise Murph does not guess.
+- One intent can initialize at most one newly created route under concurrent
+  messages or simultaneous new groups.
+- Existing routes never consume an intent or change owner.
+- No raw roster handle, chat id, provider actor, message, style, room context,
+  or contact label enters pending state or diagnostics.
 
 ## Scope
 
-- In scope now:
-  - the encrypted pending-setup store and migration;
-  - strict versioned payload validation;
-  - deterministic candidate selection and atomic one-time claim;
-  - a reusable composition over the existing thread-container, preference, and
-    usage-referral owners;
-  - focused conflict and payload tests.
-- Still to wire before this PR is shippable:
-  - private-conversation `murph.group` prepare/read/cancel actions with trusted
-    current Linq-line context;
-  - bounded provider-roster lookup before the Web transaction and blind-index
-    resolution to member ids;
-  - the Linq new-group planner call into the prepared-route composition;
-  - an optional activation bootstrap field that initializes the existing group
-    room-model page before the first conversation turn;
-  - production-faithful transaction/concurrency tests and account-deletion
-    export coverage;
-  - durable architecture, security, privacy, product, and testing-map updates.
+- Private-text `murph.group` actions to prepare, read, and cancel the intent.
+- A minimal Postgres row containing only owner, blinded line key, and times.
+- One bounded provider roster read before an unbound-group transaction.
+- Bounded roster-handle resolution to known member ids.
+- Deterministic candidate selection and atomic one-use claim.
+- Composition over the existing canonical thread-container and referral owners.
+- Focused unit, webhook, schema/privacy, and PostgreSQL concurrency proof.
+- Durable architecture, security, reliability, product, skill, and testing-map
+  documentation.
 
 ## Constraints
 
-- Keep `HostedThreadContainer.ownerMemberId` as the only canonical room owner.
-- Keep the synthetic thread-container member and its existing preference columns
-  as the only group style owner.
-- Do not use `participant.added` actor data; Linq reports that source as
-  unreliable.
-- Provider calls happen before the database transaction. Only bounded normalized
-  roster evidence enters the transaction.
-- Raw roster handles are never persisted in setup state.
-- Do not create a cleanup scheduler: expiry is query-time authority and stale
-  rows disappear on replacement, cancellation, or owner deletion.
-- Do not generalize beyond Linq until a second provider has the same product
-  requirement.
+- `HostedThreadContainer.ownerMemberId` remains the only canonical group owner.
+- The provider adapter accepts only resolved member ids, never raw handles.
+- `participant.added` actor data is not authority.
+- Provider I/O stays outside the database transaction and is bounded.
+- No cleanup scheduler: expiry is query-time authority; replacement,
+  cancellation, claim, and member deletion remove state.
+- No generalized draft-group subsystem or second provider abstraction.
 
 ## Design
 
-1. A private authenticated turn arms one `hosted_pending_group_setup` row for
-   the current member and current Murph line. A newer setup atomically replaces
-   the older one.
-2. The encrypted v1 payload contains only sparse existing style settings and an
-   optional bounded Markdown seed for the fixed group room model.
-3. On the first message for an unbound Linq thread, the adapter fetches the
-   current roster outside the transaction and resolves only known active Murph
-   member ids.
-4. Inside the transaction, candidate selection follows one rule:
+1. A fresh private text turn arms one setup for the active person's current
+   managed Linq line; a newer setup atomically replaces the older one.
+2. Before the first inbound for an unbound Linq group, Web performs one bounded
+   current-chat read and resolves at most 32 active non-Murph handles to member
+   ids. Failure leaves the participant list empty.
+3. Inside the route transaction, candidate selection is:
    - one candidate: select it;
    - several candidates and sender owns one: select the sender's;
    - otherwise: select none.
-5. `DELETE ... RETURNING` is the one-time setup claim. The surrounding route
-   transaction restores the row automatically on failure. A second group racing
-   for the same setup loses the claim and re-evaluates without it.
-6. The selected setup owner is passed to the existing
-   `ensureHostedThreadContainerRouteTx`. If no setup was selected, the existing
-   authenticated sender remains the fallback owner.
-7. When the route is newly created, style is applied through
-   `upsertHostedMemberAssistantPreferencesTx`, and the existing usage-referral
-   binding runs once. The room-model Markdown is returned for the activation
-   bootstrap wiring still pending in this draft.
+4. `DELETE ... RETURNING` claims the selected setup exactly once. A concurrent
+   claimant re-evaluates without it.
+5. The selected member, or the existing sender fallback, is passed to
+   `ensureHostedThreadContainerRouteTx`. That primitive remains the only route
+   and owner writer and retains its existing usage-referral composition.
+6. An existing-route convergence or recoverable admission failure restores the
+   still-valid intent; a successful new route consumes it.
 
 ## Risks and mitigations
 
-1. **Two groups consume one setup.** The setup row itself is atomically deleted
-   before route creation in the same transaction; only one delete can return it.
-2. **A different family receives private setup context.** Candidates must be in
-   the live roster, on the exact prepared Murph line, within the short expiry;
-   ambiguity does not guess.
-3. **An existing group changes owner or style.** Setup application is conditional
-   on `ensure.created`; an existing-route convergence restores the claimed row.
-4. **Optional corrupt state wedges group admission.** Invalid encrypted payloads
-   are not authority and are consumed rather than repeatedly blocking new groups.
-5. **Schema turns into a generic draft-group subsystem.** The table owns only one
-   short-lived next-group intent per member; it has no group id, chat id, roster,
-   lifecycle state machine, or history.
-6. **Foreground latency grows unchecked.** The final adapter must make exactly
-   one bounded Linq roster call before the transaction, resolve at most 32
-   participant members, and retain the existing sender-only fallback on provider
-   failure.
+1. **Two groups consume one intent.** One transactional delete is the
+   linearization point; the opt-in PostgreSQL test races two claimants.
+2. **Stale or incomplete provider roster.** The lookup is advisory matching
+   evidence only; failure or ambiguity preserves sender-owner admission.
+3. **Wrong line or inactive member prepares state.** Arm and claim both bind the
+   current routing key and current runtime-access predicate.
+4. **Existing ownership changes.** The canonical ensure primitive rejects or
+   converges on the existing route and the setup is restored.
+5. **Private contact data spreads.** Pending state contains no raw provider
+   value, logs only a closed outcome, and account deletion cascades the row.
+6. **Foreground latency grows.** The provider call is one non-retried 1.5-second
+   read before the transaction and resolution is capped at 32 handles.
 
 ## Tasks
 
-1. Land the store, migration, selection rule, composition service, and focused
-   unit tests as a reviewable draft foundation.
-2. Add private prepare/read/cancel tool actions against the existing group tool.
-3. Add bounded pre-transaction roster acquisition and member-id projection.
-4. Replace only the new-group owner-resolution branch with the shared prepared
-   route service; preserve existing explicit-route handling.
-5. Extend thread-container activation with optional initial room-model Markdown
-   and initialize the existing fixed page idempotently before first-turn planning.
-6. Add PostgreSQL race proof, webhook planner scenarios, privacy/account-deletion
-   proof, docs, focused verification, and review gates.
+1. [x] Replace the draft style/context payload with a minimal ownership intent.
+2. [x] Add private prepare/read/cancel tool contracts and execution gating.
+3. [x] Add bounded pre-transaction roster acquisition and member-id projection.
+4. [x] Compose new-group owner resolution with the canonical route primitive.
+5. [x] Add selection, composition, tool, parser, webhook, schema/privacy, and
+   PostgreSQL concurrency coverage.
+6. [x] Update durable owner and product documentation.
+7. [ ] Complete canonical verification and preliminary specialist review.
+8. [ ] Push the exact head, run final ReviewGPT concurrently with CI, resolve
+   findings, and leave the draft PR ready to merge.
 
 ## Decisions
 
-- Prefer one imperfect but explicit "next group" intent over a deterministic
-  setup code or a provider-specific actor heuristic.
-- Treat roster membership as matching evidence, not ownership by itself. The
-  pending intent supplies the ownership claim; the sender resolves only a real
-  conflict.
-- Preserve the existing first-active-sender behavior whenever no pending setup
-  is safely selected.
-- Keep this PR draft until the adapter, tool, room-model initialization, and
-  production-faithful tests are complete.
+- Prefer one explicit short-lived intent over an add-actor heuristic, roster
+  ordering, timing inference, or pending-owner state machine.
+- Treat roster membership as matching evidence, not ownership. The private
+  member intent supplies the ownership claim.
+- Preserve existing behavior whenever the intent cannot be selected safely.
+- Keep the PR draft until exact-head review and required CI are green.
 
 ## Verification
 
-- Focused local TypeScript syntax and unit-test execution remain pending until
-  the draft is materialized in a repository checkout with workspace dependencies.
-- Exact-head GitHub Actions are expected to identify schema drift or package
-  boundary work still required by the intentionally incomplete draft.
+- Full Web, hosted-execution, and assistant-engine typechecks pass locally.
+- Focused and canonical diff/acceptance suites, PostgreSQL concurrency proof,
+  preliminary specialist review, final ReviewGPT, and exact-head CI remain to
+  be recorded before completion.

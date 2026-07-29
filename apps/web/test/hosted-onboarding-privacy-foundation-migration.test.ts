@@ -75,6 +75,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    "pendingGroupSetup HostedPendingGroupSetup?",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
@@ -89,6 +90,16 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'usageReferralsAsBeneficiary HostedUsageReferral[] @relation("HostedUsageReferralBeneficiary")',
     'usageReferralsAsIntroduced HostedUsageReferral[] @relation("HostedUsageReferralIntroducedMember")',
     'usageReferralsAsReferrer HostedUsageReferral[] @relation("HostedUsageReferralReferrer")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+    'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedPendingGroupSetup: [
+    "id String @id",
+    'ownerMemberId String @unique @map("owner_member_id")',
+    "channel String",
+    'recipientPhoneLookupKey String @map("recipient_phone_lookup_key")',
+    'armedAt DateTime @map("armed_at")',
+    'expiresAt DateTime @map("expires_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -864,6 +875,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedPendingGroupSetupMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729124500_hosted_pending_group_setup/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -1006,8 +1024,18 @@ describe("hosted Prisma baseline migration", () => {
       "20260728030000_hosted_usage_referral_credit_entry_constraints",
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "20260728190000_hosted_mailbox_source_message",
+      "20260729124500_hosted_pending_group_setup",
       "migration_lock.toml",
     ]);
+    expect(hostedPendingGroupSetupMigrationSql).toContain(
+      'CREATE TABLE "hosted_pending_group_setup"',
+    );
+    expect(hostedPendingGroupSetupMigrationSql).toContain(
+      'ON DELETE CASCADE ON UPDATE CASCADE',
+    );
+    expect(hostedPendingGroupSetupMigrationSql).not.toMatch(
+      /payload|handle|chat_id|participant/iu,
+    );
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
       'ADD COLUMN "source_provider_slug" TEXT',
     );
@@ -2261,7 +2289,7 @@ describe("hosted Prisma baseline migration", () => {
 });
 
 function readHostedMemberModelNames(schema: string): string[] {
-  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|MealPhotoCaptureEnrollment|Member\w*|SensitiveActionChallenge))\s+\{/gmu)]
+  return [...schema.matchAll(/^model\s+(Hosted(?:ConnectedApp\w*|MealPhotoCaptureEnrollment|Member\w*|PendingGroupSetup|SensitiveActionChallenge))\s+\{/gmu)]
     .map((match) => match[1]);
 }
 

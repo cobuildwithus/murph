@@ -6,9 +6,6 @@ import {
   bindArmedHostedUsageReferralToNewContainerTx,
 } from "../hosted-growth/usage-referral";
 import {
-  upsertHostedMemberAssistantPreferencesTx,
-} from "../hosted-onboarding/member-preferences";
-import {
   ensureHostedThreadContainerRouteTx,
   type HostedThreadContainerRouteEnsureResult,
 } from "../hosted-routing/thread-container-service";
@@ -36,7 +33,6 @@ export type HostedPreparedLinqThreadContainerResult =
     }
   | {
       ensure: HostedThreadContainerRouteEnsureResult;
-      initialRoomContextMarkdown: string | null;
       kind: "ensured";
       ownerMemberId: string;
       ownerResolution: HostedPreparedLinqThreadOwnerResolution;
@@ -46,8 +42,8 @@ export type HostedPreparedLinqThreadContainerResult =
     };
 
 /**
- * Composes the existing canonical thread-container owner, style preference, and
- * usage-referral primitives around one optional roster-matched setup claim.
+ * Composes the existing canonical thread-container owner and usage-referral
+ * primitives around one optional roster-matched setup claim.
  * Provider adapters remain responsible only for proving the current roster and
  * current sender member; this service never accepts raw handles.
  */
@@ -58,14 +54,14 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   mailboxDedupeKey: string;
   occurredAt: Date;
   participantMemberIds: readonly string[];
-  recipientPhoneLookupKey: string;
+  recipientPhoneLookupKeys: readonly string[];
   senderMemberId?: string | null;
   threadId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPreparedLinqThreadContainerResult> {
   const pendingSetupClaim = await claimHostedPendingGroupSetupForParticipantsTx({
     participantMemberIds: input.participantMemberIds,
-    recipientPhoneLookupKey: input.recipientPhoneLookupKey,
+    recipientPhoneLookupKeys: input.recipientPhoneLookupKeys,
     senderMemberId: input.senderMemberId,
     tx: input.tx,
   });
@@ -127,18 +123,6 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
 
   const pendingSetupApplied =
     ensure.created && pendingSetupClaim.kind === "claimed";
-  if (pendingSetupApplied) {
-    const style = pendingSetupClaim.setup.payload.style;
-    if (style) {
-      await upsertHostedMemberAssistantPreferencesTx({
-        memberId: ensure.containerMemberId,
-        occurredAt: input.occurredAt.toISOString(),
-        preferences: style,
-        prisma: input.tx,
-      });
-    }
-  }
-
   if (ensure.created) {
     await bindArmedHostedUsageReferralToNewContainerTx({
       occurredAt: input.occurredAt,
@@ -150,9 +134,6 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
 
   return {
     ensure,
-    initialRoomContextMarkdown: pendingSetupApplied
-      ? pendingSetupClaim.setup.payload.roomContextMarkdown ?? null
-      : null,
     kind: "ensured",
     ownerMemberId,
     ownerResolution: pendingSetupClaim.kind === "claimed"

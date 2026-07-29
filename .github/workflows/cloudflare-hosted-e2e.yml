@@ -271,6 +271,7 @@ jobs:
           apps/web/test/hosted-onboarding-member-lock-postgres.test.ts
           apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
+          apps/web/test/hosted-pending-group-setup-postgres-concurrency.test.ts
           apps/web/test/prisma-database-retry-postgres.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
           apps/web/test/hosted-production-500-regressions-postgres.test.ts

@@ -115,6 +115,11 @@ import { sha256Hex } from "../primitives";
 import {
   lookupHostedGroupParticipantMemberByHandle,
 } from "./participant-member";
+import {
+  armHostedPendingGroupSetupTx,
+  cancelHostedPendingGroupSetupTx,
+  readHostedPendingGroupSetup,
+} from "./pending-group-setup";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -158,15 +163,18 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
+  cancel_next_group: "personal_active",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "personal_active",
   post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
+  prepare_next_group: "personal_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_name: "participant_aware",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_next_group: "personal_active",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
   read_usage_referral: "participant_aware",
@@ -265,6 +273,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
       updateDisplayName: input.request.updateDisplayName,
+    });
+  }
+
+  if (
+    input.request.action === "prepare_next_group"
+    || input.request.action === "read_next_group"
+    || input.request.action === "cancel_next_group"
+  ) {
+    return handleHostedRuntimePendingGroupSetup({
+      action: input.request.action,
+      memberId: input.memberId,
     });
   }
 
@@ -396,6 +415,63 @@ export async function handleHostedRuntimeGroupTool(input: {
         }
       : { status: "none", group: null },
   };
+}
+
+async function handleHostedRuntimePendingGroupSetup(input: {
+  action: "cancel_next_group" | "prepare_next_group" | "read_next_group";
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: input.action,
+    result: { status: "unavailable", unavailableReason },
+  });
+  const prisma = getPrisma();
+
+  try {
+    if (input.action === "read_next_group") {
+      const setup = await readHostedPendingGroupSetup({
+        ownerMemberId: input.memberId,
+        prisma,
+      });
+      return {
+        action: input.action,
+        result: setup
+          ? { expiresAt: setup.expiresAt.toISOString(), status: "prepared" }
+          : { status: "none" },
+      };
+    }
+
+    if (input.action === "cancel_next_group") {
+      const canceled = await prisma.$transaction(
+        (tx) => cancelHostedPendingGroupSetupTx({
+          ownerMemberId: input.memberId,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+      return {
+        action: input.action,
+        result: { status: canceled ? "canceled" : "none" },
+      };
+    }
+
+    const setup = await prisma.$transaction(
+      (tx) => armHostedPendingGroupSetupTx({
+        ownerMemberId: input.memberId,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    return {
+      action: input.action,
+      result: {
+        expiresAt: setup.expiresAt.toISOString(),
+        status: "prepared",
+      },
+    };
+  } catch {
+    return unavailable("next_group_preparation_unavailable");
+  }
 }
 
 async function handleHostedRuntimeGroupLeaveMembership(input: {

@@ -229,6 +229,22 @@ from raw records.
 
 ## Creating a hosted group
 
+### Preparing ownership before Murph joins an existing iMessage group
+
+In a private text conversation, when the member explicitly says they are about
+to add Murph to an existing iMessage group and wants that next group associated
+with them, call `murph.group action="prepare_next_group"` once. On
+`status="prepared"`, say plainly that the preparation applies to one new group
+on their current Murph number for 30 minutes. Do not claim that Murph detected
+who tapped Add; the preparation is the member's explicit ownership intent.
+
+Use `read_next_group` only when the member asks whether that preparation is
+still active, and `cancel_next_group` when they ask to stop it. Never call any
+of these actions from a group, email, scheduled turn, or without fresh direct
+user input. If preparation is unavailable, do not tell the member to race to
+send the first message; say only that Murph could not prepare the next group
+right now.
+
 In interactive group setup and additive-permission flows, call `read_current`
 before a permission-bearing `create_join_link` or `post_join_offer`. The bounded
 running-challenge standings flow in `group-challenge` is the exception: its

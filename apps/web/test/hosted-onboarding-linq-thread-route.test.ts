@@ -57,6 +57,9 @@ const usageReferralMocks = vi.hoisted(() => ({
   })),
   reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
 }));
+const preparedThreadMocks = vi.hoisted(() => ({
+  ensureHostedPreparedLinqThreadContainerRouteTx: vi.fn(),
+}));
 
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -77,6 +80,19 @@ vi.mock("../src/lib/hosted-growth/usage-referral", () => ({
   reconcileHostedUsageReferralRewardAfterCommit:
     usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
 }));
+
+vi.mock("../src/lib/hosted-groups/prepared-thread-container", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-groups/prepared-thread-container")
+  >();
+  preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+    .mockImplementation(actual.ensureHostedPreparedLinqThreadContainerRouteTx);
+  return {
+    ...actual,
+    ensureHostedPreparedLinqThreadContainerRouteTx:
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+  };
+});
 
 vi.mock("../src/lib/hosted-crypto/secure-box", async (importOriginal) => {
   const actual = await importOriginal<
@@ -4997,6 +5013,17 @@ describe("Linq group chat auto-provision", () => {
         { handle: "+15552223333", isMe: false, status: "active" },
       ];
     });
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
+      expect(transactionOpen).toBe(false);
+      return {
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551112222", isMe: false, status: "active" },
+          { handle: "+15552223333", isMe: false, status: "active" },
+        ],
+        isGroup: true,
+      };
+    });
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
@@ -5016,7 +5043,19 @@ describe("Linq group chat auto-provision", () => {
     expect(linqClient.getHostedLinqChatHandles).toHaveBeenCalledWith({
       chatId: "chat_group_123",
     });
-    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
+      chatId: "chat_group_123",
+      timeoutMs: 1_500,
+    });
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      participantMemberIds: [
+        "member_owner_123",
+        "member_participant_123",
+      ],
+      senderMemberId: "member_owner_123",
+    }));
     expect(usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit)
       .toHaveBeenCalledExactlyOnceWith({
         prisma,

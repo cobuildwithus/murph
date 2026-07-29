@@ -3,7 +3,6 @@ CREATE TABLE "hosted_pending_group_setup" (
   "owner_member_id" TEXT NOT NULL,
   "channel" TEXT NOT NULL,
   "recipient_phone_lookup_key" TEXT NOT NULL,
-  "payload_encrypted" TEXT NOT NULL,
   "armed_at" TIMESTAMP(3) NOT NULL,
   "expires_at" TIMESTAMP(3) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -18,8 +17,6 @@ CREATE TABLE "hosted_pending_group_setup" (
     CHECK ("expires_at" > "armed_at"),
   CONSTRAINT "hosted_pending_group_setup_recipient_key_present"
     CHECK (length("recipient_phone_lookup_key") > 0),
-  CONSTRAINT "hosted_pending_group_setup_payload_present"
-    CHECK (length("payload_encrypted") > 0),
   CONSTRAINT "hosted_pending_group_setup_owner_member_id_fkey"
     FOREIGN KEY ("owner_member_id") REFERENCES "hosted_member"("id")
     ON DELETE CASCADE ON UPDATE CASCADE

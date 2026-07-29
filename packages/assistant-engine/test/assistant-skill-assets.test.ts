@@ -862,6 +862,20 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
+  it('keeps next-group ownership preparation explicit and private', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
+    expect(groupChatSkill).toBeTruthy()
+    if (!groupChatSkill) return
+
+    const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('action="prepare_next_group"')
+    expect(raw).toContain('one new group')
+    expect(raw).toContain('for 30 minutes')
+    expect(raw).toContain("Do not claim that Murph detected")
+    expect(raw).toContain("Never call any\nof these actions from a group, email, scheduled turn")
+    expect(raw).toContain("do not tell the member to race to\nsend the first message")
+  })
+
   it('polls scheduled member asks to a terminal result in the current turn', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()

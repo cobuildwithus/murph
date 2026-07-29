@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  armHostedPendingGroupSetupTx: vi.fn(),
+  cancelHostedPendingGroupSetupTx: vi.fn(),
   prepareHostedGroupJoinOfferPostTx: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
@@ -35,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
+  readHostedPendingGroupSetup: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   recordHostedGroupDisclosurePermissionTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
@@ -147,6 +150,12 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
+  armHostedPendingGroupSetupTx: mocks.armHostedPendingGroupSetupTx,
+  cancelHostedPendingGroupSetupTx: mocks.cancelHostedPendingGroupSetupTx,
+  readHostedPendingGroupSetup: mocks.readHostedPendingGroupSetup,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
@@ -322,6 +331,8 @@ function groupSummaryWithOwnerEmailGrant() {
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedPendingGroupSetup.mockResolvedValue(null);
+    mocks.cancelHostedPendingGroupSetupTx.mockResolvedValue(false);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
@@ -462,15 +473,18 @@ describe("handleHostedRuntimeGroupTool", () => {
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
+      cancel_next_group: "personal_active",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
       post_disclosure_request: "owner_active",
       post_join_offer: "owner_active",
+      prepare_next_group: "personal_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_name: "participant_aware",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
+      read_next_group: "personal_active",
       revoke_disclosure_grant: "personal_active",
       read_usage: "participant_aware",
       read_usage_referral: "participant_aware",
@@ -479,6 +493,55 @@ describe("handleHostedRuntimeGroupTool", () => {
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+    });
+  });
+
+  it("prepares, reads, and cancels the member's next group intent", async () => {
+    const expiresAt = new Date("2026-07-29T18:30:00.000Z");
+    const setup = {
+      armedAt: new Date("2026-07-29T18:00:00.000Z"),
+      channel: "linq" as const,
+      expiresAt,
+      id: "hpgs_test",
+      ownerMemberId: "member_group_runtime",
+      recipientPhoneLookupKey: "hplk_current_line",
+    };
+    mocks.armHostedPendingGroupSetupTx.mockResolvedValue(setup);
+    mocks.readHostedPendingGroupSetup.mockResolvedValue(setup);
+    mocks.cancelHostedPendingGroupSetupTx.mockResolvedValue(true);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "prepare_next_group" },
+    })).resolves.toEqual({
+      action: "prepare_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        status: "prepared",
+      },
+    });
+    expect(mocks.armHostedPendingGroupSetupTx).toHaveBeenCalledWith({
+      ownerMemberId: "member_group_runtime",
+      tx: fakeTx,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_next_group" },
+    })).resolves.toEqual({
+      action: "read_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        status: "prepared",
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "cancel_next_group" },
+    })).resolves.toEqual({
+      action: "cancel_next_group",
+      result: { status: "canceled" },
     });
   });
 

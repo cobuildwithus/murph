@@ -2310,6 +2310,11 @@ describe("parseHostedRuntimeGroupTool", () => {
 
   it("parses chat-scoped requests with and without the runtime-injected linqThread", () => {
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_next_group",
+    })).toEqual({
+      action: "prepare_next_group",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "read_chat_name",
     })).toEqual({
       action: "read_chat_name",
@@ -2396,6 +2401,50 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses bounded next-group setup responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "prepare_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        status: "prepared",
+      },
+    })).toEqual({
+      action: "prepare_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        status: "prepared",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_next_group",
+      result: { status: "none" },
+    })).toEqual({
+      action: "read_next_group",
+      result: { status: "none" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "cancel_next_group",
+      result: { status: "canceled" },
+    })).toEqual({
+      action: "cancel_next_group",
+      result: { status: "canceled" },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "prepare_next_group",
+      result: {
+        expiresAt: "2026-07-29 18:30:00",
+        status: "prepared",
+      },
+    })).toThrow(/canonical timestamp/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "cancel_next_group",
+      result: {
+        expiresAt: "2026-07-29T18:30:00.000Z",
+        status: "canceled",
+      },
+    })).toThrow(/not allowed/u);
   });
 
   it("parses bounded read_chat_name responses", () => {

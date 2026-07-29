@@ -121,6 +121,13 @@ default destination for every goal or the definition of activation.
   another join. Default to the route-bound server-owned like-to-consent offer;
   liking adds only the disclosed snapshot, while the first-party page is the
   customize path.
+- A member who is about to add Murph to an existing iMessage group can prepare
+  ownership in their private Murph text first. That explicit intent applies to
+  one new group on their current Murph number for 30 minutes. If exactly one
+  prepared member is in the new group's current roster, that member owns
+  Murph's group even when someone else speaks first. Competing preparations do
+  not guess; only a prepared current sender breaks the tie, otherwise the
+  existing first-active-sender behavior remains.
 
 ## First-Class Product Objects
 

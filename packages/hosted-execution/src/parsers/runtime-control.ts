@@ -1247,6 +1247,9 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (
     action === "read_current"
+    || action === "prepare_next_group"
+    || action === "read_next_group"
+    || action === "cancel_next_group"
     || action === "read_chat_name"
     || action === "read_usage"
     || action === "list_memberships"
@@ -2331,6 +2334,64 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (
+    action === "prepare_next_group"
+    || action === "read_next_group"
+    || action === "cancel_next_group"
+  ) {
+    const label = `Hosted runtime group tool ${action} response result`;
+    const result = requireObject(record.result, label);
+    const status = requireString(result.status, `${label} status`);
+    if (
+      (action === "prepare_next_group" || action === "read_next_group")
+      && status === "prepared"
+    ) {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["expiresAt", "status"]),
+        `${label} prepared`,
+      );
+      const expiresAt = requireString(result.expiresAt, `${label} expiresAt`);
+      const expiresAtDate = new Date(expiresAt);
+      if (
+        !Number.isFinite(expiresAtDate.getTime())
+        || expiresAtDate.toISOString() !== expiresAt
+      ) {
+        throw new TypeError(`${label} expiresAt must be a canonical timestamp.`);
+      }
+      return { action, result: { expiresAt, status } };
+    }
+    if (
+      (action === "read_next_group" || action === "cancel_next_group")
+      && status === "none"
+    ) {
+      assertAllowedObjectKeys(result, new Set(["status"]), `${label} none`);
+      return { action, result: { status } };
+    }
+    if (action === "cancel_next_group" && status === "canceled") {
+      assertAllowedObjectKeys(result, new Set(["status"]), `${label} canceled`);
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        `${label} unavailable`,
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            `${label} unavailableReason`,
+          ),
+        },
+      };
+    }
+    throw new TypeError(`${label} status is invalid.`);
   }
 
   if (action === "read_chat_name") {

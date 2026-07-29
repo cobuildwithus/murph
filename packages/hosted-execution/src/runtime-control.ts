@@ -1281,6 +1281,9 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "prepare_next_group" }
+  | { action: "read_next_group" }
+  | { action: "cancel_next_group" }
   | { action: "read_chat_name" }
   | { action: "read_usage" }
   | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
@@ -1368,6 +1371,25 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "prepare_next_group";
+      result:
+        | { expiresAt: string; status: "prepared" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "read_next_group";
+      result:
+        | { expiresAt: string; status: "prepared" }
+        | { status: "none" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "cancel_next_group";
+      result:
+        | { status: "canceled" | "none" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "read_chat_name";

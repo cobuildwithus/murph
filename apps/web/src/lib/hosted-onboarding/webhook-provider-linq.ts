@@ -121,6 +121,9 @@ import {
   ensureHostedThreadContainerRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
+import {
+  ensureHostedPreparedLinqThreadContainerRouteTx,
+} from "../hosted-groups/prepared-thread-container";
 import type {
   HostedLinqFirstContactAdmissionDecision,
   HostedLinqFirstContactAdmissionRequest,
@@ -156,7 +159,6 @@ import {
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
 import {
-  bindArmedHostedUsageReferralToNewContainerTx,
   observeHostedUsageReferralInboundTx,
 } from "../hosted-growth/usage-referral";
 import type { HostedOnboardingReadClient } from "./shared";
@@ -770,6 +772,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
   instantStartAllowed?: boolean;
+  pendingGroupParticipantMemberIds?: readonly string[] | null;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -853,6 +856,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
+      participantMemberIds: input.pendingGroupParticipantMemberIds ?? [],
       prisma: input.prisma,
       threadRouteAccountLookupKeys,
     });
@@ -2436,6 +2440,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  participantMemberIds: readonly string[];
   prisma: Prisma.TransactionClient;
   threadRouteAccountLookupKeys: readonly string[];
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -2522,27 +2527,25 @@ async function planHostedLinqGroupChatWebhook(input: {
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
   try {
-    const ensureResult = await ensureHostedThreadContainerRouteTx({
+    const preparedResult = await ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
-      channel: "linq",
+      fallbackOwnerMemberId: sender.id,
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
-      ownerMemberId: sender.id,
-      prisma: input.prisma,
+      participantMemberIds: input.participantMemberIds,
+      recipientPhoneLookupKeys: input.threadRouteAccountLookupKeys,
+      senderMemberId: sender.id,
       threadId: summary.chatId,
+      tx: input.prisma,
     });
+    if (preparedResult.kind !== "ensured") {
+      return ignored("provision-unavailable", senderIdentityMatch);
+    }
+    const ensureResult = preparedResult.ensure;
     createdContainerMemberId = ensureResult.created
       ? ensureResult.containerMemberId
       : null;
-    if (ensureResult.created) {
-      await bindArmedHostedUsageReferralToNewContainerTx({
-        occurredAt: new Date(occurredAt),
-        ownerMemberId: sender.id,
-        targetContainerMemberId: ensureResult.containerMemberId,
-        tx: input.prisma,
-      });
-    }
     demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (

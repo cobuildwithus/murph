@@ -171,6 +171,14 @@ Last verified: 2026-07-28
   ownership; delayed observations remain subject to the shared seven-day lease
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
+- New Linq-group ownership preparation adds one bounded, non-retried provider
+  roster read before the unbound-group transaction. Provider timeout, failure,
+  an empty or non-group result, no eligible intent, or unresolved ambiguity
+  must preserve the existing first-active-sender provisioning path and must not
+  delay or drop the accepted group message. The one-use setup claim and route
+  creation share one transaction. A concurrent loser re-evaluates without the
+  consumed intent, while convergence on an already-created route restores the
+  still-valid intent instead of silently spending it.
 - Current-chat naming is one on-demand provider read through
   `murph.group action="read_chat_name"`. It uses the current durable route and
   existing bounded Linq or Telegram request timeout and does not retry, cache,
