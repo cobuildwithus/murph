@@ -82,6 +82,9 @@ import {
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -8730,6 +8733,176 @@ describe('assistant codex runtime', () => {
     })
 
     expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+  })
+
+  it('discards feedback from a disconnected stream and keeps native retry safe', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-product-feedback-retry-',
+    )
+    const acceptProductFeedbackCandidate = vi.fn()
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{
+        id: 'assistant_input_feedback_retry',
+        source: 'assistant-input',
+      }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
+      },
+    })
+    if (!productFeedbackRecorder) {
+      throw new Error('Expected product feedback collection to be available.')
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: {
+                id: 'thread-product-feedback-retry',
+              },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: first disconnected candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-disconnected',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'error',
+            params: {
+              error: {
+                message: 'Reconnecting... 1/5',
+                additionalDetails:
+                  'stream disconnected before completion',
+              },
+              threadId: 'thread-product-feedback-retry',
+              turnId: 'turn-product-feedback-retry',
+              willRetry: true,
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 82,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: recovered candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-recovered',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-product-feedback-retry',
+                message: 'Recovered response.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        productFeedbackRecorder,
+        prompt: 'retry after collecting feedback',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Recovered response.',
+      providerActionCount: 0,
+    })
+    expect(productFeedbackRecorder.readProductFeedback()).toMatchObject({
+      kind: 'feature_request',
+      summary: 'Speculative: recovered candidate.',
+    })
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })
 
   it('emits terminal Codex transport diagnostics after provider actions', async () => {
