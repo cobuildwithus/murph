@@ -641,6 +641,9 @@ async function runHostedBillingCheckoutAttempt(input: {
     if (bindResult.kind === "restart") {
       return { kind: "restart" };
     }
+    if (bindResult.kind === "already_active") {
+      return { alreadyActive: true, kind: "already_active", url: null };
+    }
     await closeUnboundHostedSubscriptionCheckout({
       deleteSessionCustomer: input.prepared.stripeCustomerId === null,
       sessionId: session.id,
@@ -650,9 +653,6 @@ async function runHostedBillingCheckoutAttempt(input: {
       throw buildHostedFamilyBillingClaimCheckoutError(
         bindResult.familyClaim,
       );
-    }
-    if (bindResult.kind === "already_active") {
-      return { alreadyActive: true, kind: "already_active", url: null };
     }
     if (bindResult.kind === "blocked") {
       throw bindResult.error;

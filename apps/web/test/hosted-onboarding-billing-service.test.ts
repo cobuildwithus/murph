@@ -1185,6 +1185,41 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.expire).not.toHaveBeenCalled();
   });
 
+  it("does not close the winning Session when a duplicate activates before bind", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const eligibleMember = {
+      billingStatus: HostedBillingStatus.not_started,
+      suspendedAt: null,
+    };
+    const prisma = makePrisma({
+      memberFindUniqueResults: [
+        eligibleMember,
+        eligibleMember,
+        {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+      ],
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: true,
+      url: null,
+    });
+
+    expect(mocks.stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.del).not.toHaveBeenCalled();
+    expect(
+      prisma.hostedMemberSubscriptionCheckout.create,
+    ).not.toHaveBeenCalled();
+  });
+
   it("expires the Stripe session instead of returning it when account deletion wins", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const eligibleMember = {
