@@ -2,10 +2,16 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
+import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
 import {
-  syncHostedLinqProviderLineInventoryTx,
-  type HostedLinqProviderInventoryLine,
-} from "./linq-line-store";
+  projectHostedLinqLineProviderStateTx,
+} from "./linq-provider-health-store";
+import {
+  parseHostedLinqLineReputationStatus,
+  parseHostedLinqLineServiceStatus,
+  type HostedLinqLineReputationStatus,
+  type HostedLinqLineServiceStatus,
+} from "./linq-provider-status";
 import { normalizePhoneNumber } from "./phone";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -13,6 +19,13 @@ import { normalizeNullableString } from "./shared";
 type HostedLinqInventoryClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT = 250;
+
+export type HostedLinqProviderInventoryLine = {
+  phoneNumber: string;
+  providerPhoneNumberId: string | null;
+  providerReputationStatus: HostedLinqLineReputationStatus | null;
+  providerServiceStatus: HostedLinqLineServiceStatus | null;
+};
 
 export async function syncHostedLinqPhoneNumberInventory(input: {
   maxLines?: number;
@@ -24,11 +37,28 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
     maxLines: input.maxLines,
     signal: input.signal,
   });
-  const syncedCount = await syncHostedLinqProviderLineInventoryTx({
-    lines,
-    observedAt: input.observedAt,
-    prisma: input.prisma,
-  });
+  const observedAt = input.observedAt ?? new Date();
+  let syncedCount = 0;
+
+  for (const line of lines) {
+    const storedLine = await upsertHostedLinqLineForPhoneTx({
+      observedAt,
+      phoneNumber: line.phoneNumber,
+      prisma: input.prisma,
+      providerPhoneNumberId: line.providerPhoneNumberId,
+      source: "provider",
+    });
+    await projectHostedLinqLineProviderStateTx({
+      observedAt,
+      phoneNumberLookupKey: storedLine.phoneNumberLookupKey,
+      prisma: input.prisma,
+      providerUpdatedAt: observedAt,
+      reputationStatus: line.providerReputationStatus,
+      serviceStatus: line.providerServiceStatus,
+    });
+    syncedCount += 1;
+  }
+
   return { syncedCount };
 }
 
@@ -96,6 +126,7 @@ export function parseHostedLinqPhoneNumberInventory(
 
   for (const record of records) {
     const reputation = readRecord(record.reputation);
+    const legacyHealthStatus = readRecord(record.health_status);
     const phoneNumber = normalizePhoneNumber(readString(record.phone_number));
     if (!phoneNumber || seenPhones.has(phoneNumber)) {
       continue;
@@ -105,10 +136,12 @@ export function parseHostedLinqPhoneNumberInventory(
     lines.push({
       phoneNumber,
       providerPhoneNumberId: normalizeNullableString(readString(record.id)),
-      providerReason: normalizeNullableString(readString(reputation?.reason)),
-      providerStatus: normalizeNullableString(
-        readString(reputation?.status) ?? readString(record.health_status),
+      providerReputationStatus: parseHostedLinqLineReputationStatus(
+        reputation?.status
+        ?? legacyHealthStatus?.status
+        ?? record.health_status,
       ),
+      providerServiceStatus: parseHostedLinqLineServiceStatus(record.status),
     });
   }
 
