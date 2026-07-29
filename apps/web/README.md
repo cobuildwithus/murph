@@ -162,6 +162,12 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+For a runnable public protocol, Start opens the member's connected channel with
+one human-readable sentence naming the experiment. The draft does not expose
+Health Commons keys or revision hashes. Murph resolves that name through the
+generated protocol discovery surface, then the protocol-backed run owner stores
+the exact key and revisions used at creation.
+
 ## Saved biomarker reference context
 
 Saved lab-result pages keep the imported source flag and per-result laboratory
@@ -238,8 +244,14 @@ retention/deletion, and security practices.
 The hosted Prisma schema keeps ownership sharp and nested:
 
 - `HostedMember` is the core member row plus activation/billing status. Its
-  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
-  authenticated Settings display/write projection; canonical assistant
+  nullable assistant provider/model/reasoning fields are the Web-owned
+  execution preference; OpenAI is the default, and the nullable Venice override
+  is projected only while `HOSTED_VENICE_ENABLED` is enabled. Settings and the
+  input-bound assistant-configuration tool share the same transaction, rollout
+  gate, and canonical response so a model-only save cannot preserve a stale
+  provider in the client. Its nullable
+  assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical personality
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
   canonical snapshot. Hosted conversation set/reset uses the signed,

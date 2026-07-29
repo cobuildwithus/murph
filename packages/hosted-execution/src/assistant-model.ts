@@ -11,6 +11,39 @@ export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
 export type HostedAssistantProductModel =
   (typeof HOSTED_ASSISTANT_PRODUCT_MODELS)[number];
 
+export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
+export const HOSTED_ASSISTANT_VENICE_PROVIDER = "venice" as const;
+
+export const HOSTED_ASSISTANT_PROVIDERS = [
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+] as const;
+
+export type HostedAssistantProvider =
+  (typeof HOSTED_ASSISTANT_PROVIDERS)[number];
+
+export const HOSTED_ASSISTANT_DEFAULT_PROVIDER =
+  HOSTED_ASSISTANT_OPENAI_PROVIDER;
+
+export const HOSTED_ASSISTANT_PROVIDER_OVERRIDES = [
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
+] as const;
+
+export type HostedAssistantProviderOverride =
+  (typeof HOSTED_ASSISTANT_PROVIDER_OVERRIDES)[number];
+
+export function isHostedAssistantProvider(
+  value: unknown,
+): value is HostedAssistantProvider {
+  return HOSTED_ASSISTANT_PROVIDERS.some((provider) => provider === value);
+}
+
+export function parseHostedAssistantProviderOverride(
+  value: unknown,
+): HostedAssistantProviderOverride | null {
+  return value === HOSTED_ASSISTANT_VENICE_PROVIDER ? value : null;
+}
+
 export const HOSTED_ASSISTANT_MODEL_OVERRIDES = [
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,

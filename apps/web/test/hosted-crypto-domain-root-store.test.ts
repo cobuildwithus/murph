@@ -1819,6 +1819,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
             ? null
             : BigInt(input.data.assistantHumorCausalSeq),
         assistantModelPreference: null,
+        assistantProviderPreference: null,
         assistantReasoningEffortPreference: null,
         assistantPush: null,
         assistantPushCausalSeq:

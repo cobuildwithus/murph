@@ -13,6 +13,7 @@ import {
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
@@ -86,6 +87,10 @@ import {
   executeCodexAssistantTurnAttempt,
   executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantActiveTurnInputController,
+  steerAssistantActiveTurnInput,
+} from '../src/assistant/active-turn-input-controller.ts'
 import {
   createAssistantProductFeedbackRecorder,
 } from '../src/assistant/turn-progress.ts'
@@ -1951,10 +1956,12 @@ describe('assistant codex runtime', () => {
 
     const configurationSnapshot = () => ({
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableProviders: [...HOSTED_ASSISTANT_PROVIDERS],
       availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
       configurationAvailable: true,
       dormantSolPreference: false,
       model: savedModel,
+      provider: "openai" as const,
       reasoningEffort: savedReasoningEffort,
       solAvailable: true,
     })
@@ -1995,6 +2002,7 @@ describe('assistant codex runtime', () => {
       currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
+        provider: "openai",
         reasoningEffort: 'low',
       }),
     }
@@ -18544,6 +18552,8 @@ describe('steered final segments', () => {
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
+      onFirstAssistantResponseCompleted?:
+        CodexAppServerTurnInput['onFirstAssistantResponseCompleted']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
@@ -18777,6 +18787,8 @@ describe('steered final segments', () => {
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
+      onFirstAssistantResponseCompleted:
+        input.onFirstAssistantResponseCompleted,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -18848,7 +18860,7 @@ describe('steered final segments', () => {
     const rejectedRef = `ain_${'3'.repeat(32)}`
     const finalReplyRef = `ain_${'4'.repeat(32)}`
     const authorizeAcceptedMessageTarget = vi.fn(async (input: {
-      action: 'native-reply' | 'reaction'
+      action: 'native-reply' | 'participant-effect' | 'reaction'
       deliveryContextOrdinal: number
       messageRef: string
     }) => input.messageRef === rejectedRef
@@ -19287,6 +19299,237 @@ describe('steered final segments', () => {
         kind: 'image',
       },
     ])
+  })
+
+  it('closes admission and preserves a media-only response before a steer boundary', async () => {
+    const firstMedia = {
+      url: 'https://cdn.example.test/assistant/media-only.png',
+      alt: 'Media-only first response',
+      source: 'media-only-first-response',
+    }
+    const callbackOrder: string[] = []
+    const onFirstAssistantResponseCompleted = vi.fn(() => {
+      callbackOrder.push('response-completed')
+    })
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'attach-response-media',
+        id: 43,
+        expectedText: '1 response image attached',
+        media: [firstMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-media-only',
+        type: 'assistant_message',
+        message: '   ',
+      }),
+      completedItemEvent({
+        id: 'user-after-media',
+        type: 'user_message',
+        message: 'This must wait for the next ordinary turn',
+      }),
+      completedItemEvent({
+        id: 'assistant-after-media',
+        type: 'assistant_message',
+        message: 'Later response.',
+      }),
+    ], {
+      onFirstAssistantResponseCompleted,
+      onTraceEvent(event) {
+        if (
+          JSON.stringify(event.rawEvent).includes('"id":"user-after-media"')
+        ) {
+          callbackOrder.push('later-user-item')
+        }
+      },
+    })
+
+    expect(onFirstAssistantResponseCompleted).toHaveBeenCalledTimes(1)
+    expect(callbackOrder).toEqual([
+      'response-completed',
+      'later-user-item',
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: '',
+        media: [
+          {
+            ...firstMedia,
+            kind: 'image',
+          },
+        ],
+      },
+    ])
+    expect(result.finalMessage).toBe('Later response.')
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('preserves provider acknowledgement when a steer response and first completion share one stdout batch', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-batched-steer-ack-work-',
+    )
+    const liveTurnReady = createDeferred<void>()
+    const controller = createAssistantActiveTurnInputController({
+      conversationKeys: [
+        'channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1',
+      ],
+      sessionId: 'session-batched-steer',
+      turnId: 'turn-batched-owner',
+      vault: '/vaults/test',
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-batched-steer',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-batched-steer',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-initial-question',
+                message: 'Initial question',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+
+          await liveTurnReady.promise
+          const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+          child.stdout.write([
+            jsonLine({ id: steerRequest.id, result: {} }),
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-before-batched-steer',
+                  message: 'First response.',
+                  type: 'assistant_message',
+                },
+                threadId: 'thread-batched-steer',
+                turnId: 'turn-batched-steer',
+              },
+            }),
+          ].join(''))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-batched-steer',
+                message: 'Clarification accepted by the provider',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-after-batched-steer',
+                message: 'Revised response.',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-batched-steer',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    try {
+      const turn = executeCodexAppServerTurn({
+        onFirstAssistantResponseCompleted: () => {
+          controller.closeInputAdmission()
+        },
+        onLiveTurn: (liveTurn) => {
+          const releaseLiveTurn = controller.registerLiveProviderTurn({
+            interrupt: () => liveTurn.interrupt(),
+            codexThreadId: liveTurn.threadId,
+            providerTurnId: liveTurn.turnId,
+            sessionId: 'session-batched-steer',
+            steer: (input) => liveTurn.steer(input),
+            turnId: 'turn-batched-owner',
+          })
+          liveTurnReady.resolve()
+          return releaseLiveTurn
+        },
+        prompt: 'Initial question',
+        workingDirectory,
+      })
+
+      await liveTurnReady.promise
+      const completion = steerAssistantActiveTurnInput({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+        },
+        expectedActiveTurnId: 'turn-batched-owner',
+        prompt: 'Clarification accepted by the provider',
+        vault: '/vaults/test',
+      })
+      expect(completion).not.toBeNull()
+      completion?.catch(() => undefined)
+
+      await expect(turn).resolves.toMatchObject({
+        finalMessage: 'Revised response.',
+        precedingAgentMessageSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'First response.',
+          },
+        ],
+        responseDeliveryContextOrdinal: 1,
+      })
+      await expect(controller.admitLiveSteered()).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: 'manual-1',
+          }),
+        ],
+        providerAlreadySteered: true,
+      })
+    } finally {
+      controller.fail(new Error('batched steer acknowledgement test complete'))
+      controller.close()
+    }
   })
 
   it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {

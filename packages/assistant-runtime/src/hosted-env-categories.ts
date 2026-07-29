@@ -67,6 +67,7 @@ export const HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES = [
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   assistantConfigured: [
     "OPENAI_API_KEY",
+    "VENICE_API_KEY",
   ],
   hostedEmailConfigured: [
     "HOSTED_EMAIL_DOMAIN",
@@ -79,4 +80,5 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [
   "OPENAI_API_KEY",
+  "VENICE_API_KEY",
 ] as const;

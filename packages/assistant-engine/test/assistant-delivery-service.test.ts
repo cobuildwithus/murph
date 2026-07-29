@@ -6,6 +6,7 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import {
   deliverAssistantReaction,
   resolveAssistantCurrentAudienceDeliveryFields,
+  resolveAssistantHostedDeliveryIdempotency,
 } from '../src/assistant/delivery-service.ts'
 import {
   startAssistantChannelTypingIndicator,
@@ -128,6 +129,69 @@ test('current audience delivery fields do not mix saved route fields with input 
     threadId: 'linq-thread',
     threadIsDirect: true,
   })
+})
+
+test('hosted delivery fallback recipient keys are room-scoped for group threads', () => {
+  function resolveKey(actorId: string, threadIsDirect: boolean): string | null {
+    const session = createAssistantSession({
+      binding: {
+        actorId,
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'group-thread',
+        },
+        identityId: 'linq-account',
+        threadId: 'group-thread',
+        threadIsDirect,
+      },
+    })
+    const sharedPlan = createSharedPlan({
+      audience: {
+        actorId,
+        bindingDelivery: session.binding.delivery,
+        channel: 'linq',
+        explicitTarget: 'group-thread',
+        identityId: 'linq-account',
+        threadId: 'group-thread',
+        threadIsDirect,
+      },
+    })
+
+    return resolveAssistantHostedDeliveryIdempotency({
+      audience: sharedPlan.conversationPolicy.audience,
+      channel: 'linq',
+      deliveryFields: {
+        actorId,
+        bindingDelivery: session.binding.delivery,
+        explicitTarget: 'group-thread',
+        identityId: 'linq-account',
+        threadId: 'group-thread',
+        threadIsDirect,
+      },
+      input: {
+        executionContext: {
+          hosted: {
+            memberId: 'member-hosted',
+            userEnvKeys: [],
+          },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: 'assistant-reply:1',
+          inboundMailboxItemIds: ['mailbox-item'],
+        },
+        prompt: 'Reply.',
+        vault: '/vaults/test',
+      },
+      session,
+    }).deliveryIdempotencyKey
+  }
+
+  expect(resolveKey('group-actor-a', false))
+    .toBe(resolveKey('group-actor-b', false))
+  expect(resolveKey('direct-actor-a', true))
+    .not.toBe(resolveKey('direct-actor-b', true))
 })
 
 test('current audience delivery fields prefer route-matched input binding hint before audience binding', () => {

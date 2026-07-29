@@ -611,6 +611,39 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("requires Venice runtime env to be configured all-or-none", () => {
+    const error =
+      "Venice runtime env must set VENICE_API_KEY, HOSTED_VENICE_LUNA_MODEL, HOSTED_VENICE_TERRA_MODEL, HOSTED_VENICE_SOL_MODEL together.";
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(error);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_VENICE_LUNA_MODEL: "qwen3-4b",
+          HOSTED_VENICE_SOL_MODEL: "qwen3-vl-235b-a22b",
+          HOSTED_VENICE_TERRA_MODEL: "zai-org-glm-4.7",
+          VENICE_API_KEY: "venice-key",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(error);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).not.toContain(error);
+  });
+
   it("requires an explicitly priced hosted assistant model for worker deploys", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
