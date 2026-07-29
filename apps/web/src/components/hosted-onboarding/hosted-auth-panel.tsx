@@ -35,7 +35,7 @@ import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedPrimaryMethod = "phone" | "email";
 type HostedResumableAuthMethod = "telegram" | "email";
-type HostedResumableAuth = {
+export type HostedResumableAuth = {
   identityLabel: string | null;
   method: HostedResumableAuthMethod;
 };
@@ -189,6 +189,7 @@ export function HostedAuthPanel({
       <div className="space-y-4">
         <HostedLegalConsentCard
           declinePending={consentDeclinePending}
+          initialStatus={pendingAuthCompletion.payload.launchConsentStatus}
           mode="compact"
           onAccepted={handleConsentSatisfied}
           onDecline={() => void handleConsentDeclined()}
@@ -318,7 +319,7 @@ export function HostedAuthPanel({
   );
 }
 
-function HostedResumableAuthState({
+export function HostedResumableAuthState({
   auth,
   disabled,
   pending,

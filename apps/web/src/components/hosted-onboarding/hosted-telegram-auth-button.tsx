@@ -51,16 +51,40 @@ export function HostedTelegramAuthButton({
   }
 
   return (
+    <HostedTelegramAuthButtonPresentation
+      active={active}
+      completionPending={completionPending}
+      disabled={disabled || !ready || loading || completionPending}
+      loading={loading}
+      onClick={handleClick}
+    />
+  );
+}
+
+export function HostedTelegramAuthButtonPresentation({
+  active = false,
+  completionPending = false,
+  disabled = false,
+  loading = false,
+  onClick,
+}: {
+  active?: boolean;
+  completionPending?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
+  onClick: () => void;
+}) {
+  return (
     <HostedInlineAuthButton
       active={active}
       busy={completionPending}
-      disabled={disabled || !ready || loading || completionPending}
+      disabled={disabled}
       icon={
         completionPending
           ? <Spinner aria-hidden="true" />
           : <TelegramIcon className="h-5 w-5" />
       }
-      onClick={handleClick}
+      onClick={onClick}
     >
       {completionPending ? "Finishing..." : loading ? "Connecting..." : "Telegram"}
     </HostedInlineAuthButton>

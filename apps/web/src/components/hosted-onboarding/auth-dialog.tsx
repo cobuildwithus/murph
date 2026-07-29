@@ -30,6 +30,10 @@ let hostedAuthPanelIslandComponent: HostedAuthPanelIslandComponent | null = null
 let hostedAuthPanelIslandLoadPromise: Promise<HostedAuthPanelIslandComponent> | null =
   null;
 
+export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
+export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
+  "Murph helps you build healthier habits that fit your life.";
+
 function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
   if (hostedAuthPanelIslandComponent) {
     return Promise.resolve(hostedAuthPanelIslandComponent);
@@ -101,8 +105,8 @@ export function AuthDialog({
   methods = ["phone", "telegram", "email"],
   open,
   onOpenChange,
-  title = "Log in or sign up",
-  description = "Murph helps you build healthier habits that fit your life.",
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,

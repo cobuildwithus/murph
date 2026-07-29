@@ -7,17 +7,18 @@ Updated: 2026-07-29
 ## Goal
 
 - Keep homepage signup visually stable from authentication through consent: the
-  active authentication button owns post-auth progress, and the consent loading
-  placeholder matches the rendered consent prompt's size and structure.
+  active authentication button owns post-auth progress, and the completion
+  response hands the already-read consent status directly to the consent prompt
+  instead of flashing an intermediate loader.
 
 ## Success criteria
 
 - The standalone "Setting things up" auth dialog state is removed.
 - Telegram, email, and resumable-auth completion keep the auth surface mounted,
   disable competing actions, and show progress on the active button.
-- The compact consent loading placeholder mirrors the rendered title,
-  description, assurances, document links, and actions at desktop and mobile
-  widths without a visible dialog-size jump.
+- The normal homepage completion path renders the correct consent variant
+  immediately, without a second consent-status request or an intermediate
+  skeleton.
 - Focused hosted-web tests and typecheck pass, the design catalog covers the
   changed states, and desktop/mobile browser proof is captured.
 
@@ -25,7 +26,7 @@ Updated: 2026-07-29
 
 - In scope:
   - Homepage hosted auth panel completion presentation.
-  - Shared compact launch-consent skeleton.
+  - Hosted auth-completion consent-status handoff.
   - Focused component tests and design-catalog studies.
 - Out of scope:
   - Provider authentication or account-provisioning behavior.
@@ -50,15 +51,17 @@ Updated: 2026-07-29
    during completion.
    Mitigation: Disable every competing auth action while marking only the active
    method as busy.
-2. Risk: A hand-tuned skeleton could drift from the real consent card again.
-   Mitigation: Mirror the production component's existing layout groups and
-   token classes, with focused structural coverage and a catalog study.
+2. Risk: Returning consent status with auth completion could change fail-closed
+   behavior if that read fails.
+   Mitigation: Keep the status optional and preserve the existing unconsented
+   fallback, which lets the consent card load status through its normal route.
 
 ## Tasks
 
 1. Remove the finishing panel view and route completion state into existing auth
    controls.
-2. Align the consent skeleton with the rendered launch-consent structure.
+2. Reuse the consent status already read by the completion endpoint so the
+   consent view does not need an immediate duplicate request.
 3. Update focused tests and the reusable-component design catalog.
 4. Run focused tests, hosted-web typecheck, and desktop/mobile browser proof.
 5. Complete required frontend review, preliminary specialist review, exact-head
@@ -68,6 +71,8 @@ Updated: 2026-07-29
 
 - Do not introduce a replacement loader component; the initiating button is the
   only post-auth progress surface.
+- Pass completion consent status through the existing payload as optional data;
+  preserve the current fail-closed fallback when the status read is unavailable.
 - Do not change phone-auth finalization here because it already owns its pending
   state inside the phone flow.
 
@@ -81,4 +86,5 @@ Updated: 2026-07-29
 - Expected outcomes:
   - No standalone finishing notice renders from homepage auth.
   - The active completion button remains visible, disabled, and busy.
-  - The consent skeleton and prompt retain the same dialog footprint.
+  - The consent prompt receives completion status directly and does not render a
+    skeleton on the normal homepage path.

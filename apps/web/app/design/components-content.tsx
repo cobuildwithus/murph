@@ -30,9 +30,15 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import {
-  ConsentSkeleton,
+  DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  DEFAULT_AUTH_DIALOG_TITLE,
+} from "@/src/components/hosted-onboarding/auth-dialog";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
+import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
+import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
 } from "@/src/components/legal/hosted-legal-consent-card";
@@ -121,12 +127,12 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
   return (
     <div className="flex flex-col gap-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
-      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
+      <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
         <p className="font-serif text-xl font-semibold tracking-tight text-[#1A1F16]">
-          Log in or sign up
+          {DEFAULT_AUTH_DIALOG_TITLE}
         </p>
         <p className="mt-1 text-sm text-[#5C5A52]">
-          Discover what actually makes you healthier.
+          {DEFAULT_AUTH_DIALOG_DESCRIPTION}
         </p>
         <div className="mt-5">{children}</div>
       </div>
@@ -256,47 +262,72 @@ const DESIGN_AVAILABLE_CONNECT_SOURCES: ConnectSource[] = [
     name: "Garmin",
   },
 ];
-const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
-  documents: DESIGN_LEGAL_DOCUMENTS,
-  generatedAt: "2026-07-23T12:00:00.000Z",
-  launchGranted: false,
-  launchScopes: [
-    {
-      granted: false,
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      scope: "launch.legal",
-    },
-    {
-      granted: false,
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      scope: "launch.health-data",
-    },
-  ],
-  ok: true,
-  schema: "murph.hosted-consent-status.v1",
-  scopes: [
-    {
-      current: false,
-      documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Terms, privacy, and AI disclosure",
-      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.legal",
-    },
-    {
-      current: false,
-      documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      grant: null,
-      granted: false,
-      label: "Health data notice and processing authorization",
-      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
-      revocable: false,
-      scope: "launch.health-data",
-    },
-  ],
-};
+function createDesignLaunchConsentStatus({
+  healthDataGranted,
+  legalGranted,
+}: {
+  healthDataGranted: boolean;
+  legalGranted: boolean;
+}): HostedConsentStatus {
+  return {
+    documents: DESIGN_LEGAL_DOCUMENTS,
+    generatedAt: "2026-07-23T12:00:00.000Z",
+    launchGranted: legalGranted && healthDataGranted,
+    launchScopes: [
+      {
+        granted: legalGranted,
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        scope: "launch.legal",
+      },
+      {
+        granted: healthDataGranted,
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        scope: "launch.health-data",
+      },
+    ],
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      {
+        current: legalGranted,
+        documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: legalGranted,
+        label: "Terms, privacy, and AI disclosure",
+        missingDocuments: legalGranted ? [] : DESIGN_LEGAL_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.legal",
+      },
+      {
+        current: healthDataGranted,
+        documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        grant: null,
+        granted: healthDataGranted,
+        label: "Health data notice and processing authorization",
+        missingDocuments: healthDataGranted
+          ? []
+          : DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+        revocable: false,
+        scope: "launch.health-data",
+      },
+    ],
+  };
+}
+
+const DESIGN_DASHBOARD_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: false,
+});
+const DESIGN_LEGAL_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: true,
+  legalGranted: false,
+});
+const DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS = createDesignLaunchConsentStatus({
+  healthDataGranted: false,
+  legalGranted: true,
+});
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
@@ -497,60 +528,88 @@ export function ComponentsContent() {
             data-design-homepage-auth-transitions
           >
             <p className="text-sm text-muted-foreground">
-              Account completion stays on the active method, then the loading
-              placeholder mirrors the real launch-consent structure so the dialog
-              keeps a stable footprint while consent status loads.
+              Account completion stays on the active production action. Its
+              response carries the consent status into the next view, so there is
+              no separate finishing notice or consent-skeleton flash.
             </p>
-            <DialogPreviewFrame label="Account completion stays on the action">
-              <div className="grid grid-cols-2 gap-3">
-                <HostedInlineAuthButton
-                  active
-                  busy
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <DialogPreviewFrame label="Telegram completion">
+                <div className="grid grid-cols-2 gap-3">
+                  <HostedTelegramAuthButtonPresentation
+                    active
+                    completionPending
+                    disabled
+                    onClick={() => {}}
+                  />
+                  <HostedInlineAuthButton
+                    disabled
+                    icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
+                    onClick={() => {}}
+                  >
+                    Email
+                  </HostedInlineAuthButton>
+                </div>
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Verification completion">
+                <HostedVerificationCodeStep
+                  autoFocus={false}
+                  code="123456"
+                  description="We emailed the latest code."
                   disabled
-                  icon={<Spinner aria-hidden="true" />}
-                  onClick={() => {}}
-                >
-                  Finishing...
-                </HostedInlineAuthButton>
-                <HostedInlineAuthButton
+                  onCodeChange={() => {}}
+                  onResendCode={() => {}}
+                  onSubmit={() => {}}
+                  pendingAction="verify-code"
+                  primaryActionLabel="Verify email"
+                  primaryActionPendingLabel="Finishing..."
+                  size="compact"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Resumable completion">
+                <HostedResumableAuthState
+                  auth={{ identityLabel: null, method: "telegram" }}
                   disabled
-                  icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
-                  onClick={() => {}}
-                >
-                  Email
-                </HostedInlineAuthButton>
-              </div>
-            </DialogPreviewFrame>
+                  onContinue={() => {}}
+                  onSignOut={() => {}}
+                  pending
+                />
+              </DialogPreviewFrame>
+            </div>
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Consent loading to decision
+              Consent appears directly from completion status
             </p>
             <div className="grid items-start gap-5 lg:grid-cols-2" inert>
               <div
                 className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="loading"
-              >
-                <ConsentSkeleton
-                  secondaryAction={
-                    <Button
-                      className="px-3 text-muted-foreground"
-                      size="lg"
-                      type="button"
-                      variant="ghost"
-                    >
-                      Decline
-                    </Button>
-                  }
-                />
-              </div>
-              <div
-                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
-                data-design-homepage-consent="loaded"
+                data-design-homepage-consent="combined"
               >
                 <HostedLegalConsentCard
                   initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
                   mode="compact"
                   onDecline={() => {}}
-                  source="design-homepage-consent"
+                  source="design-homepage-consent-combined"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="health-data"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_HEALTH_DATA_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-health-data"
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="legal"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_LEGAL_ONLY_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent-legal"
                 />
               </div>
             </div>

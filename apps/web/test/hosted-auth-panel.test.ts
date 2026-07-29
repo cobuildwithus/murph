@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   loginWithTelegram: vi.fn(),
   legalConsentCardProps: null as {
     declinePending?: boolean;
+    initialStatus?: unknown;
     mode?: string;
     onAccepted?: () => Promise<void> | void;
     onDecline?: () => void;
@@ -37,6 +38,16 @@ const mocks = vi.hoisted(() => ({
   usePrivy: vi.fn(),
   useUser: vi.fn(),
 }));
+
+const launchConsentStatus = {
+  documents: [],
+  generatedAt: "2026-07-29T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [],
+} as const;
 
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
@@ -178,6 +189,7 @@ beforeEach(() => {
       activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "/join/invite-code",
+      launchConsentStatus,
       stage: "active",
     },
     redirectUrl: "/home",
@@ -463,6 +475,7 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Hosted legal consent card");
   expect(mocks.legalConsentCardProps).toMatchObject({
+    initialStatus: launchConsentStatus,
     mode: "compact",
     preferredScope: "launch.legal",
     source: "homepage-auth-dialog",
@@ -633,6 +646,7 @@ test("HostedAuthPanel shows launch consent after homepage signup auth before red
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Hosted legal consent card");
   expect(mocks.legalConsentCardProps).toMatchObject({
+    initialStatus: launchConsentStatus,
     mode: "compact",
     preferredScope: "launch.legal",
     source: "homepage-auth-dialog",
