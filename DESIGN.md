@@ -202,7 +202,11 @@ cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
 deliberate binary target exception because the standard sienna warning token
 reads brown rather than the explicitly required red; always pair either color
 with `10% target hit` or `Below 10% target` text. A missing comparison stays
-neutral and must not claim that a snapshot exists.
+neutral and must not claim that a snapshot exists. Active-user windows must not
+present intentionally retired group-sender evidence as an exact count: prefix
+an affected WAU or MAU with `At least`, explain the private evidence retirement
+in the supporting copy, and withhold a week-over-week rate when either compared
+window is incomplete.
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
