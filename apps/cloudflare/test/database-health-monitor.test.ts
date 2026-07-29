@@ -862,6 +862,119 @@ describe("database health monitor", () => {
     });
   });
 
+  it("promotes deferred direct evidence alone after the attempt fence reopens", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const healthyChatResponse = () => Response.json({
+      ...createLinqChatResponseBody(),
+      health_status: { status: "HEALTHY" },
+    });
+    const healthyPhoneResponse = () =>
+      Response.json(createHealthyLinqPhoneNumbersBody());
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        healthyChatResponse,
+        healthyPhoneResponse,
+        healthyChatResponse,
+        healthyPhoneResponse,
+        () => new Response(null, { status: 503 }),
+      ],
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy" });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 4),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 7),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCheckedAtMs: FIVE_MINUTES_MS * 4,
+      deferredDirectErrorCount: 2,
+      pendingAlertMessage: null,
+    });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 12,
+      directErrors: 7,
+    });
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 14),
+    ).resolves.toMatchObject({ outcome: "alert_failed" });
+    expect(harness.linqRequests).toHaveLength(2);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCheckedAtMs: null,
+      deferredDirectErrorCount: 0,
+      pendingAlertMessage: expect.stringContaining(
+        "2 direct migration connection errors",
+      ),
+    });
+    expect(harness.monitor.readAlertState().pendingAlertMessage)
+      .toContain("Checked 00:20 UTC");
+    expect(harness.monitor.readAlertState().pendingAlertMessage)
+      .not.toContain("PgBouncer wait");
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 15),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 20),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.linqRequests).toHaveLength(3);
+    const directErrorPage = await readLinqRequestBody(harness.linqRequests[2]);
+    expect(directErrorPage.message.parts[0]?.value)
+      .toContain("2 direct migration connection errors");
+    expect(directErrorPage.message.parts[0]?.value)
+      .toContain("Checked 00:20 UTC");
+    expect(directErrorPage.message.parts[0]?.value)
+      .not.toContain("PgBouncer wait");
+    expect(
+      harness.monitor.readRecentSamples(20)
+        .filter((sample) => sample.directConnectionErrorDelta === 2),
+    ).toHaveLength(1);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCheckedAtMs: null,
+      deferredDirectErrorCount: 0,
+      incidentOpen: false,
+      pendingAlertMessage: null,
+    });
+  });
+
   it("retains a direct-error page suppressed by Linq health after recovery", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

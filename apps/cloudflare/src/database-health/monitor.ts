@@ -259,6 +259,9 @@ export class DatabaseHealthMonitor {
           alertState.deferredDirectErrorCount
           + (currentDirectError?.count ?? 0)
         );
+    const isPromotingDeferredDirectError =
+      !hasExistingPendingAlert
+      && alertState.deferredDirectErrorCount > 0;
     if (
       sample.conditions.length > 0
       || directErrorCountAvailableForAdmission > 0
@@ -289,7 +292,14 @@ export class DatabaseHealthMonitor {
           >= DATABASE_HEALTH_ALERT_INTERVAL_MS
         );
       const admittedConditions =
-        !isNewIncident && !attemptFenceOpen && hasDirectConnectionError
+        (
+          isPromotingDeferredDirectError
+          || (
+            !isNewIncident
+            && !attemptFenceOpen
+            && hasDirectConnectionError
+          )
+        )
           ? conditionsWithDeferredDirectErrors.filter(
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
