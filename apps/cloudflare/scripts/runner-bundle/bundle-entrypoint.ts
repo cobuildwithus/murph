@@ -58,10 +58,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // ordinary small authored-code growth.
 //
 // The private-media and current hosted-alert integration measured 9,761,860B
-// total and an 8,009,225B static closure on 2026-07-28. The combined graph added
-// no forbidden boot input; production assembly below still fails closed if any
-// dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_761_860 + 32_768;
+// total and an 8,009,225B static closure on 2026-07-28. The next-group setup
+// integration measured 9,798,049B total in CI on 2026-07-29. The largest inputs
+// remained the existing hosted runtime, parser, and dynamic-tool owners, and the
+// forbidden-input guard admitted no new subsystem. Keep the established 32KB
+// reviewed-addition allowance above that measured total.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_798_049 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
