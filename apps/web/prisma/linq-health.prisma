@@ -1,0 +1,29 @@
+model HostedLinqLineProviderState {
+  phoneNumberLookupKey String    @id @map("phone_number_lookup_key")
+  serviceStatus        String?   @map("service_status")
+  reputationStatus     String?   @map("reputation_status")
+  providerUpdatedAt    DateTime? @map("provider_updated_at")
+  providerObservedAt   DateTime  @map("provider_observed_at")
+  lastStatusEventId    String?   @map("last_status_event_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([serviceStatus])
+  @@index([reputationStatus])
+  @@index([providerUpdatedAt])
+  @@map("hosted_linq_line_provider_state")
+}
+
+model HostedLinqChatHealth {
+  linqChatLookupKey     String   @id @map("linq_chat_lookup_key")
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  providerStatus       String   @map("provider_status")
+  providerUpdatedAt    DateTime @map("provider_updated_at")
+  providerObservedAt   DateTime @map("provider_observed_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([phoneNumberLookupKey, providerStatus])
+  @@index([providerStatus, providerUpdatedAt])
+  @@map("hosted_linq_chat_health")
+}
