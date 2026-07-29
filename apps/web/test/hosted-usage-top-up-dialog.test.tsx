@@ -451,9 +451,9 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /How many messages do you want to sponsor\?/,
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Sponsor more messages",
     );
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),

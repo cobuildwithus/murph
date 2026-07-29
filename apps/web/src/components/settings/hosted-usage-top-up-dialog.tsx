@@ -217,7 +217,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "Usage credit unavailable"
                 : props.scope === "group"
-                  ? "How many messages do you want to sponsor?"
+                  ? "Sponsor more messages"
                   : familyTarget
                     ? `Choose an amount for ${familyTarget}`
                     : "Choose an amount"}
