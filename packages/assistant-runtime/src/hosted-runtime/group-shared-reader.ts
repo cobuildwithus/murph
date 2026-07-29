@@ -48,10 +48,12 @@ const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES = 2 * 1_024 * 1_024;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_ENTRIES = 2_048;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_KEY_PATTERN =
   /^[a-f0-9]{64}$/u;
-// A successful omission can represent a new profile/contact not yet shared,
-// so keep negative reuse short without adding mutation-time invalidation.
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_NEGATIVE_TTL_MS = 5 * 60 * 1_000;
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_POSITIVE_TTL_MS = 60 * 60 * 1_000;
+// A successful omission means Web found neither an authorized profile name nor
+// an owner-shared contact label. Bound its reuse without adding invalidation.
+const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_NEGATIVE_TTL_MS =
+  6 * 60 * 60 * 1_000;
+const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_POSITIVE_TTL_MS =
+  14 * 24 * 60 * 60 * 1_000;
 const HOSTED_GROUP_SHARED_SELECTABLE_SCOPE_BY_KEY = new Map(
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((projectionScope) => [
     buildHostedVaultShareProjectionScopeKey(projectionScope),

@@ -1366,8 +1366,9 @@ memo and one bounded private file cache at
 Initial prompt preparation reads unresolved unique handles in one batch; later
 live admissions reuse operation-local positive, negative, and fail-soft entries
 and read only new handles. Across ordinary turns that reuse the same local
-workspace, validated positive labels have a fixed one-hour TTL and valid
-successful omissions have a fixed five-minute TTL. Each entry uses an opaque
+workspace, validated profile and owner-shared contact labels have a fixed
+14-day TTL, while a valid successful omission after both sources are unresolved
+has a fixed six-hour TTL. Each entry uses an opaque
 SHA-256 key over the callback-bound runtime member, exact accepted-input route
 conversation key, channel, and normalized handle. The versioned JSON file is
 atomically replaced, capped at 2,048 insertion-ordered entries and two MiB on

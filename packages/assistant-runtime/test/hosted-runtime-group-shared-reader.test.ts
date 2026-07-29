@@ -210,7 +210,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("reuses positive entries for one fixed hour without crossing runtime or room scope", async () => {
+  it("reuses profile and shared-contact positives for 14 days without crossing runtime or room scope", async () => {
     const vaultRoot = await createTestVaultRoot();
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-07-29T12:00:00.000Z");
@@ -226,9 +226,11 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       return {
         action: "read_participant_display_names",
         result: {
-          participants: input.linqSenderHandles.map((senderHandle) => ({
+          participants: input.linqSenderHandles.map((senderHandle, index) => ({
             displayName: `Label ${round}`,
-            displayNameSource: "profile-name" as const,
+            displayNameSource: index === 0
+              ? "profile-name" as const
+              : "unverified-owner-contact" as const,
             senderHandle,
           })),
           status: "ok",
@@ -243,19 +245,27 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       ...input,
       vaultRoot,
     });
-    const senderHandle = "+15551112222";
-    const senderHandles = [senderHandle] as const;
+    const profileHandle = "+15551112222";
+    const sharedContactHandle = "+15553334444";
+    const senderHandles = [profileHandle, sharedContactHandle] as const;
 
     await expect(createReader({
       routeConversationKey: "linq\0room-positive-ttl",
       runtimeMemberId: "member-positive-ttl",
-    }).read({ channel: "linq", senderHandles })).resolves.toEqual([{
-      displayName: "Label 1",
-      displayNameSource: "profile-name",
-      senderHandle,
-    }]);
+    }).read({ channel: "linq", senderHandles })).resolves.toEqual([
+      {
+        displayName: "Label 1",
+        displayNameSource: "profile-name",
+        senderHandle: profileHandle,
+      },
+      {
+        displayName: "Label 1",
+        displayNameSource: "unverified-owner-contact",
+        senderHandle: sharedContactHandle,
+      },
+    ]);
 
-    vi.setSystemTime(startedAtMs + 59 * 60 * 1_000);
+    vi.setSystemTime(startedAtMs + 14 * 24 * 60 * 60 * 1_000 - 1);
     vi.resetModules();
     const {
       createHostedGroupParticipantDisplayNameReader: createFreshReader,
@@ -268,12 +278,19 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     });
     await expect(sameScopeReader.read({
       channel: "linq",
-      senderHandles: [` ${senderHandle} `],
-    })).resolves.toEqual([{
-      displayName: "Label 1",
-      displayNameSource: "profile-name",
-      senderHandle,
-    }]);
+      senderHandles: [` ${profileHandle} `, ` ${sharedContactHandle} `],
+    })).resolves.toEqual([
+      {
+        displayName: "Label 1",
+        displayNameSource: "profile-name",
+        senderHandle: profileHandle,
+      },
+      {
+        displayName: "Label 1",
+        displayNameSource: "unverified-owner-contact",
+        senderHandle: sharedContactHandle,
+      },
+    ]);
     expect(request).toHaveBeenCalledTimes(1);
 
     await createReader({
@@ -286,19 +303,26 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }).read({ channel: "linq", senderHandles });
     expect(request).toHaveBeenCalledTimes(3);
 
-    vi.setSystemTime(startedAtMs + 60 * 60 * 1_000);
+    vi.setSystemTime(startedAtMs + 14 * 24 * 60 * 60 * 1_000);
     await expect(createReader({
       routeConversationKey: "linq\0room-positive-ttl",
       runtimeMemberId: "member-positive-ttl",
-    }).read({ channel: "linq", senderHandles })).resolves.toEqual([{
-      displayName: "Label 4",
-      displayNameSource: "profile-name",
-      senderHandle,
-    }]);
+    }).read({ channel: "linq", senderHandles })).resolves.toEqual([
+      {
+        displayName: "Label 4",
+        displayNameSource: "profile-name",
+        senderHandle: profileHandle,
+      },
+      {
+        displayName: "Label 4",
+        displayNameSource: "unverified-owner-contact",
+        senderHandle: sharedContactHandle,
+      },
+    ]);
     expect(request).toHaveBeenCalledTimes(4);
   });
 
-  it("batches only cache misses and refreshes a valid unnamed result after five minutes", async () => {
+  it("batches only true name misses and refreshes a valid unnamed result after six hours", async () => {
     const vaultRoot = await createTestVaultRoot();
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-07-29T13:00:00.000Z");
@@ -371,14 +395,14 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }]);
     expect(request).toHaveBeenCalledTimes(2);
 
-    vi.setSystemTime(startedAtMs + 4 * 60 * 1_000);
+    vi.setSystemTime(startedAtMs + 6 * 60 * 60 * 1_000 - 1);
     await expect(createReader().read({
       channel: "linq",
       senderHandles: [actorC],
     })).resolves.toEqual([]);
     expect(request).toHaveBeenCalledTimes(2);
 
-    vi.setSystemTime(startedAtMs + 5 * 60 * 1_000);
+    vi.setSystemTime(startedAtMs + 6 * 60 * 60 * 1_000);
     await expect(createReader().read({
       channel: "linq",
       senderHandles: [actorC],

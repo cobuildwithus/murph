@@ -1614,9 +1614,10 @@ results. Initial prompt preparation reads unresolved unique handles once,
 including a 20-message/four-sender burst as one four-handle request. Later live
 admissions reuse operation-local positive, negative, and fail-soft entries and
 batch only newly unresolved handles. Across ordinary turns and fresh reader or
-process instances sharing one local workspace, a validated positive entry has
-a fixed one-hour TTL and a valid successful omission has a fixed five-minute
-TTL. The 2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
+process instances sharing one local workspace, a validated profile or
+owner-shared contact entry has a fixed 14-day TTL and a valid successful
+omission after both sources are unresolved has a fixed six-hour TTL. The
+2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
 callback-bound runtime member, exact accepted-input route conversation key,
 channel, and normalized handle; hits neither slide expiry nor reorder eviction.
 The fixed-path JSON is atomically replaced under `0700`/`0600` permissions and

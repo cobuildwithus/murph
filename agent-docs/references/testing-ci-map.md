@@ -465,9 +465,10 @@ Hosted Web tests prove exact current-membership/profile candidates, pre-group
 and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
 profile-over-contact precedence, fail-soft advisory outcomes, and one set-based
 profile/contact lookup. Assistant-runtime tests prove the operation-local
-reader memo, bounded private file-backed positive and valid-negative cache,
-reuse across fresh module instances, exact runtime and route scope isolation,
-fixed TTLs, non-sliding FIFO eviction, failure-only operation suppression,
+reader memo, bounded private file-backed profile/contact-positive and
+valid-negative cache, reuse across fresh module instances, exact runtime and
+route scope isolation, the 14-day positive and six-hour true-miss boundaries,
+non-sliding FIFO eviction, failure-only operation suppression,
 corruption recovery, opaque keys, private permissions where portable, provenance
 preservation, duplicate
 rejection, malformed-batch rejection, and mixed batch miss behavior.
