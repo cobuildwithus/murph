@@ -16,6 +16,8 @@ import type {
 import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
+  HostedAssistantProvider,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -1782,10 +1784,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
+      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
+      provider: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -1800,10 +1809,12 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
+  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -2500,6 +2511,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }

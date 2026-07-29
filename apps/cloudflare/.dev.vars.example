@@ -37,6 +37,13 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # Add any optional provider/runtime vars or secrets you need for wrangler dev here. The checked-in
 # local scaffold no longer filters `.dev.vars` through `secrets.required`.
 # OPENAI_API_KEY=...
+# Configure Venice as one all-or-none group. The Web Settings choice stays
+# hidden until these values have been deployed and HOSTED_VENICE_ENABLED is
+# enabled in apps/web.
+# VENICE_API_KEY=...
+# HOSTED_VENICE_LUNA_MODEL=qwen3-4b
+# HOSTED_VENICE_TERRA_MODEL=zai-org-glm-4.7
+# HOSTED_VENICE_SOL_MODEL=qwen3-vl-235b-a22b
 # MURPH_DATA_API_KEY=replace-with-random-data-api-key
 # AGENTMAIL_API_KEY=...
 # TELEGRAM_BOT_TOKEN=...
