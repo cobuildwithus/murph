@@ -1,16 +1,10 @@
 import "server-only";
 
 import {
-  assistantPersonaIdSchema,
-  assistantPersonalityScoreSchema,
-  assistantPersonalitySettingIds,
-  assistantTonePreferenceSchema,
-  assistantVoiceOptionIdSchema,
-  type AssistantPersonaId,
-  type AssistantPersonalitySettingId,
-  type AssistantTonePreference,
-  type AssistantVoiceOptionId,
-} from "@murphai/contracts";
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+  parseHostedRuntimePendingGroupSetupInput,
+  type HostedRuntimePendingGroupSetupInput,
+} from "@murphai/hosted-execution/pending-group-setup";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
@@ -27,8 +21,6 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_PENDING_GROUP_SETUP_TTL_MS = 30 * 60 * 1_000;
 export const HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS = 32;
-export const HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES = 4 * 1_024;
-export const HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION = 1;
 
 const HOSTED_PENDING_GROUP_SETUP_CHANNEL = "linq" as const;
 const HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE =
@@ -37,27 +29,14 @@ const HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE =
 export type HostedPendingGroupSetupChannel =
   typeof HOSTED_PENDING_GROUP_SETUP_CHANNEL;
 
-export interface HostedPendingGroupSetupStyle {
-  persona?: AssistantPersonaId;
-  personality?: Partial<Record<AssistantPersonalitySettingId, number | null>>;
-  tone?: AssistantTonePreference;
-  voice?: AssistantVoiceOptionId;
-}
-
-export interface HostedPendingGroupSetupPayloadV1 {
-  roomContextMarkdown?: string;
-  schemaVersion: typeof HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION;
-  style?: HostedPendingGroupSetupStyle;
-}
-
 export interface HostedPendingGroupSetupSnapshot {
   armedAt: Date;
   channel: HostedPendingGroupSetupChannel;
   expiresAt: Date;
   id: string;
   ownerMemberId: string;
-  payload: HostedPendingGroupSetupPayloadV1;
   recipientPhoneLookupKey: string;
+  setup: HostedRuntimePendingGroupSetupInput;
 }
 
 interface HostedPendingGroupSetupRow {
@@ -123,8 +102,8 @@ export interface HostedPendingGroupSetupRestoreToken {
 export async function armHostedPendingGroupSetupTx(input: {
   now?: Date;
   ownerMemberId: string;
-  payload: unknown;
   recipientPhoneLookupKey: string;
+  setup: unknown;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupSnapshot> {
   const ownerMemberId = requireNonEmptyString(
@@ -137,7 +116,7 @@ export async function armHostedPendingGroupSetupTx(input: {
   );
   const now = requireValidDate(input.now ?? new Date(), "pending group setup armed at");
   const expiresAt = new Date(now.getTime() + HOSTED_PENDING_GROUP_SETUP_TTL_MS);
-  const payload = normalizeHostedPendingGroupSetupPayload(input.payload);
+  const setup = parseHostedRuntimePendingGroupSetupInput(input.setup);
 
   const owner = await input.tx.hostedMember.findUnique({
     select: { id: true, suspendedAt: true },
@@ -167,7 +146,10 @@ export async function armHostedPendingGroupSetupTx(input: {
     prisma: input.tx,
     scope: HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE,
     userId: ownerMemberId,
-    value: JSON.stringify(payload),
+    value: JSON.stringify({
+      schemaVersion: HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+      ...setup,
+    }),
   });
   if (!payloadEncrypted) {
     throw new TypeError("Pending group setup payload encryption returned no value.");
@@ -203,13 +185,13 @@ export async function armHostedPendingGroupSetupTx(input: {
   if (!row) {
     throw new Error("Pending group setup upsert returned no row.");
   }
-  return projectHostedPendingGroupSetupSnapshot(row, payload);
+  return projectHostedPendingGroupSetupSnapshot(row, setup);
 }
 
 export async function readHostedPendingGroupSetup(input: {
   now?: Date;
   ownerMemberId: string;
-  prisma?: PrismaClient;
+  prisma?: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupSnapshot | null> {
   const ownerMemberId = normalizeNullableString(input.ownerMemberId);
   if (!ownerMemberId) {
@@ -238,10 +220,7 @@ export async function readHostedPendingGroupSetup(input: {
   try {
     return projectHostedPendingGroupSetupSnapshot(
       row,
-      await openHostedPendingGroupSetupPayload({
-        prisma,
-        row,
-      }),
+      await openHostedPendingGroupSetupPayload({ prisma, row }),
     );
   } catch {
     // Optional unreadable setup state never becomes group authority.
@@ -285,11 +264,7 @@ export function selectHostedPendingGroupSetupCandidate(input: {
   const senderMemberId = normalizeNullableString(input.senderMemberId);
   const senderCandidate = senderMemberId ? byOwner.get(senderMemberId) : undefined;
   return senderCandidate
-    ? {
-        candidate: senderCandidate,
-        kind: "selected",
-        reason: "sender_wins_conflict",
-      }
+    ? { candidate: senderCandidate, kind: "selected", reason: "sender_wins_conflict" }
     : { kind: "none", reason: "ambiguous" };
 }
 
@@ -354,7 +329,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
       continue;
     }
     try {
-      const payload = await openHostedPendingGroupSetupPayload({
+      const setup = await openHostedPendingGroupSetupPayload({
         prisma: input.tx,
         row: claimed,
       });
@@ -362,7 +337,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
         claimToken: { ...claimed },
         kind: "claimed",
         reason: selection.reason,
-        setup: projectHostedPendingGroupSetupSnapshot(claimed, payload),
+        setup: projectHostedPendingGroupSetupSnapshot(claimed, setup),
       };
     } catch {
       // Arm validates payloads. Corrupt or future bytes are consumed rather than
@@ -391,144 +366,6 @@ export async function restoreHostedPendingGroupSetupClaimTx(input: {
     )
     ON CONFLICT ("owner_member_id") DO NOTHING
   `)) > 0;
-}
-
-export function normalizeHostedPendingGroupSetupPayload(
-  value: unknown,
-): HostedPendingGroupSetupPayloadV1 {
-  const record = requireStrictObject(value, "Pending group setup payload");
-  assertOnlyKeys(record, ["roomContextMarkdown", "schemaVersion", "style"]);
-  if (record.schemaVersion !== HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION) {
-    throw new TypeError("Pending group setup schema version is invalid.");
-  }
-
-  const roomContextMarkdown = Object.hasOwn(record, "roomContextMarkdown")
-    ? normalizeHostedPendingGroupSetupRoomContext(record.roomContextMarkdown)
-    : undefined;
-  const style = Object.hasOwn(record, "style")
-    ? normalizeHostedPendingGroupSetupStyle(record.style)
-    : undefined;
-  if (roomContextMarkdown === undefined && style === undefined) {
-    throw new TypeError("Pending group setup requires style or room context.");
-  }
-
-  return {
-    ...(roomContextMarkdown === undefined ? {} : { roomContextMarkdown }),
-    schemaVersion: HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION,
-    ...(style === undefined ? {} : { style }),
-  };
-}
-
-function normalizeHostedPendingGroupSetupStyle(
-  value: unknown,
-): HostedPendingGroupSetupStyle {
-  const record = requireStrictObject(value, "Pending group setup style");
-  assertOnlyKeys(record, ["persona", "personality", "tone", "voice"]);
-  const style: HostedPendingGroupSetupStyle = {};
-
-  if (Object.hasOwn(record, "persona")) {
-    style.persona = parseContractValue(
-      assistantPersonaIdSchema,
-      record.persona,
-      "Pending group setup persona is invalid.",
-    );
-  }
-  if (Object.hasOwn(record, "tone")) {
-    style.tone = parseContractValue(
-      assistantTonePreferenceSchema,
-      record.tone,
-      "Pending group setup tone is invalid.",
-    );
-  }
-  if (Object.hasOwn(record, "voice")) {
-    style.voice = parseContractValue(
-      assistantVoiceOptionIdSchema,
-      record.voice,
-      "Pending group setup voice is invalid.",
-    );
-  }
-  if (Object.hasOwn(record, "personality")) {
-    const personalityRecord = requireStrictObject(
-      record.personality,
-      "Pending group setup personality",
-    );
-    assertOnlyKeys(personalityRecord, assistantPersonalitySettingIds);
-    if (Object.keys(personalityRecord).length === 0) {
-      throw new TypeError(
-        "Pending group setup personality requires at least one setting.",
-      );
-    }
-    const personality: HostedPendingGroupSetupStyle["personality"] = {};
-    for (const setting of assistantPersonalitySettingIds) {
-      if (!Object.hasOwn(personalityRecord, setting)) {
-        continue;
-      }
-      const settingValue = personalityRecord[setting];
-      personality[setting] = settingValue === null
-        ? null
-        : parseContractValue(
-            assistantPersonalityScoreSchema,
-            settingValue,
-            `Pending group setup ${setting} is invalid.`,
-          );
-    }
-    style.personality = personality;
-  }
-
-  if (Object.keys(style).length === 0) {
-    throw new TypeError("Pending group setup style requires at least one setting.");
-  }
-  return style;
-}
-
-function normalizeHostedPendingGroupSetupRoomContext(value: unknown): string {
-  if (typeof value !== "string") {
-    throw new TypeError("Pending group setup room context must be text.");
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    throw new TypeError("Pending group setup room context must not be empty.");
-  }
-  if (
-    new TextEncoder().encode(normalized).byteLength
-      > HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES
-  ) {
-    throw new TypeError("Pending group setup room context is too large.");
-  }
-  return normalized;
-}
-
-function parseContractValue<T>(
-  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
-  value: unknown,
-  message: string,
-): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
-    throw new TypeError(message);
-  }
-  return parsed.data;
-}
-
-function requireStrictObject(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function assertOnlyKeys(
-  record: Record<string, unknown>,
-  allowedKeys: readonly string[],
-): void {
-  const allowed = new Set(allowedKeys);
-  const unknown = Object.keys(record).find((key) => !allowed.has(key));
-  if (unknown) {
-    throw new TypeError(`Pending group setup field ${unknown} is not supported.`);
-  }
 }
 
 async function readCandidateRowsTx(input: {
@@ -577,7 +414,7 @@ async function filterCurrentlyEligibleCandidateRows(input: {
 async function openHostedPendingGroupSetupPayload(input: {
   prisma: PrismaClient | Prisma.TransactionClient;
   row: HostedPendingGroupSetupRow;
-}): Promise<HostedPendingGroupSetupPayloadV1> {
+}): Promise<HostedRuntimePendingGroupSetupInput> {
   const serialized = await openHostedUserSecureBoxString({
     aad: buildHostedPendingGroupSetupPayloadAad(input.row.id),
     lane: "hosted-member-private-field",
@@ -589,12 +426,20 @@ async function openHostedPendingGroupSetupPayload(input: {
   if (!serialized) {
     throw new TypeError("Pending group setup payload is missing.");
   }
-  return normalizeHostedPendingGroupSetupPayload(JSON.parse(serialized) as unknown);
+  const parsed = JSON.parse(serialized) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Pending group setup payload is invalid.");
+  }
+  const { schemaVersion, ...setup } = parsed as Record<string, unknown>;
+  if (schemaVersion !== HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION) {
+    throw new TypeError("Pending group setup payload version is unsupported.");
+  }
+  return parseHostedRuntimePendingGroupSetupInput(setup);
 }
 
 function projectHostedPendingGroupSetupSnapshot(
   row: HostedPendingGroupSetupRow,
-  payload: HostedPendingGroupSetupPayloadV1,
+  setup: HostedRuntimePendingGroupSetupInput,
 ): HostedPendingGroupSetupSnapshot {
   return {
     armedAt: row.armedAt,
@@ -602,8 +447,8 @@ function projectHostedPendingGroupSetupSnapshot(
     expiresAt: row.expiresAt,
     id: row.id,
     ownerMemberId: row.ownerMemberId,
-    payload,
     recipientPhoneLookupKey: row.recipientPhoneLookupKey,
+    setup,
   };
 }
 
