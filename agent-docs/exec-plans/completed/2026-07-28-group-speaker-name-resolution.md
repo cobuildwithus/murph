@@ -1,6 +1,6 @@
 # Efficient group speaker name resolution
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -68,10 +68,11 @@ Updated: 2026-07-28
    authority owners.
 2. [x] Receive and inspect ReviewGPT's implementation patch.
 3. [x] Apply the smallest correct patch and resolve verified integration issues.
-4. [ ] Run focused tests, typechecks, canonical diff verification, and
+4. [x] Run focused tests, typechecks, canonical diff verification, and
    acceptance verification.
-5. [ ] Complete required product, specialist, parent-final, final ReviewGPT,
-   CI, commit, push, and PR gates.
+5. [x] Complete required product, specialist, parent-final, verification,
+   commit, push, and PR-body prerequisites for the post-plan final ReviewGPT
+   and CI gates.
 
 ## Verification
 
@@ -82,3 +83,25 @@ Updated: 2026-07-28
 - `pnpm verify:acceptance`.
 - Required product-experience review, preliminary `completion-specialists`
   ReviewGPT pass, parent final review, and final PR-lane ReviewGPT gate.
+
+## Review outcomes
+
+- Product-experience review passed after preserving pre-membership owner-contact
+  fallback and suspended/ambiguous-member suppression.
+- Preliminary ReviewGPT found and the implementation resolved two bounded
+  issues: a missing sender handle no longer renders through the authoritative
+  `Sender:` grammar, and executable two-turn coverage proves the operation-local
+  name memo expires before the next ordinary turn.
+- The focused remediation suite passed 312 tests. The canonical remediation
+  lane passed 2,853 Assistant Engine, 1,953 Assistant Runtime, 1,084 CLI, and
+  2,052 Cloudflare Node tests plus Workers tests, typechecks, and repository
+  guards.
+- Full acceptance verification passed after remediation, including all package
+  coverage, 7,239 Web tests, the Web production build, and Cloudflare app
+  verification.
+- Parent final review found no additional defect after rechecking the naming
+  resolver, contact fallback, batch/memo lifecycle, prompt provenance,
+  fail-soft deadline, effect-authority boundary, merge resolutions, and rollout
+  contract. The final PR-specific ReviewGPT round and exact-head CI remain
+  post-plan merge-readiness gates.
+Completed: 2026-07-28
