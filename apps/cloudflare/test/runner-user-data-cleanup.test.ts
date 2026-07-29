@@ -1,4 +1,8 @@
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +12,8 @@ import {
 } from "../src/storage-paths.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.js";
 import {
   deleteHostedRunnerUserData,
@@ -322,6 +328,93 @@ describe("hosted runner user data cleanup", () => {
     expect(stateStore.deleteStateCallCount).toBe(0);
   });
 
+  it("carries a real owner-recorded monotonic PUT drain into deletion admission", async () => {
+    const now = Date.parse("2026-07-28T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const durable = createDurableObjectHarness();
+    const ownerStateStore = createOwningSnapshotStateStore();
+    const source = new ListableMemoryEncryptedR2Bucket();
+    const destination = new ListableMemoryEncryptedR2Bucket();
+    const snapshotId = "snapshot_destination_ticket";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const session: HostedWorkspaceSnapshotUploadSession = {
+      attemptId: "attempt_1",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      encryption: {
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey,
+          snapshotId,
+          userId: USER_ID,
+        }),
+        ivBase64: "AQIDBAUGBwgJCgsM",
+        rootKeyId: "root_1",
+        scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+        wrappedDataKey: "wrapped",
+      },
+      expectedWorkspaceVersion: "7",
+      expiresAt: "2026-07-28T13:00:00.000Z",
+      leaseGeneration: "3",
+      objectKey,
+      r2BucketRole: "destination",
+      schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+      snapshotId,
+      userId: USER_ID,
+      workspaceVersion: "7",
+    };
+    const service = createWorkspaceSnapshotSessionService({
+      bucket: destination,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
+      state: durable.state,
+      stateStore: ownerStateStore,
+      readHostedWorkspaceFromWeb: async (userId) => ({
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      }),
+      assertWorkspaceBelongsToRunnerUser() {},
+    });
+
+    const created = await service.create(session);
+    expect(created).toEqual(session);
+    const first = await service.rememberPresignedPut({
+      drainUntil: "2026-07-28T12:20:00.000Z",
+      expectedSession: session,
+      expiresAt: "2026-07-28T12:10:00.000Z",
+    });
+    if (!first) {
+      throw new Error("Expected the first owner-recorded PUT drain.");
+    }
+    await expect(service.rememberPresignedPut({
+      drainUntil: "2026-07-28T12:15:00.000Z",
+      expectedSession: first,
+      expiresAt: "2026-07-28T12:10:00.000Z",
+    })).resolves.not.toBeNull();
+    expect(durable.storageValues.get("workspace-snapshot:r2-put-drain:v1")).toEqual({
+      drainUntil: "2026-07-28T12:20:00.000Z",
+      schema: "murph.hosted-workspace-snapshot-r2-put-drain.v1",
+      userId: USER_ID,
+    });
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: createDeletionStateStore(),
+      userId: USER_ID,
+    })).resolves.toEqual({
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: 1_200,
+      userId: USER_ID,
+    });
+
+    expect(source.listCalls).toEqual([]);
+    expect(destination.listCalls).toEqual([]);
+    expect(source.deleteBatches).toEqual([]);
+    expect(destination.deleteBatches).toEqual([]);
+  });
+
   it("withholds completion when a late object appears between empty observations", async () => {
     const durable = createDurableObjectHarness();
     const stateStore = createDeletionStateStore();
@@ -532,6 +625,27 @@ function createBindOnlyStateStore(): {
   };
 }
 
+function createOwningSnapshotStateStore(): {
+  bindUser(userId: string): Promise<string>;
+  validateWriteFenceToken(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<{ owns: true; record: null }>;
+} {
+  return {
+    async bindUser(userId) {
+      return userId;
+    },
+    async validateWriteFenceToken() {
+      return {
+        owns: true,
+        record: null,
+      };
+    },
+  };
+}
+
 function createUnusedRunnerStoreCache() {
   return {
     async ensure(): Promise<never> {
@@ -552,6 +666,7 @@ function createWorkspaceState(userId: string): HostedWorkspaceState {
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   readonly deleteBatches: string[][] = [];
+  readonly listCalls: string[] = [];
 
   override async delete(key: string | string[]): Promise<void> {
     const keys = Array.isArray(key) ? key : [key];
@@ -568,6 +683,7 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
     objects: Array<{ key: string }>;
     truncated: boolean;
   }> {
+    this.listCalls.push(input.prefix ?? "");
     const matchingKeys = [...this.objects.keys()]
       .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
       .sort();

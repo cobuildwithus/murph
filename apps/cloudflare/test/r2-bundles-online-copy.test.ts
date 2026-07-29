@@ -10,8 +10,10 @@ import {
 } from "../scripts/r2-bundles-online-copy.ts";
 import {
   createR2MigrationMarkerKey,
+  type R2BundlesMigrationCommandRunner,
   type R2ObjectInventoryEntry,
 } from "../scripts/r2-bundles-migration.ts";
+import { createHostedStorageNamespaceId } from "../src/storage-paths.ts";
 
 const sourceBucket = "murph-bundles-oc";
 const destinationBucket = "murph-bundles-enam";
@@ -24,10 +26,24 @@ const activeOwners = {
   canonicalSnapshotObjectKeys: new Set<string>(),
   namespaces: new Set(["hsn_0123456789abcdef01234567"]),
 };
+const lifecycleOutput = (bucketName: string) => `Listing lifecycle rules for bucket '${bucketName}'...
+name:     delete-hosted-email-raw-messages-after-24h
+enabled:  Yes
+prefix:   hosted-email/messages/
+action:   Expire objects after 1 days
+
+name:     delete-hosted-meal-photos-after-31d
+enabled:  Yes
+prefix:   hosted-meal-photos/images/
+action:   Expire objects after 31 days`;
 type CopyObjectInput = {
   destination: string;
   entry: R2ObjectInventoryEntry;
   source: string;
+};
+type MigrationCommandCall = {
+  args: readonly string[];
+  command: string;
 };
 
 function entry(key: string, overrides: Partial<R2ObjectInventoryEntry> = {}): R2ObjectInventoryEntry {
@@ -57,6 +73,68 @@ function options(overrides: Partial<R2BundlesOnlineCopyOptions> = {}): R2Bundles
     source: sourceBucket,
     sourcePutDrained: false,
     ...overrides,
+  };
+}
+
+function createCommandBoundaryRunner(input: {
+  destinationInventory: () => R2ObjectInventoryEntry[];
+  ownerStdout?: string;
+  sourceInventory: () => R2ObjectInventoryEntry[];
+}): {
+  calls: MigrationCommandCall[];
+  runner: R2BundlesMigrationCommandRunner;
+} {
+  const calls: MigrationCommandCall[] = [];
+  return {
+    calls,
+    runner: {
+      async run(call) {
+        calls.push({ args: call.args, command: call.command });
+        if (call.command === "aws" && call.args[0] === "--version") {
+          return { stderr: "aws-cli/2.24.21", stdout: "" };
+        }
+        if (call.command === "murph-prod-psql-ro") {
+          return {
+            stderr: "",
+            stdout: input.ownerStdout
+              ?? `${JSON.stringify({ memberId: "member_1", snapshotRef: null })}\n`,
+          };
+        }
+        if (call.command === "pnpm" && call.args.includes("info")) {
+          const bucket = String(call.args[5]);
+          return {
+            stderr: "",
+            stdout: JSON.stringify({
+              default_storage_class: "Standard",
+              location: bucket === sourceBucket ? "OC" : "ENAM",
+              name: bucket,
+            }),
+          };
+        }
+        if (call.command === "pnpm" && call.args.includes("lifecycle")) {
+          return {
+            stderr: "",
+            stdout: lifecycleOutput(String(call.args[6])),
+          };
+        }
+        if (
+          call.command === "aws"
+          && call.args[0] === "s3api"
+          && call.args[1] === "list-objects-v2"
+        ) {
+          const bucket = call.args[call.args.indexOf("--bucket") + 1];
+          return {
+            stderr: "",
+            stdout: JSON.stringify(
+              bucket === sourceBucket
+                ? input.sourceInventory()
+                : input.destinationInventory(),
+            ),
+          };
+        }
+        throw new Error(`Unhandled online-copy test command: ${call.command} ${call.args.join(" ")}`);
+      },
+    },
   };
 }
 
@@ -119,6 +197,101 @@ describe("R2 online immutable copy", () => {
     expect(signed.headers["x-amz-copy-source-if-match"]).toBe('"etag"');
     expect(signed.headers.authorization).toContain("cf-copy-destination-if-none-match");
     expect(signed.headers.authorization).toContain("x-amz-copy-source-if-match");
+  });
+
+  it("exercises the production command boundary, create-only CopyObject, and owner gate", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/boundary.snapshot.enc`,
+      { etag: '"abababababababababababababababab"', size: 12 },
+    );
+    let destinationInventory = [marker()];
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => destinationInventory,
+      sourceInventory: () => [eligible],
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(String(request));
+      if (init?.method === "PUT") {
+        const headers = new Headers(init.headers);
+        expect(url.pathname).toBe(`/${destinationBucket}/${eligible.key}`);
+        expect(headers.get("cf-copy-destination-if-none-match")).toBe("*");
+        expect(headers.get("x-amz-copy-source")).toBe(`/${sourceBucket}/${eligible.key}`);
+        expect(headers.get("x-amz-copy-source-if-match")).toBe(eligible.etag);
+        expect(headers.get("x-amz-metadata-directive")).toBe("COPY");
+        expect(headers.get("x-amz-storage-class")).toBe("STANDARD");
+        expect(headers.get("authorization")).toContain(
+          "cf-copy-destination-if-none-match",
+        );
+        destinationInventory = [marker(), eligible];
+        return new Response(null, { status: 412 });
+      }
+      if (init?.method === "HEAD") {
+        expect([
+          `/${destinationBucket}/${eligible.key}`,
+          `/${sourceBucket}/${eligible.key}`,
+        ]).toContain(url.pathname);
+        return new Response(null, {
+          headers: {
+            "content-length": String(eligible.size),
+            etag: eligible.etag,
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected online-copy fetch: ${init?.method ?? "GET"} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        log: vi.fn(),
+        runner: harness.runner,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(harness.calls.some((call) =>
+      call.command === "aws" && call.args[0] === "--version"
+    )).toBe(true);
+    expect(harness.calls.filter((call) =>
+      call.command === "pnpm" && call.args.includes("info")
+    )).toHaveLength(2);
+    expect(harness.calls.filter((call) =>
+      call.command === "pnpm" && call.args.includes("lifecycle")
+    )).toHaveLength(2);
+    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(1);
+  });
+
+  it("rejects malformed production owner rows before inventory or R2 requests", async () => {
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => [marker()],
+      ownerStdout: `${JSON.stringify({ memberId: null, snapshotRef: null })}\n`,
+      sourceInventory: () => [],
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runR2BundlesOnlineCopy(
+      options(),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    )).rejects.toThrow("owner query omitted memberId");
+
+    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(1);
+    expect(harness.calls.some((call) =>
+      call.command === "aws" && call.args[1] === "list-objects-v2"
+    )).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("allows ENAM-native objects only after destination_active", () => {
@@ -291,6 +464,53 @@ describe("R2 online immutable copy", () => {
       },
     );
 
+    expect(copyObject).not.toHaveBeenCalled();
+    expect(putMarker).not.toHaveBeenCalled();
+  });
+
+  it("reads source and destination twice in order and rejects source drift", async () => {
+    const copied = entry(
+      "users/hsn_0123456789abcdef01234567/artifacts/0123456789abcdef0123456789abcdef0123456789abcdef.artifact.bin",
+    );
+    const changed = { ...copied, etag: '"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"' };
+    const readInventory = vi.fn(async (bucket: string) => {
+      const callIndex = readInventory.mock.calls.length;
+      if (callIndex === 1) return [copied];
+      if (callIndex === 2) return [marker(), copied];
+      if (callIndex === 3) return [changed];
+      return [marker(), copied];
+    });
+    const copyObject = vi.fn();
+    const putMarker = vi.fn();
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        copierStopped: true,
+        finalConvergence: true,
+        immutableKeysAudited: true,
+        phase: "destination_active",
+        sourcePutDrained: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(),
+          putMarker,
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory,
+      },
+    )).rejects.toThrow("inventory changed between the final convergence reads");
+
+    expect(readInventory.mock.calls.map(([bucket]) => bucket)).toEqual([
+      sourceBucket,
+      destinationBucket,
+      sourceBucket,
+      destinationBucket,
+    ]);
     expect(copyObject).not.toHaveBeenCalled();
     expect(putMarker).not.toHaveBeenCalled();
   });

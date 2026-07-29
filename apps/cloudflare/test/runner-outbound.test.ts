@@ -4554,6 +4554,94 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
   });
 
+  it("keeps destination-active snapshot PUT tickets bucket-affine and rejects stale drain writes", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const sourceBucket = createRunnerOutboundEnv().BUNDLES;
+    const destinationBucket = createRunnerOutboundEnv().BUNDLES;
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: sourceBucket,
+      BUNDLES_ENAM: destinationBucket,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(await response.json(), "destination snapshot start response");
+    const snapshotId = requireTestString(body.snapshotId, "destination snapshot id");
+    const objectKey = requireTestString(body.objectKey, "destination snapshot objectKey");
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      r2BucketRole: "destination",
+    });
+
+    const presignResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: "a".repeat(64),
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(presignResponse.status).toBe(200);
+    const presignBody = requireTestObject(
+      await presignResponse.json(),
+      "destination snapshot presign response",
+    );
+    const putUrl = new URL(requireTestString(presignBody.putUrl, "destination snapshot putUrl"));
+    expect(putUrl.pathname).toBe(`/bundles-enam-test/${objectKey}`);
+    expect(runner.rememberHostedWorkspaceSnapshotPresignedPut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        drainUntil: expect.stringMatching(/^20/u),
+        expectedSession: expect.objectContaining({
+          objectKey,
+          r2BucketRole: "destination",
+          snapshotId,
+        }),
+        expiresAt: presignBody.expiresAt,
+      }),
+    );
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      r2BucketRole: "destination",
+      r2PutDrainUntil: expect.stringMatching(/^20/u),
+      r2PutExpiresAt: presignBody.expiresAt,
+    });
+
+    runner.rememberHostedWorkspaceSnapshotPresignedPut.mockResolvedValueOnce(null);
+    const staleResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: "a".repeat(64),
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+    expect(staleResponse.status).toBe(409);
+    await expect(staleResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+  });
+
   it("rejects direct-R2 workspace snapshot PUT presigns at the single-part limit before session lookup", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
@@ -5103,12 +5191,18 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     });
+    const sourceBucket = createRunnerOutboundEnv().BUNDLES;
+    const destinationBucket = createRunnerOutboundEnv().BUNDLES;
     const env = createRunnerOutboundEnv({
+      BUNDLES: sourceBucket,
+      BUNDLES_ENAM: destinationBucket,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
       USER_RUNNER: {
         getByName: runner.getByName,
       },
     });
-    await env.BUNDLES.put(objectKey, new Uint8Array([1, 2, 3, 4]));
+    await sourceBucket.put(objectKey, new Uint8Array([1, 2, 3, 4]));
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotPresignGetRequest({
@@ -5520,8 +5614,9 @@ describe("handleRunnerOutboundRequest", () => {
       key,
       size: bytes.byteLength,
     }));
+    const destinationHead = vi.fn(async () => null);
     const env = createRunnerOutboundEnv({
-      BUNDLES: createWorkspaceSnapshotBucket(
+      BUNDLES: createBridgeWorkspaceSnapshotBucket(
         async (key) => ({ key, size: bytes.byteLength }),
         async (key) => {
           const object = await head(key);
@@ -5534,6 +5629,12 @@ describe("handleRunnerOutboundRequest", () => {
             : null;
         },
       ),
+      BUNDLES_ENAM: createBridgeWorkspaceSnapshotBucket(
+        async () => null,
+        destinationHead,
+      ),
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
       USER_RUNNER: {
         getByName: runner.getByName,
       },
@@ -5604,6 +5705,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
+    expect(destinationHead).not.toHaveBeenCalled();
   });
 
   it("retains the replaced successful workspace snapshot for delayed cleanup after checkpoint CAS", async () => {
@@ -6691,13 +6793,21 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
-    const deleteObject = vi.fn(async () => {});
+    const sourceDelete = vi.fn(async () => {});
+    const destinationDelete = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
-      BUNDLES: createWorkspaceSnapshotBucket(
+      BUNDLES: createBridgeWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({ key, size: 4 }),
-        deleteObject,
+        sourceDelete,
       ),
+      BUNDLES_ENAM: createBridgeWorkspaceSnapshotBucket(
+        async () => null,
+        async () => null,
+        destinationDelete,
+      ),
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
       USER_RUNNER: {
         getByName: runner.getByName,
       },
@@ -6720,7 +6830,8 @@ describe("handleRunnerOutboundRequest", () => {
     });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
-    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(sourceDelete).toHaveBeenCalledWith(objectKey);
+    expect(destinationDelete).not.toHaveBeenCalled();
   });
 
   it("does not abort a snapshot after its active fence changes during the session read", async () => {
@@ -10170,6 +10281,27 @@ function createWorkspaceSnapshotBucket(
     },
     ...(head ? { head } : {}),
     async put() {},
+  };
+}
+
+function createBridgeWorkspaceSnapshotBucket(
+  get: (key: string) => Promise<{ key: string; size?: number } | null>,
+  head: (key: string) => Promise<{
+    checksums?: { sha256: Uint8Array };
+    customMetadata?: Record<string, string>;
+    key: string;
+    size?: number;
+  } | null>,
+  deleteObject: (key: string) => Promise<void> = async () => {},
+): RunnerOutboundEnvironmentSource["BUNDLES"] {
+  return {
+    ...createWorkspaceSnapshotBucket(get, head, deleteObject),
+    async list() {
+      return {
+        objects: [],
+        truncated: false,
+      };
+    },
   };
 }
 

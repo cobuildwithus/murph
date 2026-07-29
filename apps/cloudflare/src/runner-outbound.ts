@@ -2167,8 +2167,14 @@ async function deleteWorkspaceSnapshotObjectBestEffort(input: {
   env: RunnerOutboundEnvironmentSource;
   objectKey: string;
 }): Promise<boolean> {
+  const bucket = input.bucketRole
+    ? readHostedR2BucketForRole(
+        resolveHostedR2CutoverContext(input.env),
+        input.bucketRole,
+      )
+    : input.bucket;
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
-    bucket: input.bucket,
+    bucket,
     bucketRole: input.bucketRole,
     env: input.env,
   });
