@@ -157,9 +157,21 @@ function TeamsPreview() {
 }
 
 const RACERS = [
-  { detail: "18 workouts", initials: "MA", name: "Maya" },
-  { detail: "16 workouts", initials: "JO", name: "Jordan" },
-  { detail: "15 workouts", initials: "TH", name: "Theo" },
+  {
+    avatarSrc: "/personas/athlete.jpg",
+    detail: "18 workouts",
+    name: "Maya",
+  },
+  {
+    avatarSrc: "/personas/founder.jpg",
+    detail: "16 workouts",
+    name: "Jordan",
+  },
+  {
+    avatarSrc: "/personas/sleeper.jpg",
+    detail: "15 workouts",
+    name: "Theo",
+  },
 ] as const;
 
 function RacePreview() {
@@ -182,9 +194,11 @@ function RacePreview() {
             <span className="w-4 font-mono text-[10px] text-[#736a58] sm:w-5">
               {index + 1}
             </span>
-            <span className="flex size-9 items-center justify-center rounded-full sm:size-10 bg-[#5a6e32]/12 font-mono text-[9px] font-semibold text-[#3d5028]">
-              {racer.initials}
-            </span>
+            <span
+              aria-hidden="true"
+              className="size-9 shrink-0 rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/35 sm:size-10"
+              style={{ backgroundImage: `url(${racer.avatarSrc})` }}
+            />
             <span className="min-w-0 flex-1 truncate font-serif text-[1.05rem] font-semibold text-[#2d3436] sm:text-[1.125rem]">
               {racer.name}
             </span>

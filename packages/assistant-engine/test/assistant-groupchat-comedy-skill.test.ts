@@ -110,19 +110,23 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
-  it('keeps challenge stakes human-owned, room-native, and practical', async () => {
+  it('keeps challenge payoffs human-owned, room-native, practical, and format-aware', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
     expect(normalized).toContain('Stakes, prizes, and consequences')
+    expect(normalized).toContain('Challenge payoffs are human-owned.')
     expect(normalized).toContain(
-      'Challenge stakes are human-owned: the winner receives or chooses something, or another participant gives, does, performs, or owes something',
+      'In a competitive game, the winner or winning team receives or chooses something',
+    )
+    expect(normalized).toContain(
+      'In a collective game, the group reaches, unlocks, celebrates, gives, or completes something together',
     )
     expect(normalized).toContain(
       'real-world stakes do not require spending or a new errand.',
     )
     expect(normalized).toContain(
-      'A Murph-generated song, comic, poster, or recap may amplify or commemorate the stakes, but it is not the sole stake unless the room explicitly chooses that.',
+      'A Murph-generated song, comic, poster, or recap may amplify or commemorate the payoff, but it is not the sole payoff unless the room explicitly chooses that.',
     )
     expect(normalized).toContain(
       'Start with the current conversation, then use reinforced canon, relationships, recurring rituals, and existing plans.',
@@ -131,7 +135,7 @@ describe('assistant group-chat comedy skill', () => {
       'Do not import a game-show, sportsbook, or roast register merely because this is a challenge.',
     )
     expect(normalized).toContain(
-      'Never manufacture intensity the room did not supply.',
+      'Never manufacture intensity or interpersonal conflict the room did not supply.',
     )
     expect(normalized).toContain(
       'Treat practicality as a creative quality, not a zero-cost gate.',
@@ -149,10 +153,13 @@ describe('assistant group-chat comedy skill', () => {
       "the loser composes and reads a poem about the winner's historic excellence at steps",
     )
     expect(normalized).toContain(
-      'The screenshot should be the performance or the line, not a receipt or a single-use outfit.',
+      'crossing the mileage target unlocks a group breakfast after the next run',
     )
     expect(normalized).toContain(
-      "These are reference points, not a fixed menu: invent fresher versions from the group's current context, canon, and constraints.",
+      'The screenshot should be the performance, milestone, or line, not a receipt or a single-use outfit.',
+    )
+    expect(normalized).toContain(
+      "These are reference points, not a fixed menu: invent fresher versions from the group's current context, canon, format, and constraints.",
     )
     expect(normalized).toContain('Judge ideas by their funny-to-hassle ratio.')
     expect(normalized).toContain(
@@ -169,6 +176,9 @@ describe('assistant group-chat comedy skill', () => {
     )
     expect(normalized).toContain(
       'offer one equally funny safer remix without lecturing',
+    )
+    expect(normalized).toContain(
+      'In collective games, never turn the least-active member into the price of missing the target.',
     )
 
     expect(comedy).not.toContain('chug a gallon of milk')
@@ -312,5 +322,4 @@ describe('assistant group-chat comedy skill', () => {
       'Challenge-only rules, standings, stakes, and dispatch history stay on the challenge page.',
     )
   })
-
 })

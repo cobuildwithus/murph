@@ -247,4 +247,11 @@ if (isDirectRun) {
   }
 }
 
-export { isFrontendUiPath, renderPrBody, validateFrontendDesignProof };
+export {
+  findRenderedListItem,
+  isFrontendUiPath,
+  readRenderedSection,
+  renderPrBody,
+  renderedText,
+  validateFrontendDesignProof,
+};

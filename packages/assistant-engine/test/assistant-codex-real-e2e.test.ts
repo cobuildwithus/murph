@@ -14,6 +14,8 @@ import {
   MURPH_AUTOMATION_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
@@ -191,6 +193,90 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'groupchat-comedy skill read',
         ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'discovers the deferred group tool from a natural group-status request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-status-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'read_current',
+                  result: {
+                    group: null,
+                    status: 'none',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Please check whether this chat already has a Murph hosted group',
+            'set up. Use the current group configuration rather than guessing,',
+            'then tell me whether one exists.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const groupCall = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(groupCall).toBeDefined()
+        expect(groupRequests).toEqual([{ action: 'read_current' }])
+        expect(result.finalMessage).toMatch(
+          /no (?:hosted )?group|not (?:yet )?set up|doesn'?t exist/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -502,6 +588,165 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'saves one finite dense reminder conversation and stays quiet after its sent grace',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-dense-reminder-conversation-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'behavior-followthrough',
+        })
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (
+                request: AssistantHostedAutomationToolRequest,
+              ) => {
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-dense-desk-reset',
+                  created: true,
+                  lookupId: 'dense-desk-reset-check-in',
+                  routeBinding: 'current_conversation',
+                  status: 'active',
+                } as const
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const offer = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Help me stay consistent with a five-minute desk reset at 9 a.m., 1 p.m., and 5 p.m. each day for the next three days.',
+            'I want conversational accountability, but do not save anything yet.',
+            'Offer the smallest finite plan first and let me answer naturally.',
+          ].join(' '),
+        })
+        const offerActions = readCapabilityRoutingActions(offer.jsonEvents)
+
+        expect(
+          offerActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_AUTOMATION_TOOL.name
+          ),
+        ).toHaveLength(0)
+        expect(
+          offerActions.find((action) =>
+            action.kind === 'command'
+            && action.command.includes('behavior-followthrough/SKILL.md')
+            && action.output.includes('# Behavior & Follow-Through')
+          ),
+          'behavior-followthrough skill read',
+        ).toBeDefined()
+        expect(offer.finalMessage).toMatch(/\?/u)
+        expect(offer.finalMessage).not.toMatch(
+          /reply\s+(?:yes|done|skip|later|stop)/iu,
+        )
+
+        const accepted = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Yes, save that exact finite conversational plan now.',
+            'Keep the three requested times, ask naturally about only the immediately preceding reset when the next one arrives, and go quiet after one unanswered combined grace message.',
+          ].join(' '),
+          resumeSessionId: offer.sessionId,
+        })
+        const acceptedActions = readCapabilityRoutingActions(
+          accepted.jsonEvents,
+        )
+        const saveCalls = acceptedActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(saveCalls).toHaveLength(1)
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          activeUntil: expect.any(String),
+          continuityPolicy: 'preserve',
+          supportKind: 'check_in',
+        })
+        const savedAutomation = automationRequests[0]
+        if (!savedAutomation || savedAutomation.action !== 'save') {
+          throw new Error('Expected one dense reminder automation save.')
+        }
+        const storedInstructions = savedAutomation.instructions
+        expect(storedInstructions).toMatch(
+          /immediately preceding|previous reset/iu,
+        )
+        expect(storedInstructions).toMatch(/natural|ordinary|normal language/iu)
+        expect(storedInstructions).toMatch(/skip|stay quiet|send nothing/iu)
+
+        const exhaustedGrace = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          allowFinishWithoutReply: true,
+          developerInstructions:
+            buildDenseReminderScheduledDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          prompt: [
+            'Run the current dense desk-reset check-in occurrence.',
+            'The preceding occurrence already combined one unresolved immediately prior reset with the then-current cue in one ordinary question.',
+            'That grace message was accepted and sent by the provider, no related reply followed, and there is no confirmed delivery failure.',
+            'This is the next later occurrence. Apply the saved quiet-stop rule without sending a repair or pause message.',
+          ].join(' '),
+          resumeSessionId: accepted.sessionId,
+        })
+        const exhaustedGraceActions = readCapabilityRoutingActions(
+          exhaustedGrace.jsonEvents,
+        )
+
+        expect(
+          exhaustedGraceActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          ),
+        ).toHaveLength(1)
+        expect(exhaustedGrace.finalMessage).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
   )
 
   it(
@@ -1061,6 +1306,28 @@ function buildGroupPointOfViewDeveloperInstructions(): string {
   })
 }
 
+function buildHostedGroupStatusDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
 function buildGroupPointOfViewCandidateProbe(): string {
   return [
     'This is a playful group-chat candidate-choice evaluation.',
@@ -1192,6 +1459,29 @@ function buildMidnightLinqReminderDeveloperInstructions(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
+  })
+}
+
+function buildDenseReminderScheduledDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedAutomationAvailable: true,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
   })
 }
 

@@ -12485,6 +12485,22 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "score-challenge": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Payload input in @file.json form or - for stdin."
+                        }
+                      }
+                    }
+                  }
+                },
                 "upsert": {
                   "type": "object",
                   "additionalProperties": false,

@@ -60,10 +60,11 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
 
 /**
  * One scripted Responses API response. A string yields an assistant message;
- * a function call yields a `function_call` output item the real Codex
- * app-server executes (dynamic tools via `namespace`, shell via
- * `exec_command`). Tool-call turns consume one queued response per provider
- * request: the tool call first, then the follow-up text.
+ * a tool call yields the matching Responses output item the real Codex
+ * app-server executes. Hosted Terra uses `custom_tool_call` for code-mode
+ * dynamic tools, while shell calls remain ordinary `function_call` items.
+ * Tool-call turns consume one queued response per provider request: the call
+ * first, then the follow-up text.
  */
 type HostedLocalAssistantProviderFunctionCallResponse = {
     functionCall: {
@@ -72,6 +73,17 @@ type HostedLocalAssistantProviderFunctionCallResponse = {
       namespace?: string;
     };
   };
+
+type HostedLocalAssistantProviderCustomToolCallResponse = {
+  customToolCall: {
+    input: string;
+    name: string;
+  };
+};
+
+type HostedLocalAssistantProviderToolCallResponse =
+  | HostedLocalAssistantProviderCustomToolCallResponse
+  | HostedLocalAssistantProviderFunctionCallResponse;
 
 type HostedLocalAssistantProviderHeldTextResponse = {
   beforeResponse?: (() => Promise<void> | void) | null;
@@ -88,7 +100,7 @@ export interface HostedLocalAssistantProviderRequestContext {
 type HostedLocalAssistantProviderRequestDerivedResponse = {
   deriveResponse(
     input: HostedLocalAssistantProviderRequestContext,
-  ): HostedLocalAssistantProviderFunctionCallResponse | string;
+  ): HostedLocalAssistantProviderToolCallResponse | string;
 };
 
 export type HostedLocalAssistantProviderScriptedResponse =
@@ -99,6 +111,7 @@ export type HostedLocalAssistantProviderScriptedResponse =
 
 type HostedLocalAssistantProviderScriptedResponsePayload =
   | string
+  | HostedLocalAssistantProviderCustomToolCallResponse
   | HostedLocalAssistantProviderFunctionCallResponse
   | HostedLocalAssistantProviderHeldTextResponse
   | HostedLocalAssistantProviderRequestDerivedResponse;
@@ -152,10 +165,9 @@ export function buildAssistantProviderMurphToolCall(
   toolArguments: Record<string, unknown>,
 ): HostedLocalAssistantProviderScriptedResponse {
   return {
-    functionCall: {
-      arguments: toolArguments,
-      name: tool,
-      namespace: "murph",
+    customToolCall: {
+      input: buildAssistantProviderMurphCodeModeInput(tool, toolArguments),
+      name: "exec",
     },
   };
 }
@@ -169,14 +181,26 @@ export function buildAssistantProviderRequestDerivedMurphToolCall(
   return {
     deriveResponse(input) {
       return {
-        functionCall: {
-          arguments: deriveArguments(input),
-          name: tool,
-          namespace: "murph",
+        customToolCall: {
+          input: buildAssistantProviderMurphCodeModeInput(
+            tool,
+            deriveArguments(input),
+          ),
+          name: "exec",
         },
       };
     },
   };
+}
+
+function buildAssistantProviderMurphCodeModeInput(
+  tool: string,
+  toolArguments: Record<string, unknown>,
+): string {
+  return [
+    `const result = await tools.murph__${tool}(${JSON.stringify(toolArguments)});`,
+    "text(result);",
+  ].join("\n");
 }
 
 /**
@@ -196,10 +220,11 @@ function quoteShellArgument(value: string): string {
 }
 
 /**
- * Asserts the real Codex app-server advertised exactly the Murph dynamic
- * tools in the most recent recorded `/v1/responses` request body.
- * `listMurphDynamicToolNames()` returns namespaced ids; Codex advertises the
- * bare tool names inside the `murph` namespace entry.
+ * Asserts the real Codex app-server exposed the expected Murph dynamic tools
+ * in the most recent recorded `/v1/responses` request body. Direct-tool models
+ * advertise every enabled tool in the `murph` namespace. Code-mode models
+ * eagerly describe non-deferred tools through `exec`; deferred tools remain
+ * available inside Codex through its generic `ALL_TOOLS` discovery mechanism.
  */
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
@@ -299,12 +324,23 @@ export function expectAdvertisedMurphDynamicTools(
     .map((name) => name.replace(/^murph\./u, ""))
     .sort();
   expect(lastResponsesRequest).toBeDefined();
-  expect(
-    readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
-  ).toEqual(expectedToolNames);
+  const advertisement = readMurphDynamicToolAdvertisement(
+    lastResponsesRequest!.body,
+  );
+  const expectedAdvertisedToolNames = advertisement.codeMode
+    ? expectedToolNames.filter((name) => name !== "automation" && name !== "group")
+    : expectedToolNames;
+  expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
+  if (advertisement.codeMode) {
+    expect(advertisement.deferredDiscoveryAvailable).toBe(true);
+  }
 }
 
-function readMurphDynamicToolNamesFromResponsesRequest(body: string): string[] {
+function readMurphDynamicToolAdvertisement(body: string): {
+  codeMode: boolean;
+  deferredDiscoveryAvailable: boolean;
+  toolNames: string[];
+} {
   const request = parseJsonObject(body);
   const candidateToolLists: unknown[][] = [];
 
@@ -343,15 +379,49 @@ function readMurphDynamicToolNamesFromResponsesRequest(body: string): string[] {
         && (tool as { name?: unknown }).name === "murph",
       )
     );
-  if (!murphNamespace || !Array.isArray(murphNamespace.tools)) {
-    return [];
+  const names = new Set<string>();
+  if (murphNamespace && Array.isArray(murphNamespace.tools)) {
+    for (const tool of murphNamespace.tools) {
+      if (
+        tool
+        && typeof tool === "object"
+        && typeof (tool as { name?: unknown }).name === "string"
+      ) {
+        names.add((tool as { name: string }).name);
+      }
+    }
   }
 
-  return murphNamespace.tools
-    .map((tool) =>
-      tool && typeof tool === "object" ? (tool as { name?: unknown }).name : null
+  const execDescriptions = candidateToolLists
+    .flat()
+    .filter((tool): tool is { description?: unknown } =>
+      Boolean(
+        tool
+        && typeof tool === "object"
+        && (tool as { type?: unknown }).type === "custom"
+        && (tool as { name?: unknown }).name === "exec",
+      )
     )
-    .filter((name): name is string => typeof name === "string");
+    .map((tool) => tool.description)
+    .filter((description): description is string =>
+      typeof description === "string"
+    );
+  for (const description of execDescriptions) {
+    for (const match of description.matchAll(/\bmurph__([a-z0-9_]+)\b/gu)) {
+      const name = match[1];
+      if (name) {
+        names.add(name);
+      }
+    }
+  }
+
+  return {
+    codeMode: execDescriptions.length > 0,
+    deferredDiscoveryAvailable: execDescriptions.some((description) =>
+      description.includes("ALL_TOOLS")
+    ),
+    toolNames: [...names],
+  };
 }
 
 export interface HostedLocalAssistantProviderStubState {
@@ -606,8 +676,12 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
 async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
   requestContext: HostedLocalAssistantProviderRequestContext,
-): Promise<string | HostedLocalAssistantProviderFunctionCallResponse> {
-  if (typeof scriptedResponse === "string" || "functionCall" in scriptedResponse) {
+): Promise<string | HostedLocalAssistantProviderToolCallResponse> {
+  if (
+    typeof scriptedResponse === "string"
+    || "customToolCall" in scriptedResponse
+    || "functionCall" in scriptedResponse
+  ) {
     return scriptedResponse;
   }
   if ("deriveResponse" in scriptedResponse) {
@@ -715,35 +789,46 @@ function writeAssistantProviderResponsesApiStubStream(input: {
   input.response.end();
 }
 
-function buildAssistantProviderFunctionCallItem(input: {
-  functionCall: HostedLocalAssistantProviderFunctionCallResponse["functionCall"];
+function buildAssistantProviderToolCallItem(input: {
   responseId: string;
+  toolCall: HostedLocalAssistantProviderToolCallResponse;
 }): Record<string, unknown> {
+  if ("customToolCall" in input.toolCall) {
+    return {
+      call_id: `call_${input.responseId}`,
+      id: `ctcall_${input.responseId}`,
+      input: input.toolCall.customToolCall.input,
+      name: input.toolCall.customToolCall.name,
+      status: "completed",
+      type: "custom_tool_call",
+    };
+  }
+
   return {
-    arguments: JSON.stringify(input.functionCall.arguments),
+    arguments: JSON.stringify(input.toolCall.functionCall.arguments),
     call_id: `call_${input.responseId}`,
     id: `fcall_${input.responseId}`,
-    name: input.functionCall.name,
-    ...(input.functionCall.namespace
-      ? { namespace: input.functionCall.namespace }
+    name: input.toolCall.functionCall.name,
+    ...(input.toolCall.functionCall.namespace
+      ? { namespace: input.toolCall.functionCall.namespace }
       : {}),
     status: "completed",
     type: "function_call",
   };
 }
 
-function writeAssistantProviderFunctionCallStubStream(input: {
-  functionCallItem: Record<string, unknown>;
+function writeAssistantProviderToolCallStubStream(input: {
   modelId: string;
   response: ServerResponse;
   responseId: string;
+  toolCallItem: Record<string, unknown>;
   usage: HostedLocalAssistantProviderUsage;
 }): void {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
     model: input.modelId,
-    output: [input.functionCallItem],
+    output: [input.toolCallItem],
     status: "completed",
     usage: input.usage,
   };
@@ -761,14 +846,14 @@ function writeAssistantProviderFunctionCallStubStream(input: {
   });
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
-      ...input.functionCallItem,
+      ...input.toolCallItem,
       status: "in_progress",
     },
     output_index: 0,
     type: "response.output_item.added",
   });
   writeAssistantProviderSseEvent(input.response, "response.output_item.done", {
-    item: input.functionCallItem,
+    item: input.toolCallItem,
     output_index: 0,
     type: "response.output_item.done",
   });
@@ -974,21 +1059,21 @@ export async function startAssistantProviderStubServer(input: {
         });
 
       if (typeof preparedScriptedResponse !== "string") {
-        const functionCallItem = buildAssistantProviderFunctionCallItem({
-          functionCall: preparedScriptedResponse.functionCall,
+        const toolCallItem = buildAssistantProviderToolCallItem({
           responseId,
+          toolCall: preparedScriptedResponse,
         });
         const usage = buildAssistantProviderStubUsage({
           body,
-          responseText: JSON.stringify(functionCallItem),
+          responseText: JSON.stringify(toolCallItem),
           usageMode: input.usageMode ?? "fixed",
         });
         if (bodyJson.stream === true) {
-          writeAssistantProviderFunctionCallStubStream({
-            functionCallItem,
+          writeAssistantProviderToolCallStubStream({
             modelId,
             response,
             responseId,
+            toolCallItem,
             usage,
           });
           return;
@@ -998,7 +1083,7 @@ export async function startAssistantProviderStubServer(input: {
           created_at: Math.floor(Date.now() / 1000),
           id: responseId,
           model: modelId,
-          output: [functionCallItem],
+          output: [toolCallItem],
           status: "completed",
           usage,
         });
