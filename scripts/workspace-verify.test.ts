@@ -31,7 +31,7 @@ function extractWorkspaceVerifyFunction(functionName: string): string {
   return functionSource;
 }
 
-function runShellHarness(source: string) {
+function runShellHarness(source: string, timeout = 10_000) {
   const harnessDir = mkdtempSync(
     path.join(os.tmpdir(), "murph-workspace-verify-function-"),
   );
@@ -42,7 +42,7 @@ function runShellHarness(source: string) {
     return spawnSync("bash", [harnessPath], {
       cwd: repoRoot,
       encoding: "utf8",
-      timeout: 10_000,
+      timeout,
     });
   } finally {
     rmSync(harnessDir, { force: true, recursive: true });
@@ -75,16 +75,43 @@ function readSanitizedCrabboxVerificationEnvironment(): Record<string, string> {
 }
 
 describe("workspace verification orchestration", () => {
-  it("enables composed acceptance parallelism only on capable non-CI hosts", () => {
+  it("detects macOS physical memory in MiB", () => {
+    const detectPhysicalMemory = extractWorkspaceVerifyFunction(
+      "detect_physical_memory_mib",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+sysctl() {
+  [[ "$1" == "-n" && "$2" == "hw.memsize" ]]
+  printf '34359738368\\n'
+}
+
+${detectPhysicalMemory}
+
+detect_physical_memory_mib
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("32768\n");
+  });
+
+  it("enables composed acceptance only for resource-qualified non-CI hosts", () => {
     const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
       "resolve_composed_acceptance_parallel_default",
+    );
+    const staticSshComposedAcceptanceAvailable = extractWorkspaceVerifyFunction(
+      "static_ssh_composed_acceptance_available",
     );
     const result = runShellHarness(`#!/usr/bin/env bash
 set -euo pipefail
 
 detected_cpus=4
+detected_memory_mib=32768
 detect_logical_cpu_count() { printf '%s\\n' "$detected_cpus"; }
+detect_physical_memory_mib() { printf '%s\\n' "$detected_memory_mib"; }
 
+${staticSshComposedAcceptanceAvailable}
 ${resolveComposedAcceptanceDefault}
 
 CI=
@@ -113,12 +140,19 @@ resolve_composed_acceptance_parallel_default
 
 CI=
 verification_profile=static-ssh
-detected_cpus=64
+detected_cpus=9
+resolve_composed_acceptance_parallel_default
+
+detected_cpus=10
+detected_memory_mib=24575
+resolve_composed_acceptance_parallel_default
+
+detected_memory_mib=24576
 resolve_composed_acceptance_parallel_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("0\n0\n1\n1\n1\n0\n0\n0\n");
+    expect(result.stdout).toBe("0\n0\n1\n1\n1\n0\n0\n0\n0\n1\n");
   });
 
   it("resolves package coverage concurrency to one value in every environment", () => {
@@ -148,10 +182,17 @@ resolve_package_coverage_concurrency_default
 
 composed_acceptance_parallel=1
 resolve_package_coverage_concurrency_default
+
+verification_profile=static-ssh
+composed_acceptance_parallel=0
+resolve_package_coverage_concurrency_default
+
+composed_acceptance_parallel=1
+resolve_package_coverage_concurrency_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("1\n2\n6\n5\n");
+    expect(result.stdout).toBe("1\n2\n6\n5\n2\n3\n");
   });
 
   it("leaves subprocess headroom while CLI coverage is active", () => {
@@ -179,11 +220,15 @@ composed_acceptance_parallel=1
 resolve_package_coverage_cli_active_concurrency_default
 
 verification_profile=static-ssh
+composed_acceptance_parallel=0
+resolve_package_coverage_cli_active_concurrency_default
+
+composed_acceptance_parallel=1
 resolve_package_coverage_cli_active_concurrency_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("1\n1\n4\n2\n1\n");
+    expect(result.stdout).toBe("1\n1\n4\n2\n1\n2\n");
   });
 
   it("reserves capable-host CPU headroom for overlapping app work", () => {
@@ -207,6 +252,7 @@ ${resolvePackageWorkers}
 ${resolveAppWorkers}
 
 CI=
+verification_profile=default
 composed_acceptance_parallel=1
 package_coverage_concurrency_limit=5
 resolve_package_coverage_vitest_max_workers_default
@@ -215,10 +261,18 @@ resolve_acceptance_app_vitest_max_workers_default
 detected_cpus=12
 resolve_package_coverage_vitest_max_workers_default
 resolve_acceptance_app_vitest_max_workers_default
+
+verification_profile=static-ssh
+detected_cpus=10
+resolve_package_coverage_vitest_max_workers_default
+resolve_acceptance_app_vitest_max_workers_default
+
+composed_acceptance_parallel=0
+resolve_acceptance_app_vitest_max_workers_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("2\n2\n1\n1\n");
+    expect(result.stdout).toBe("2\n2\n1\n1\n2\n1\n2\n");
   });
 
   it("bounds CLI workers during composed acceptance", () => {
@@ -237,6 +291,7 @@ normalize_positive_integer() {
 ${resolveCliWorkers}
 
 unset MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS
+verification_profile=default
 composed_acceptance_parallel=1
 package_coverage_vitest_max_workers=2
 resolve_package_coverage_cli_vitest_max_workers_default
@@ -251,13 +306,19 @@ composed_acceptance_parallel=1
 MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS=4
 package_coverage_vitest_max_workers=4
 resolve_package_coverage_cli_vitest_max_workers_default
+
+unset MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS
+verification_profile=static-ssh
+detected_cpus=10
+package_coverage_vitest_max_workers=2
+resolve_package_coverage_cli_vitest_max_workers_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("4\n3\n2\n4\n");
+    expect(result.stdout).toBe("4\n3\n2\n4\n3\n");
   });
 
-  it("reports an internally controlled CLI-first static SSH profile", () => {
+  it("reports an internally controlled 10-core static SSH profile", () => {
     const normalizePositiveInteger = extractWorkspaceVerifyFunction(
       "normalize_positive_integer",
     );
@@ -266,6 +327,9 @@ resolve_package_coverage_cli_vitest_max_workers_default
     );
     const localWorkerBudgetDefault = extractWorkspaceVerifyFunction(
       "local_worker_budget_default",
+    );
+    const staticSshComposedAcceptanceAvailable = extractWorkspaceVerifyFunction(
+      "static_ssh_composed_acceptance_available",
     );
     const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
       "resolve_composed_acceptance_parallel_default",
@@ -300,6 +364,7 @@ set -euo pipefail
 ${normalizePositiveInteger}
 ${localConcurrencyDefault}
 ${localWorkerBudgetDefault}
+${staticSshComposedAcceptanceAvailable}
 ${resolveComposedAcceptanceDefault}
 ${resolvePackageConcurrencyDefault}
 ${resolvePackageWorkersDefault}
@@ -310,7 +375,8 @@ ${resolveCliActiveConcurrencyDefault}
 ${resolveProfileControlledValue}
 ${logAcceptanceResourcePlan}
 
-detect_logical_cpu_count() { printf '64\\n'; }
+detect_logical_cpu_count() { printf '10\\n'; }
+detect_physical_memory_mib() { printf '32768\\n'; }
 verify_log() { printf '[workspace-verify] %s\\n' "$*"; }
 
 CI=
@@ -338,7 +404,7 @@ log_acceptance_resource_plan
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "[workspace-verify] resources cpus=64 composed_parallel=0 package_processes=2 cli_package_processes=1 package_workers=2 cli_workers=2 app_workers=2 app_overlap=0 profile=static-ssh test_lanes=0 app_parallel=0\n",
+      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh test_lanes=1 app_parallel=1\n",
     );
   });
 
@@ -419,11 +485,15 @@ resolve_local_parallel_default
 
 CI=
 verification_profile=static-ssh
+composed_acceptance_parallel=1
+resolve_local_parallel_default
+
+composed_acceptance_parallel=0
 resolve_local_parallel_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("0\n1\n1\n0\n0\n");
+    expect(result.stdout).toBe("0\n1\n1\n0\n1\n0\n");
   });
 
   it("overlaps independent capable-host acceptance preparation", () => {
@@ -759,8 +829,8 @@ set -uo pipefail
 
 export MURPH_APP_VITEST_MAX_WORKERS=99
 verification_profile=static-ssh
-composed_acceptance_parallel=0
-acceptance_app_vitest_max_workers=2
+composed_acceptance_parallel=1
+acceptance_app_vitest_max_workers=1
 acceptance_cli_coverage_ready_file=
 
 run_command_with_retry() {
@@ -774,7 +844,7 @@ run_app_verify_command_with_retry apps/web 1 1 1
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("MURPH_APP_VITEST_MAX_WORKERS=2");
+    expect(result.stdout).toContain("MURPH_APP_VITEST_MAX_WORKERS=1");
     expect(result.stdout).not.toContain("MURPH_APP_VITEST_MAX_WORKERS=99");
   });
 
@@ -817,7 +887,7 @@ rm -rf -- "$ready_dir"
     expect(result.stdout).toBe("ready\n");
   });
 
-  it("keeps app tests blocked through CLI completion and releases them on success or failure", () => {
+  it("releases apps and expands package fanout after CLI success or failure", () => {
     const markCliCoverageComplete = extractWorkspaceVerifyFunction(
       "mark_acceptance_cli_coverage_complete",
     );
@@ -849,16 +919,39 @@ verify_log() { return 0; }
 run_workspace_package_coverage() {
   local package_dir="$1"
 
-  if [[ "$package_dir" != "packages/cli" ]]; then
-    return 0
-  fi
-
-  : >"$cli_started_file"
-  while [[ ! -f "$cli_release_file" ]]; do
-    command sleep 0.01
-  done
-
-  [[ "$cli_should_fail" != "1" ]]
+  case "$package_dir" in
+    "packages/cli")
+      : >"$cli_started_file"
+      while [[ ! -f "$cli_release_file" ]]; do
+        command sleep 0.01
+      done
+      [[ "$cli_should_fail" != "1" ]]
+      ;;
+    "packages/assistant-engine")
+      : >"$first_peer_started_file"
+      while [[ ! -f "$first_peer_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/assistant-runtime")
+      : >"$second_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/core")
+      : >"$third_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+    "packages/setup-cli")
+      : >"$fourth_peer_started_file"
+      while [[ ! -f "$refill_release_file" ]]; do
+        command sleep 0.01
+      done
+      ;;
+  esac
 }
 
 exercise_interlock() {
@@ -872,6 +965,12 @@ exercise_interlock() {
 
   cli_started_file="$case_dir/cli-started"
   cli_release_file="$case_dir/release-cli"
+  first_peer_started_file="$case_dir/first-peer-started"
+  first_peer_release_file="$case_dir/release-first-peer"
+  second_peer_started_file="$case_dir/second-peer-started"
+  third_peer_started_file="$case_dir/third-peer-started"
+  fourth_peer_started_file="$case_dir/fourth-peer-started"
+  refill_release_file="$case_dir/release-refill"
   acceptance_cli_coverage_ready_file="$case_dir/cli-ready"
   export MURPH_ACCEPTANCE_CLI_COVERAGE_READY_FILE="$acceptance_cli_coverage_ready_file"
 
@@ -887,38 +986,73 @@ exercise_interlock() {
   ) &
   local scheduler_pid="$!"
 
-  for _ in {1..200}; do
-    if [[ -f "$cli_started_file" ]] && grep -q "wait for CLI coverage" "$case_dir/app-wait.log"; then
+  for _ in {1..400}; do
+    if [[
+      -f "$cli_started_file"
+      && -f "$first_peer_started_file"
+      && -f "$case_dir/app-wait.log"
+    ]] && grep -q "wait for CLI coverage" "$case_dir/app-wait.log"; then
       break
     fi
     command sleep 0.01
   done
 
   [[ -f "$cli_started_file" ]]
+  [[ -f "$first_peer_started_file" ]]
   grep -q "wait for CLI coverage" "$case_dir/app-wait.log"
   command sleep 0.05
   [[ ! -f "$case_dir/app-released" ]]
   [[ ! -f "$acceptance_cli_coverage_ready_file" ]]
+  [[ ! -f "$second_peer_started_file" ]]
+  [[ ! -f "$third_peer_started_file" ]]
+  [[ ! -f "$fourth_peer_started_file" ]]
 
   : >"$cli_release_file"
-  wait "$scheduler_pid"
-  wait "$app_pid"
+
+  for _ in {1..400}; do
+    if [[
+      -f "$case_dir/app-released"
+      && -f "$second_peer_started_file"
+      && -f "$third_peer_started_file"
+    ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
 
   [[ -f "$case_dir/app-released" ]]
   [[ -f "$acceptance_cli_coverage_ready_file" ]]
+  [[ -f "$second_peer_started_file" ]]
+  [[ -f "$third_peer_started_file" ]]
+  command sleep 0.05
+  [[ ! -f "$fourth_peer_started_file" ]]
+
+  : >"$first_peer_release_file"
+  for _ in {1..400}; do
+    if [[ -f "$fourth_peer_started_file" ]]; then
+      break
+    fi
+    command sleep 0.01
+  done
+  [[ -f "$fourth_peer_started_file" ]]
+
+  : >"$refill_release_file"
+  wait "$scheduler_pid"
+  wait "$app_pid"
+
   observed_status="$(<"$case_dir/scheduler-status")"
   [[ "$observed_status" == "$expected_status" ]]
 }
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
-package_coverage_concurrency_limit=2
+package_coverage_concurrency_limit=3
 package_coverage_cli_active_concurrency_limit=2
 
 exercise_interlock success 0 0
 exercise_interlock failure 1 1
 printf 'interlock-covered\n'
-`);
+`, 30_000);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("interlock-covered\n");
