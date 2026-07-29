@@ -756,7 +756,10 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.activeUsers).toEqual({
       trailing30Days: 6,
+      trailing30DaysComplete: true,
       trailing7Days: 4,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
       wowPercent: 300,
     });
     expect(dashboard.usageTopUps).toEqual({
@@ -829,6 +832,129 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(6);
   });
 
+  it("marks MAU incomplete without discarding an exact weekly comparison", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const retainedPhone = requireLinqContact("phone", "+15550000001");
+    const retiredMonthlyPhone = requireLinqContact("phone", "+15550000002");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_current" }])
+      .mockResolvedValueOnce([{ userId: "member_previous" }])
+      .mockResolvedValueOnce([
+        { userId: "member_current" },
+        { userId: "member_previous" },
+        { userId: "member_monthly" },
+      ]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: retainedPhone,
+        containerMemberId: "thread_container_current",
+        occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+      }),
+      retireGroupMailboxRow(buildLinqGroupMailboxRow({
+        contact: retiredMonthlyPhone,
+        containerMemberId: "thread_container_monthly",
+        occurredAt: new Date("2026-06-10T12:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      trailing30Days: 4,
+      trailing30DaysComplete: false,
+      trailing7Days: 2,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
+      wowPercent: 100,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      select: {
+        contentRetiredAt: true,
+      },
+    });
+  });
+
+  it("withholds WAU change when retired content affects a compared week", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const retiredPreviousPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_current" }])
+      .mockResolvedValueOnce([{ userId: "member_previous" }])
+      .mockResolvedValueOnce([
+        { userId: "member_current" },
+        { userId: "member_previous" },
+      ]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      retireGroupMailboxRow(buildLinqGroupMailboxRow({
+        contact: retiredPreviousPhone,
+        containerMemberId: "thread_container_previous",
+        occurredAt: new Date("2026-06-25T12:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      trailing30Days: 2,
+      trailing30DaysComplete: false,
+      trailing7Days: 1,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: false,
+      wowPercent: null,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
+  });
+
+  it("still rejects missing group content without a retirement marker", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const missingPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      {
+        ...buildLinqGroupMailboxRow({
+          contact: missingPhone,
+          containerMemberId: "thread_container_missing",
+          occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+        }),
+        payloadInlineCiphertext: null,
+      },
+    ]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await expect(readHostedGrowthDashboard(now)).rejects.toThrow(
+      "Hosted growth group message payload is unavailable.",
+    );
+  });
+
   it("keeps admission-time group members stable when provider identity is missing or reassigned", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
@@ -876,7 +1002,10 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.activeUsers).toEqual({
       trailing30Days: 3,
+      trailing30DaysComplete: true,
       trailing7Days: 3,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
       wowPercent: null,
     });
     expect(mocks.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
@@ -920,7 +1049,10 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.activeUsers).toEqual({
       trailing30Days: 1,
+      trailing30DaysComplete: true,
       trailing7Days: 1,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
       wowPercent: null,
     });
     expect(mocks.hostedMemberRouting.findMany).toHaveBeenCalledTimes(1);
@@ -933,6 +1065,9 @@ describe("hosted ops growth metrics", () => {
       containerMemberId: "thread_container_unknown",
       occurredAt: new Date("2026-07-05T12:00:00.000Z"),
     });
+    if (!row.payloadInlineCiphertext) {
+      throw new Error("Expected inline test mailbox payload.");
+    }
     const decoded = JSON.parse(row.payloadInlineCiphertext) as {
       message: Record<string, unknown>;
     };
@@ -1045,7 +1180,10 @@ describe("hosted ops growth metrics", () => {
 
       expect(dashboard.activeUsers).toEqual({
         trailing30Days: 21,
+        trailing30DaysComplete: true,
         trailing7Days: 7,
+        trailing7DaysComplete: true,
+        wowComparisonComplete: true,
         wowPercent: 0,
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
@@ -1079,7 +1217,10 @@ describe("hosted ops growth metrics", () => {
     const scorecardProps = {
       activeUsers: {
         trailing30Days: 61,
+        trailing30DaysComplete: true,
         trailing7Days: 24,
+        trailing7DaysComplete: true,
+        wowComparisonComplete: true,
         wowPercent: 9.1,
       },
       conversion: { converted: 8, matureStarted: 20, percent: 40 },
@@ -1107,7 +1248,7 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("61 MAU across personal + group chats");
     expect(markup).toContain("+9.1% WAU versus the prior seven days");
     expect(markup).toContain(
-      "Each distinct sender counts once across personal + group chats",
+      "Each retained distinct sender counts once across personal + group chats",
     );
     expect(markup).toContain("8 of 20 mature trials");
 
@@ -1151,6 +1292,55 @@ describe("hosted ops growth metrics", () => {
     expect(noBaselineMarkup).toContain("No weekly baseline");
     expect(noBaselineMarkup).not.toContain(
       "Closest daily snapshot from six to eight days ago",
+    );
+
+    const partialMonthlyHistoryMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        activeUsers: {
+          trailing30Days: 48,
+          trailing30DaysComplete: false,
+          trailing7Days: 24,
+          trailing7DaysComplete: true,
+          wowComparisonComplete: true,
+          wowPercent: 9.1,
+        },
+        mrrWowPercent: 9.9,
+      }),
+    );
+    expect(partialMonthlyHistoryMarkup).toContain(
+      "At least 48 MAU across personal + group chats",
+    );
+    expect(partialMonthlyHistoryMarkup).toContain(
+      "+9.1% WAU versus the prior seven days",
+    );
+    expect(partialMonthlyHistoryMarkup).toContain(
+      "MAU is a lower bound because older group sender evidence was intentionally retired",
+    );
+    expect(partialMonthlyHistoryMarkup).toContain(">24 WAU<");
+    expect(partialMonthlyHistoryMarkup).not.toContain(
+      "Prior-week comparison unavailable",
+    );
+
+    const partialWeeklyHistoryMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        activeUsers: {
+          trailing30Days: 48,
+          trailing30DaysComplete: false,
+          trailing7Days: 21,
+          trailing7DaysComplete: false,
+          wowComparisonComplete: false,
+          wowPercent: null,
+        },
+        mrrWowPercent: 9.9,
+      }),
+    );
+    expect(partialWeeklyHistoryMarkup).toContain(
+      "At least 21 WAU",
+    );
+    expect(partialWeeklyHistoryMarkup).toContain(
+      "Prior-week comparison unavailable because older group sender evidence was intentionally retired",
     );
   });
 
@@ -1579,8 +1769,22 @@ function buildGroupMailboxRow(input: {
   eventId: string;
   occurredAt: Date;
   wake: HostedExecutionConversationMessageWake;
-}) {
+}): {
+  contentRetiredAt: Date | null;
+  dedupeKey: string;
+  id: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint;
+  occurredAt: Date;
+  payload: null;
+  payloadInlineCiphertext: string | null;
+  payloadRef: string | null;
+  payloadSchema: string;
+  userId: string;
+} {
   return {
+    contentRetiredAt: null,
     dedupeKey: input.eventId,
     id: `mailbox_${input.eventId}`,
     kind: "conversation.message",
@@ -1592,6 +1796,18 @@ function buildGroupMailboxRow(input: {
     payloadRef: null,
     payloadSchema: "murph.hosted-mailbox-item-payload.v1",
     userId: input.containerMemberId,
+  };
+}
+
+function retireGroupMailboxRow(
+  row: ReturnType<typeof buildGroupMailboxRow>,
+): ReturnType<typeof buildGroupMailboxRow> {
+  return {
+    ...row,
+    contentRetiredAt: new Date("2026-07-06T00:00:00.000Z"),
+    payload: null,
+    payloadInlineCiphertext: null,
+    payloadRef: null,
   };
 }
 

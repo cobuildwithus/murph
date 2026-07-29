@@ -307,7 +307,12 @@ runtime entitlement authority. Direct wakes reject it. The growth projection
 uses current blind-index resolution only for legacy wakes and unregistered Linq
 participants, falls back to the existing keyed opaque sender identity when no
 legacy registration remains, and omits valid group-email wakes because that
-channel has no authenticated per-sender attribution.
+channel has no authenticated per-sender attribution. Mailbox content retirement
+remains authoritative over analytics: the projection never decrypts a row after
+its content-retirement marker is set, reports any affected rolling count as a
+lower bound, and withholds a week-over-week comparison when either weekly
+window has incomplete group-sender evidence. Missing unretired content remains
+an integrity failure.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
