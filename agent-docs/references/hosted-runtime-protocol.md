@@ -1341,6 +1341,13 @@ and persisted delivery shape before creating the private Linq chat. The webhook
 recipient only identifies the candidate line; the existing `HostedLinqLine`
 projection grants new-route or recovery authority. Established thread routes
 remain authoritative independently of current line-pool eligibility.
+Recovery deliveries use a finite five-attempt sequence within the existing
+`HostedLinqDelivery` owner. A live or successful attempt converges every source
+event for that member, failed line, and group thread. Only a different source
+event may advance after a provider-correlated terminal receipt; replay of the
+exact failed event cannot create another provider request. Safe structured
+digests in `sourceRef` preserve that distinction without storing raw contacts,
+group identifiers, or provider event identifiers.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After

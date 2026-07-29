@@ -17,6 +17,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   readHostedLinqDeliveryProviderDispatchIntentTx,
+  readHostedLinqDeliveryProviderDispatchIntentsTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
@@ -44,16 +45,19 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import {
-  createHostedLinqDeliverySourceRefLookupKey,
+  createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
 import {
   buildHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
   buildHostedLinqGroupLineRecoveryEffectId,
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
   buildHostedLinqGroupLineRecoveryMessage,
-  buildHostedLinqGroupLineRecoveryRecipientSourceRef,
+  buildHostedLinqGroupLineRecoverySourceRef,
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS,
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+  isHostedLinqGroupLineRecoverySourceRefForSameIntent,
   type HostedLinqGroupLineRecoveryParticipantContact,
 } from "./linq-group-line-recovery";
 import {
@@ -1358,29 +1362,71 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
     return { status: "target_unauthorized" };
   }
 
-  const sourceRef = buildHostedLinqGroupLineRecoveryRecipientSourceRef(
-    payload.participantContact,
+  const sourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+    effectId: input.effect.effectId,
+    sourceEventId: payload.sourceEventId,
+  });
+  const attemptEffectIds = Array.from(
+    { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
+    (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
+      attempt: index + 1,
+      effectId: input.effect.effectId,
+    }),
   );
-  const persistedIntent =
-    await readHostedLinqDeliveryProviderDispatchIntentTx({
-      idempotencyKey: input.effect.effectId,
+  const persistedIntents =
+    await readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: attemptEffectIds,
       prisma: input.prisma,
     });
-  if (persistedIntent?.providerCorrelated) {
-    return { status: "already_completed" };
-  }
-  if (
-    persistedIntent
-    && (
-      persistedIntent.sourceRef
-        !== createHostedLinqDeliverySourceRefLookupKey(sourceRef)
-      || persistedIntent.targetKind !== "participant"
-      || persistedIntent.template !== HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-      || !persistedIntent.phoneNumberLookupKey
-      || persistedIntent.phoneNumberLookupKey
+  const persistedIntentByLookupKey = new Map(
+    persistedIntents.map((intent) => [
+      intent.idempotencyLookupKey,
+      intent,
+    ]),
+  );
+  let attemptEffectId: string | null = null;
+  let persistedIntent: (typeof persistedIntents)[number] | null = null;
+  let dispatchSourceRef = sourceRef;
+  let currentSourceAlreadyFailed = false;
+  for (const candidateEffectId of attemptEffectIds) {
+    const candidateLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(candidateEffectId);
+    const candidateIntent = candidateLookupKey
+      ? persistedIntentByLookupKey.get(candidateLookupKey) ?? null
+      : null;
+    if (!candidateIntent) {
+      if (currentSourceAlreadyFailed) {
+        return { status: "target_unauthorized" };
+      }
+      attemptEffectId = candidateEffectId;
+      break;
+    }
+    if (
+      !isHostedLinqGroupLineRecoverySourceRefForSameIntent({
+        candidate: candidateIntent.sourceRef,
+        expected: sourceRef,
+      })
+      || candidateIntent.targetKind !== "participant"
+      || candidateIntent.template !== HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+      || !candidateIntent.phoneNumberLookupKey
+      || candidateIntent.phoneNumberLookupKey
         === incomingLine.phoneNumberLookupKey
-    )
-  ) {
+    ) {
+      return { status: "target_unauthorized" };
+    }
+    if (candidateIntent.providerCorrelated) {
+      if (candidateIntent.status === "failed") {
+        currentSourceAlreadyFailed ||= candidateIntent.sourceRef === sourceRef;
+        continue;
+      }
+      return { status: "already_completed" };
+    }
+    attemptEffectId = candidateEffectId;
+    persistedIntent = candidateIntent;
+    dispatchSourceRef = candidateIntent.sourceRef ?? sourceRef;
+    break;
+  }
+  if (!attemptEffectId) {
     return { status: "target_unauthorized" };
   }
 
@@ -1416,12 +1462,13 @@ async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
     capacityClaimed,
     effect: {
       ...input.effect,
+      effectId: attemptEffectId,
       payload: {
         ...payload,
         assignedRecipientPhone,
       },
     },
-    sourceRef,
+    sourceRef: dispatchSourceRef,
     status: "resolved",
   };
 }

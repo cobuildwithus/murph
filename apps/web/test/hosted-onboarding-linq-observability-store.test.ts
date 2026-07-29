@@ -15,6 +15,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
+  readHostedLinqDeliveryProviderDispatchIntentsTx,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
@@ -25,6 +26,11 @@ import {
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
+  buildHostedLinqGroupLineRecoveryEffectId,
+  buildHostedLinqGroupLineRecoverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
 import {
   ingestHostedLinqProviderEventTx,
   markHostedLinqGroupJoinOfferHandledTx,
@@ -2823,6 +2829,87 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves safe recovery source identity and reads terminal attempt receipts", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const secondAttemptEffectId =
+      buildHostedLinqGroupLineRecoveryAttemptEffectId({
+        attempt: 2,
+        effectId,
+      });
+    const sourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-group-line-recovery-1",
+    });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: effectId,
+      phoneNumber: "+15550100042",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef,
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toMatchObject({ claimed: true });
+    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ sourceRef })],
+      skipDuplicates: true,
+    });
+
+    const firstLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(effectId);
+    const secondLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(secondAttemptEffectId);
+    if (!firstLookupKey || !secondLookupKey) {
+      throw new Error("Expected recovery attempt lookup keys.");
+    }
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_group_line_recovery",
+        idempotencyKey: firstLookupKey,
+        lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
+        messageLookupKey: "hbid:linq-message:provider-message-123",
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100042"),
+        sourceRef,
+        status: "failed",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      },
+    ]);
+
+    await expect(readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: [effectId, secondAttemptEffectId],
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        idempotencyLookupKey: firstLookupKey,
+        providerCorrelated: true,
+        sourceRef,
+        status: "failed",
+      }),
+    ]);
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          idempotencyKey: {
+            in: [firstLookupKey, secondLookupKey],
+          },
+        },
+      }),
+    );
   });
 
   it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {

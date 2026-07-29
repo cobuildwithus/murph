@@ -3,8 +3,13 @@ import { normalizePhoneNumber } from "./phone";
 
 export const HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE =
   "group_line_recovery";
+export const HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS = 5;
 
 const BACKUP_NUMBER_PLACEHOLDER = "{backupNumber}";
+const HOSTED_LINQ_GROUP_LINE_RECOVERY_EFFECT_ID_PATTERN =
+  /^linq-group-line-recovery:([0-9a-f]{32})$/u;
+const HOSTED_LINQ_GROUP_LINE_RECOVERY_SOURCE_REF_PATTERN =
+  /^linq-group-line-recovery-source:([0-9a-f]{32}):([0-9a-f]{32})$/u;
 
 const HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANTS = [
   `Murph is having trouble replying from the number in that group. Add ${BACKUP_NUMBER_PLACEHOLDER} inside the existing group chat, then send the intro again.`,
@@ -90,24 +95,81 @@ export function buildHostedLinqGroupLineRecoveryEffectId(input: {
   }`;
 }
 
-export function buildHostedLinqGroupLineRecoveryRecipientSourceRef(
-  contact: HostedLinqGroupLineRecoveryParticipantContact,
-): string {
-  const value = contact.kind === "phone"
-    ? normalizePhoneNumber(contact.value)
-    : contact.value.trim().toLowerCase();
-  if (!value) {
+export function buildHostedLinqGroupLineRecoveryAttemptEffectId(input: {
+  attempt: number;
+  effectId: string;
+}): string {
+  const match = HOSTED_LINQ_GROUP_LINE_RECOVERY_EFFECT_ID_PATTERN.exec(
+    input.effectId,
+  );
+  if (
+    !match
+    || !Number.isInteger(input.attempt)
+    || input.attempt < 1
+    || input.attempt > HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS
+  ) {
     throw new TypeError(
-      "Hosted Linq group-line recovery requires a valid recipient contact.",
+      "Hosted Linq group-line recovery requires a valid bounded attempt.",
     );
   }
 
-  return `linq-group-line-recovery-recipient:${
-    sha256Hex(JSON.stringify({
-      kind: contact.kind,
-      value,
-    })).slice(0, 32)
-  }`;
+  return input.attempt === 1
+    ? input.effectId
+    : `linq-group-line-recovery:${match[1]}:attempt:${input.attempt}`;
+}
+
+export function buildHostedLinqGroupLineRecoverySourceRef(input: {
+  effectId: string;
+  sourceEventId: string;
+}): string {
+  const effectMatch = HOSTED_LINQ_GROUP_LINE_RECOVERY_EFFECT_ID_PATTERN.exec(
+    input.effectId,
+  );
+  const sourceEventId = input.sourceEventId.trim();
+  if (!effectMatch || !sourceEventId) {
+    throw new TypeError(
+      "Hosted Linq group-line recovery requires a valid intent and source event.",
+    );
+  }
+
+  const sourceEventDigest = sha256Hex(sourceEventId).slice(0, 32);
+  return [
+    "linq-group-line-recovery-source",
+    effectMatch[1],
+    sourceEventDigest,
+  ].join(":");
+}
+
+export type HostedLinqGroupLineRecoverySourceRef = {
+  intentDigest: string;
+  sourceEventDigest: string;
+};
+
+export function parseHostedLinqGroupLineRecoverySourceRef(
+  value: string | null | undefined,
+): HostedLinqGroupLineRecoverySourceRef | null {
+  const match = HOSTED_LINQ_GROUP_LINE_RECOVERY_SOURCE_REF_PATTERN.exec(
+    value?.trim() ?? "",
+  );
+  return match
+    ? {
+        intentDigest: match[1]!,
+        sourceEventDigest: match[2]!,
+      }
+    : null;
+}
+
+export function isHostedLinqGroupLineRecoverySourceRefForSameIntent(input: {
+  candidate: string | null;
+  expected: string;
+}): boolean {
+  const candidate = parseHostedLinqGroupLineRecoverySourceRef(input.candidate);
+  const expected = parseHostedLinqGroupLineRecoverySourceRef(input.expected);
+  return Boolean(
+    candidate
+      && expected
+      && candidate.intentDigest === expected.intentDigest
+  );
 }
 
 export function readHostedLinqGroupLineRecoveryVariantIndex(

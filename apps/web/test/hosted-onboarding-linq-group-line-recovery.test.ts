@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedLinqGroupLineRecoveryAttemptEffectId,
   buildHostedLinqGroupLineRecoveryEffectId,
   buildHostedLinqGroupLineRecoveryMessage,
-  buildHostedLinqGroupLineRecoveryRecipientSourceRef,
+  buildHostedLinqGroupLineRecoverySourceRef,
   HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANT_COUNT,
+  isHostedLinqGroupLineRecoverySourceRefForSameIntent,
+  parseHostedLinqGroupLineRecoverySourceRef,
   readHostedLinqGroupLineRecoveryVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-line-recovery";
 
@@ -59,21 +62,66 @@ describe("Hosted Linq group line recovery copy", () => {
     expect(otherLine).not.toBe(first);
   });
 
-  it("normalizes participant contacts for source refs", () => {
-    expect(buildHostedLinqGroupLineRecoveryRecipientSourceRef({
-      kind: "phone",
-      value: "+1 (555) 123-4567",
-    })).toBe(buildHostedLinqGroupLineRecoveryRecipientSourceRef({
-      kind: "phone",
-      value: "+15551234567",
-    }));
-    expect(buildHostedLinqGroupLineRecoveryRecipientSourceRef({
-      kind: "email",
-      value: "Member@Example.TEST",
-    })).toBe(buildHostedLinqGroupLineRecoveryRecipientSourceRef({
-      kind: "email",
-      value: "member@example.test",
-    }));
+  it("keys source refs by recovery intent and exact source event", () => {
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const first = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-1",
+    });
+    const replay = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-1",
+    });
+    const retry = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-2",
+    });
+
+    expect(first).toBe(replay);
+    expect(first).not.toBe(retry);
+    expect(first).toMatch(
+      /^linq-group-line-recovery-source:[0-9a-f]{32}:[0-9a-f]{32}$/u,
+    );
+  });
+
+  it("keeps attempts bounded while source refs distinguish exact events", () => {
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      threadId: "chat-group-1",
+    });
+    const firstAttempt = buildHostedLinqGroupLineRecoveryAttemptEffectId({
+      attempt: 1,
+      effectId,
+    });
+    const secondAttempt = buildHostedLinqGroupLineRecoveryAttemptEffectId({
+      attempt: 2,
+      effectId,
+    });
+    const firstSource = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-1",
+    });
+    const secondSource = buildHostedLinqGroupLineRecoverySourceRef({
+      effectId,
+      sourceEventId: "event-2",
+    });
+
+    expect(firstAttempt).toBe(effectId);
+    expect(secondAttempt).toBe(`${effectId}:attempt:2`);
+    expect(firstSource).not.toBe(secondSource);
+    expect(parseHostedLinqGroupLineRecoverySourceRef(firstSource)).toMatchObject({
+      intentDigest: expect.stringMatching(/^[0-9a-f]{32}$/u),
+      sourceEventDigest: expect.stringMatching(/^[0-9a-f]{32}$/u),
+    });
+    expect(isHostedLinqGroupLineRecoverySourceRefForSameIntent({
+      candidate: firstSource,
+      expected: secondSource,
+    })).toBe(true);
   });
 });
 
