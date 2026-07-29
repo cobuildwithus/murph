@@ -23,6 +23,7 @@ import type {
   CodexProgressEvent,
 } from './assistant-codex-events.js'
 import {
+  registerCancelPendingWarmCodexPreinitialization,
   registerStopWarmCodexAppServer,
   registerWaitForWarmCodexBackgroundWork,
   type WaitForWarmCodexBackgroundWorkInput,
@@ -227,6 +228,21 @@ type CodexAppServerProcessInput = {
   codexCommand: string
   env: NodeJS.ProcessEnv
   launchKey: string
+}
+
+type CodexAppServerLaunchInput = {
+  codexCommand?: string | null
+  codexHome?: string | null
+  configOverrides?: readonly string[]
+  env?: NodeJS.ProcessEnv
+  oss?: boolean
+  profile?: string | null
+  workingDirectory: string
+}
+
+type CodexAppServerPreparedProcessInput = CodexAppServerProcessInput & {
+  configOverrides: readonly string[]
+  workingDirectory: string
 }
 
 type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
@@ -487,6 +503,11 @@ export interface CodexAppServerTurnInput {
   workingDirectory: string
 }
 
+export interface CodexAppServerPreinitializeInput
+  extends CodexAppServerLaunchInput {
+  signal?: AbortSignal | null
+}
+
 export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
   additionalUsages: AssistantProviderUsageDraft[]
@@ -632,13 +653,7 @@ export async function executeCodexAppServerTurn(
 ): Promise<CodexAppServerTurnResult> {
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
-  const workingDirectory = path.resolve(input.workingDirectory)
-  await assertCodexAppServerWorkingDirectory(workingDirectory)
-  const childEnv = await resolveCodexChildEnv({
-    codexHome: input.codexHome,
-    env: input.env,
-  })
-  const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
+  const processInput = await prepareCodexAppServerProcessInput(input)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const imagePaths = await materializeCodexImagePaths({
     images: input.images,
@@ -647,35 +662,21 @@ export async function executeCodexAppServerTurn(
   const normalizedInput = {
     ...input,
     approvalPolicy,
-    configOverrides: withHostedCodexModelCatalogConfigOverride({
-      configOverrides: input.configOverrides,
-      env: input.env,
-    }),
+    configOverrides: processInput.configOverrides,
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
       path.resolve(root),
     ),
   }
-  const args = buildCodexAppServerArgs(normalizedInput)
-  const launchKey = buildCodexAppServerLaunchKey({
-    args,
-    codexCommand,
-    env: childEnv,
-    workingDirectory,
-  })
   const preparedInput: CodexAppServerPreparedTurnInput = {
     ...normalizedInput,
-    args,
-    codexCommand,
-    env: childEnv,
+    ...processInput,
     fetchImpl: input.fetchImpl ?? fetch,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
-    launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
     askGrokRuntime: input.askGrokRuntime ?? null,
-    workingDirectory,
   }
 
   let oneShotProcess: CodexAppServerProcess | null = null
@@ -692,8 +693,21 @@ export async function executeCodexAppServerTurn(
       return await runCodexAppServerTurnOnProcess(oneShotProcess, preparedInput)
     }
 
-    const processInstance = await getOrStartWarmCodexProcess(preparedInput)
-    return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
+    let allowPreinitializeFallback = true
+    while (true) {
+      const processInstance = await getOrStartWarmCodexProcess(preparedInput)
+      try {
+        return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
+      } catch (error) {
+        if (
+          !allowPreinitializeFallback ||
+          !processInstance.didSpeculativeInitializationFail(error)
+        ) {
+          throw error
+        }
+        allowPreinitializeFallback = false
+      }
+    }
   } finally {
     try {
       await oneShotProcess?.stop('one-shot-complete')
@@ -776,6 +790,42 @@ function resolveCodexAppServerCommand(
   return codexCommand?.trim() || 'codex'
 }
 
+async function prepareCodexAppServerProcessInput(
+  input: CodexAppServerLaunchInput,
+): Promise<CodexAppServerPreparedProcessInput> {
+  const workingDirectory = path.resolve(input.workingDirectory)
+  await assertCodexAppServerWorkingDirectory(workingDirectory)
+  const env = await resolveCodexChildEnv({
+    codexHome: input.codexHome,
+    env: input.env,
+  })
+  const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
+  const configOverrides =
+    withHostedCodexModelCatalogConfigOverride({
+      configOverrides: input.configOverrides,
+      env: input.env,
+    }) ?? []
+  const args = buildCodexAppServerArgs({
+    configOverrides,
+    oss: input.oss,
+    profile: input.profile,
+  })
+  const launchKey = buildCodexAppServerLaunchKey({
+    args,
+    codexCommand,
+    env,
+    workingDirectory,
+  })
+  return {
+    args,
+    codexCommand,
+    configOverrides,
+    env,
+    launchKey,
+    workingDirectory,
+  }
+}
+
 function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
@@ -836,10 +886,14 @@ class CodexAppServerProcess {
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
+  private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
   private initialized = false
+  private initializationFailure: unknown = null
+  private initializationPromise: Promise<void> | null = null
+  private initializationWasSpeculative = false
   private endReason: CodexAppServerColdStartReason | null = null
   private nextRequestId = 1
   private normalShutdown = false
@@ -857,6 +911,7 @@ class CodexAppServerProcess {
   private stderrBuffer = ''
   private startupStderr = ''
   private startupFailure: Error | null = null
+  private spawnReadyPromise: Promise<void> | null = null
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
   private stopPromise: Promise<void> | null = null
@@ -912,6 +967,14 @@ class CodexAppServerProcess {
     return this.initialized
   }
 
+  get wasPreinitialized(): boolean {
+    return this.initializationWasSpeculative
+  }
+
+  get hasCompletedTurn(): boolean {
+    return this.completedTurn
+  }
+
   get processLifetimeMs(): number {
     return Math.max(0, Date.now() - this.startedAt)
   }
@@ -934,6 +997,40 @@ class CodexAppServerProcess {
 
   get isStopped(): boolean {
     return this.state === 'stopped'
+  }
+
+  get hasUnclaimedSpeculativeInitialization(): boolean {
+    return (
+      this.initializationWasSpeculative &&
+      !this.initialized &&
+      !this.hasInFlightTurn
+    )
+  }
+
+  canClaimForLaunch(launchKey: string): boolean {
+    return (
+      this.launchKey === launchKey &&
+      !this.poisoned &&
+      this.state === 'idle' &&
+      this.child.exitCode === null &&
+      this.child.signalCode === null
+    )
+  }
+
+  noteSpeculativeInitialization(): void {
+    this.initializationWasSpeculative = true
+  }
+
+  didSpeculativeInitializationFail(error: unknown): boolean {
+    return (
+      this.initializationWasSpeculative &&
+      this.initializationFailure !== null &&
+      this.initializationFailure === error
+    )
+  }
+
+  noteTurnCompleted(): void {
+    this.completedTurn = true
   }
 
   reserveTurn(): void {
@@ -997,6 +1094,11 @@ class CodexAppServerProcess {
   }
 
   async waitForSpawn(): Promise<void> {
+    this.spawnReadyPromise ??= this.runWaitForSpawn()
+    await this.spawnReadyPromise
+  }
+
+  private async runWaitForSpawn(): Promise<void> {
     this.throwStartupFailure()
     try {
       await waitForCodexSpawn(this.child)
@@ -1011,10 +1113,19 @@ class CodexAppServerProcess {
   }
 
   async initialize(): Promise<void> {
-    if (this.initialized) {
-      return
-    }
+    this.initializationPromise ??= this.runInitialize().catch((error: unknown) => {
+      this.initializationFailure = error
+      this.poisoned = true
+      if (error instanceof Error) {
+        this.startupFailure ??= error
+      }
+      throw error
+    })
+    await this.initializationPromise
+  }
 
+  private async runInitialize(): Promise<void> {
+    await this.waitForSpawn()
     await withCodexRpcTimeout(
       this.sendRequest('initialize', {
         clientInfo: {
@@ -1114,7 +1225,10 @@ class CodexAppServerProcess {
       !this.poisoned &&
       this.child.exitCode === null &&
       this.child.signalCode === null &&
-      this.state === 'idle'
+      (
+        this.state === 'idle' ||
+        (this.state === 'reserved' && this.activeTurn === null)
+      )
     ) {
       return
     }
@@ -1282,6 +1396,16 @@ class CodexAppServerProcess {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
+    this.rejectPending(
+      new VaultCliError(
+        'ASSISTANT_CODEX_APP_SERVER_STOPPED',
+        'Codex app-server stopped before its pending RPC completed.',
+        {
+          reason,
+          retryable: true,
+        },
+      ),
+    )
     let stopped = false
     try {
       await stopCodexAppServerChild({
@@ -1318,12 +1442,9 @@ class CodexAppServerProcess {
 
   isReusableFor(launchKey: string): boolean {
     return (
-      this.launchKey === launchKey &&
+      this.canClaimForLaunch(launchKey) &&
       this.initialized &&
-      !this.poisoned &&
-      this.state === 'idle' &&
-      this.child.exitCode === null &&
-      this.child.signalCode === null
+      this.initializationFailure === null
     )
   }
 
@@ -1574,6 +1695,13 @@ class CodexAppServerProcess {
     this.cleanupProcessExitListener()
 
     if (this.normalShutdown) {
+      this.rejectPending(
+        new VaultCliError(
+          'ASSISTANT_CODEX_APP_SERVER_STOPPED',
+          'Codex app-server closed before its pending RPC completed.',
+          { retryable: true },
+        ),
+      )
       return
     }
 
@@ -1779,37 +1907,18 @@ function resolveCodexAppServerEndReason(
 }
 
 let warmCodexProcess: CodexAppServerProcess | null = null
-let warmCodexSlotLock: Promise<void> = Promise.resolve()
-
-async function withWarmCodexSlotLock<T>(
-  operation: () => Promise<T>,
-): Promise<T> {
-  const previous = warmCodexSlotLock
-  let release!: () => void
-  warmCodexSlotLock = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await previous
-  try {
-    return await operation()
-  } finally {
-    release()
-  }
-}
 
 async function getOrStartWarmCodexProcess(
   input: CodexAppServerProcessInput,
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
-  return await withWarmCodexSlotLock(async () => {
-    if (warmCodexProcess?.isReusableFor(launchKey)) {
-      warmCodexProcess.reserveTurn()
-      return warmCodexProcess
-    }
-
+  while (true) {
     const previousProcess = warmCodexProcess
-    let coldStartReason: CodexAppServerColdStartReason = 'node-process-first-use'
     if (previousProcess) {
+      if (previousProcess.canClaimForLaunch(launchKey)) {
+        previousProcess.reserveTurn()
+        return previousProcess
+      }
       if (previousProcess.hasInFlightTurn) {
         throw previousProcess.buildBusyError(
           'Codex app-server process is already serving a turn.',
@@ -1824,50 +1933,200 @@ async function getOrStartWarmCodexProcess(
           ? 'launch-identity-changed'
           : 'process-unhealthy'
       await previousProcess.stop(stopReason)
-      coldStartReason = previousProcess.nextColdStartReason
+      if (warmCodexProcess !== previousProcess) {
+        continue
+      }
     }
 
     const processInstance = new CodexAppServerProcess({
       ...input,
-      coldStartReason,
+      coldStartReason:
+        previousProcess?.nextColdStartReason ?? 'node-process-first-use',
     })
     warmCodexProcess = processInstance
-    warmCodexProcess.reserveTurn()
-    return warmCodexProcess
-  })
+    processInstance.reserveTurn()
+    return processInstance
+  }
+}
+
+async function stopExactUnclaimedWarmCodexProcess(
+  processInstance: CodexAppServerProcess,
+  reason: string,
+): Promise<void> {
+  if (
+    warmCodexProcess !== processInstance ||
+    !processInstance.hasUnclaimedSpeculativeInitialization
+  ) {
+    return
+  }
+  await processInstance.stop(reason)
+}
+
+function readCodexPreinitializeAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException(
+        'Codex app-server preinitialization was interrupted.',
+        'AbortError',
+      )
+}
+
+function beginCodexPreinitialize(
+  processInstance: CodexAppServerProcess,
+  signal: AbortSignal | null,
+): void {
+  const readiness = processInstance.initialize()
+  const onAbort = () => {
+    void stopExactUnclaimedWarmCodexProcess(
+      processInstance,
+      'preinitialize-aborted',
+    ).catch(() => undefined)
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) {
+    onAbort()
+  }
+  void readiness.then(
+    () => {
+      signal?.removeEventListener('abort', onAbort)
+    },
+    () => {
+      signal?.removeEventListener('abort', onAbort)
+      void stopExactUnclaimedWarmCodexProcess(
+        processInstance,
+        'preinitialize-failure',
+      ).catch(() => undefined)
+    },
+  )
+}
+
+export async function preinitializeCodexAppServer(
+  input: CodexAppServerPreinitializeInput,
+): Promise<void> {
+  const processInput = await prepareCodexAppServerProcessInput(input)
+  const signal = input.signal ?? null
+  if (signal?.aborted) {
+    throw readCodexPreinitializeAbortReason(signal)
+  }
+
+  while (true) {
+    if (signal?.aborted) {
+      throw readCodexPreinitializeAbortReason(signal)
+    }
+    const processInstance = warmCodexProcess
+    if (processInstance) {
+      if (processInstance.canClaimForLaunch(processInput.launchKey)) {
+        if (!processInstance.initializedForRpc) {
+          processInstance.noteSpeculativeInitialization()
+          beginCodexPreinitialize(processInstance, signal)
+        }
+        return
+      }
+      if (processInstance.hasInFlightTurn) {
+        return
+      }
+      const processExited =
+        processInstance.child.exitCode !== null ||
+        processInstance.child.signalCode !== null
+      await processInstance.stop(
+        processExited
+          ? 'process-exited'
+          : processInstance.launchKey !== processInput.launchKey
+            ? 'launch-identity-changed'
+            : 'process-unhealthy',
+      )
+      if (warmCodexProcess !== processInstance) {
+        continue
+      }
+    }
+
+    if (signal?.aborted) {
+      throw readCodexPreinitializeAbortReason(signal)
+    }
+    const preparedProcess = new CodexAppServerProcess({
+      args: processInput.args,
+      codexCommand: processInput.codexCommand,
+      coldStartReason:
+        processInstance?.nextColdStartReason ?? 'node-process-first-use',
+      env: processInput.env,
+      launchKey: processInput.launchKey,
+    })
+    preparedProcess.noteSpeculativeInitialization()
+    warmCodexProcess = preparedProcess
+    beginCodexPreinitialize(preparedProcess, signal)
+    return
+  }
 }
 
 export async function stopWarmCodexAppServer(
   reason = 'external-stop',
 ): Promise<void> {
-  await withWarmCodexSlotLock(async () => {
-    const processInstance = warmCodexProcess
-    if (!processInstance) {
-      return
-    }
+  const processInstance = warmCodexProcess
+  if (!processInstance) {
+    return
+  }
+  if (processInstance.hasInFlightTurn) {
+    throw processInstance.buildBusyError(
+      'Codex app-server process is serving a turn and cannot be stopped directly.',
+    )
+  }
+  await processInstance.stop(reason)
+}
 
-    if (processInstance.hasInFlightTurn) {
-      throw processInstance.buildBusyError(
-        'Codex app-server process is serving a turn and cannot be stopped directly.',
-      )
+export async function cancelPendingWarmCodexPreinitialization(): Promise<void> {
+  const processInstance = warmCodexProcess
+  if (!processInstance?.hasUnclaimedSpeculativeInitialization) {
+    return
+  }
+  try {
+    await stopExactUnclaimedWarmCodexProcess(
+      processInstance,
+      'invocation-release-during-preinitialize',
+    )
+  } catch (error) {
+    // An already-proven exit is sufficient for this optional optimization's
+    // invocation-release boundary. Unproven teardown still fails closed.
+    if (!processInstance.isStopped) {
+      throw error
     }
-
-    await processInstance.stop(reason)
-  })
+  }
 }
 
 export async function waitForWarmCodexBackgroundWork(
   input: WaitForWarmCodexBackgroundWorkInput = {},
 ): Promise<void> {
-  await withWarmCodexSlotLock(async () => {
-    const processInstance = warmCodexProcess
-    if (!processInstance || processInstance.isStopped) {
-      return
-    }
+  const processInstance = warmCodexProcess
+  if (!processInstance || processInstance.isStopped) {
+    return
+  }
+  if (processInstance.hasUnclaimedSpeculativeInitialization) {
+    await stopExactUnclaimedWarmCodexProcess(
+      processInstance,
+      'workspace-boundary-during-preinitialize',
+    )
+    return
+  }
+  if (processInstance.hasInFlightTurn) {
+    throw processInstance.buildBusyError(
+      'Codex app-server process is serving a turn and cannot cross a workspace boundary.',
+    )
+  }
+  if (!processInstance.isReusableFor(processInstance.launchKey)) {
+    await processInstance.stop('workspace-boundary-process-unhealthy')
+    return
+  }
+
+  processInstance.reserveTurn()
+  try {
     await processInstance.waitForBackgroundWork(input)
-  })
+  } finally {
+    processInstance.releaseReservation()
+  }
 }
 
+registerCancelPendingWarmCodexPreinitialization(
+  cancelPendingWarmCodexPreinitialization,
+)
 registerStopWarmCodexAppServer(stopWarmCodexAppServer)
 registerWaitForWarmCodexBackgroundWork(waitForWarmCodexBackgroundWork)
 
@@ -2330,15 +2589,15 @@ export async function compactWarmCodexThread(input: {
   signal?: AbortSignal | null
   timeoutMs: number
 }): Promise<CodexWarmThreadCompactionOutcome> {
-  const reservation = await withWarmCodexSlotLock(async () => {
-    const processInstance = warmCodexProcess
-    if (!processInstance || !processInstance.isReusableFor(processInstance.launchKey)) {
-      return processInstance?.hasInFlightTurn
+  const candidateProcess = warmCodexProcess
+  const reservation = (() => {
+    if (!candidateProcess || !candidateProcess.isReusableFor(candidateProcess.launchKey)) {
+      return candidateProcess?.hasInFlightTurn
         ? ({ kind: 'skipped', reason: 'turn_in_flight', threadContextTokensBefore: null } as const)
         : ({ kind: 'skipped', reason: 'no_warm_process', threadContextTokensBefore: null } as const)
     }
 
-    const vitals = processInstance.warmThreadTokenUsage
+    const vitals = candidateProcess.warmThreadTokenUsage
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
     }
@@ -2360,7 +2619,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
-    if (processInstance.hasUncheckpointedDetachedWork) {
+    if (candidateProcess.hasUncheckpointedDetachedWork) {
       return {
         kind: 'skipped',
         reason: 'background_work_pending',
@@ -2368,9 +2627,13 @@ export async function compactWarmCodexThread(input: {
       } as const
     }
 
-    processInstance.reserveTurn()
-    return { kind: 'reserved', processInstance, vitals } as const
-  })
+    candidateProcess.reserveTurn()
+    return {
+      kind: 'reserved',
+      processInstance: candidateProcess,
+      vitals,
+    } as const
+  })()
   if (reservation.kind !== 'reserved') {
     return reservation
   }
@@ -2785,7 +3048,7 @@ async function runCodexAppServerTurnOnProcess(
   )
   let codexThreadId: string | null = null
   let turnId: string | null = null
-  const isReusedWarmProcess = codexProcess.initializedForRpc
+  const isReusedWarmProcess = codexProcess.hasCompletedTurn
   // Completed final-phase agent messages that were followed by a steered
   // user-message item and then superseded by a newer response segment in the
   // same turn. A closed segment is held as a candidate until newer text or
@@ -3060,7 +3323,7 @@ async function runCodexAppServerTurnOnProcess(
         rawEvent: {
           schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
           type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
-          ...(stage === 'initialized'
+          ...(stage === 'initialized' || stage === 'preinitialized'
             ? {
                 codexTimingColdStartReason: codexProcess.coldStartReason,
               }
@@ -4667,7 +4930,12 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('spawn-ready')
       await codexProcess.initialize()
       lifecycleStage = 'initialized'
-      emitAppServerTimingTrace('initialized')
+      emitAppServerTimingTrace(
+        codexProcess.wasPreinitialized ? 'preinitialized' : 'initialized',
+      )
+    } else if (!codexProcess.hasCompletedTurn) {
+      lifecycleStage = 'initialized'
+      emitAppServerTimingTrace('preinitialized')
     } else {
       lifecycleStage = 'initialized'
       emitAppServerTimingTrace('warm-reused')
@@ -4753,6 +5021,7 @@ async function runCodexAppServerTurnOnProcess(
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
     lifecycleStage = 'turn_completed'
+    codexProcess.noteTurnCompleted()
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
     if (stdinFailure) {

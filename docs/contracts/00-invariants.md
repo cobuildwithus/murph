@@ -67,6 +67,21 @@ it has been explicitly elevated to a cross-cutting invariant.
   that Codex cannot accept through thread or turn RPC. Workspace invocation
   abort/preemption must synchronously stop the exact owned App Server before
   the invocation slot can be reused.
+- `packages/assistant-engine` is the sole resident App Server process owner.
+  Process readiness is a memoized property of that exact process and is
+  separate from turn reservation: process-only initialization may start
+  without reserving a turn, and a matching turn synchronously reserves that
+  exact process before joining the same readiness work. Do not add a second
+  warm-slot lifecycle, startup scheduler, slot lock, or speculative turn owner.
+  Initialization alone is not prior-turn reuse: the first foreground turn keeps
+  first-turn request and event scoping until one real turn completes.
+- Process-only initialization never starts or resumes a thread, starts a turn,
+  invokes provider or account operations, assembles dynamic tools, compacts a
+  thread, or launches a child. Failure or cancellation is only a missed
+  optimization: it rejects every pending App Server RPC, stops the exact
+  process, and leaves accepted work eligible for the ordinary fresh-process
+  path. A stale readiness completion from a stopped or replaced process cannot
+  publish, clear, reserve, or replace a newer process.
 - Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
   automation or device authority are request facts, not App Server launch
   identity or ambient child-process authority. Expose invocation-scoped
@@ -98,6 +113,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   and fails closed. Explicit workspace invocation abort/preemption interrupts
   the wait and synchronously tears down that exact process before workspace or
   invocation ownership is released.
+- Before checkpoint construction, unreserved process initialization that is
+  still pending is cancelled and its exact process is awaited through teardown.
+  An already-ready idle resident process remains governed by the ordinary warm
+  App Server checkpoint contract; preparation does not create another
+  checkpoint owner.
 
 ## Foreground Reply Critical Path
 

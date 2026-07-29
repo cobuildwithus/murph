@@ -50,6 +50,9 @@ import {
   type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import type {
+  HostedCodexAssistantProcessPreparationInput,
+} from "@murphai/assistant-engine/assistant-runtime";
 import {
   parseAssistantSessionRecord,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -143,12 +146,16 @@ const mocks = vi.hoisted(() => ({
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
+  prepareHostedCodexAssistantProcess: vi.fn<
+    (input: HostedCodexAssistantProcessPreparationInput) => Promise<void>
+  >(async () => undefined),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   runHostedIdleCheckpointMaintenance: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
+  cancelPendingWarmCodexPreinitialization: vi.fn(async () => undefined),
 }));
 
 vi.mock("../src/hosted-runtime/pending-input-index.ts", async (importOriginal) => {
@@ -206,6 +213,30 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
       mocks.runAssistantAutomationPass.mockImplementation(
         actual.runAssistantAutomationPass,
       ),
+  };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-runtime", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-runtime")
+  >();
+
+  return {
+    ...actual,
+    prepareHostedCodexAssistantProcess:
+      mocks.prepareHostedCodexAssistantProcess,
+  };
+});
+
+vi.mock("@murphai/assistant-engine/codex-lifecycle", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/codex-lifecycle")
+  >();
+
+  return {
+    ...actual,
+    cancelPendingWarmCodexPreinitialization:
+      mocks.cancelPendingWarmCodexPreinitialization,
   };
 });
 
@@ -328,6 +359,7 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
+  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -811,6 +843,150 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       prepareRelease.resolve();
       await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("admits Codex preparation before mailbox import and settles it on an early return", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-codex-preinitialization-early-return",
+    );
+    const sidecarItem = createMailboxItem({
+      id: "mailbox_item_codex_preinitialization_early_return",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:codex-preinitialization-early-return",
+    });
+    const baseMailboxPort = createMailboxPort({
+      events,
+      items: [sidecarItem],
+    });
+    const prepareHostedCodexRuntimeEnvironmentImpl =
+      mocks.prepareHostedCodexRuntimeEnvironment.getMockImplementation();
+    let preparedRuntimeEnv: Readonly<Record<string, string>> | null = null;
+    let preparedOperatorHomeRoot: string | null = null;
+
+    assert.ok(prepareHostedCodexRuntimeEnvironmentImpl);
+    mocks.prepareHostedCodexRuntimeEnvironment.mockImplementationOnce(async (input) => {
+      const prepared = await prepareHostedCodexRuntimeEnvironmentImpl(input);
+      preparedOperatorHomeRoot = input.operatorHomeRoot;
+      preparedRuntimeEnv = prepared.runtimeEnv;
+      events.push("codex.config.done");
+      return prepared;
+    });
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize");
+    });
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockImplementationOnce(async () => {
+      events.push("codex.workspace-boundary");
+    });
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
+            HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+            HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+          },
+          request: {
+            attemptId: "attempt_synthetic_codex_preinitialization_overlap",
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Retry-only mailbox scheduling should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Unavailable mailbox payload should not import.");
+          },
+          platform: createPlatform({
+            mailboxPort: {
+              ...baseMailboxPort,
+              async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+                events.push("mailbox.fetchPayload");
+                return {
+                  fetchedAt: TEST_NOW,
+                  payload: null,
+                  unavailable: {
+                    code: "not_found",
+                    retryable: true,
+                  },
+                };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("Early-return test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("Early-return test should not complete snapshots.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("Early-return test should not upload snapshots.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+              },
+              async startSnapshotSession() {
+                throw new Error("Early-return test should not start snapshots.");
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      const preparationInput =
+        mocks.prepareHostedCodexAssistantProcess.mock.calls.at(-1)?.[0];
+      assert.ok(preparationInput);
+      assert.ok(preparedOperatorHomeRoot);
+      assert.ok(preparedRuntimeEnv);
+      assert.ok(
+        events.indexOf("codex.config.done") < events.indexOf("codex.preinitialize"),
+      );
+      assert.ok(
+        events.indexOf("codex.preinitialize") < events.indexOf("mailbox.fetch"),
+      );
+      assert.ok(
+        events.indexOf("mailbox.fetchPayload") < events.indexOf("codex.workspace-boundary"),
+      );
+      assert.equal(preparationInput.workingDirectory, vaultRoot);
+      assert.deepEqual(
+        preparationInput.env,
+        createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: preparedOperatorHomeRoot,
+          runtimeEnv: preparedRuntimeEnv,
+          vaultRoot,
+        }).env,
+      );
+      assert.equal(preparationInput.signal?.aborted, false);
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        1,
+      );
+      assert.equal(result.status, "scheduled");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -7719,6 +7895,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
     const assistantWorkspaceVersions: string[] = [];
     let bootstrapImported = false;
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
 
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_image_only_001",
@@ -7845,6 +8023,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -7982,6 +8165,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.cancelPendingWarmCodexPreinitialization.mockClear();
     const mealPhotoItem = createMailboxItem({
       dedupeKey: "meal-photo:system-mailbox-only",
       id: "mailbox_item_system_mailbox_only_meal",
@@ -8100,6 +8285,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, importCheckpoint?.nextWakeAt);
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(
+        mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length,
+        0,
+      );
       assert.ok(
         events.lastIndexOf("workspace.checkpoint") < events.indexOf("meal-photo.delete"),
       );

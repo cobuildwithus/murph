@@ -47,6 +47,27 @@ Last verified: 2026-07-29
 
 ## Runtime Expectations
 
+- `packages/assistant-engine` owns one resident Codex App Server process and one
+  memoized readiness promise on that process. Readiness covers spawn plus the
+  App Server initialization handshake; it does not reserve the process for a
+  turn. Matching preparation callers join that same promise, while a matching
+  foreground turn synchronously reserves the exact process before joining its
+  readiness. Exact object identity and synchronous state transitions serialize
+  publish, claim, replacement, and teardown without a second slot lock or
+  readiness owner.
+- Every App Server stop path rejects all pending JSON-RPC requests promptly and
+  tears down the exact process object. Preparation failure, timeout, abort, or
+  incompatible replacement must finish that teardown before a fresh process is
+  published. Late completion from the old object cannot mutate the resident
+  slot, and a foreground turn falls back to ordinary fresh startup only after
+  the failed preparation is fully cleared; preparation failure never consumes
+  or silences accepted work.
+- Before snapshot construction, the checkpoint owner cancels and awaits exact
+  teardown of readiness that is still pending and unreserved. A ready idle
+  process remains on the existing warm-process path; a reserved or running
+  process remains on the existing turn-quiescence path. The hosted
+  conversation warm lease remains 20 minutes, and process-only initialization
+  neither extends that lease nor adds keepalive traffic.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample

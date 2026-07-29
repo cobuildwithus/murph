@@ -1022,6 +1022,18 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
+For established hosted conversation work, the same engine-owned slot may begin
+process-only spawn and initialization after restore plus final Codex config/auth
+preparation, while initial mailbox import continues. Readiness is memoized on
+the exact process and does not reserve a turn; a matching foreground turn
+synchronously reserves that object before joining readiness. Preparation sends
+no thread, turn, provider, account, tool, or compaction request, and launches no
+detached child. Checkpoint and invocation-release boundaries stop and settle
+pending unclaimed preparation, while ready idle processes stay warm.
+Exact object identity and synchronous state transitions replace the former
+warm-slot lock; no second owner, queue, scheduler, keepalive, or longer
+container lease is introduced.
+
 Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
 Before the root reply, Murph retains a durable accepted input, canonical fact,
 or raw source and gives each child its exact source words, ids, or refs. A

@@ -49,6 +49,12 @@ import {
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
+  prepareHostedCodexAssistantProcess,
+} from "@murphai/assistant-engine/assistant-runtime";
+import {
+  cancelPendingWarmCodexPreinitialization,
+} from "@murphai/assistant-engine/codex-lifecycle";
+import {
   AssistantActiveTurnInputUnavailableError,
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -91,6 +97,9 @@ import {
   resolveHostedCurrentInputIdForAcceptedInputs,
   type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
+import {
+  readHostedAssistantExecutionDefaultTarget,
+} from "./hosted-runtime/context.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -963,6 +972,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
+  let codexProcessPreparationAdmitted = false;
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
@@ -1483,6 +1493,43 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
+    if (
+      (input.request.processingMode ?? "default") === "default"
+      && !initialMailboxImportPlan.bootstrapRequired
+    ) {
+      let preinitializationTarget = null;
+      try {
+        preinitializationTarget = await readHostedAssistantExecutionDefaultTarget({
+          homeDirectory: restored.operatorHomeRoot,
+          runtimeEnv: hostedCodexRuntime.runtimeEnv,
+        });
+      } catch {
+        // Process preparation is only a latency optimization. The ordinary
+        // assistant path remains the authority for reporting config failures.
+      }
+      assertRuntimeNotAborted();
+      if (preinitializationTarget) {
+        try {
+          // Admission publishes the exact process owner; initialization keeps
+          // running while the mailbox import below proceeds.
+          const turnEnvironment = createHostedAssistantTurnEnvironment({
+            operatorHomeRoot: restored.operatorHomeRoot,
+            runtimeEnv: hostedCodexRuntime.runtimeEnv,
+            vaultRoot: restored.vaultRoot,
+          });
+          await prepareHostedCodexAssistantProcess({
+            env: turnEnvironment.env,
+            signal: runtimeAbortController.signal,
+            target: preinitializationTarget,
+            workingDirectory: restored.vaultRoot,
+          });
+          codexProcessPreparationAdmitted = true;
+        } catch {
+          // Foreground acquisition falls back to ordinary process startup.
+        }
+      }
+    }
+    assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
         ? (["system"] as const)
@@ -3931,9 +3978,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
-    await imageGenerationController?.close();
-    await closeDetachedAssistantAskBeforeWorkspaceRelease();
-    hostAbortSignal?.removeEventListener("abort", abortFromHost);
+    try {
+      if (codexProcessPreparationAdmitted) {
+        await cancelPendingWarmCodexPreinitialization();
+      }
+    } finally {
+      try {
+        await imageGenerationController?.close();
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+      } finally {
+        hostAbortSignal?.removeEventListener("abort", abortFromHost);
+      }
+    }
   }
 }
 
