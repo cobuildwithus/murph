@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { rankHostedLinqProviderStatus } from "./linq-provider-status";
 import {
   createHostedLinqChatLookupKey,
   createHostedLinqMessageLookupKey,
@@ -813,20 +814,6 @@ function chooseMostSevereProviderStatus(values: readonly string[]): string | nul
     }
   }
   return selected;
-}
-
-function rankHostedLinqProviderStatus(value: string): number {
-  const normalized = value.trim().toLowerCase();
-  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
-    return 4;
-  }
-  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
-    return 3;
-  }
-  if (["active", "healthy", "ok", "ready"].includes(normalized)) {
-    return 2;
-  }
-  return 1;
 }
 
 function buildPayloadHash(rawBody: string | null | undefined, event: HostedLinqWebhookEvent): string | null {

@@ -62,23 +62,50 @@ const HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANTS = [
 export const HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANT_COUNT =
   HOSTED_LINQ_GROUP_LINE_RECOVERY_VARIANTS.length;
 
+export type HostedLinqGroupLineRecoveryParticipantContact = {
+  kind: "email" | "phone";
+  value: string;
+};
+
 export function buildHostedLinqGroupLineRecoveryEffectId(input: {
-  chatId: string;
+  incomingRecipientPhone: string;
   memberId: string;
-  sourceEventId: string;
+  threadId: string;
 }): string {
-  const chatId = input.chatId.trim();
+  const incomingRecipientPhone = normalizePhoneNumber(input.incomingRecipientPhone);
   const memberId = input.memberId.trim();
-  const sourceEventId = input.sourceEventId.trim();
-  if (!chatId || !memberId || !sourceEventId) {
-    return `linq-message:${sourceEventId || "group-line-recovery"}`;
+  const threadId = input.threadId.trim();
+  if (!incomingRecipientPhone || !memberId || !threadId) {
+    throw new TypeError(
+      "Hosted Linq group-line recovery requires a valid member, thread, and incoming line.",
+    );
   }
 
   return `linq-group-line-recovery:${
     sha256Hex(JSON.stringify({
-      chatId,
+      incomingRecipientPhone,
       memberId,
-      sourceEventId,
+      threadId,
+    })).slice(0, 32)
+  }`;
+}
+
+export function buildHostedLinqGroupLineRecoveryRecipientSourceRef(
+  contact: HostedLinqGroupLineRecoveryParticipantContact,
+): string {
+  const value = contact.kind === "phone"
+    ? normalizePhoneNumber(contact.value)
+    : contact.value.trim().toLowerCase();
+  if (!value) {
+    throw new TypeError(
+      "Hosted Linq group-line recovery requires a valid recipient contact.",
+    );
+  }
+
+  return `linq-group-line-recovery-recipient:${
+    sha256Hex(JSON.stringify({
+      kind: contact.kind,
+      value,
     })).slice(0, 32)
   }`;
 }

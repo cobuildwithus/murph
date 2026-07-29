@@ -99,7 +99,6 @@ import {
 import {
   type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
-  type HostedLinqHomeLineAuthority,
   readHostedLinqHomeLineAuthority,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineFromPoolTx,
@@ -107,24 +106,11 @@ import {
 } from "./linq-home-routing";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
-  hasActiveHostedLinqManagedLine,
-  isHostedLinqManagedLineExactAtRisk,
-  isHostedLinqManagedLineHardBlocked,
-  listHostedLinqHealthyProactiveLines,
-  readHostedLinqManagedLineState,
-  type HostedLinqAssignableHomeLine,
-  type HostedLinqManagedLineState,
+  readHostedLinqIncomingLineState,
 } from "./linq-line-store";
 import {
-  chooseHostedLinqSignupWelcomeLine,
   resolveHostedLinqSignupWelcomeDailyLimit,
 } from "./linq-routing-policy";
-import {
-  buildHostedLinqGroupLineRecoveryEffectId,
-} from "./linq-group-line-recovery";
-import {
-  readHostedLinqDeliveryProviderDispatchIntentTx,
-} from "./linq-delivery-store";
 import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
@@ -2442,19 +2428,25 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "provision-unavailable"
   | "recipient-line-hard-blocked"
   | "recipient-line-authority-unresolved"
+  | "recipient-line-conflicting"
+  | "recipient-line-degraded-unavailable"
   | "recipient-line-unmanaged"
-  | "recipient-line-unavailable"
-  | "recipient-line-recovery-unavailable"
+  | "recipient-line-not-assigned"
+  | "recipient-line-service-unavailable"
+  | "recipient-line-structurally-unavailable"
   | "sender-contact-unresolved"
   | "sender-identity-unresolved"
   | "sender-inactive";
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
- * an active member and the recipient resolves to an active managed Murph Linq
- * line; only then is the dedicated thread-container runtime provisioned and
- * the triggering message routed into it. The webhook recipient alone is never
- * line authority. Existing routes are handled before this admission path.
+ * an active member and the recipient resolves to either an assignable Murph
+ * Linq line or that member's exact assigned AT_RISK line; only then is the
+ * dedicated thread-container runtime provisioned and the triggering message
+ * routed into it. A hard-blocked assigned line never provisions the group: it
+ * plans a private recovery prompt to add a healthy backup number instead. The
+ * webhook recipient alone is never line authority. Existing routes are handled
+ * before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -2537,23 +2529,58 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("sender-inactive", senderIdentityMatch);
   }
 
-  const activeManagedLine = await hasActiveHostedLinqManagedLine({
+  const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
     prisma: input.prisma,
   });
-  if (!activeManagedLine) {
-    const lineState = await readHostedLinqManagedLineState({
-      phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
+
+  if (lineState.kind === "unmanaged") {
+    return ignored(
+      "recipient-line-unmanaged",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "conflicting") {
+    return ignored(
+      "recipient-line-conflicting",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "structurally_unavailable") {
+    return ignored(
+      "recipient-line-structurally-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "degraded_unavailable") {
+    return ignored(
+      "recipient-line-degraded-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (
+    (
+      lineState.kind === "at_risk"
+      || lineState.kind === "hard_blocked"
+    )
+    && !isHostedLinqIMessageService(messageEvent.data.service)
+  ) {
+    return ignored(
+      "recipient-line-service-unavailable",
+      senderIdentityMatch,
+      "group-chat-line-unavailable",
+    );
+  }
+  if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
+    await lockHostedMemberRow(input.prisma, sender.id);
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: sender.id,
       prisma: input.prisma,
     });
-    if (!lineState) {
-      return ignored(
-        "recipient-line-unmanaged",
-        senderIdentityMatch,
-        "group-chat-line-unavailable",
-      );
-    }
-    await lockHostedMemberRow(input.prisma, sender.id);
     if (
       !(await readHostedRuntimeAiAccessDecision({
         memberId: sender.id,
@@ -2568,39 +2595,35 @@ async function planHostedLinqGroupChatWebhook(input: {
         prisma: input.prisma,
       }),
     );
-    if (!isHostedLinqAssignedAtRiskGroupAdmissionAllowed({
-      authority: senderAuthority,
-      incomingRecipientPhone,
-      lineState,
-    })) {
-      if (isHostedLinqManagedLineHardBlocked(lineState)) {
-        const recoveryPlan = await planHostedLinqHardBlockedGroupLineRecovery({
-          context: input.context,
-          event: input.event,
-          memberId: sender.id,
-          prisma: input.prisma,
-        });
-        if (recoveryPlan) {
-          return logHostedLinqWebhookPlannerDecisionAndReturn(
-            recoveryPlan,
-            buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-              existingMemberMatch: senderIdentityMatch,
-              reason: "recipient-line-hard-blocked",
-              routeStage: "new-group-recovery-private",
-            }),
-          );
-        }
-        return ignored(
-          "recipient-line-recovery-unavailable",
-          senderIdentityMatch,
-          "group-chat-line-unavailable",
-        );
-      }
-
+    if (
+      senderAuthority.kind === "none"
+      || senderAuthority.recipientPhone !== incomingRecipientPhone
+    ) {
       return ignored(
-        "recipient-line-unavailable",
+        "recipient-line-not-assigned",
         senderIdentityMatch,
         "group-chat-line-unavailable",
+      );
+    }
+
+    if (lineState.kind === "hard_blocked") {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildGroupLineRecoveryResponse({
+          incomingRecipientPhone,
+          memberId: sender.id,
+          occurredAt,
+          participantContact: {
+            kind: participantContact.kind,
+            value: participantContact.value,
+          },
+          sourceEventId: input.event.event_id,
+          threadId: summary.chatId,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+          existingMemberMatch: senderIdentityMatch,
+          reason: "recipient-line-hard-blocked",
+          routeStage: "new-group-line-recovery-planned",
+        }),
       );
     }
   }
@@ -2675,117 +2698,6 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
 
   return plan;
-}
-
-function isHostedLinqAssignedAtRiskGroupAdmissionAllowed(input: {
-  authority: HostedLinqHomeLineAuthority;
-  incomingRecipientPhone: string;
-  lineState: HostedLinqManagedLineState;
-}): boolean {
-  if (!isHostedLinqManagedLineExactAtRisk(input.lineState)) {
-    return false;
-  }
-
-  return input.authority.kind !== "none"
-    && input.authority.recipientPhone === input.incomingRecipientPhone;
-}
-
-async function planHostedLinqHardBlockedGroupLineRecovery(input: {
-  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
-  event: HostedLinqWebhookEvent;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const { messageEvent, occurredAt, participantContact, summary } =
-    input.context;
-  if (
-    participantContact?.kind !== "phone"
-    || !isHostedLinqIMessageService(messageEvent.data.service)
-  ) {
-    return null;
-  }
-
-  const memberPhone = normalizePhoneNumber(participantContact.value);
-  if (!memberPhone) {
-    return null;
-  }
-
-  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
-    chatId: summary.chatId,
-    memberId: input.memberId,
-    sourceEventId: input.event.event_id,
-  });
-  const existingIntent = await readHostedLinqDeliveryProviderDispatchIntentTx({
-    idempotencyKey: effectId,
-    prisma: input.prisma,
-  });
-  const line = await claimHostedLinqGroupLineRecoverySenderTx({
-    capacityObservedAt: new Date(),
-    pinnedLineLookupKey: existingIntent?.phoneNumberLookupKey ?? null,
-    prisma: input.prisma,
-  });
-  if (!line) {
-    return null;
-  }
-
-  return buildGroupLineRecoveryResponse({
-    assignedPhone: line.phoneNumber,
-    groupChatId: summary.chatId,
-    memberId: input.memberId,
-    memberPhone,
-    occurredAt,
-    sourceEventId: input.event.event_id,
-  });
-}
-
-async function claimHostedLinqGroupLineRecoverySenderTx(input: {
-  capacityObservedAt: Date;
-  pinnedLineLookupKey: string | null;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedLinqAssignableHomeLine | null> {
-  const healthyLines = await listHostedLinqHealthyProactiveLines({
-    prisma: input.prisma,
-  });
-  if (input.pinnedLineLookupKey) {
-    return healthyLines.find((line) =>
-      line.phoneNumberLookupKey === input.pinnedLineLookupKey
-    ) ?? null;
-  }
-
-  const dayUtc = startOfUtcDay(input.capacityObservedAt);
-  const newAssignmentsByRecipientPhone = new Map(
-    healthyLines.map((line) => [
-      line.phoneNumber,
-      line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
-        ? line.proactiveConversationCount ?? 0
-        : 0,
-    ]),
-  );
-  const activeMembersByRecipientPhone = new Map<string, number>();
-  for (let attempt = 0; attempt < healthyLines.length; attempt += 1) {
-    const line = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
-      lines: healthyLines,
-      newAssignmentsByRecipientPhone,
-      preferredRecipientPhone: null,
-    });
-    if (!line) {
-      return null;
-    }
-
-    const limit = resolveHostedLinqSignupWelcomeDailyLimit(line);
-    if (await claimHostedLinqProactiveConversationCapacityTx({
-      dayUtc,
-      limit,
-      phoneNumberLookupKey: line.phoneNumberLookupKey,
-      prisma: input.prisma,
-    })) {
-      return line;
-    }
-    newAssignmentsByRecipientPhone.set(line.phoneNumber, limit);
-  }
-
-  return null;
 }
 
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {

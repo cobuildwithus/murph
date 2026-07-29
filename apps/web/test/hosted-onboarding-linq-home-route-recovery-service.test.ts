@@ -170,9 +170,19 @@ describe("Linq group-line recovery inside the canonical webhook owner", () => {
   const sideEffect = {
     effectId: "linq-group-line-recovery:reclaimable",
     payload: {
-      assignedRecipientPhone: "+15550100042",
-      memberPhone: "+15551230000",
+      assignedRecipientPhone: null,
+      chatId: null,
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-07-29T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551230000",
+      },
+      replyToMessageId: null,
+      sourceEventId: "linq:event:group-recovery",
       template: "group_line_recovery",
+      threadId: "chat_group_recovery",
     },
   };
 

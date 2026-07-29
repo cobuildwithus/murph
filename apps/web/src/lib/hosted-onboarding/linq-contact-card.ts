@@ -6,6 +6,10 @@ import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { listHostedLinqContactCardLines } from "./linq-line-store";
 import {
+  isHostedLinqProviderStatusAtRisk,
+  isHostedLinqProviderStatusCritical,
+} from "./linq-provider-status";
+import {
   HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
   syncHostedLinqPhoneNumberInventory,
 } from "./linq-phone-number-inventory";
@@ -80,10 +84,10 @@ export async function reconcileHostedLinqContactCards(input: {
   };
 
   for (const line of lines) {
-    if (line.providerStatus === "AT_RISK") {
+    if (isHostedLinqProviderStatusAtRisk(line.providerStatus)) {
       result.atRiskLines += 1;
     }
-    if (line.providerStatus === "CRITICAL") {
+    if (isHostedLinqProviderStatusCritical(line.providerStatus)) {
       result.criticalLines += 1;
     }
 
@@ -467,8 +471,8 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
     });
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
-      && line.providerStatus !== "AT_RISK"
-      && line.providerStatus !== "CRITICAL"
+      && !isHostedLinqProviderStatusAtRisk(line.providerStatus)
+      && !isHostedLinqProviderStatusCritical(line.providerStatus)
     )?.phoneNumber ?? null;
   } catch {
     return null;

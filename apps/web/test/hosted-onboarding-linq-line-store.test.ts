@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   assertHostedLinqAssignableHomeLinePoolReady,
@@ -11,6 +12,7 @@ import {
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqIncomingLineState,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -148,6 +150,79 @@ describe("listHostedLinqAssignableHomeLines", () => {
   });
 });
 
+describe("readHostedLinqIncomingLineState", () => {
+  it("distinguishes assignable, exact at-risk, and hard-blocked line states", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerStatus: "active",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerStatus: "AT-RISK",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerStatus: "temporarily blocked",
+        }),
+      ]);
+    const prisma = {
+      hostedLinqLine: { findMany },
+    } as never;
+    const phoneNumberLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates("+15550100001");
+
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "assignable" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "at_risk" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "hard_blocked" });
+  });
+
+  it("fails closed for ambiguous or structurally unavailable incoming lines", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          phoneNumberLookupKey: "lookup:current",
+        }),
+        buildIncomingLineRow("+15550100001", {
+          phoneNumberLookupKey: "lookup:legacy",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          configuredAt: null,
+          healthStatus: "unhealthy",
+          providerStatus: "blocked",
+        }),
+      ]);
+    const prisma = {
+      hostedLinqLine: { findMany },
+    } as never;
+
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys: ["lookup:current", "lookup:legacy"],
+      prisma,
+    })).resolves.toEqual({ kind: "conflicting" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys: ["lookup:current"],
+      prisma,
+    })).resolves.toEqual({ kind: "structurally_unavailable" });
+  });
+});
+
 describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
   it("passes when at least one configured assignable DB line exists", async () => {
     const findFirst = vi.fn().mockResolvedValue({
@@ -260,6 +335,32 @@ describe("hosted Linq proactive-conversation capacity", () => {
     ).resolves.toBe(false);
 
     expect(updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("can require the selected line to remain healthy while claiming capacity", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+
+    await expect(
+      claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: 50,
+        phoneNumberLookupKey: "lookup:line-1",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+        requiredHealthStatus: "healthy",
+      }),
+    ).resolves.toBe(false);
+
+    for (const call of updateMany.mock.calls) {
+      expect(call[0].where).toMatchObject({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: "healthy",
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: "lookup:line-1",
+      });
+    }
   });
 });
 
@@ -434,6 +535,36 @@ function buildAssignableLineRow(
     phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber) ?? `lookup:${phoneNumber}`,
     proactiveConversationCount: overrides.proactiveConversationCount ?? null,
     proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
+  };
+}
+
+function buildIncomingLineRow(
+  phoneNumber: string,
+  overrides: Partial<{
+    configuredAt: Date | null;
+    egressPolicy: string;
+    healthStatus: string;
+    phoneNumberEncrypted: string | null;
+    phoneNumberLookupKey: string;
+    providerStatus: string | null;
+  }> = {},
+) {
+  return {
+    configuredAt:
+      overrides.configuredAt === undefined
+        ? new Date("2026-07-16T12:00:00.000Z")
+        : overrides.configuredAt,
+    egressPolicy: overrides.egressPolicy ?? "enabled",
+    healthStatus: overrides.healthStatus ?? "healthy",
+    phoneNumberEncrypted:
+      overrides.phoneNumberEncrypted === undefined
+        ? encryptHostedLinqLinePhoneNumber(phoneNumber)
+        : overrides.phoneNumberEncrypted,
+    phoneNumberLookupKey:
+      overrides.phoneNumberLookupKey
+      ?? createHostedPhoneLookupKey(phoneNumber)
+      ?? `lookup:${phoneNumber}`,
+    providerStatus: overrides.providerStatus ?? "active",
   };
 }
 

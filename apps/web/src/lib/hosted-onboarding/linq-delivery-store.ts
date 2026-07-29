@@ -327,6 +327,8 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   phoneNumberLookupKey: string | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
+  targetKind: string | null;
+  template: string | null;
 } | null> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     input.idempotencyKey,
@@ -347,6 +349,8 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
       phoneNumberLookupKey: true,
       sourceRef: true,
       status: true,
+      targetKind: true,
+      template: true,
     },
   });
   return delivery
@@ -357,6 +361,8 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
         phoneNumberLookupKey: delivery.phoneNumberLookupKey,
         providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
         sourceRef: delivery.sourceRef,
+        targetKind: delivery.targetKind,
+        template: delivery.template,
       }
     : null;
 }

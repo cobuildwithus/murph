@@ -3,7 +3,14 @@ import { HostedBillingStatus } from "@prisma/client";
 
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
+  listHostedLinqHealthyProactiveLines: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  readHostedLinqIncomingLineState: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
+  reserveHostedLinqHealthyProactiveLineTx: vi.fn(),
   shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
     status: "sent",
   }),
@@ -45,11 +52,40 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRouteLockTx:
+    transportBoundaryMocks.acquireHostedMemberHomeLinqRouteLockTx,
+  readHostedMemberRoutingState:
+    transportBoundaryMocks.readHostedMemberRoutingState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberCoreState: vi.fn(async () => null),
   readHostedMemberSnapshot: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  lookupHostedMemberIdentityByPhoneNumber:
+    transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-home-routing")
+  >("@/src/lib/hosted-onboarding/linq-home-routing");
+  return {
+    ...actual,
+    reserveHostedLinqHealthyProactiveLineTx:
+      transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  listHostedLinqHealthyProactiveLines:
+    transportBoundaryMocks.listHostedLinqHealthyProactiveLines,
+  readHostedLinqIncomingLineState:
+    transportBoundaryMocks.readHostedLinqIncomingLineState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -170,6 +206,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
   buildHostedLinqGroupLineRecoveryMessage,
+  buildHostedLinqGroupLineRecoveryRecipientSourceRef,
 } from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
 import {
   createHostedWebhookLinqMessageSideEffect,
@@ -203,6 +240,59 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValue(
       null,
     );
+    transportBoundaryMocks.acquireHostedMemberHomeLinqRouteLockTx
+      .mockResolvedValue(undefined);
+    transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber
+      .mockResolvedValue({ core: { id: "member-1" } });
+    transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress
+      .mockResolvedValue({ core: { id: "member-1" } });
+    transportBoundaryMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15550100000",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+    });
+    const incomingLineLookupKey = createHostedPhoneLookupKey("+15550100000");
+    const backupLineLookupKey = createHostedPhoneLookupKey("+15550100042");
+    if (!incomingLineLookupKey || !backupLineLookupKey) {
+      throw new Error("Expected hosted Linq recovery line lookup keys.");
+    }
+    transportBoundaryMocks.readHostedLinqIncomingLineState.mockResolvedValue({
+      kind: "hard_blocked",
+      phoneNumberLookupKey: incomingLineLookupKey,
+    });
+    transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx
+      .mockResolvedValue({
+        kind: "reserved",
+        reservation: {
+          assignedAt: new Date("2026-03-26T12:00:00.000Z"),
+          line: {
+            activeMemberLimit: null,
+            assignmentWeight: 100,
+            maxNewConversationsPerDay: null,
+            phoneNumber: "+15550100042",
+            phoneNumberHint: "+0042",
+            phoneNumberLookupKey: backupLineLookupKey,
+            proactiveConversationCount: null,
+            proactiveConversationDayUtc: null,
+          },
+          proactiveConversationReserved: true,
+        },
+      });
+    transportBoundaryMocks.listHostedLinqHealthyProactiveLines.mockResolvedValue([
+      {
+        activeMemberLimit: null,
+        assignmentWeight: 100,
+        maxNewConversationsPerDay: null,
+        phoneNumber: "+15550100042",
+        phoneNumberHint: "+0042",
+        phoneNumberLookupKey: backupLineLookupKey,
+        proactiveConversationCount: null,
+        proactiveConversationDayUtc: null,
+      },
+    ]);
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx)
       .mockImplementation(async (input) => {
         await input.prisma.$transaction(async (prisma) => {
@@ -574,6 +664,8 @@ describe("hosted Linq webhook transport", () => {
       phoneNumberLookupKey: null,
       providerCorrelated: false,
       sourceRef: effect.effectId,
+      targetKind: "thread",
+      template: "invite_signup",
     });
     const prisma = createInviteSignupPrismaFixture({
       groupJoinCode: "join-group-a",
@@ -638,6 +730,8 @@ describe("hosted Linq webhook transport", () => {
         phoneNumberLookupKey: null,
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
+        targetKind: "thread",
+        template: "invite_signup",
       });
 
     await expect(
@@ -2099,7 +2193,10 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
-  it("creates group-line recovery chats with the sender rendered as the backup number", async () => {
+  it("renders the backup sender and reserves stale-event capacity at dispatch time", async () => {
+    vi.useFakeTimers();
+    const dispatchNow = new Date("2026-03-27T12:00:00.000Z");
+    vi.setSystemTime(dispatchNow);
     const recoveryPhone = "+15550100042";
     const memberPhone = "+15551234567";
     const prisma = {
@@ -2115,46 +2212,64 @@ describe("hosted Linq webhook transport", () => {
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
-      assignedRecipientPhone: recoveryPhone,
-      groupChatId: "chat-group-1",
+      incomingRecipientPhone: "+15550100000",
       memberId: "member-1",
-      memberPhone,
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: memberPhone,
+      },
       sourceEventId: "event-group-line-recovery",
       template: "group_line_recovery",
+      threadId: "chat-group-1",
     });
     const expectedMessage = buildHostedLinqGroupLineRecoveryMessage({
       backupPhoneNumber: recoveryPhone,
       seed: effect.effectId,
     });
-
-    await expect(
-      drainHostedLinqSideEffectsDirect({
-        prisma: prisma as never,
-        sideEffects: [effect],
-      }),
-    ).resolves.toEqual({ sentCount: 1, skipped: [] });
-
-    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(expect.objectContaining({
-      idempotencyKey: effect.effectId,
-      phoneNumber: recoveryPhone,
-      prisma,
-      reclaimStalePreProviderAttempt: true,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "event-group-line-recovery",
-      status: "attempted",
-      targetKind: "participant",
-      template: "group_line_recovery",
-    }));
-    expect(createHostedLinqChat).toHaveBeenCalledWith({
-      from: recoveryPhone,
-      idempotencyKey: effect.effectId,
-      message: expectedMessage,
-      signal: undefined,
-      to: [memberPhone],
+    const expectedSourceRef = buildHostedLinqGroupLineRecoveryRecipientSourceRef({
+      kind: "phone",
+      value: memberPhone,
     });
-    expect(countOccurrences(expectedMessage, recoveryPhone)).toBe(1);
-    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+      expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idempotencyKey: effect.effectId,
+          phoneNumber: recoveryPhone,
+          prisma,
+          reclaimStalePreProviderAttempt: true,
+          source: "hosted_webhook_side_effect",
+          sourceRef: expectedSourceRef,
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_line_recovery",
+        }),
+      );
+      expect(createHostedLinqChat).toHaveBeenCalledWith({
+        from: recoveryPhone,
+        idempotencyKey: effect.effectId,
+        message: expectedMessage,
+        signal: undefined,
+        to: [memberPhone],
+      });
+      expect(countOccurrences(expectedMessage, recoveryPhone)).toBe(1);
+      expect(transportBoundaryMocks.reserveHostedLinqHealthyProactiveLineTx)
+        .toHaveBeenCalledWith(expect.objectContaining({
+          now: dispatchNow,
+          prisma,
+        }));
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not dispatch group-line recovery after transport-time access revocation", async () => {
@@ -2173,13 +2288,16 @@ describe("hosted Linq webhook transport", () => {
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
-      assignedRecipientPhone: "+15550100042",
-      groupChatId: "chat-group-1",
+      incomingRecipientPhone: "+15550100000",
       memberId: "member-1",
-      memberPhone: "+15551234567",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
       sourceEventId: "event-group-line-recovery",
       template: "group_line_recovery",
+      threadId: "chat-group-1",
     });
 
     await expect(

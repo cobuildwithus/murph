@@ -210,22 +210,22 @@ export function buildFallbackSignupLinkResponse(input: {
 }
 
 export function buildGroupLineRecoveryResponse(input: {
-  assignedPhone: string;
-  groupChatId: string;
+  incomingRecipientPhone: string;
   memberId: string;
-  memberPhone: string;
   occurredAt: string;
+  participantContact: Pick<HostedLinqParticipantContact, "kind" | "value">;
   sourceEventId: string;
+  threadId: string;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
-        assignedRecipientPhone: input.assignedPhone,
-        groupChatId: input.groupChatId,
+        incomingRecipientPhone: input.incomingRecipientPhone,
         memberId: input.memberId,
-        memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
+        participantContact: input.participantContact,
         sourceEventId: input.sourceEventId,
+        threadId: input.threadId,
         template: "group_line_recovery",
       }),
     ],
