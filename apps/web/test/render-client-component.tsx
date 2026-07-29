@@ -24,6 +24,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
 type RenderClientComponentOptions = {
   historyState?: unknown;
   location?: Record<string, string>;
+  matchMedia?: typeof window.matchMedia;
   sessionStorage?: Storage;
 };
 
@@ -98,6 +99,12 @@ export async function renderClientComponent(
     configurable: true,
     value: options.sessionStorage ?? createMemoryStorage(),
   });
+  if (options.matchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: options.matchMedia,
+    });
+  }
 
   const container = document.getElementById("root");
   assert.ok(container);
