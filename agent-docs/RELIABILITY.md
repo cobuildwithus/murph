@@ -89,12 +89,12 @@ Last verified: 2026-07-27
   ownership; delayed observations remain subject to the shared seven-day lease
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
-- Current-chat naming is one best-effort provider read inside the existing
-  new-group creation action. It uses the current durable route and existing
-  bounded Linq or Telegram request timeout, runs outside the database
-  transaction, and does not retry, cache, reconcile, or add a state owner. A
-  provider failure, absent title, or Linq-synthesized handle label degrades to
-  unnamed creation instead of failing setup.
+- Current-chat naming is one on-demand provider read through
+  `murph.group action="read_chat_name"`. It uses the current durable route and
+  existing bounded Linq or Telegram request timeout and does not retry, cache,
+  reconcile, or add a state owner. Provider failure returns `unavailable`; an
+  absent title or Linq-synthesized handle label returns `none`. New-group setup
+  may continue unnamed after either outcome.
 - Group-origin Telegram recovery retains three outcomes in the existing
   delivery owner. Explicit Telegram rate limits persist a retry time;
   provider-confirmed permanent 4xx rejection persists a recognizable definitely

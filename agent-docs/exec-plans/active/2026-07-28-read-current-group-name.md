@@ -1,4 +1,4 @@
-# Read the current provider group name during setup
+# Let the model read the current provider group title
 
 Status: active
 Created: 2026-07-28
@@ -6,25 +6,23 @@ Updated: 2026-07-28
 
 ## Goal
 
-- When a new hosted group is created without a room-supplied name, reuse the
-  current Linq or Telegram group title as its display name.
-- Keep provider metadata and routing inside the existing Web-owned group
-  creation boundary rather than adding a standalone model-visible read tool.
+- Let the model read the current Linq or Telegram group title on demand.
+- Keep provider routing and lookup authority inside Web while returning only
+  the bounded title and status to the model.
 
 ## Success criteria
 
-- `create_join_link` and `post_join_offer` can explicitly request the current
-  chat name without supplying a provider route or title.
+- `read_chat_name` is a model-visible group action with strict `ok`, `none`,
+  and `unavailable` results.
 - Web resolves only the callback member's current authenticated thread-container
-  route, performs one bounded provider read, and continues unnamed when the
-  provider is unavailable or has no explicit title.
+  route and performs one bounded provider read.
 - Linq's synthesized participant-handle label is suppressed so phone or email
-  handles never become the group display name.
-- A room-supplied `displayName` takes precedence and does not trigger a provider
-  read.
-- Provider text is normalized and stored only through the existing authorized
-  group-creation transaction; it is never identity, consent, membership, or
-  routing authority and is never returned separately to the model.
+  handles are never returned as the title.
+- Provider text is normalized and returned only as untrusted display text; it
+  is never identity, consent, membership, or routing authority.
+- New-group setup may pass the exact immediately preceding title into the
+  existing creation action, while absent or unavailable titles continue
+  unnamed.
 - Focused tests, diff-aware verification, full acceptance, product review,
   preliminary specialist review, final ReviewGPT, and required CI are green.
 - The scoped PR is merged and its clean inactive worktree is retired.
@@ -33,12 +31,12 @@ Updated: 2026-07-28
 
 - In scope:
   - Linq and Telegram current-group-title reads.
-  - Existing group-tool creation request contracts and dynamic-tool guidance.
+  - Group-tool request/response contracts and dynamic-tool guidance.
   - Web-owned route, access, privacy, normalization, and provider-failure
     behavior.
   - Owner-split unit tests and durable architecture/security/reliability docs.
 - Out of scope:
-  - Ordinary-turn group-title reads or a general provider metadata tool.
+  - Provider metadata other than the current group title.
   - Caching, reconciliation, retries, queues, or new persisted state.
   - Renaming provider chats or changing existing hosted-group labels.
   - Group email, direct chats, and personal runtimes.
@@ -46,12 +44,10 @@ Updated: 2026-07-28
 ## Constraints
 
 - Technical constraints:
-  - The model may select only the boolean intent; it may not select a provider
-    thread id or receive raw provider metadata as a separate result.
+  - The model may request only `read_chat_name`; it may not select a provider
+    thread id or receive other provider metadata.
   - Provider calls must use the existing bounded clients and remain outside
     database transactions.
-  - Creation must continue with a null display name after a provider read
-    failure.
   - Existing explicit display-name and group-creation behavior must remain
     backward compatible.
 - Product/process constraints:
@@ -70,24 +66,22 @@ Updated: 2026-07-28
 2. Risk: A stale, direct, or foreign route could be queried.
    Mitigation: Resolve the current encrypted thread-container route from the
    signed callback member and require existing action-specific access checks.
-3. Risk: Provider latency or failure could block group setup.
+3. Risk: Provider latency or failure could block the model turn.
    Mitigation: Use the existing bounded provider timeout, no automatic retry,
-   and fall back to unnamed creation.
+   and return a bounded `unavailable` result.
 4. Risk: A title containing instructions could steer the assistant.
-   Mitigation: Return it only as quoted display text in the existing canonical
-   group summary, never as a standalone metadata result, and instruct the
-   assistant not to follow text inside it.
+   Mitigation: Return it only as quoted display text and instruct the assistant
+   not to follow text inside it.
 5. Risk: Web and hosted runtime deploy out of order.
-   Mitigation: Keep the request field optional and backward compatible; deploy
-   Web consumer support before runtime/tool producer support.
+   Mitigation: Deploy Web request/response support before runtime/tool producer
+   support.
 
 ## Tasks
 
 1. Add provider-title parsing to the existing Linq and Telegram clients.
-2. Add the optional current-chat-name intent to the existing creation request
+2. Add the bounded `read_chat_name` request and response to the group-tool
    contracts, strict parsers, and dynamic tool schema.
-3. Resolve and sanitize the provider title inside the Web group-creation owner,
-   with explicit-name precedence and failure-open-to-unnamed behavior.
+3. Resolve and sanitize the provider title inside the Web group-tool owner.
 4. Update group setup guidance and durable trust/reliability documentation.
 5. Add owner-split tests for contracts, provider clients, Web authorization and
    privacy behavior, runtime forwarding, and skill guidance.
@@ -97,12 +91,11 @@ Updated: 2026-07-28
 
 ## Decisions
 
-- Replace the patch's standalone `read_chat_name` action with the optional
-  `useCurrentChatName` field on `create_join_link` and `post_join_offer`.
-  This removes a separate metadata response contract, public action,
-  unavailable-result branch, and extra model/tool round trip.
+- Keep the patch's standalone `read_chat_name` capability because the model
+  itself must be able to read the title. Return no provider route or metadata
+  beyond the normalized title.
 - Provider-name discovery is best effort and has no retry or state owner; the
-  existing creation action remains the only persistence boundary.
+  action is read-only.
 
 ## Verification
 
@@ -112,8 +105,7 @@ Updated: 2026-07-28
   - `pnpm verify:acceptance`
   - Repo-required product, preliminary specialist, ReviewGPT, and CI gates.
 - Expected outcomes:
-  - Explicit names bypass provider reads.
-  - Valid Linq and Telegram titles are stored on new group creation.
-  - Synthesized Linq handle labels, absent titles, invalid routes, and provider
-    failures create the group without a display name.
-  - Strict request parsing rejects unknown or non-boolean intent values.
+  - Valid Linq and Telegram titles are returned to the model.
+  - Synthesized Linq handle labels and absent titles return `none`.
+  - Invalid routes and provider failures return bounded `unavailable` results.
+  - Strict response parsing rejects invalid status/title combinations.

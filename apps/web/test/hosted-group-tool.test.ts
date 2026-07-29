@@ -468,6 +468,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       post_disclosure_request: "owner_active",
       post_join_offer: "owner_active",
       preflight_set_chat_avatar: "owner_active",
+      read_chat_name: "participant_aware",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
       revoke_disclosure_grant: "personal_active",
@@ -1153,41 +1154,34 @@ describe("handleHostedRuntimeGroupTool", () => {
       });
   });
 
-  it("uses the current Linq group title inside new-group creation", async () => {
+  it("reads the current Linq group title on demand from the durable route", async () => {
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       displayName: "  Weekend   Warriors  ",
-      handles: [
-        { handle: "+15550000001", isMe: true, status: "active" },
-        { handle: "+15550000002", isMe: false, status: "active" },
-      ],
+      handles: [],
       isGroup: true,
     });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: { useCurrentChatName: true },
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: "Weekend Warriors",
+        status: "ok",
       },
-    })).resolves.toMatchObject({
-      action: "create_join_link",
-      result: { status: "ok" },
     });
 
-    expect(mocks.resolveHostedAssistantNotificationDestination)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        memberId: "member_group_runtime",
-      }));
+    expect(mocks.resolveHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      memberId: "member_group_runtime",
+    });
     expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
     });
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        displayName: "Weekend Warriors",
-      }));
+    expect(mocks.getHostedTelegramGroupTitle).not.toHaveBeenCalled();
   });
 
-  it("suppresses Linq's synthesized participant-handle group title", async () => {
+  it("does not expose Linq's synthesized handle list as a group title", async () => {
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       displayName: "+15550000002, +15550000001",
       handles: [
@@ -1197,21 +1191,19 @@ describe("handleHostedRuntimeGroupTool", () => {
       isGroup: true,
     });
 
-    await handleHostedRuntimeGroupTool({
+    await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: { useCurrentChatName: true },
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "none",
       },
     });
-
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        displayName: null,
-      }));
   });
 
-  it("uses a Telegram group title without exposing the provider route to the model", async () => {
+  it("reads the current Telegram group title on demand from the durable route", async () => {
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValueOnce({
       conversationShape: "thread-container",
       externalThreadRouteAuthority: {
@@ -1230,62 +1222,56 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     mocks.getHostedTelegramGroupTitle.mockResolvedValueOnce("Weekend Warriors");
 
-    await handleHostedRuntimeGroupTool({
+    await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: { useCurrentChatName: true },
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: "Weekend Warriors",
+        status: "ok",
       },
     });
 
     expect(mocks.getHostedTelegramGroupTitle).toHaveBeenCalledWith({
       threadId: "-42:topic:7",
     });
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        displayName: "Weekend Warriors",
-      }));
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
   });
 
-  it("keeps an explicit group name authoritative and skips provider metadata", async () => {
-    await handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: {
-          displayName: "Room choice",
-          useCurrentChatName: true,
-        },
-      },
+  it("reports no current group title without inventing one", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      displayName: null,
+      handles: [],
+      isGroup: true,
     });
 
-    expect(mocks.resolveHostedAssistantNotificationDestination).not.toHaveBeenCalled();
-    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
-    expect(mocks.getHostedTelegramGroupTitle).not.toHaveBeenCalled();
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        displayName: "Room choice",
-      }));
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "none",
+      },
+    });
   });
 
-  it("continues unnamed when the provider title read fails", async () => {
+  it("reports provider failure without exposing an error payload", async () => {
     mocks.getHostedLinqChatSummary.mockRejectedValueOnce(new Error("provider down"));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: { useCurrentChatName: true },
-      },
-    })).resolves.toMatchObject({
-      action: "create_join_link",
-      result: { status: "ok" },
-    });
-
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
         displayName: null,
-      }));
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
@@ -1294,10 +1280,7 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: {
-        action: "create_join_link",
-        joinLink: { useCurrentChatName: true },
-      },
+      request: { action: "create_join_link" },
     })).resolves.toEqual({
       action: "create_join_link",
       result: {
@@ -1308,7 +1291,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedAssistantNotificationDestination).not.toHaveBeenCalled();
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
   });
 
@@ -2335,41 +2317,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.any(Object),
       });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
-  });
-
-  it("uses the authorized Linq title in the same join-offer creation action", async () => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      displayName: "Weekend Warriors",
-      handles: [
-        { handle: "+15550000001", isMe: true, status: "active" },
-        { handle: "+15550000002", isMe: false, status: "active" },
-      ],
-      isGroup: true,
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_join_offer",
-        joinOffer: {
-          projectionScopes: [SLEEP_SCOPE],
-          useCurrentChatName: true,
-        },
-        linqThread: LINQ_THREAD,
-      },
-    })).resolves.toMatchObject({
-      action: "post_join_offer",
-      result: { status: "sent" },
-    });
-
-    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_group_1",
-    });
-    expect(mocks.resolveHostedAssistantNotificationDestination).not.toHaveBeenCalled();
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        displayName: "Weekend Warriors",
-      }));
   });
 
   it("uses the diagnostic disclosure for the exact frozen offer snapshot", async () => {

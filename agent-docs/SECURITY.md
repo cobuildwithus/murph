@@ -39,19 +39,16 @@ Last verified: 2026-07-28
 ## Runtime Security Posture
 
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
-- Current-chat naming during hosted-group creation is a Web-owned provider
-  metadata boundary inside the existing `create_join_link` and
-  `post_join_offer` actions. The model may request only
-  `useCurrentChatName=true`; Web rechecks owner access, resolves the signed
-  callback member's single encrypted Linq or Telegram thread route, and never
-  accepts a provider chat id or title from the model. Provider titles are
-  bounded untrusted display text and confer no identity, membership, consent,
-  routing, or mutation authority. They are not returned separately to the model
-  or logged, and may be persisted only through the separately reauthorized
-  creation transaction. Suppress Linq's default comma-joined participant-handle
-  label so phone numbers and email addresses cannot become a group name. Group
-  email and direct or personal runtimes cannot authorize this provider-title
-  lookup.
+- `murph.group action="read_chat_name"` is a read-only, Web-owned provider
+  metadata boundary. The signed callback member selects the synthetic group
+  runtime; Web resolves its single encrypted Linq or Telegram thread route and
+  never accepts a provider chat id from the model. Provider titles are bounded
+  untrusted display text and confer no identity, membership, consent, routing,
+  or mutation authority. They are returned only as `displayName` with an
+  `ok`, `none`, or `unavailable` status and must not be logged or cached.
+  Suppress Linq's default comma-joined participant-handle label so phone
+  numbers and email addresses cannot become a group name. Group email and
+  direct or personal runtimes cannot authorize this provider-title lookup.
 - An accepted-message `Message ref` is an opaque selector, not authority. Render only the existing `AssistantInputEvent.inputId` when at least one targeting action is eligible and the accepted input is either positively identified Linq iMessage or Telegram with a valid numeric message target; conversation source and reply-target channel must also agree. Linq SMS, RCS, and unknown service types expose no ref and are ineligible for both tools. Both `murph.select_reply_target` and `murph.react_to_message` must require an exact active root invocation, use the same resolver, bind the ref to the current delivery-context ordinal, reload the stored event, and recheck route, conversation, direct/group audience, account, group actor, provider target, and action-specific capability before execution. The dispatcher must reject descendant, stale-turn, or foreign-thread tool requests before consulting accepted-message authority, and descendant shell env carries no targeting authority. Invented, stale, cross-turn, cross-thread, descendant, or unsupported refs fail closed. Provider message ids must stay out of prompts, tool arguments/results, model history, diagnostics, and model-visible errors; only the local delivery owner may resolve one immediately before the effect.
 - Hosted automation record authority is scoped by the active write-fenced member or synthetic-group workspace and its restored canonical vault, not by each record's stored delivery route. A narrow automation port is captured from durable accepted input for the active authenticated root turn and binds new or explicit retarget writes to that trusted route. Invocation-scoped automation and device authority is exposed only through typed root-turn dynamic tools and must be absent from Codex App Server and descendant shell env. The dispatcher must reject descendant, stale-turn, or foreign-thread use. Tool arguments must not let the model select another route. Attended and scheduled root turns use the same dynamic-tool planner; the invocation's actual route, audience, available ports, and accepted-input evidence decide which tools can perform an effect. Non-direct email remains unable to mutate durable room controls because its audience is not authenticated for those controls, not because it runs a reduced assistant profile.
 - Group newsletter setup is valid only from a verified non-direct iMessage or Telegram group route. The structured setup action owns the stable slug, canonical configuration, and exactly one system delivery tag; ordinary model-authored automation writes cannot claim those tags. The ordinary dynamic-tool planner exposes the newsletter email port only when the trusted runtime supplies scheduled email occurrence authority, so a current-chat newsletter receives no email capability. For group-email preparation, the signed callback member resolves the unique hosted group; any legacy request `groupId` is compatibility-only, ignored, and never authority.

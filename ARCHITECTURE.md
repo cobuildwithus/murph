@@ -53,17 +53,16 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
-New-group creation may set `useCurrentChatName` on the existing
-`create_join_link` or `post_join_offer` request instead of supplying a
-room-chosen display name. Web first rechecks the callback member's group-owner
-access, resolves only that synthetic runtime's single encrypted Linq or Telegram
-thread route, and performs one bounded provider-title read outside the creation
-transaction. The model supplies no provider thread id and never receives the
-provider title as a separate tool result. Linq's synthetic comma-joined handle
-label is treated as absent instead of persisting phone or email handles. A valid
-title enters only the existing authorized creation transaction as bounded
-display metadata; provider failure continues unnamed, with no cache, retry,
-reconciliation, wake field, or new state owner.
+`murph.group action="read_chat_name"` is the on-demand provider-title primitive.
+Web resolves the signed callback member's single encrypted thread-container
+route only after the model invokes it, then performs one bounded Linq chat read
+or Telegram `getChat` read. The model supplies no provider thread id. Linq's
+synthetic comma-joined handle label is returned as no name rather than exposing
+phone or email handles. The result contains only bounded untrusted display text
+with `ok`, `none`, or `unavailable` status; it grants no authority and creates
+no cache, retry, reconciliation, wake field, or new state owner. New-group setup
+may pass the exact immediately preceding `ok` result into the existing
+`create_join_link` or `post_join_offer` display-name field.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only

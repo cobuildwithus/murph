@@ -164,6 +164,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
+  read_chat_name: "participant_aware",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   revoke_disclosure_grant: "personal_active",
@@ -264,6 +265,12 @@ export async function handleHostedRuntimeGroupTool(input: {
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
       updateDisplayName: input.request.updateDisplayName,
+    });
+  }
+
+  if (input.request.action === "read_chat_name") {
+    return handleHostedRuntimeGroupReadChatName({
+      memberId: input.memberId,
     });
   }
 
@@ -797,14 +804,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const resolvedDisplayName = await resolveHostedRuntimeGroupCreationDisplayName({
-    displayName: input.joinLink?.displayName,
-    memberId: input.memberId,
-    useCurrentChatName: input.joinLink?.useCurrentChatName === true,
-  });
-  if ("unavailableReason" in resolvedDisplayName) {
-    return unavailable(resolvedDisplayName.unavailableReason);
-  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -822,7 +821,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
-      displayName: resolvedDisplayName.displayName,
+      displayName: input.joinLink?.displayName ?? null,
       kind: input.joinLink?.kind ?? null,
       now,
       requestedVaultShareProjectionScopes,
@@ -1020,15 +1019,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const resolvedDisplayName = await resolveHostedRuntimeGroupCreationDisplayName({
-    displayName: input.joinOffer?.displayName,
-    linqChatId: authorized.chatId,
-    memberId: input.memberId,
-    useCurrentChatName: input.joinOffer?.useCurrentChatName === true,
-  });
-  if ("unavailableReason" in resolvedDisplayName) {
-    return unavailable(resolvedDisplayName.unavailableReason);
-  }
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.joinOffer?.projectionScopes
       ?? input.joinOffer?.projectionKinds
@@ -1045,7 +1035,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
-      displayName: resolvedDisplayName.displayName,
+      displayName: input.joinOffer?.displayName ?? null,
       now,
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
@@ -1332,62 +1322,65 @@ function normalizeHostedGroupDisplayName(value: string): string | null {
   return normalized;
 }
 
-type HostedRuntimeGroupCreationDisplayNameResolution =
-  | { displayName: string | null }
-  | { unavailableReason: string };
-
-async function resolveHostedRuntimeGroupCreationDisplayName(input: {
-  displayName?: string | null;
-  linqChatId?: string;
+async function handleHostedRuntimeGroupReadChatName(input: {
   memberId: string;
-  useCurrentChatName: boolean;
-}): Promise<HostedRuntimeGroupCreationDisplayNameResolution> {
-  if (input.displayName !== undefined && input.displayName !== null) {
-    return { displayName: input.displayName };
-  }
-  if (!input.useCurrentChatName) {
-    return { displayName: null };
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "read_chat_name",
+    result: { displayName: null, status: "unavailable", unavailableReason },
+  });
+
+  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+    return unavailable("runtime_inactive");
   }
 
-  const prisma = getPrisma();
-  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
-    memberId: input.memberId,
-    prisma,
-  });
-  if (ownerAccess.status !== "ok") {
-    return { unavailableReason: ownerAccess.unavailableReason };
+  let destination: Awaited<
+    ReturnType<typeof resolveHostedAssistantNotificationDestination>
+  >;
+  try {
+    destination = await resolveHostedAssistantNotificationDestination({
+      memberId: input.memberId,
+    });
+  } catch {
+    return unavailable("route_unavailable");
+  }
+
+  const authority = destination?.conversationShape === "thread-container"
+    ? destination.externalThreadRouteAuthority
+    : null;
+  if (!authority) {
+    return unavailable("group_chat_unavailable");
   }
 
   let providerDisplayName: string | null;
   try {
-    if (input.linqChatId) {
+    if (authority.channel === "linq") {
       providerDisplayName = await readHostedLinqExplicitGroupDisplayName(
-        input.linqChatId,
+        authority.threadId,
       );
-    } else {
-      const destination = await resolveHostedAssistantNotificationDestination({
-        memberId: input.memberId,
-        prisma,
+    } else if (authority.channel === "telegram") {
+      providerDisplayName = await getHostedTelegramGroupTitle({
+        threadId: authority.threadId,
       });
-      const authority = destination?.conversationShape === "thread-container"
-        ? destination.externalThreadRouteAuthority
-        : null;
-      if (!authority) {
-        return { displayName: null };
-      }
-      providerDisplayName = authority.channel === "linq"
-        ? await readHostedLinqExplicitGroupDisplayName(authority.threadId)
-        : await getHostedTelegramGroupTitle({ threadId: authority.threadId });
+    } else {
+      return unavailable("group_chat_unavailable");
     }
   } catch {
-    return { displayName: null };
+    return unavailable("provider_unavailable");
   }
 
-  return {
-    displayName: providerDisplayName
-      ? normalizeHostedGroupDisplayName(providerDisplayName)
-      : null,
-  };
+  const displayName = providerDisplayName
+    ? normalizeHostedGroupDisplayName(providerDisplayName)
+    : null;
+  return displayName
+    ? {
+        action: "read_chat_name",
+        result: { displayName, status: "ok" },
+      }
+    : {
+        action: "read_chat_name",
+        result: { displayName: null, status: "none" },
+      };
 }
 
 async function readHostedLinqExplicitGroupDisplayName(

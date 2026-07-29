@@ -1245,6 +1245,7 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (
     action === "read_current"
+    || action === "read_chat_name"
     || action === "read_usage"
     || action === "list_memberships"
   ) {
@@ -1482,13 +1483,7 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set([
-      "displayName",
-      "messageTemplate",
-      "projectionKinds",
-      "projectionScopes",
-      "useCurrentChatName",
-    ]),
+    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
   const displayName = parseHostedRuntimeGroupDisplayName(
@@ -1511,14 +1506,6 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionScopes",
     ),
-    ...(record.useCurrentChatName === undefined
-      ? {}
-      : {
-          useCurrentChatName: requireBoolean(
-            record.useCurrentChatName,
-            "Hosted runtime group tool post_join_offer useCurrentChatName",
-          ),
-        }),
   };
 }
 
@@ -1711,7 +1698,6 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       "kind",
       "requestedVaultShareProjectionKinds",
       "requestedVaultShareProjectionScopes",
-      "useCurrentChatName",
     ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
@@ -1736,14 +1722,6 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
     ),
-    ...(record.useCurrentChatName === undefined
-      ? {}
-      : {
-          useCurrentChatName: requireBoolean(
-            record.useCurrentChatName,
-            "Hosted runtime group tool create_join_link useCurrentChatName",
-          ),
-        }),
   };
 }
 
@@ -2351,6 +2329,71 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_chat_name") {
+    const label = "Hosted runtime group tool read_chat_name response result";
+    const result = requireObject(record.result, label);
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_chat_name response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status"]),
+        `${label} ok`,
+      );
+      const displayName = parseHostedRuntimeGroupDisplayName(
+        result.displayName,
+        "Hosted runtime group tool read_chat_name displayName",
+      );
+      if (displayName === null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name ok displayName must be present.",
+        );
+      }
+      return { action, result: { displayName, status } };
+    }
+    if (status === "none") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status"]),
+        `${label} none`,
+      );
+      if (result.displayName !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name none displayName must be null.",
+        );
+      }
+      return { action, result: { displayName: null, status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["displayName", "status", "unavailableReason"]),
+        `${label} unavailable`,
+      );
+      if (result.displayName !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_chat_name unavailable displayName must be null.",
+        );
+      }
+      return {
+        action,
+        result: {
+          displayName: null,
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            "Hosted runtime group tool read_chat_name unavailableReason",
+          ),
+        },
+      };
+    }
+    throw new TypeError(
+      "Hosted runtime group tool read_chat_name response status is invalid.",
+    );
   }
 
   if (action === "read_usage") {
