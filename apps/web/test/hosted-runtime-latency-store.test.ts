@@ -1078,6 +1078,20 @@ describe("hosted runtime latency dashboard store", () => {
     });
     await expect(recordHostedIngressAssistantMilestone({
       assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.200Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "progress_update_accepted",
+      prisma,
+      runtimeAttemptId: "attempt_assistant_milestone_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.375Z"),
       authenticatedUserId: "member_latency_1",
       checkpointPublicationExpectedBy: instant("2026-06-02T19:20:00.000Z"),
@@ -1194,7 +1208,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistant: {
         linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
         progressUpdateAcceptedAtEpochMs:
-          Date.parse("2026-06-02T19:12:21.300Z"),
+          Date.parse("2026-06-02T19:12:21.200Z"),
         checkpointPublicationExpectedByEpochMs:
           Date.parse("2026-06-02T19:40:00.000Z"),
         terminalNonReplyCommittedAtEpochMs:

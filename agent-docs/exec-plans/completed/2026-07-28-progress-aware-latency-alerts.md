@@ -1,7 +1,7 @@
 # Progress-Aware Hosted Reply Latency Alerts
 
-Status: active
-Updated: 2026-07-28
+Status: completed
+Updated: 2026-07-29
 
 ## Why
 
@@ -60,3 +60,4 @@ The protocol addition must be additive. Web must tolerate old runtimes that do
 not emit the milestone, and new runtimes must tolerate a web deployment that
 has not learned to store it. The safe order and skew behavior will be recorded
 in the PR.
+Completed: 2026-07-29

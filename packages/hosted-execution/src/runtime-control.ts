@@ -2166,7 +2166,9 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write.
+// stored leaves are dropped before the next write. Accepted progress is the one
+// repeated milestone: retain its earliest timestamp when callbacks arrive out
+// of order.
 export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   existing: unknown;
   incoming: HostedRuntimeLatencyPhaseBreakdown;
@@ -2205,6 +2207,18 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
     let phaseChanged = false;
 
     for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
+      if (
+        phase === "assistant"
+        && leafKey === "progressUpdateAcceptedAtEpochMs"
+        && typeof leaf === "number"
+        && typeof mergedPhase[leafKey] === "number"
+      ) {
+        if (leaf < mergedPhase[leafKey]) {
+          mergedPhase[leafKey] = leaf;
+          phaseChanged = true;
+        }
+        continue;
+      }
       if (mergedPhase[leafKey] !== undefined) {
         continue;
       }

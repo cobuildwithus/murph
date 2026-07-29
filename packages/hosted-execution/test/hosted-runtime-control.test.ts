@@ -1767,6 +1767,45 @@ describe("hosted runtime control contracts", () => {
       value: merged.value,
     });
 
+    const earlierProgressMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_000,
+        },
+        schemaVersion: 1,
+      },
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    });
+
+    expect(earlierProgressMerged).toEqual({
+      changed: true,
+      value: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_029_999,
+        },
+        schemaVersion: 1,
+      },
+    });
+    expect(mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: earlierProgressMerged.value,
+      incoming: {
+        assistant: {
+          progressUpdateAcceptedAtEpochMs: 1_777_000_030_001,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["assistant"],
+    })).toEqual({
+      changed: false,
+      value: earlierProgressMerged.value,
+    });
+
     const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
       existing: {},
       incoming: {
