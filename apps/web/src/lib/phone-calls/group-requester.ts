@@ -26,7 +26,7 @@ export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
     input.inboundMailboxItemIds,
   );
   if (mailboxItemIds.length === 0) {
-    throwHostedGroupPhoneCallRequesterActivationRequired();
+    throwHostedGroupPhoneCallRequesterProvenanceRequired();
   }
 
   const prisma = input.prisma ?? getPrisma();
@@ -49,21 +49,33 @@ export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
       !memberId
       || (requesterMemberId !== null && requesterMemberId !== memberId)
     ) {
-      throwHostedGroupPhoneCallRequesterActivationRequired();
+      throwHostedGroupPhoneCallRequesterProvenanceRequired();
     }
     requesterMemberId = memberId;
   }
 
   input.signal?.throwIfAborted();
+  if (!requesterMemberId) {
+    throwHostedGroupPhoneCallRequesterProvenanceRequired();
+  }
   if (
-    !requesterMemberId
-    || !await hasHostedMemberActivationProof({
+    !await hasHostedMemberActivationProof({
       memberId: requesterMemberId,
       prisma,
     })
   ) {
     throwHostedGroupPhoneCallRequesterActivationRequired();
   }
+}
+
+function throwHostedGroupPhoneCallRequesterProvenanceRequired(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
+    httpStatus: 403,
+    message:
+      "Group phone calls require one trusted requesting participant.",
+    retryable: false,
+  });
 }
 
 function normalizeHostedGroupPhoneCallMailboxItemIds(
