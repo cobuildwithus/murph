@@ -4621,7 +4621,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ...(body.authorityCheckOnly === false
           ? { providerDispatchClaimed: true }
           : {}),
-        threadIsDirect: responseCount === 1 ? false : "false",
+        ...(responseCount === 1
+          ? {}
+          : {
+              targetOverride: {
+                conversationThreadId: "hid_current_chat",
+                target: "chat_current",
+                targetKind: "thread",
+              },
+            }),
+        threadIsDirect: responseCount === 1 ? false : true,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -4657,7 +4666,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    })).resolves.toEqual({
+      assistantAskFallbackRequired: true,
+      targetOverride: {
+        conversationThreadId: "hid_current_chat",
+        target: "chat_current",
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
