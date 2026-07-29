@@ -1708,6 +1708,27 @@ function promptInputCarriesNativeReplyReference(
     metadata.editedTextPartIndex === undefined
 }
 
+function promptInputCorrectionTargetsAcceptedLiveInput(input: {
+  acceptedLiveInputIds: ReadonlySet<string>
+  candidate: AssistantInputCandidate
+}): boolean {
+  const metadata = input.candidate.event.sourceMetadata
+  if (
+    metadata?.kind !== 'linq' ||
+    (
+      metadata.editedSourceInputId === undefined &&
+      metadata.editedTextPartIndex === undefined
+    )
+  ) {
+    return true
+  }
+  return (
+    metadata.editedSourceInputId !== undefined &&
+    metadata.editedTextPartIndex !== undefined &&
+    input.acceptedLiveInputIds.has(metadata.editedSourceInputId)
+  )
+}
+
 interface HostedAutoReplyDeliveryIdempotency {
   answeredMailboxItemIds: string[]
   deliveryIdempotencyKey: string | null
@@ -2093,6 +2114,25 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       lateInputs.inputs.some((candidate) =>
         candidate.event.sourceMetadata?.kind !== 'email' ||
         candidate.event.sourceMetadata.assistantStyleSettingsAuthorized !== true
+      )
+    ) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+    // A correction may bypass native-reply deferral only when its opaque
+    // source names input already owned by this turn. Older-message edits stay
+    // uncheckpointed for the next ordinary automation scan.
+    const acceptedLiveInputIds = new Set([
+      ...context.inputIds,
+      ...pendingAcceptances.flatMap((pending) => pending.acceptedInputIds),
+    ])
+    if (
+      lateInputs.inputs.some((candidate) =>
+        !promptInputCorrectionTargetsAcceptedLiveInput({
+          acceptedLiveInputIds,
+          candidate,
+        })
       )
     ) {
       return {

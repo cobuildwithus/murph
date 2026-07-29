@@ -44,7 +44,13 @@ Last verified: 2026-07-28
   text or its claimed authority. Web may correlate it only to an already
   accepted inbound conversation item through the private versioned blind
   source-message key, then must reattest the original sender, chat, direction,
-  and current direct or group route authority before appending a correction.
+  and current direct route or same group route plus container authority before
+  appending a correction. Optional group member attribution and personal
+  entitlement are not room authority; missing participant projection remains
+  eligible, while an existing projection must fail closed on positive
+  removal or handle-conflict evidence. A correction may join an active turn
+  only when its opaque original reference names an input already accepted into
+  that turn; otherwise it remains pending for ordinary planning.
   The edited text remains quoted user data; the runtime-injected part index,
   opaque original assistant-input reference, and correction framing are the
   only trusted prompt metadata. The reference is deterministically derived

@@ -383,7 +383,9 @@ function buildLinqMessageEditedEvent(input: {
   } as const;
 }
 
-function buildAcceptedGroupLinqOriginalWake() {
+function buildAcceptedGroupLinqOriginalWake(input: {
+  senderMemberId?: string | null;
+} = {}) {
   return buildHostedExecutionLinqConversationMessageWake({
     accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
     contactKind: "phone",
@@ -406,7 +408,12 @@ function buildAcceptedGroupLinqOriginalWake() {
       containerMemberId: "member_thread_container_123",
       threadId: "chat_group_123",
     },
-    senderMemberId: "member_active_participant_123",
+    ...(input.senderMemberId === null
+      ? {}
+      : {
+          senderMemberId:
+            input.senderMemberId ?? "member_active_participant_123",
+        }),
     occurredAt: "2026-06-24T12:00:00.000Z",
     userId: "member_thread_container_123",
   });
@@ -746,6 +753,30 @@ function createPrisma(input: {
     }),
   };
   const hostedThreadContainerParticipant = {
+    findUnique: vi.fn().mockImplementation(async ({ where }: {
+      where: {
+        containerMemberId_participantMemberId: {
+          containerMemberId: string;
+          participantMemberId: string;
+        };
+      };
+    }) => {
+      const identity = where.containerMemberId_participantMemberId;
+      if (
+        !routeParticipantHasProjection
+        || identity.containerMemberId !== routeContainerMemberId
+        || identity.participantMemberId !== "member_active_participant_123"
+      ) {
+        return null;
+      }
+      return {
+        handleLookupKey: input.routeParticipantHandleLookupKey
+          ?? requireTestPhoneLookupKey("+15551112222"),
+        removedAt: routeParticipantRemoved
+          ? new Date("2026-06-24T12:00:30.000Z")
+          : null,
+      };
+    }),
     findFirst: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) =>
       routeParticipantActive
       && (
@@ -1372,6 +1403,92 @@ describe("Linq message edit correction planning", () => {
     }));
   });
 
+  it("accepts a group correction from an unattributed route-authorized sender", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantHasProjection: false,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake({
+      senderMemberId: null,
+    });
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        reason: "wake-appended-message-edit",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a group correction when optional participant projection is absent", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantHasProjection: false,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        reason: "wake-appended-message-edit",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it("keeps owner-backed group edit authority independent of personal billing", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: false,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        reason: "wake-appended-message-edit",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).toHaveBeenCalledOnce();
+  });
+
   it("appends a direct correction only while the bound home route is active", async () => {
     const prisma = createPrisma();
     const originalWake = buildAcceptedDirectLinqOriginalWake();
@@ -1456,7 +1573,36 @@ describe("Linq message edit correction planning", () => {
   it("rejects a group correction after participant authority is revoked", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
-      routeParticipantActive: false,
+      routeParticipantRemoved: true,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
+      .mockResolvedValueOnce([{
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      }]);
+
+    await expect(planHostedLinqMessageEditedWebhook({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: true,
+        reason: "message-edit-group-route-inactive",
+      },
+    });
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group correction when durable participant attribution conflicts", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantHandleLookupKey:
+        requireTestPhoneLookupKey("+15552223333"),
     });
     const originalWake = buildAcceptedGroupLinqOriginalWake();
     vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)

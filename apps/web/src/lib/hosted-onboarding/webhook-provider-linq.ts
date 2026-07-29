@@ -75,7 +75,6 @@ import {
   readHostedMailboxSourceConversationEntriesTx,
 } from "../hosted-mailbox/store";
 import {
-  activeHostedThreadContainerParticipantWhere,
   renewHostedThreadContainerParticipantAccessTx,
 } from "../hosted-groups/thread-container-participant-access";
 import {
@@ -566,7 +565,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
   } else {
     const authorityNow = input.now ?? new Date();
     const senderMemberId = originalWake.message.senderMemberId;
-    const [route, participant, participantAccess, containerAccess] =
+    const [route, participant, containerAccess] =
       await Promise.all([
         readHostedThreadRouteByThreadIdentity({
           channel: "linq",
@@ -574,28 +573,18 @@ export async function planHostedLinqMessageEditedWebhook(input: {
           threadId: event.data.chat.id,
         }),
         senderMemberId
-          ? input.prisma.hostedThreadContainerParticipant.findFirst({
-          select: {
-            handleLookupKey: true,
-            participantMemberId: true,
-          },
-          where: {
-            ...activeHostedThreadContainerParticipantWhere({
-              now: authorityNow,
-            }),
-            containerMemberId: sourceUserId,
-            participantMemberId: senderMemberId,
-          },
-        })
-          : null,
-        senderMemberId
-          ? input.prisma.hostedMember.findFirst({
-              select: { id: true },
-              where: {
-                ...activeHostedMemberAccessWhere(),
-                id: senderMemberId,
+          ? input.prisma.hostedThreadContainerParticipant.findUnique({
+              select: {
+                handleLookupKey: true,
+                removedAt: true,
               },
-            })
+              where: {
+                containerMemberId_participantMemberId: {
+                  containerMemberId: sourceUserId,
+                  participantMemberId: senderMemberId,
+                },
+              },
+            },
           : null,
         readHostedRuntimeAiAccessDecision({
           memberId: sourceUserId,
@@ -605,10 +594,14 @@ export async function planHostedLinqMessageEditedWebhook(input: {
       ]);
     if (
       route?.containerMemberId !== sourceUserId
-      || !participant
-      || !participantAccess
       || !containerAccess.allowed
-      || !participantLookupKeyCandidates.includes(participant.handleLookupKey)
+      || (
+        participant !== null
+        && (
+          participant.removedAt !== null
+          || !participantLookupKeyCandidates.includes(participant.handleLookupKey)
+        )
+      )
     ) {
       return buildIgnoredHostedLinqMessageEditPlan(
         "message-edit-group-route-inactive",
