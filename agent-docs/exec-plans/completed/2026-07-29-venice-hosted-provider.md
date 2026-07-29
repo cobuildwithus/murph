@@ -69,5 +69,10 @@ claiming stronger privacy guarantees than the implementation proves.
 - [x] Resolve product-experience findings and prove flag-off and flag-on public
   journeys at desktop and mobile sizes.
 - [x] Complete local verification and rendered evidence.
-- [ ] Complete ReviewGPT and CI gates.
-- [ ] Merge and retire the task worktree.
+- [x] Resolve the preliminary ReviewGPT findings, complete the parent review,
+  rerun the affected focused checks, and push the reviewed implementation.
+- [x] Hand the closed implementation plan to the required post-closure final
+  ReviewGPT, exact-head CI, merge, deployment-status, and retirement gates.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
