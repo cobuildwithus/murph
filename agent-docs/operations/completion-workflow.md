@@ -192,6 +192,16 @@ Required:
   cardinality, whether it runs serially or in parallel, its timeout, retry, and
   fallback behavior, and its expected or measured latency. Include before/after
   call counts and focused trace, benchmark, or deterministic call-count proof.
+- **Murph runtime system prompt impact.** Report the final assembled
+  system-prompt change for individual and group Murph separately. For a
+  prompt-affecting PR, render the PR base and head with identical representative
+  inputs that exercise the changed path; count shared prompt changes in both
+  runtimes. Record base and head character counts, the signed character delta,
+  and the signed percentage change (`delta / base * 100`) for each runtime.
+  Name the changed prompt files, builders, or layers and the base/head refs plus
+  fixture, command, or deterministic measurement method. If no system-prompt
+  surface changed, record a zero delta for both runtimes and explain why no
+  render measurement was necessary.
 - **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
   `applicable` or `not applicable` with one short reason each. For coverage,
   name the canonical coverage-bearing command and current outcome. For
