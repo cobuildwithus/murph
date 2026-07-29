@@ -48,9 +48,7 @@ export function HostedPrivyReadinessState({
     <Alert variant="destructive">
       <AlertTitle>Sign in didn&apos;t load</AlertTitle>
       <AlertDescription className="space-y-3">
-        <p>
-          No verification code was sent. Check your connection and try again.
-        </p>
+        <p>Nothing was submitted. Check your connection and try again.</p>
         <Button onClick={onRetry} size="sm" type="button" variant="outline">
           Try again
         </Button>
