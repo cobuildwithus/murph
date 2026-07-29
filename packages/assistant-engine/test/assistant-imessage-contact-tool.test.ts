@@ -37,6 +37,7 @@ describe("assistant iMessage contact tool", () => {
     const ensure = vi.fn(async () => ({
       phoneNumber: "+15550100001",
       status: "assigned" as const,
+      verifiedSenderPhoneHint: "*** 0009",
     }));
     const context = buildHostedToolContext(ensure);
     const result = await executeMurphDynamicToolRequest({
@@ -53,6 +54,15 @@ describe("assistant iMessage contact tool", () => {
     });
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain("+15550100001");
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "verified phone shown as *** 0009",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "another phone number or email",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "may start a separate Murph conversation",
+    );
 
     const repeated = await executeMurphDynamicToolRequest({
       env: {},
@@ -96,6 +106,7 @@ describe("assistant iMessage contact tool", () => {
       hostedToolContext: buildHostedToolContext(vi.fn(async () => ({
         phoneNumber: null,
         status: "unavailable" as const,
+        verifiedSenderPhoneHint: null,
       }))),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
@@ -127,6 +138,7 @@ describe("assistant iMessage contact tool", () => {
       hostedToolContext: buildHostedToolContext(vi.fn(async () => ({
         phoneNumber: null,
         status: "identity_required" as const,
+        verifiedSenderPhoneHint: null,
       }))),
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
@@ -135,7 +147,7 @@ describe("assistant iMessage contact tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toBe(
-      "No Murph iMessage number was assigned because this account does not have a verified phone number or email for iMessage. Tell the member to connect and verify the phone number or email they use for iMessage at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.",
+      "No Murph iMessage number was assigned because this account does not have a verified phone number that can identify the same member in iMessage. Tell the member to connect and verify their iMessage phone number at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.",
     );
   });
 

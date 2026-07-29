@@ -3900,7 +3900,7 @@ export function parseHostedRuntimeIMessageContactToolResponse(
   );
   assertAllowedObjectKeys(
     record,
-    new Set(["phoneNumber", "status"]),
+    new Set(["phoneNumber", "status", "verifiedSenderPhoneHint"]),
     "Hosted runtime iMessage contact tool response",
   );
   const status = requireString(
@@ -3908,12 +3908,19 @@ export function parseHostedRuntimeIMessageContactToolResponse(
     "Hosted runtime iMessage contact tool response status",
   );
   if (status === "identity_required" || status === "unavailable") {
-    if (record.phoneNumber !== null) {
+    if (
+      record.phoneNumber !== null
+      || record.verifiedSenderPhoneHint !== null
+    ) {
       throw new TypeError(
-        "Hosted runtime iMessage contact response without a number requires a null phoneNumber.",
+        "Hosted runtime iMessage contact response without a number requires null phoneNumber and verifiedSenderPhoneHint.",
       );
     }
-    return { phoneNumber: null, status };
+    return {
+      phoneNumber: null,
+      status,
+      verifiedSenderPhoneHint: null,
+    };
   }
   if (status !== "assigned" && status !== "existing") {
     throw new TypeError(
@@ -3929,7 +3936,16 @@ export function parseHostedRuntimeIMessageContactToolResponse(
       "Hosted runtime iMessage contact tool response phoneNumber is invalid.",
     );
   }
-  return { phoneNumber, status };
+  const verifiedSenderPhoneHint = requireString(
+    record.verifiedSenderPhoneHint,
+    "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint",
+  );
+  if (!/^\*{3} [0-9]{4}$/u.test(verifiedSenderPhoneHint)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint is invalid.",
+    );
+  }
+  return { phoneNumber, status, verifiedSenderPhoneHint };
 }
 
 export function parseHostedRuntimeAssistantConfigurationToolRequest(

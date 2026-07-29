@@ -1458,17 +1458,23 @@ claimed that day.
 A private direct Telegram member may explicitly ask for Murph's iMessage
 number before a home line exists. The hosted assistant exposes a
 one-current-input tool whose authenticated Web owner first requires a verified
-member phone or email that Linq inbound can resolve back to the same member.
-Without that identity the tool assigns nothing and directs the member to the
-existing account settings flow. It then locks and rereads the member's route.
+member phone that Linq inbound can resolve back to the same member. A verified
+account email alone is not iMessage sender proof. Without that phone the tool
+assigns nothing and directs the member to the existing account settings flow.
+It then locks and rereads the member's route.
 An existing `linqRecipientPhone` is returned without consulting the pool. Only
 `none` home-route authority may select a healthy assignable line, and the bare
 home-line assignment commits in the same transaction; pending or chat-bound
 authority fails closed. The tool accepts neither a member id nor a requested
 phone number, so repeated or concurrent requests reuse one durable line instead
-of consuming the pool. The line is not copied into Telegram wake or persisted
-assistant-input metadata; both existing and first assignments use the same
-signed request path. This assignment sends no message and does not claim
+of consuming the pool. Every successful result also returns the existing masked
+verified-phone hint. The assistant must tell the member to start their first
+iMessage from that phone and state that same-account recognition is not
+guaranteed for another number or email and may produce a separate Murph
+conversation. This is an explicit supported-sender boundary, not a guarantee
+for an arbitrary iMessage sender. The line is not copied into Telegram wake or
+persisted assistant-input metadata; both existing and first assignments use the
+same signed request path. This assignment sends no message and does not claim
 proactive-conversation capacity.
 
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active

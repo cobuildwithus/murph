@@ -3465,7 +3465,7 @@ async function executeIMessageContactTool(input: {
     if (result.status === 'identity_required') {
       return toolTextResult(
         true,
-        'No Murph iMessage number was assigned because this account does not have a verified phone number or email for iMessage. Tell the member to connect and verify the phone number or email they use for iMessage at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.',
+        'No Murph iMessage number was assigned because this account does not have a verified phone number that can identify the same member in iMessage. Tell the member to connect and verify their iMessage phone number at https://withmurph.ai/settings, then ask again here. They can continue using Telegram. Never guess or invent a number.',
       )
     }
     if (result.status === 'unavailable') {
@@ -3474,7 +3474,10 @@ async function executeIMessageContactTool(input: {
         'No Murph iMessage number was assigned. The member can continue using Telegram and ask again later. Never guess or invent a phone number, and do not promise when one will become available.',
       )
     }
-    return toolTextResult(true, safeToolPayloadText(result))
+    return toolTextResult(
+      true,
+      `Murph iMessage number: ${result.phoneNumber}. Tell the member to start their first iMessage from the verified phone shown as ${result.verifiedSenderPhoneHint}. If iMessage sends from another phone number or email, same-account recognition is not guaranteed and it may start a separate Murph conversation. Never omit this sender constraint.`,
+    )
   } catch {
     return toolTextResult(
       false,

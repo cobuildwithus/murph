@@ -435,28 +435,40 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeIMessageContactToolResponse({
       phoneNumber: "+15550100001",
       status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
     })).toEqual({
       phoneNumber: "+15550100001",
       status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
     });
     expect(parseHostedRuntimeIMessageContactToolResponse({
       phoneNumber: null,
       status: "unavailable",
+      verifiedSenderPhoneHint: null,
     })).toEqual({
       phoneNumber: null,
       status: "unavailable",
+      verifiedSenderPhoneHint: null,
     });
     expect(parseHostedRuntimeIMessageContactToolResponse({
       phoneNumber: null,
       status: "identity_required",
+      verifiedSenderPhoneHint: null,
     })).toEqual({
       phoneNumber: null,
       status: "identity_required",
+      verifiedSenderPhoneHint: null,
     });
     expect(() => parseHostedRuntimeIMessageContactToolResponse({
       phoneNumber: "+15550100001",
       status: "unavailable",
-    })).toThrow(/requires a null phoneNumber/u);
+      verifiedSenderPhoneHint: null,
+    })).toThrow(/requires null phoneNumber/u);
+    expect(() => parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "existing",
+      verifiedSenderPhoneHint: "+15550100009",
+    })).toThrow(/verifiedSenderPhoneHint is invalid/u);
 
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",

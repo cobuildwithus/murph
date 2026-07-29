@@ -22,8 +22,9 @@ import {
   readHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
-  readHostedMemberEmailAuthorization,
-} from "@/src/lib/hosted-onboarding/hosted-member-store";
+  hostedPhoneLookupKeyMatchesValue,
+  readHostedPhoneHint,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -58,25 +59,27 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
         "iMessage contact assignment requires current direct Telegram input.",
       );
     }
-    const [identity, emailAuthorization] = await Promise.all([
-      readHostedMemberIdentity({
-        memberId: input.memberId,
-        prisma: tx,
-      }),
-      readHostedMemberEmailAuthorization({
-        memberId: input.memberId,
-        prisma: tx,
-      }),
-    ]);
+    const identity = await readHostedMemberIdentity({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const verifiedSenderPhone = normalizePhoneNumber(identity?.phoneNumber);
     if (
-      !(identity?.phoneLookupKey && identity.phoneNumberVerifiedAt)
-      && !emailAuthorization?.verifiedEmail?.lookupKey
+      !identity?.phoneLookupKey
+      || !identity.phoneNumberVerifiedAt
+      || !verifiedSenderPhone
+      || !hostedPhoneLookupKeyMatchesValue(
+        verifiedSenderPhone,
+        identity.phoneLookupKey,
+      )
     ) {
       return {
         phoneNumber: null,
         status: "identity_required",
+        verifiedSenderPhoneHint: null,
       };
     }
+    const verifiedSenderPhoneHint = readHostedPhoneHint(verifiedSenderPhone);
 
     await acquireHostedMemberHomeLinqRouteLockTx({
       memberId: input.memberId,
@@ -93,12 +96,14 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
       return {
         phoneNumber: existingPhoneNumber,
         status: "existing",
+        verifiedSenderPhoneHint,
       };
     }
     if (readHostedLinqHomeLineAuthority(routing).kind !== "none") {
       return {
         phoneNumber: null,
         status: "unavailable",
+        verifiedSenderPhoneHint: null,
       };
     }
 
@@ -110,6 +115,7 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
       return {
         phoneNumber: null,
         status: "unavailable",
+        verifiedSenderPhoneHint: null,
       };
     }
 
@@ -125,6 +131,7 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
     return {
       phoneNumber,
       status: "assigned",
+      verifiedSenderPhoneHint,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }

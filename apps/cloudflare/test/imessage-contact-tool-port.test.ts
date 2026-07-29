@@ -49,6 +49,7 @@ describe("hosted iMessage contact tool port", () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       phoneNumber: "+15550100001",
       status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
     });
     const fetchImpl = vi.fn<typeof fetch>();
     const port = createHostedRuntimeIMessageContactToolPort({
@@ -64,6 +65,7 @@ describe("hosted iMessage contact tool port", () => {
     await expect(port.ensure(request)).resolves.toEqual({
       phoneNumber: "+15550100001",
       status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
     });
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
       body: request,
@@ -80,6 +82,7 @@ describe("hosted iMessage contact tool port", () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       phoneNumber: "+15550100001",
       status: "unavailable",
+      verifiedSenderPhoneHint: null,
     });
     const port = createHostedRuntimeIMessageContactToolPort({
       boundUserId: "member_bound",

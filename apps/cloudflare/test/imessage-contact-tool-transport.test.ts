@@ -38,6 +38,7 @@ describe("hosted iMessage contact tool transport", () => {
       return new Response(JSON.stringify({
         phoneNumber: "+15550100001",
         status: "existing",
+        verifiedSenderPhoneHint: "*** 0009",
       }), {
         headers: { "content-type": "application/json" },
         status: 200,
@@ -60,6 +61,7 @@ describe("hosted iMessage contact tool transport", () => {
     })).resolves.toEqual({
       phoneNumber: "+15550100001",
       status: "existing",
+      verifiedSenderPhoneHint: "*** 0009",
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });

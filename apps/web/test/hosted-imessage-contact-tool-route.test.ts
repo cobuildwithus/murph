@@ -37,6 +37,7 @@ describe("hosted iMessage contact tool route", () => {
     mocks.handleTool.mockResolvedValue({
       phoneNumber: "+15550100001",
       status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
     });
   });
 
