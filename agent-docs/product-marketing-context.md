@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-07-15*
+*Last updated: 2026-07-29*
 
 This doc separates **facts** (true today), **strategy decisions** (chosen
 product direction), **hypotheses** (beliefs still to validate), and **target
@@ -158,8 +158,9 @@ points and composable help, not unlimited provider access or clinical scope.
 - One family member of a founder pays **$20/month** on Edge. The Edge buyer is
   not validated.
 - The older $15/month or $150/year launch pricing is obsolete.
-- Group monetization remains an open question. Do not state who pays for a
-  group as fact until it has been tested.
+- For Clubs, organizers buy AI usage as needed with no platform fee. Members
+  receive two free weeks of Murph and can continue on the eligible Group plan
+  for **$3.50/month** after that plan lands.
 
 ## Product Loops
 

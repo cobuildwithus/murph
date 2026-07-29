@@ -234,10 +234,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     ),
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
-  assert.match(
-    config,
-    /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
-  );
+  assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
@@ -1440,9 +1437,6 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[features]",
       "plugins = false",
       "memories = true",
-      "",
-      "[features.code_mode]",
-      'direct_only_tool_namespaces = ["murph"]',
       "",
       "# This table owns enablement and the proactive per-turn mode/tool hints.",
       "# A CLI boolean override would replace the table and silently drop them.",
