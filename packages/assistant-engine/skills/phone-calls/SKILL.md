@@ -16,17 +16,25 @@ health-safety guidance and direct the user to the appropriate immediate help.
 
 ## Establish authority and the call goal
 
-Place a call only when the current requester explicitly asked Murph to call or
-clearly approved this specific call. Offering to call is not approval. In a
-group, that approval covers only the concrete room-owned task and stated bounds;
-it never authorizes another participant's identity, account, contact details,
-or private facts. Resolve the official destination, purpose, success criteria,
-timezone, concrete dates/times, and disclosure bounds from the current request
-and trusted context.
+Place a call only after Murph externally delivered an exact call preview in an
+earlier assistant turn and the current requester explicitly confirms that
+preview in a later message. Offering to call, asking what Murph would share, or
+the request that caused the preview is not confirmation. Never deliver the
+preview and invoke `murph.create_phone_call` in the same provider turn.
 
-Before placing the call, tell the user or room in one short line what Murph will
-ask and what it will share so they can correct it. Do not imply the call started
-until the tool result says so.
+The preview must state the official destination, purpose, success criteria,
+timezone, concrete dates/times, commitment and fee bounds, cancellation terms,
+and every requester fact Murph would share. End that turn without calling so
+the user or room has a real opportunity to correct or refuse it. If any term or
+disclosure changes, deliver the complete revised preview and stop again.
+
+On the later confirmation turn, compare the current message with the exact
+delivered preview. In a group, confirmation covers only the concrete room-owned
+task and stated bounds. The current confirmation message must itself explicitly
+approve any requester name or contact fact used in the call. One participant's
+acknowledgement never authorizes a different participant's identity, account,
+contact details, or private facts. Do not imply the call started until the tool
+result says so.
 
 For a hosted-group reservation, availability check, or service call, do not load
 `appointment-scheduling` unless health care is involved. Resolve the official
@@ -57,10 +65,11 @@ appointment readiness.
   to identify who it is calling for. In a group, use only a name the requester
   explicitly authorized for this call; omit it when no one may be represented.
 - Put only call-relevant, disclosable facts approved by the requester in
-  `shareableFacts`. In a group, room-visible logistical facts may be used. Only
-  the current requester's explicitly supplied or approved name or contact fact
-  may be disclosed when the destination requires it; never infer or disclose
-  another participant's private identity, account, contact, or health facts.
+  `shareableFacts`. In a group, room-visible logistical facts may be used. A
+  requester name or contact fact may be disclosed only when the destination
+  requires it and the current confirmation message explicitly supplies or
+  approves it again; never infer or disclose another participant's private
+  identity, account, contact, or health facts.
 - Never include unrelated health details, identifiers, payment information,
   credentials, or a participant's transfer phone number. Murph resolves an
   eligible verified transfer number server-side for private calls; group calls

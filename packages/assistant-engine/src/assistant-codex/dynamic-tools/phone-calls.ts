@@ -35,8 +35,10 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
   name: 'create_phone_call',
   description: [
-    'Before a real call, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
-    'Start one outbound phone call only when the current requester explicitly asked Murph to call or clearly approved this specific call.',
+    'Before preparing a preview for a real call or placing one, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
+    'Start one outbound phone call only when the current requester explicitly confirms an exact call preview that Murph externally delivered in an earlier assistant turn.',
+    'Never deliver the preview and start the call in the same provider turn; after a new request or any changed term, deliver the complete preview and stop.',
+    'The confirming message must explicitly approve any requester name or contact fact used in the call; one participant cannot approve another participant\'s private facts.',
     'Resolve relative dates and times before creating the brief.',
     'Before a real health care appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Put only requester-approved, call-relevant, disclosable facts in shareableFacts.',

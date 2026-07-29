@@ -2720,6 +2720,10 @@ describe('assistant Codex turn planning', () => {
       supportsNativeResume: false,
     })
     const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: 'group-email-phone-request',
+        source: 'manual',
+      }],
       executionContext: {
         hosted: {
           memberId: 'member-group-container',
@@ -2732,6 +2736,7 @@ describe('assistant Codex turn planning', () => {
         ...createHostedToolContext(),
         assistantConfigurationTool: { request: vi.fn() },
         personalizationTool: { request: vi.fn() },
+        phoneCalls: { start: vi.fn() },
       },
       input: {
         ...createMessageInput(),
@@ -2776,6 +2781,9 @@ describe('assistant Codex turn planning', () => {
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'assistant_configuration',
     )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'create_phone_call',
+    )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
     )
@@ -2786,6 +2794,12 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       "change this room's Murph style",
     )
+    expect(plan.developerInstructions).toContain(
+      'Do not offer or attempt a phone call from group email.',
+    )
+    expect(plan.developerInstructions).toContain(
+      'authenticated Linq or Telegram group chat',
+    )
     expect(plan.developerInstructions).not.toContain(
       'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
@@ -2793,6 +2807,60 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
     expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+  })
+
+  it('keeps phone calls available on authenticated Telegram group turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      null,
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: 'telegram-group-phone-confirmation',
+        source: 'manual',
+      }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        phoneCalls: { start: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        threadIsDirect: false,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'telegram',
+        effectiveThreadIsDirect: false,
+        threadId: 'telegram-group-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(plan.dynamicTools.map((tool) => tool.name)).toContain(
+      'create_phone_call',
+    )
   })
 
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {

@@ -58,7 +58,16 @@ describe("assistant phone calls", () => {
       "$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "only when the current requester explicitly asked Murph to call or clearly approved this specific call",
+      "Before preparing a preview for a real call or placing one",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "only when the current requester explicitly confirms an exact call preview that Murph externally delivered in an earlier assistant turn",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Never deliver the preview and start the call in the same provider turn",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "one participant cannot approve another participant's private facts",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Before a real health care appointment booking",

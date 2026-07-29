@@ -371,6 +371,119 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
   })
 })
 
+test('a separate confirmation turn preserves external preview-before-phone-start order', async () => {
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience.channel = 'linq'
+  plan.conversationPolicy.audience.effectiveThreadIsDirect = false
+  plan.conversationPolicy.audience.threadIsDirect = false
+  const events: string[] = []
+  const start = vi.fn(async () => {
+    events.push('phone-start')
+    return {
+      phoneCallId: 'hpc_group_preview_confirmed',
+      status: 'calling' as const,
+    }
+  })
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule({ plan })
+  mocks.dispatchAssistantReply.mockImplementation(async (input) => {
+    events.push(`delivered:${input.response}`)
+    return {
+      delivery: {
+        channel: 'linq',
+        sentAt: '2026-07-28T12:00:05.000Z',
+        target: 'group-thread',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-group-phone-preview',
+      kind: 'sent' as const,
+      media: [],
+      session,
+    }
+  })
+  mocks.executeCodexTurnWithRecovery
+    .mockImplementationOnce(async () => ({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'Preview: restaurant, table for six, $50 refundable deposit. Reply confirm or send a correction.',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        transcriptResponse: 'Preview: restaurant, table for six, $50 refundable deposit. Reply confirm or send a correction.',
+      },
+    }))
+    .mockImplementationOnce(async (providerInput) => {
+      expect(events).toEqual([
+        'delivered:Preview: restaurant, table for six, $50 refundable deposit. Reply confirm or send a correction.',
+      ])
+      await providerInput.hostedToolContext?.phoneCalls?.start({
+        brief: {
+          allowTransferToUser: false,
+          callerName: 'Sam',
+          goal: 'Reserve the confirmed table for six.',
+          instructions: [
+            'Do not accept a deposit above $50.',
+          ],
+          shareableFacts: {
+            deposit: 'Refundable deposit up to $50.',
+            reservation: 'Outdoor table for six.',
+          },
+          successCriteria: 'The restaurant confirms the exact reservation.',
+          timeZone: 'America/New_York',
+          to: {
+            label: 'Public restaurant',
+            phoneNumber: '+12025550123',
+          },
+        },
+        inboundMailboxItemIds: ['mailbox-confirmation'],
+        originSessionId: session.sessionId,
+        requestKey: 'phone_call_confirmed_preview',
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: false,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          response: 'The confirmed call was accepted.',
+          responseDeliveryContextOrdinal: 0,
+          session,
+          transcriptResponse: 'The confirmed call was accepted.',
+        },
+      }
+    })
+
+  const executionContext = {
+    hosted: {
+      memberId: 'member-group-container',
+      phoneCalls: { start },
+      userEnvKeys: [],
+    },
+  }
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext,
+    prompt: 'Prepare the exact restaurant call preview, but do not call.',
+    vault: '/vaults/test',
+  })
+
+  expect(start).not.toHaveBeenCalled()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext,
+    prompt: 'I confirm the exact prior preview and approve my caller name Sam.',
+    vault: '/vaults/test',
+  })
+
+  expect(start).toHaveBeenCalledTimes(1)
+  expect(events).toEqual([
+    'delivered:Preview: restaurant, table for six, $50 refundable deposit. Reply confirm or send a correction.',
+    'phone-start',
+    'delivered:The confirmed call was accepted.',
+  ])
+})
+
 test('sendAssistantMessageLocal passes lazy scheduled group tools without invoking them', async () => {
   const groupPermissionOfferRequest = vi.fn(async () => ({
     action: 'post_join_offer' as const,

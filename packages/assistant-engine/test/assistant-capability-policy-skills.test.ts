@@ -53,7 +53,22 @@ describe('assistant capability policy skills', () => {
       'ordinary shared-life logistics task',
     )
     expect(normalized).toContain(
-      'Place a call only when the current requester explicitly asked Murph to call or clearly approved this specific call.',
+      'Place a call only after Murph externally delivered an exact call preview in an earlier assistant turn and the current requester explicitly confirms that preview in a later message.',
+    )
+    expect(normalized).toContain(
+      'Never deliver the preview and invoke `murph.create_phone_call` in the same provider turn.',
+    )
+    expect(normalized).toContain(
+      'End that turn without calling so the user or room has a real opportunity to correct or refuse it.',
+    )
+    expect(normalized).toContain(
+      'If any term or disclosure changes, deliver the complete revised preview and stop again.',
+    )
+    expect(normalized).toContain(
+      'The current confirmation message must itself explicitly approve any requester name or contact fact used in the call',
+    )
+    expect(normalized).toContain(
+      'One participant\'s acknowledgement never authorizes a different participant\'s identity, account, contact details, or private facts',
     )
     expect(normalized).toContain(
       'For a hosted-group reservation, availability check, or service call',
@@ -76,7 +91,7 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('Set `callerName`')
     expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
     expect(normalized).toContain(
-      'Only the current requester\'s explicitly supplied or approved name or contact fact may be disclosed when the destination requires it',
+      'A requester name or contact fact may be disclosed only when the destination requires it and the current confirmation message explicitly supplies or approves it again',
     )
     expect(normalized).toContain(
       'never infer or disclose another participant\'s private identity, account, contact, or health facts',

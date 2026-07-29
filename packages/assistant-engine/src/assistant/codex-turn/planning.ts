@@ -452,7 +452,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const privateInteractiveAudience = conversationScope === 'direct'
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
-  const authenticatedGroupRoomModelRuntime =
+  const authenticatedGroupChatRuntime =
     hostedGroupRuntime &&
     assistantRouteSupportsGroupRoomModel({
       channel: resolvedChannel,
@@ -591,7 +591,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             : []),
         ]
   const groupRoomModelPrompt =
-    authenticatedGroupRoomModelRuntime &&
+    authenticatedGroupChatRuntime &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
       ? await readAssistantGroupRoomModelPrompt({
@@ -825,7 +825,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.subscriptionTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
         groupRoomModelAvailable:
-          authenticatedGroupRoomModelRuntime &&
+          authenticatedGroupChatRuntime &&
           userActionAcceptedInputIds.length > 0,
         groupPermissionOfferAvailable:
           hostedGroupRuntime &&
@@ -841,7 +841,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
-          (privateInteractiveAudience || hostedGroupRuntime) &&
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

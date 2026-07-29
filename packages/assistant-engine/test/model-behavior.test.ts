@@ -2585,6 +2585,14 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain('Email replies can converse about this group')
+    expect(prompt).toContain('help plan from public information')
+    expect(prompt).toContain('or authorize a phone call')
+    expect(prompt).toContain(
+      'Do not offer or attempt a phone call from group email.',
+    )
+    expect(prompt).toContain(
+      'Continue the exact call preview and confirmation in the authenticated Linq or Telegram group chat.',
+    )
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
     expect(prompt).toContain("change this room's Murph style")
     expect(prompt).toContain('In group email, do not use the CLI or shell')
