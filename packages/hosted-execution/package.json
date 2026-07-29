@@ -122,6 +122,10 @@
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"
     },
+    "./pending-group-setup": {
+      "types": "./dist/pending-group-setup.d.ts",
+      "default": "./dist/pending-group-setup.js"
+    },
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
