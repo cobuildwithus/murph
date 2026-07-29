@@ -1,6 +1,6 @@
 # Natural reminder density conversations
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -56,9 +56,13 @@ Updated: 2026-07-29
 ## Verification
 
 - Passed: focused Assistant Engine policy/behavior/skill suite (3 files, 99 tests).
-- Passed: Assistant Engine package typecheck.
-- Passed: real-Codex E2E file compiles and its ordinary non-live cases run (4 passed, 8 skipped).
+- Passed after current-main reconciliation: focused Assistant Engine policy/behavior/skill/real-E2E-file suite (4 files, 103 tests passed, 9 skipped).
+- Passed after current-main reconciliation: Assistant Engine package typecheck.
 - Blocked before model invocation: the focused real-Codex dense-reminder scenario requires the harness's external API credential, which is not present in this checkout.
 - Completed: product-experience review; one material delivery-semantics finding accepted and corrected.
 - Completed: preliminary ReviewGPT prompt/coverage review of pushed head `81d9225`; all three findings accepted and corrected without rerunning the one substantive pass.
-- Superseded diagnostic: the first canonical diff run passed the touched Assistant Engine, assistant-runtime, and assistantd owners, then existing CLI tests hit repeated 60-second timeouts and the exact owned session was stopped after producing no new output; rerun on the corrected head remains pending.
+- Completed: parent final review of the reconciled patch; no further finding remained.
+- Passed: `git merge-tree --write-tree HEAD origin/main` after preserving both sides of the import-only real-Codex test conflict.
+- Local broad diagnostic: `pnpm test:diff ...` passed all repository guards, all affected package typechecks, Assistant Engine (2,884 passed, 11 skipped), assistant-cli (128 passed), assistant-runtime (1,958 passed, 2 skipped), and assistantd (40 passed). The unrelated broad CLI suite then reproduced eight existing exact 60-second command-test timeouts plus cascading expansion failures, so the exact owned diagnostic session was stopped. Current PR policy assigns this broad surface to exact-head CI; both CI CLI host matrices, release verification, and CLI coverage passed.
+- Exact-head CI on `1cc7255`: all release, coverage, CLI, design, build, and sibling hosted E2E lanes passed. One unrelated hosted media scenario timed out with its workspace still in flight and conversation mailbox lag remaining; the unchanged-head failed-job retry was started.
+Completed: 2026-07-29
