@@ -415,7 +415,7 @@ const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
         {
           current: "89.1 percent",
           delta: "-0.5 percent",
-          label: "Sleep efficiency",
+          label: "Blood oxygen saturation (SpO₂)",
           sentiment: "negative",
         },
       ],

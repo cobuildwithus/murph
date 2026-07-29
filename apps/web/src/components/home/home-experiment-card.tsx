@@ -185,7 +185,7 @@ function ExperimentResults({ metrics }: { metrics: ExperimentRunCardMetric[] }) 
                 key={`${metric.label}:${index}`}
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4 py-2.5"
               >
-                <dt className="min-w-0 truncate font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
+                <dt className="min-w-0 break-words font-mono text-[9px] uppercase leading-tight tracking-widest text-muted-foreground">
                   {metric.label}
                 </dt>
                 <dd className={cn(

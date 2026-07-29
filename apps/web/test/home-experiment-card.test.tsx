@@ -122,6 +122,35 @@ test("HomeExperimentCard omits the supporting ledger for a single result", async
   assert.doesNotMatch(markup, /Deep sleep/);
 });
 
+test("HomeExperimentCard keeps long supporting metric labels readable", async () => {
+  const { HomeExperimentCard } = await import(
+    "@/src/components/home/home-experiment-card"
+  );
+  const card = resultCard();
+  if (!card.runSummary) {
+    throw new Error("Expected the result-card fixture to have a run summary.");
+  }
+  card.runSummary = {
+    ...card.runSummary,
+    metrics: card.runSummary.metrics.map((metric, index) => (
+      index === 1
+        ? { ...metric, label: "Blood oxygen saturation (SpO₂)" }
+        : metric
+    )),
+  };
+  const markup = renderToStaticMarkup(createElement(HomeExperimentCard, {
+    card,
+    variant: "history",
+  }));
+
+  assert.match(
+    markup,
+    /<dt class="[^"]*break-words[^"]*">Blood oxygen saturation \(SpO₂\)<\/dt>/,
+  );
+  assert.doesNotMatch(markup, /<dt class="[^"]*truncate/);
+  assert.match(markup, /\+20\.4 min/);
+});
+
 test("HomeExperimentCard does not hide a source Done status", async () => {
   const { HomeExperimentCard } = await import(
     "@/src/components/home/home-experiment-card"
