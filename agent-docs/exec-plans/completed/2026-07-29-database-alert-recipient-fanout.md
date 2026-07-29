@@ -1,6 +1,6 @@
 # Fan out database health alerts to two direct chats
 
-Status: active
+Status: completed
 
 Date: 2026-07-29
 
@@ -62,3 +62,5 @@ This is a Cloudflare-only runtime change. Add the secondary protected secret
 before deploying so the new worker fails closed rather than starting with an
 incomplete recipient set. Deploy the worker, observe a natural scheduled run,
 then perform the separately authorized confirmation sends.
+Updated: 2026-07-29
+Completed: 2026-07-29
