@@ -1105,15 +1105,7 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      await lockHostedMemberRow(transaction, route.owner.id);
-      if (input.participantChange.event_type === "participant.added") {
-        await markHostedLinqThreadRouteParticipantAdditionPendingTx({
-          containerMemberId: route.containerMemberId,
-          prisma: transaction,
-          threadId: chatId,
-        });
-      }
-      await stageHostedLinqGroupParticipantContextTx({
+      await applyHostedLinqParticipantChangeToRouteTx({
         event: input.participantChange,
         prisma: transaction,
         route,
@@ -1121,6 +1113,26 @@ async function ingestHostedLinqParticipantEventDirect(input: {
       return providerResult;
     },
   );
+}
+
+export async function applyHostedLinqParticipantChangeToRouteTx(input: {
+  event: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
+  prisma: Prisma.TransactionClient;
+  route: HostedThreadRouteSnapshot;
+}): Promise<void> {
+  const chatId = input.event.data.chat_id;
+  if (!chatId) {
+    return;
+  }
+  await lockHostedMemberRow(input.prisma, input.route.owner.id);
+  if (input.event.event_type === "participant.added") {
+    await markHostedLinqThreadRouteParticipantAdditionPendingTx({
+      containerMemberId: input.route.containerMemberId,
+      prisma: input.prisma,
+      threadId: chatId,
+    });
+  }
+  await stageHostedLinqGroupParticipantContextTx(input);
 }
 
 function scheduleHostedLinqProviderEventIngestionBestEffort(input: {

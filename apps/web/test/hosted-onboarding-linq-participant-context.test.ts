@@ -167,6 +167,24 @@ describe("stageHostedLinqGroupParticipantContextTx", () => {
     }));
   });
 
+  it("keeps the handle-only context when the owner address book is unavailable", async () => {
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
+      new Error("projection lookup unavailable"),
+    );
+
+    await expect(stageHostedLinqGroupParticipantContextTx({
+      event: buildParticipantEvent("participant.removed", "+15551234567"),
+      prisma: createPrismaStub(),
+      route: buildActiveRoute(),
+    })).resolves.toBe(true);
+
+    expect(
+      mocks.appendHostedLinqThreadRouteParticipantContextTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      text: "Participant +15551234567 was removed from the group.",
+    }));
+  });
+
   it("skips invalid or inactive route context and absorbs staging failure", async () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
 
