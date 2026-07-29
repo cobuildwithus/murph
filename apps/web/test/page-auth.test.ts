@@ -419,6 +419,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantHumor: null,
     assistantHumorCausalSeq: null,
     assistantModelPreference: null,
+    assistantProviderPreference: null,
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,
