@@ -79,16 +79,17 @@ The command blocks rather than copies:
   and
 - any source or destination migration marker other than the exact pair marker.
 
-Raw email and meal-photo objects are recognized but excluded:
+Raw email, private-media, and meal-photo objects are recognized but excluded:
 
 - `hosted-email/messages/`
+- `hosted-private-media/images/`
 - `hosted-meal-photos/images/`
 
 Copying these objects would restart their lifecycle age. Their consumers must
 continue using exact keys, which automatically receive destination-active
 ENAM-to-OC read fallback. Do not introduce a generic merged list to discover
-them. Keep OC until both source prefixes have drained through processing and
-their original lifecycle policy.
+them. Keep OC until all three source prefixes have drained through processing
+and their original lifecycle policy.
 
 ## Direct snapshot upload tickets
 
@@ -157,8 +158,10 @@ HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME=<new-enam-production>
 HOSTED_R2_CUTOVER_PHASE=source_active
 ```
 
-The deploy renderer rejects transposed buckets, equal source/destination roles,
-an unknown phase, or a presign name that does not match its fixed binding.
+Before rendering Worker deploy artifacts, the deploy preflight reads Cloudflare
+bucket metadata and requires each fixed source to report OC and each fixed
+destination to report ENAM. It also rejects equal source/destination roles, an
+unknown phase, or a presign name that does not match its fixed binding.
 
 ## Minimum production sequence
 
@@ -317,13 +320,14 @@ state remains for retry.
 
 ### 11. Drain OC lifecycle prefixes and fallback
 
-Continue normal processing of exact raw-email and meal-photo keys. Require both
-OC prefixes to become empty under their original lifecycle. Keep ENAM-to-OC
-fallback while any legitimate source read remains.
+Continue normal processing of exact raw-email, private-media, and meal-photo
+keys. Require all three OC prefixes to become empty under their original
+lifecycle. Keep ENAM-to-OC fallback while any legitimate source read remains.
 
 Before removing fallback, require a bounded zero-fallback interval longer than
-all supported GET URLs and relevant retry/alarm cycles, plus successful cold
-restores of both pre-switch and post-switch snapshots.
+all supported GET URLs, the 24-hour private-media capability horizon, and
+relevant retry/alarm cycles, plus successful cold restores of both pre-switch
+and post-switch snapshots.
 
 ### 12. Retire OC and remove the bridge
 
@@ -332,7 +336,7 @@ Use a separate reviewed destructive operation. Before deleting OC, prove:
 - all live configuration and presign variables name ENAM as authority;
 - the runtime is ENAM-only;
 - no source-only eligible object remains;
-- both OC lifecycle prefixes are empty;
+- all three OC lifecycle prefixes are empty;
 - no valid OC URL or credential remains;
 - account deletion is green against the ENAM-only path; and
 - fallback has remained unused for the approved soak.

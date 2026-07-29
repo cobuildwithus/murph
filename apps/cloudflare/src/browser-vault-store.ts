@@ -136,6 +136,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
       const encodedReplica = encodeHostedBrowserVaultReplicaJson({ replica });
       const objectKey = await hostedBrowserVaultReplicaObjectKey({
         dataVersion: parsed.source.dataVersion,
+        generatedAt: parsed.generatedAt,
         userId,
       });
       const ref: HostedBrowserVaultReplicaRef = {

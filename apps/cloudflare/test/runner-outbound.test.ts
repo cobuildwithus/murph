@@ -6831,7 +6831,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(sourceDelete).toHaveBeenCalledWith(objectKey);
-    expect(destinationDelete).not.toHaveBeenCalled();
+    expect(destinationDelete).toHaveBeenCalledWith(objectKey);
   });
 
   it("does not abort a snapshot after its active fence changes during the session read", async () => {
@@ -7508,7 +7508,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("does not delete the current workspace snapshot object when an expired completion retry cleans up replaced state", async () => {
+  it("deletes replaced state from both fixed-role buckets without deleting the current snapshot", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_expired_current_retry";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -7541,9 +7541,10 @@ describe("handleRunnerOutboundRequest", () => {
         replacedSnapshotRef,
       }),
     );
-    const deleteObject = vi.fn(async () => {});
+    const sourceDelete = vi.fn(async () => {});
+    const destinationDelete = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
-      BUNDLES: createWorkspaceSnapshotBucket(
+      BUNDLES: createBridgeWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
           checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
@@ -7551,8 +7552,20 @@ describe("handleRunnerOutboundRequest", () => {
           key,
           size: 4,
         }),
-        deleteObject,
+        sourceDelete,
       ),
+      BUNDLES_ENAM: createBridgeWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        destinationDelete,
+      ),
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam-test",
       USER_RUNNER: {
         getByName: runner.getByName,
       },
@@ -7593,8 +7606,10 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
     }));
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
+    expect(sourceDelete).toHaveBeenCalledWith(replacedObjectKey);
+    expect(destinationDelete).toHaveBeenCalledWith(replacedObjectKey);
+    expect(sourceDelete).not.toHaveBeenCalledWith(objectKey);
+    expect(destinationDelete).not.toHaveBeenCalledWith(objectKey);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
       snapshotId,

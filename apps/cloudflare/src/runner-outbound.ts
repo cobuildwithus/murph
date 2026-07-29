@@ -1780,16 +1780,8 @@ async function deleteReplacedWorkspaceSnapshotRef(input: {
     ) {
       return true;
     }
-    const bucketRole = await locateHostedR2ObjectBucketRole(
-      resolveHostedR2CutoverContext(input.env),
-      replacedSnapshotRef.objectKey,
-    );
-    if (!bucketRole) {
-      return true;
-    }
     const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
       bucket: input.bucket,
-      bucketRole,
       env: input.env,
       objectKey: replacedSnapshotRef.objectKey,
     });
@@ -2167,27 +2159,35 @@ async function deleteWorkspaceSnapshotObjectBestEffort(input: {
   env: RunnerOutboundEnvironmentSource;
   objectKey: string;
 }): Promise<boolean> {
-  const bucket = input.bucketRole
-    ? readHostedR2BucketForRole(
-        resolveHostedR2CutoverContext(input.env),
-        input.bucketRole,
-      )
-    : input.bucket;
-  const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
-    bucket,
-    bucketRole: input.bucketRole,
-    env: input.env,
-  });
-  if (!snapshotObjectStore.delete) {
+  const context = resolveHostedR2CutoverContext(input.env);
+  const snapshotObjectStores = context.coexisting
+    ? (["source", "destination"] as const).map((bucketRole) =>
+        createWorkspaceSnapshotObjectStore({
+          bucket: readHostedR2BucketForRole(context, bucketRole),
+          bucketRole,
+          env: input.env,
+        }))
+    : [
+        createWorkspaceSnapshotObjectStore({
+          bucket: input.bucketRole
+            ? readHostedR2BucketForRole(context, input.bucketRole)
+            : input.bucket,
+          bucketRole: input.bucketRole,
+          env: input.env,
+        }),
+      ];
+  if (snapshotObjectStores.some((store) => !store.delete)) {
     return false;
   }
   try {
-    await snapshotObjectStore.delete(input.objectKey);
+    for (const snapshotObjectStore of snapshotObjectStores) {
+      await snapshotObjectStore.delete?.(input.objectKey);
+    }
     return true;
   } catch {
-    // The critical durability outcome is the checkpoint CAS. Failed object
-    // cleanup is retried by later owner cleanup instead of changing the
-    // complete-route result.
+    // Unique snapshot keys can coexist in both fixed-role buckets while the
+    // online copier is running. Failed cleanup is retained for a later
+    // idempotent retry instead of leaving one role's copy live indefinitely.
     return false;
   }
 }

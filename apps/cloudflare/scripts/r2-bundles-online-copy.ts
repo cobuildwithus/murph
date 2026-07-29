@@ -11,14 +11,15 @@ import {
 
 import { createHostedStorageNamespaceId } from "../src/storage-paths.js";
 import {
+  assertR2FixedBucketPair,
   buildAwsMigrationChildEnvironment,
   buildWranglerMigrationChildEnvironment,
+  createR2BundlesMigrationCommandRunner,
   createR2MigrationMarkerKey,
   parseCanonicalLifecycleJson,
-  parseR2BucketInfoJson,
   parseR2ObjectInventoryJson,
   parseWranglerLifecycleList,
-  type R2BucketInfo,
+  readR2BucketInfoWithWrangler,
   type R2BundlesMigrationCommandRunner,
   type R2LifecycleRule,
   type R2ObjectInventoryEntry,
@@ -55,12 +56,13 @@ const ELIGIBLE_KEY_PATTERNS = [
 const MUTABLE_KEY_PATTERN = new RegExp(`^users/${USER_NAMESPACE}/runner-secrets\\.json$`, "u");
 const LIFECYCLE_PREFIXES = [
   "hosted-email/messages/",
+  "hosted-private-media/images/",
   "hosted-meal-photos/images/",
 ] as const;
 const LEGACY_GLOBAL_PREFIX = "bundles/";
 const USER_NAMESPACE_FROM_KEY_PATTERN = /^users\/([^/]+)\//u;
 const LIFECYCLE_NAMESPACE_FROM_KEY_PATTERN =
-  /^hosted-(?:email\/messages|meal-photos\/images)\/([^/]+)\//u;
+  /^hosted-(?:email\/messages|private-media\/images|meal-photos\/images)\/([^/]+)\//u;
 const ACTIVE_HOSTED_MEMBER_OWNERS_SQL = `SELECT json_build_object(
   'memberId', member.id,
   'snapshotRef', workspace.snapshot_ref
@@ -152,9 +154,9 @@ export const R2_BUNDLES_ONLINE_COPY_USAGE = `Usage:
 
 The online command never deletes or overwrites destination objects. It copies
 only user-scoped immutable key classes with both the listed source ETag and the
-R2 destination create-only condition. Lifecycle-managed raw email and meal
-photo objects are intentionally excluded. Mutable, unknown, and legacy-global
-keys block the operation.
+R2 destination create-only condition. Lifecycle-managed raw email, private
+media, and meal photo objects are intentionally excluded. Mutable, unknown,
+and legacy-global keys block the operation.
 
 Options:
   --apply                       Copy currently missing eligible objects.
@@ -281,7 +283,7 @@ export async function runR2BundlesOnlineCopy(
   assertOnlineCopyAcknowledgements(options);
   const log = dependencies.log ?? console.log;
   const environment = readMigrationEnvironment(sourceEnvironment);
-  const runner = dependencies.runner ?? createDefaultCommandRunner();
+  const runner = dependencies.runner ?? createR2BundlesMigrationCommandRunner();
   const awsEnvironment = buildAwsMigrationChildEnvironment({
     accessKeyId: environment.accessKeyId,
     base: sourceEnvironment,
@@ -925,14 +927,20 @@ async function inspectR2OnlineCopyInfrastructure(input: {
     });
     return result.stdout;
   };
-  const [sourceInfoText, destinationInfoText, sourceLifecycleText, destinationLifecycleText] =
+  const [sourceInfo, destinationInfo, sourceLifecycleText, destinationLifecycleText] =
     await Promise.all([
-      runWrangler("R2 online-copy source bucket info", [
-        "exec", "wrangler", "r2", "bucket", "info", input.source, "--json",
-      ]),
-      runWrangler("R2 online-copy destination bucket info", [
-        "exec", "wrangler", "r2", "bucket", "info", input.destination, "--json",
-      ]),
+      readR2BucketInfoWithWrangler({
+        bucketName: input.source,
+        environment: wranglerEnvironment,
+        label: "R2 online-copy source bucket info",
+        runner: input.runner,
+      }),
+      readR2BucketInfoWithWrangler({
+        bucketName: input.destination,
+        environment: wranglerEnvironment,
+        label: "R2 online-copy destination bucket info",
+        runner: input.runner,
+      }),
       runWrangler("R2 online-copy source lifecycle", [
         "exec", "wrangler", "r2", "bucket", "lifecycle", "list", input.source,
       ]),
@@ -940,9 +948,13 @@ async function inspectR2OnlineCopyInfrastructure(input: {
         "exec", "wrangler", "r2", "bucket", "lifecycle", "list", input.destination,
       ]),
     ]);
-  const sourceInfo = parseR2BucketInfoJson(sourceInfoText);
-  const destinationInfo = parseR2BucketInfoJson(destinationInfoText);
-  assertBucketPair(sourceInfo, destinationInfo, input.source, input.destination);
+  assertR2FixedBucketPair({
+    destination: destinationInfo,
+    destinationName: input.destination,
+    label: "R2 online copy",
+    source: sourceInfo,
+    sourceName: input.source,
+  });
   const expectedLifecycle = parseCanonicalLifecycleJson(
     await readFile(lifecycleConfigPath, "utf8"),
   );
@@ -956,29 +968,6 @@ async function inspectR2OnlineCopyInfrastructure(input: {
     expectedLifecycle,
     "destination",
   );
-}
-
-function assertBucketPair(
-  source: R2BucketInfo,
-  destination: R2BucketInfo,
-  sourceName: string,
-  destinationName: string,
-): void {
-  if (source.name !== sourceName || destination.name !== destinationName) {
-    throw new Error("R2 bucket-info output did not match the requested fixed-role pair.");
-  }
-  if (source.location.toUpperCase() !== "OC") {
-    throw new Error("The fixed source bucket must report OC.");
-  }
-  if (destination.location.toUpperCase() !== "ENAM") {
-    throw new Error("The fixed destination bucket must report ENAM.");
-  }
-  if (
-    source.defaultStorageClass.toLowerCase() !== "standard"
-    || destination.defaultStorageClass.toLowerCase() !== "standard"
-  ) {
-    throw new Error("Both online-copy buckets must use Standard as their default storage class.");
-  }
 }
 
 function assertExactLifecycle(
@@ -1011,36 +1000,6 @@ async function readR2ObjectInventory(input: {
     label: "R2 online-copy inventory read",
   });
   return parseR2ObjectInventoryJson(result.stdout);
-}
-
-function createDefaultCommandRunner(): R2BundlesMigrationCommandRunner {
-  return {
-    async run(input) {
-      const { spawn } = await import("node:child_process");
-      return await new Promise((resolve, reject) => {
-        const child = spawn(input.command, [...input.args], {
-          cwd: input.cwd,
-          env: input.env,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-        child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-        child.on("error", () => reject(new Error(`${input.label} could not start.`)));
-        child.on("close", (code) => {
-          if (code !== 0) {
-            reject(new Error(`${input.label} failed with exit code ${code ?? "unknown"}.`));
-          } else {
-            resolve({
-              stderr: Buffer.concat(stderr).toString("utf8"),
-              stdout: Buffer.concat(stdout).toString("utf8"),
-            });
-          }
-        });
-      });
-    },
-  };
 }
 
 function readMigrationEnvironment(

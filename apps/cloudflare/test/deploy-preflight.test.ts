@@ -82,6 +82,14 @@ function createRequiredPreviewWorkerDeployEnv(
   });
 }
 
+async function readValidR2BucketInfo(bucketName: string) {
+  return {
+    defaultStorageClass: "Standard",
+    location: bucketName.includes("enam") ? "ENAM" : "OC",
+    name: bucketName,
+  };
+}
+
 describe("deploy preflight helpers", () => {
   it("requires the base deploy environment regardless of deploy mode", () => {
     expect(listMissingHostedDeployEnvironment({}, { deployWorker: false })).toEqual([
@@ -808,9 +816,47 @@ describe("deploy preflight helpers", () => {
       createRequiredWorkerDeployEnv(),
       { deployWorker: true },
       {
+        readR2BucketInfo: readValidR2BucketInfo,
         resolveHostnameAddresses: async () => ["8.8.8.8", "2001:4860:4860::8888"],
       },
     )).resolves.toBeUndefined();
+  });
+
+  it("rejects fully transposed fixed-role R2 bucket variables before deployment", async () => {
+    const source = createRequiredWorkerDeployEnv({
+      CF_BUNDLES_BUCKET: "bundles-enam",
+      CF_BUNDLES_ENAM_BUCKET: "bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview-enam",
+      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles-enam",
+      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles",
+    });
+
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      source,
+      { deployWorker: true },
+      {
+        readR2BucketInfo: readValidR2BucketInfo,
+        resolveHostnameAddresses: async () => ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "R2 fixed-role bucket metadata validation failed: Runtime R2 fixed source bucket must report OC.",
+    );
+  });
+
+  it("fails closed when fixed-role R2 bucket metadata cannot be read", async () => {
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        readR2BucketInfo: async () => {
+          throw new Error("bucket metadata unavailable");
+        },
+        resolveHostnameAddresses: async () => ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "R2 fixed-role bucket metadata validation failed: bucket metadata unavailable",
+    );
   });
 
   it("rejects production deploy hostnames that resolve to private-network addresses", async () => {
@@ -818,6 +864,7 @@ describe("deploy preflight helpers", () => {
       createRequiredWorkerDeployEnv(),
       { deployWorker: true },
       {
+        readR2BucketInfo: readValidR2BucketInfo,
         resolveHostnameAddresses: async (hostname) =>
           hostname === "app.example.test" ? ["10.1.2.3"] : ["8.8.8.8"],
       },
@@ -831,6 +878,7 @@ describe("deploy preflight helpers", () => {
       createRequiredWorkerDeployEnv(),
       { deployWorker: true },
       {
+        readR2BucketInfo: readValidR2BucketInfo,
         resolveHostnameAddresses: async (hostname) =>
           hostname === "app.example.test" ? ["::ffff:10.1.2.3"] : ["8.8.8.8"],
       },
@@ -847,6 +895,7 @@ describe("deploy preflight helpers", () => {
       }),
       { deployWorker: true },
       {
+        readR2BucketInfo: readValidR2BucketInfo,
         resolveHostnameAddresses: async () => ["8.8.8.8", "2001:4860:4860::8888"],
       },
     )).resolves.toBeUndefined();
@@ -870,6 +919,7 @@ describe("deploy preflight helpers", () => {
         ),
         { deployWorker: true },
         {
+          readR2BucketInfo: readValidR2BucketInfo,
           resolveHostnameAddresses: async (hostname) =>
             hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
         },

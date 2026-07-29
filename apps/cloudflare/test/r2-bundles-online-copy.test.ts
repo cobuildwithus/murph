@@ -155,6 +155,9 @@ describe("R2 online immutable copy", () => {
       "hosted-email/messages/hsn_0123456789abcdef01234567/message.eml",
     )).toBe("lifecycle_managed");
     expect(classifyR2OnlineCopyKey(
+      "hosted-private-media/images/hsn_0123456789abcdef01234567/photo.image.enc",
+    )).toBe("lifecycle_managed");
+    expect(classifyR2OnlineCopyKey(
       "hosted-meal-photos/images/hsn_0123456789abcdef01234567/photo.jpg.enc",
     )).toBe("lifecycle_managed");
     expect(classifyR2OnlineCopyKey(
@@ -324,6 +327,10 @@ describe("R2 online immutable copy", () => {
       "hosted-email/messages/hsn_0123456789abcdef01234567/message.eml",
       { etag: '"multipart-etag-2"', size: 6_000_000_000 },
     );
+    const privateMedia = entry(
+      "hosted-private-media/images/hsn_0123456789abcdef01234567/photo.image.enc",
+      { etag: '"multipart-etag-3"', size: 6_000_000_000 },
+    );
     let destinationInventory = [marker()];
     const copyObject = vi.fn(async (_input: CopyObjectInput) => {
       destinationInventory = [marker(), eligible];
@@ -352,7 +359,7 @@ describe("R2 online immutable copy", () => {
         inspectInfrastructure: async () => undefined,
         log: vi.fn(),
         readInventory: async (bucket) => bucket === sourceBucket
-          ? [eligible, lifecycle]
+          ? [eligible, lifecycle, privateMedia]
           : destinationInventory,
       },
     );
@@ -530,6 +537,27 @@ describe("R2 online immutable copy", () => {
         confirmDestination: destinationBucket,
         immutableKeysAudited: true,
       }),
+      environment,
+      {
+        client: {
+          copyObject: vi.fn(),
+          headObject: vi.fn(),
+          putMarker: vi.fn(),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => bucket === sourceBucket ? [unowned] : [marker()],
+      },
+    )).rejects.toThrow("outside current hosted-member ownership");
+  });
+
+  it("blocks lifecycle-managed private media outside the current hosted-member ownership set", async () => {
+    const unowned = entry(
+      "hosted-private-media/images/hsn_ffffffffffffffffffffffff/photo.image.enc",
+    );
+    await expect(runR2BundlesOnlineCopy(
+      options(),
       environment,
       {
         client: {

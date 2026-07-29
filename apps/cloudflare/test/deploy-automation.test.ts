@@ -882,6 +882,9 @@ describe("hosted deploy automation helpers", () => {
     expect(validateDeployEnvStep).toContain(
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
     );
+    expect(validateDeployEnvStep).toContain(
+      "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(validateDeployEnvStep).toContain(
         `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
