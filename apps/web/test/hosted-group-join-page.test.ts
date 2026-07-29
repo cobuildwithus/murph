@@ -15,12 +15,14 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
   GroupJoinAcceptForm(props: {
     expectedMembershipId: string | null;
     groupName: string;
+    inviteCode?: string | null;
     postJoinDestination: string;
   }) {
     return createElement(
       "form",
       {
         "data-group-name": props.groupName,
+        "data-invite-code": props.inviteCode ?? "",
         "data-membership-id": props.expectedMembershipId ?? "none",
         "data-post-join-destination": props.postJoinDestination,
       },
@@ -180,7 +182,7 @@ test("passes only sanitized launch consent status to the legal consent gate", as
   expect(markup).not.toContain("Accept group invite");
 });
 
-test("renders the join form for authenticated viewers with current launch consent", async () => {
+test("forwards a phone-bound invite into the authenticated join form", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     authenticatedMember: { id: "member_123" },
@@ -189,8 +191,11 @@ test("renders the join form for authenticated viewers with current launch consen
     launchGranted: true,
   }));
 
-  const markup = await renderGroupJoinPage("JOIN123");
+  const markup = await renderGroupJoinPage("JOIN123", {
+    invite: "invite_phone_bound",
+  });
 
+  expect(markup).toContain('data-invite-code="invite_phone_bound"');
   expect(markup).toContain("Accept group invite");
   expect(markup).not.toContain('data-legal-consent-gate="true"');
   expect(markup).toContain('href="/home"');
