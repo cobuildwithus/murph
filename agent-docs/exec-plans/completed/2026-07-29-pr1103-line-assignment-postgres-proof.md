@@ -1,6 +1,6 @@
 # Prove PR 1103 line assignment against PostgreSQL
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -52,7 +52,19 @@ Updated: 2026-07-29
   E2E database job remains the single owner of this proof.
 - Use the existing route-lock primitive to make the race deterministic instead
   of adding sleeps or production test hooks.
+- Inject independent real Prisma clients only at the handler's existing
+  `getPrisma` boundary; every mailbox, access, routing, pool, encryption, and
+  persistence operation remains the production implementation.
 
 ## Verification
 
-- Pending.
+- Focused real-PostgreSQL suite passed all 17 tests against an isolated
+  loopback database after current migrations.
+- Hosted Web typecheck passed through `pnpm --dir apps/web typecheck`.
+- Focused ESLint and `git diff --check` passed.
+- The preliminary `completion-specialists` ReviewGPT coverage pass reviewed
+  exact pushed head `e074159426aab6fd26adf6eda2dea85f8bc17130` with the
+  requested Pro model in roughly nine minutes. It returned
+  `SPECIALIST_OUTCOME: PASS`, no findings, and no coverage patch artifact.
+- Exact-head GitHub CI is in progress.
+Completed: 2026-07-29
