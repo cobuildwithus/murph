@@ -4498,6 +4498,119 @@ describe("owned multi-part Linq delivery receipts", () => {
     },
   );
 
+  it.each(["delivered", "failed"] as const)(
+    "keeps a parent-only rich-link partial absorbing when its known provider message is %s",
+    async (messageStatus) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_parent_only_partial",
+        idempotencyKey: "payment-message:evt_parent_only",
+        phoneNumberLookupKey: null,
+        sourceRef: null,
+        status: "failed",
+        template: null,
+      });
+
+      await expect(applyHostedLinqDeliveryReceiptTx({
+        event: requireParsedProviderEvent(buildProviderEvent({
+          data: {
+            message_id: "msg_known_partial",
+            phone_number: "+15550000000",
+            service: "iMessage",
+          },
+          eventId: `evt_parent_only_${messageStatus}`,
+          eventType: `message.${messageStatus}`,
+        })),
+        prisma: fixture.prisma as never,
+      })).resolves.toEqual({
+        advanced: false,
+        deliveryId: "hld_parent_only_partial",
+        phoneNumberLookupKey: null,
+        reopenOnboardingLink: null,
+        restoreOnboardingLink: null,
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["delivered", "failed"] as const)(
+    "attaches a buffered %s receipt after recording an incomplete rich-link child without promoting the parent",
+    async (messageStatus) => {
+      const fixture = createObservabilityPrismaFixture();
+      const partialFailedAt = new Date("2026-03-26T11:59:59.000Z");
+      const partialFailureReason =
+        "Linq could not confirm both rich-link provider identities.";
+      const receiptAt = new Date("2026-03-26T12:00:00.000Z");
+      fixture.hostedLinqDeliveryFindUnique
+        .mockResolvedValueOnce({ id: "hld_partial_catchup" })
+        .mockResolvedValueOnce({
+          failedAt: partialFailedAt,
+          failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+          failureReason: partialFailureReason,
+          status: "failed",
+        });
+      fixture.hostedLinqDeliveryMessageFindFirst.mockResolvedValueOnce({
+        id: "hldm_partial_catchup",
+      });
+      fixture.hostedLinqDeliveryMessageUpdateMany.mockResolvedValueOnce({
+        count: 1,
+      });
+      fixture.hostedLinqDeliveryMessageFindMany.mockResolvedValueOnce([
+        buildOwnedDeliveryMessageState(
+          messageStatus,
+          `evt_buffered_${messageStatus}`,
+        ),
+      ]);
+      fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+        deliveryStatus: messageStatus,
+        eventId: `evt_buffered_${messageStatus}`,
+        failureCode: messageStatus === "failed" ? "provider_rejected" : null,
+        failureReason:
+          messageStatus === "failed" ? "Provider rejected message." : null,
+        phoneNumberLookupKey: null,
+        providerCreatedAt: receiptAt,
+        service: "iMessage",
+      }]);
+
+      await markHostedLinqDeliverySendFailedTx({
+        failedAt: partialFailedAt,
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        failureReason: partialFailureReason,
+        idempotencyKey: "payment-message:evt_partial_catchup",
+        linqChatId: "chat_partial_catchup",
+        messageIds: ["msg_known_partial"],
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqDeliveryMessageUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: messageStatus,
+          }),
+          where: expect.objectContaining({
+            id: "hldm_partial_catchup",
+          }),
+        }),
+      );
+      expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveredAt: null,
+            failedAt: partialFailedAt,
+            failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            failureReason: partialFailureReason,
+            status: "failed",
+          }),
+          where: { id: "hld_partial_catchup" },
+        }),
+      );
+    },
+  );
+
   it("records ordered primary and link identities with the link as the scalar owner key", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({

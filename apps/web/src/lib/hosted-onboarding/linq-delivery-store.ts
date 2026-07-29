@@ -1244,56 +1244,74 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
     return;
   }
   const failedAt = input.failedAt ?? new Date();
+  const failureCode = sanitizeHostedOnboardingPersistedErrorCode(
+    normalizeNullable(input.failureCode),
+  );
   const providerMessageIds = normalizeHostedLinqProviderMessageIds(
     input.messageIds,
     null,
   );
   const finalMessageId = providerMessageIds.at(-1) ?? null;
-  const updated = await input.prisma.hostedLinqDelivery.updateMany({
-    where: {
-      acceptedAt: null,
-      deliveredAt: null,
-      ...(input.expectedAttemptedAt
-        ? { attemptedAt: input.expectedAttemptedAt }
-        : {}),
-      idempotencyKey,
-      lastReceiptAt: null,
-      messageLookupKey: null,
-    },
-    data: {
-      failedAt,
-      failureCode: sanitizeHostedOnboardingPersistedErrorCode(
-        normalizeNullable(input.failureCode),
-      ),
-      failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
-        normalizeNullable(input.failureReason),
-      ),
-      ...(providerMessageIds.length > 0
-        ? {
-            linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
-            messageIdSuffix: toHostedOnboardingLogIdSuffix(finalMessageId),
-            messageLookupKey: createHostedLinqMessageLookupKey(finalMessageId),
-          }
-        : {}),
-      retryAfterAt: input.retryAfterAt ?? null,
-      status: "failed",
-    },
-  });
-  if (updated.count !== 1 || providerMessageIds.length === 0) {
-    return;
-  }
-  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
-    where: { idempotencyKey },
-    select: { id: true },
-  });
-  if (delivery) {
+  await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+    const updated = await prisma.hostedLinqDelivery.updateMany({
+      where: {
+        acceptedAt: null,
+        deliveredAt: null,
+        ...(input.expectedAttemptedAt
+          ? { attemptedAt: input.expectedAttemptedAt }
+          : {}),
+        idempotencyKey,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+      },
+      data: {
+        failedAt,
+        failureCode,
+        failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+          normalizeNullable(input.failureReason),
+        ),
+        ...(providerMessageIds.length > 0
+          ? {
+              linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
+              messageIdSuffix: toHostedOnboardingLogIdSuffix(finalMessageId),
+              messageLookupKey: createHostedLinqMessageLookupKey(finalMessageId),
+            }
+          : {}),
+        retryAfterAt: input.retryAfterAt ?? null,
+        status: "failed",
+      },
+    });
+    if (updated.count !== 1 || providerMessageIds.length === 0) {
+      return;
+    }
+    const delivery = await prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: { id: true },
+    });
+    if (!delivery) {
+      return;
+    }
     await recordHostedLinqDeliveryMessagesTx({
       acceptedAt: failedAt,
       deliveryId: delivery.id,
       messageIds: providerMessageIds,
-      prisma: input.prisma,
+      prisma,
     });
-  }
+    if (
+      failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+    ) {
+      await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
+        deliveryId: delivery.id,
+        idempotencyKey,
+        messageLookupKey: createHostedLinqMessageLookupKey(finalMessageId),
+        messageLookupKeyCandidates:
+          createHostedLinqMessageLookupKeyReadCandidates(finalMessageId),
+        messageIds: providerMessageIds,
+        prisma,
+      });
+    }
+  });
 }
 
 export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
@@ -1476,12 +1494,14 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       },
     },
     select: {
+      failureCode: true,
       groupJoinOutreachId: true,
       groupJoinReplyOccurredAt: true,
       id: true,
       idempotencyKey: true,
       phoneNumberLookupKey: true,
       sourceRef: true,
+      status: true,
       template: true,
     },
   });
@@ -1491,6 +1511,19 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       advanced: true,
       deliveryId: null,
       phoneNumberLookupKey: null,
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    };
+  }
+  if (
+    delivery.status === "failed"
+    && delivery.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+  ) {
+    return {
+      advanced: false,
+      deliveryId: delivery.id,
+      phoneNumberLookupKey: delivery.phoneNumberLookupKey,
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     };
@@ -1781,7 +1814,7 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
   if (
     input.deliveryId
     && input.messageIds
-    && input.messageIds.length > 1
+    && input.messageIds.length > 0
   ) {
     return applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx({
       deliveryId: input.deliveryId,

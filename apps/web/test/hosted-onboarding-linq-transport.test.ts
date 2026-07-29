@@ -174,18 +174,28 @@ import {
 } from "@/src/lib/hosted-onboarding/webhook-transport";
 import { requireHostedOnboardingLinqConfig } from "@/src/lib/hosted-onboarding/runtime";
 
-const usageTransactionPrisma = {};
+const usageHostedLinqDelivery = {
+  findUnique: vi.fn().mockResolvedValue({ id: "hld_usage_notice" }),
+  updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+};
+const usageHostedLinqDeliveryMessage = {
+  createMany: vi.fn().mockResolvedValue({ count: 1 }),
+};
+const usageHostedLinqProviderEvent = {
+  findMany: vi.fn().mockResolvedValue([]),
+};
+const usageTransactionPrisma = {
+  hostedLinqDelivery: usageHostedLinqDelivery,
+  hostedLinqDeliveryMessage: usageHostedLinqDeliveryMessage,
+  hostedLinqProviderEvent: usageHostedLinqProviderEvent,
+};
 const usagePrisma = {
   $transaction: vi.fn(async (
     operation: (prisma: typeof usageTransactionPrisma) => Promise<unknown>,
   ) => operation(usageTransactionPrisma)),
-  hostedLinqDelivery: {
-    findUnique: vi.fn().mockResolvedValue({ id: "hld_usage_notice" }),
-    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-  },
-  hostedLinqDeliveryMessage: {
-    createMany: vi.fn().mockResolvedValue({ count: 1 }),
-  },
+  hostedLinqDelivery: usageHostedLinqDelivery,
+  hostedLinqDeliveryMessage: usageHostedLinqDeliveryMessage,
+  hostedLinqProviderEvent: usageHostedLinqProviderEvent,
 };
 
 describe("hosted Linq webhook transport", () => {
