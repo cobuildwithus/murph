@@ -283,6 +283,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 }
 
 export interface HostedRuntimeLinqTargetOverride {
+  conversationThreadId?: string | null;
   target: string;
   targetKind: "thread";
 }

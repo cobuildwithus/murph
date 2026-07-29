@@ -33,6 +33,8 @@ const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const hostedLinqParticipantAdditionGroupContext =
   "One or more participants were recently added to this group chat.";
+const hostedLinqParticipantAddedDetailedContext =
+  "Participant +15559870001 was added to the group.";
 const linqWebhookRunId = Date.now();
 const hostedLinqGroupIsolationGuestUserId =
   `member_local_linq_webhook_group_isolation_guest_${linqWebhookRunId}`;
@@ -383,6 +385,7 @@ describe("hosted local Linq webhook e2e", () => {
       && !body.includes("Murph onboarding:")
       && !body.includes("murph-onboarding/SKILL.md")
       && !body.includes(hostedLinqParticipantAdditionGroupContext)
+      && !body.includes(hostedLinqParticipantAddedDetailedContext)
     )).toBe(true);
 
     const participantAddedProviderCountBefore =
@@ -489,6 +492,9 @@ describe("hosted local Linq webhook e2e", () => {
     )).toBe(true);
     expect(guestProviderBodies.some((body) =>
       body.includes(hostedLinqParticipantAdditionGroupContext)
+    )).toBe(true);
+    expect(guestProviderBodies.some((body) =>
+      body.includes(hostedLinqParticipantAddedDetailedContext)
     )).toBe(true);
   }, 600_000);
 

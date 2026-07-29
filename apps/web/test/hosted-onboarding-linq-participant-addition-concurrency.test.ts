@@ -1,8 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import {
+  deleteHostedAddressBookProjection,
+  parseHostedAddressBookDeleteRequest,
+  parseHostedAddressBookReplaceRequest,
+  replaceHostedAddressBookProjection,
+} from "@/src/lib/hosted-address-book/projection";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
@@ -20,13 +26,23 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
+  recordHostedLaunchRequiredConsent,
+} from "@/src/lib/legal/consent";
+import {
   ensureHostedThreadContainerRouteTx,
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   lockHostedThreadRouteByThreadIdentityTx,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
+  readHostedThreadRouteByThreadIdentity,
 } from "@/src/lib/hosted-routing/thread-route-store";
+import type {
+  HostedLinqParticipantChangedEvent,
+} from "@/src/lib/hosted-onboarding/linq";
+import {
+  applyHostedLinqParticipantChangeToRouteTx,
+} from "@/src/lib/hosted-onboarding/webhook-service";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -184,6 +200,232 @@ async function readPendingParticipantAddition(
   return route?.pendingParticipantAddition ?? null;
 }
 
+const ADDRESS_BOOK_ENV_KEYS = [
+  "HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED",
+  "HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_CRYPTO_GCP_ADDRESS_BOOK_MAC_KEYRING_JSON",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
+  "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+] as const;
+
+function configureHostedAddressBookLocalCryptoForTest(): () => void {
+  const previous = new Map(
+    ADDRESS_BOOK_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  const authorityKeyVersion =
+    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+  const addressBookKeyVersion =
+    "projects/test/locations/global/keyRings/test/cryptoKeys/address-book/cryptoKeyVersions/1";
+  Object.assign(process.env, {
+    HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED: "1",
+    HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED: "1",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test-automation-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      JSON.stringify(automationKey.publicKey),
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_ADDRESS_BOOK_MAC_KEYRING_JSON: JSON.stringify({
+      currentVersion: 1,
+      keyVersionNames: { 1: addressBookKeyVersion },
+      readVersions: [1],
+    }),
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: authorityKeyVersion,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+  });
+  return () => {
+    for (const [key, value] of previous) {
+      restoreEnvValue(key, value);
+    }
+  };
+}
+
+async function prepareAddressBookLabelFixture(
+  fixture: RouteFixture,
+  participantHandle: string,
+): Promise<void> {
+  await fixture.observer.hostedMember.updateMany({
+    data: { billingStatus: "active" },
+    where: {
+      id: {
+        in: [fixture.containerMemberId, fixture.ownerMemberId],
+      },
+    },
+  });
+  for (const scope of ["launch.legal", "launch.health-data"] as const) {
+    await recordHostedLaunchRequiredConsent({
+      memberId: fixture.ownerMemberId,
+      prisma: fixture.observer,
+      scope,
+      source: "participant-context-concurrency-test",
+    });
+  }
+  await replaceHostedAddressBookProjection({
+    memberId: fixture.ownerMemberId,
+    prisma: fixture.observer,
+    request: parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: [{
+        advisoryName: "Taylor R.",
+        phoneNumber: participantHandle,
+      }],
+      mutationId: randomUUID(),
+      schemaVersion: 1,
+    }),
+  });
+}
+
+function buildParticipantChangeEvent(input: {
+  eventType: HostedLinqParticipantChangedEvent["event_type"];
+  handle: string;
+  threadId: string;
+}): HostedLinqParticipantChangedEvent {
+  const base = {
+    api_version: "v3",
+    created_at: "2026-07-29T01:00:00.000Z",
+    data: {
+      chat_id: input.threadId,
+      participant: {
+        handle: input.handle,
+        service: "iMessage",
+      },
+    },
+    event_id: `evt_${randomUUID()}`,
+  };
+  return input.eventType === "participant.added"
+    ? { ...base, event_type: "participant.added" }
+    : { ...base, event_type: "participant.removed" };
+}
+
+function readHostedSecureBoxTestValue(ciphertext: string): string {
+  const encoded = ciphertext.replace(/^hsb-test:/u, "");
+  const decoded = JSON.parse(
+    Buffer.from(encoded, "base64url").toString("utf8"),
+  ) as { value?: unknown };
+  if (typeof decoded.value !== "string") {
+    throw new Error("Expected a hosted secure-box test value.");
+  }
+  return decoded.value;
+}
+
+function observeParticipantContextRouteWrite(input: {
+  ciphertext: Deferred<string>;
+  release?: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedThreadRoute = new Proxy(input.tx.hostedThreadRoute, {
+    get(target, property) {
+      if (property === "updateMany") {
+        return async (args: Prisma.HostedThreadRouteUpdateManyArgs) => {
+          const result = await target.updateMany(args);
+          const encrypted = args.data.pendingGroupReactionContextEncrypted;
+          if (typeof encrypted === "string") {
+            input.ciphertext.resolve(encrypted);
+            await input.release?.promise;
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedThreadRoute") {
+        return hostedThreadRoute;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function pauseAddressBookClearBeforeCommit(input: {
+  cleared: Deferred<void>;
+  client: PrismaClient;
+  release: Deferred<void>;
+}): PrismaClient {
+  return new Proxy(input.client, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return (
+          callback: (tx: Prisma.TransactionClient) => Promise<unknown>,
+          options?: {
+            isolationLevel?: Prisma.TransactionIsolationLevel;
+            maxWait?: number;
+            timeout?: number;
+          },
+        ) => target.$transaction(async (tx) => callback(
+          new Proxy<Prisma.TransactionClient>(tx, {
+            get(transaction, transactionProperty) {
+              if (transactionProperty === "hostedThreadRoute") {
+                return new Proxy(transaction.hostedThreadRoute, {
+                  get(delegate, delegateProperty) {
+                    if (delegateProperty === "updateMany") {
+                      return async (
+                        args: Prisma.HostedThreadRouteUpdateManyArgs,
+                      ) => {
+                        const result = await delegate.updateMany(args);
+                        if (
+                          args.data.pendingGroupReactionContextEncrypted === null
+                        ) {
+                          input.cleared.resolve();
+                          await input.release.promise;
+                        }
+                        return result;
+                      };
+                    }
+                    const value = Reflect.get(
+                      delegate,
+                      delegateProperty,
+                      delegate,
+                    );
+                    return typeof value === "function"
+                      ? value.bind(delegate)
+                      : value;
+                  },
+                });
+              }
+              const value = Reflect.get(
+                transaction,
+                transactionProperty,
+                transaction,
+              );
+              return typeof value === "function"
+                ? value.bind(transaction)
+                : value;
+            },
+          }),
+        ), options);
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 function configureHostedContactPrivacyKeyringForTest(currentVersion: string): void {
   process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
     `v1:${Buffer.alloc(32, 3).toString("base64url")}`,
@@ -336,6 +578,194 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           messageTransaction,
           ...(markerTransaction ? [markerTransaction] : []),
         ]);
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
+    it("lets a waiting address-book deletion clear context staged under the owner lock", async () => {
+      const restoreAddressBookEnv =
+        configureHostedAddressBookLocalCryptoForTest();
+      const fixture = await createRouteFixture();
+      const participantHandle = "+15559870001";
+      const contextCiphertext = createDeferred<string>();
+      const participantContextWritten = createDeferred();
+      const releaseParticipant = createDeferred();
+      let deletion: ReturnType<typeof deleteHostedAddressBookProjection> | null =
+        null;
+      let participantTransaction: Promise<void> | null = null;
+
+      try {
+        await prepareAddressBookLabelFixture(fixture, participantHandle);
+        const route = await readHostedThreadRouteByThreadIdentity({
+          channel: "linq",
+          prisma: fixture.observer,
+          threadId: fixture.threadId,
+        });
+        if (!route) {
+          throw new Error("Expected a routed Linq group.");
+        }
+
+        participantTransaction = fixture.participantClient.$transaction(
+          async (tx) => {
+            await applyHostedLinqParticipantChangeToRouteTx({
+              event: buildParticipantChangeEvent({
+                eventType: "participant.added",
+                handle: participantHandle,
+                threadId: fixture.threadId,
+              }),
+              prisma: observeParticipantContextRouteWrite({
+                ciphertext: contextCiphertext,
+                release: releaseParticipant,
+                tx,
+              }),
+              route,
+            });
+            participantContextWritten.resolve();
+          },
+        );
+
+        const stagedValue = readHostedSecureBoxTestValue(
+          await contextCiphertext.promise,
+        );
+        expect(stagedValue).toContain(
+          "Participant +15559870001 (unverified owner contact label: Taylor R.) was added to the group.",
+        );
+
+        const deletionPid = await readBackendPid(fixture.messageClient);
+        deletion = deleteHostedAddressBookProjection({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.messageClient,
+          request: parseHostedAddressBookDeleteRequest({
+            baseRevision: 1,
+            mutationId: randomUUID(),
+            schemaVersion: 1,
+          }),
+        });
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: deletionPid,
+        });
+
+        releaseParticipant.resolve();
+        await participantContextWritten.promise;
+        await participantTransaction;
+        await expect(deletion).resolves.toMatchObject({
+          enabled: false,
+          revision: 2,
+        });
+        await expect(fixture.observer.hostedThreadRoute.findFirst({
+          select: { pendingGroupReactionContextEncrypted: true },
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        })).resolves.toEqual({
+          pendingGroupReactionContextEncrypted: null,
+        });
+      } finally {
+        releaseParticipant.resolve();
+        await Promise.allSettled([
+          ...(participantTransaction ? [participantTransaction] : []),
+          ...(deletion ? [deletion] : []),
+        ]);
+        restoreAddressBookEnv();
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
+    it("stages only handle context after a deletion that already holds the owner lock", async () => {
+      const restoreAddressBookEnv =
+        configureHostedAddressBookLocalCryptoForTest();
+      const fixture = await createRouteFixture();
+      const participantHandle = "+15559870001";
+      const addressBookCleared = createDeferred();
+      const releaseDeletion = createDeferred();
+      const contextCiphertext = createDeferred<string>();
+      const participantPid = createDeferred<number>();
+      let deletion: ReturnType<typeof deleteHostedAddressBookProjection> | null =
+        null;
+      let participantTransaction: Promise<void> | null = null;
+
+      try {
+        await prepareAddressBookLabelFixture(fixture, participantHandle);
+        const route = await readHostedThreadRouteByThreadIdentity({
+          channel: "linq",
+          prisma: fixture.observer,
+          threadId: fixture.threadId,
+        });
+        if (!route) {
+          throw new Error("Expected a routed Linq group.");
+        }
+
+        deletion = deleteHostedAddressBookProjection({
+          memberId: fixture.ownerMemberId,
+          prisma: pauseAddressBookClearBeforeCommit({
+            cleared: addressBookCleared,
+            client: fixture.messageClient,
+            release: releaseDeletion,
+          }),
+          request: parseHostedAddressBookDeleteRequest({
+            baseRevision: 1,
+            mutationId: randomUUID(),
+            schemaVersion: 1,
+          }),
+        });
+        await addressBookCleared.promise;
+
+        participantTransaction = fixture.participantClient.$transaction(
+          async (tx) => {
+            participantPid.resolve(await readBackendPid(tx));
+            await applyHostedLinqParticipantChangeToRouteTx({
+              event: buildParticipantChangeEvent({
+                eventType: "participant.removed",
+                handle: participantHandle,
+                threadId: fixture.threadId,
+              }),
+              prisma: observeParticipantContextRouteWrite({
+                ciphertext: contextCiphertext,
+                tx,
+              }),
+              route,
+            });
+          },
+        );
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: await participantPid.promise,
+        });
+
+        releaseDeletion.resolve();
+        await expect(deletion).resolves.toMatchObject({
+          enabled: false,
+          revision: 2,
+        });
+        await participantTransaction;
+
+        const stagedValue = readHostedSecureBoxTestValue(
+          await contextCiphertext.promise,
+        );
+        expect(stagedValue).toContain(
+          "Participant +15559870001 was removed from the group.",
+        );
+        expect(stagedValue).not.toContain("Taylor R.");
+        await expect(fixture.observer.hostedThreadRoute.findFirst({
+          select: { pendingGroupReactionContextEncrypted: true },
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        })).resolves.toMatchObject({
+          pendingGroupReactionContextEncrypted: expect.stringMatching(
+            /^hsb-test:/u,
+          ),
+        });
+      } finally {
+        releaseDeletion.resolve();
+        await Promise.allSettled([
+          ...(deletion ? [deletion] : []),
+          ...(participantTransaction ? [participantTransaction] : []),
+        ]);
+        restoreAddressBookEnv();
         await cleanupRouteFixture(fixture);
       }
     });
