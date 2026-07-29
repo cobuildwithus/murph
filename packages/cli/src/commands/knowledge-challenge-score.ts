@@ -1,3 +1,5 @@
+import { z } from 'incur'
+
 import {
   groupChallengeScoreResultSchema,
   scoreGroupChallengeJson,
@@ -14,17 +16,23 @@ import {
 export const knowledgeChallengeScoreCommandDescription =
   'Apply one frozen additive challenge scorecard to model-normalized participant quantities. This command performs validation and deterministic arithmetic only; it does not read health data, infer metric rules, or write challenge state.'
 
+const knowledgeChallengeScoreOptionsSchema = z.object({
+  input: inputFileOptionSchema,
+})
+
+type KnowledgeChallengeScoreOptions = z.infer<
+  typeof knowledgeChallengeScoreOptionsSchema
+>
+
 export function createKnowledgeChallengeScoreCommandDefinition() {
   return {
     args: emptyArgsSchema,
     description: knowledgeChallengeScoreCommandDescription,
     hint:
       'Pass --input @file.json or pipe the exact scorecard, format, and explicit participant-component observations to --input -. Persist the returned result on the existing challenge knowledge page in the same turn.',
-    options: {
-      input: inputFileOptionSchema,
-    },
+    options: knowledgeChallengeScoreOptionsSchema,
     output: groupChallengeScoreResultSchema,
-    async run({ options }: { options: { input: string } }) {
+    async run({ options }: { options: KnowledgeChallengeScoreOptions }) {
       const input = await loadJsonInputObject(
         options.input,
         'group challenge scorecard input',
