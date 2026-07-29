@@ -5250,7 +5250,7 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
-  it("does not select ownership from a partial oversized roster", async () => {
+  it("limits oversized-roster setup matching to the authenticated sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -5299,7 +5299,7 @@ describe("Linq group chat auto-provision", () => {
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
-      participantMemberIds: [],
+      participantMemberIds: ["member_owner_123"],
       senderMemberId: "member_owner_123",
     }));
   });
@@ -5341,6 +5341,13 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "wake-appended-thread-route",
       });
+      expect(
+        preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+      ).toHaveBeenCalledWith(expect.objectContaining({
+        fallbackOwnerMemberId: "member_owner_123",
+        participantMemberIds: ["member_owner_123"],
+        senderMemberId: "member_owner_123",
+      }));
       expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
       expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
         abortSignal: expect.any(AbortSignal),

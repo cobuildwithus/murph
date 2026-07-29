@@ -2522,6 +2522,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     })).allowed
       ? sender.id
       : null;
+  const pendingSetupParticipantMemberIds = activeSenderMemberId
+    ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+    : input.participantMemberIds;
 
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
@@ -2532,7 +2535,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       fallbackOwnerMemberId: activeSenderMemberId,
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
-      participantMemberIds: input.participantMemberIds,
+      participantMemberIds: pendingSetupParticipantMemberIds,
       recipientPhoneLookupKeys: input.threadRouteAccountLookupKeys,
       senderMemberId: activeSenderMemberId,
       threadId: summary.chatId,
