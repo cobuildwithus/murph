@@ -39,19 +39,42 @@ describe('assistant capability policy skills', () => {
     }
   })
 
-  it('keeps phone consent, disclosure, transfer, and result semantics together', async () => {
+  it('keeps group logistics, consent, disclosure, transfer, and result semantics together', async () => {
     const skill = await readSkill('phone-calls')
     const normalized = normalizeWhitespace(skill)
-
-    expect(normalized).toContain(
-      'Place a call only when the user asked for it or clearly approved this specific call.',
+    const registration = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'phone-calls',
     )
+
+    expect(registration?.triggerHint).toContain(
+      'hosted group Murph may call a public venue or service business',
+    )
+    expect(registration?.triggerHint).toContain(
+      'ordinary shared-life logistics task',
+    )
+    expect(normalized).toContain(
+      'Place a call only when the current requester explicitly asked Murph to call or clearly approved this specific call.',
+    )
+    expect(normalized).toContain(
+      'For a hosted-group reservation, availability check, or service call',
+    )
+    expect(normalized).toContain(
+      'do not load `appointment-scheduling` unless health care is involved',
+    )
+    expect(normalized).toContain('party size or resource count')
+    expect(normalized).toContain(
+      'charge, commitment, or materially different booking',
+    )
+    expect(normalized).toContain(
+      'This skill never expands the conversation\'s scope boundary or authorizes code production or work, school, or professional operations.',
+    )
+    expect(normalized).toContain('room-visible logistical facts may be used')
     expect(normalized).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md',
     )
     expect(normalized).toContain('satisfy its ready-to-act gate')
     expect(normalized).toContain('Set `callerName`')
-    expect(normalized).toContain('only user-approved, call-relevant, disclosable facts')
+    expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
     expect(normalized).toContain('Never include unrelated health details')
     expect(normalized).toContain('Set `allowTransferToUser: true`')
     expect(normalized).toContain('Set it to `false` for information-only calls')

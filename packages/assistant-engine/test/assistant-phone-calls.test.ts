@@ -57,7 +57,10 @@ describe("assistant phone calls", () => {
       "$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "only when the user asked Murph to call or clearly approved this specific call",
+      "only when the current requester explicitly asked Murph to call or clearly approved this specific call",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Before a real health care appointment booking",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md",
@@ -75,7 +78,7 @@ describe("assistant phone calls", () => {
       "information-only or connectivity-test call must stay non-mutating",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Murph resolves verified transfer numbers server-side",
+      "Murph resolves eligible verified transfer numbers server-side for private calls",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Group-chat calls never transfer to one participant",
