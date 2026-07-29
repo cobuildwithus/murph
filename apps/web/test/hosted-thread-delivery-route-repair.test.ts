@@ -14,6 +14,7 @@ import {
   buildHostedThreadDeliveryRoute,
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
   openHostedThreadDeliveryRoute,
+  projectHostedThreadDeliveryRouteAccountLookupKey,
   sealHostedThreadDeliveryRoute,
   type HostedThreadDeliveryRouteChannel,
   type HostedThreadDeliveryRouteV1,
@@ -80,6 +81,7 @@ describe("hosted thread delivery-route repair", () => {
     async (fixture) => {
       const expectedRoute = buildHostedThreadDeliveryRoute(fixture);
       const harness = createRepairHarness({
+        accountLookupKey: null,
         channel: fixture.channel,
         containerMemberId: fixture.containerMemberId,
         deliveryRouteEncrypted: "corrupt-delivery-route",
@@ -128,6 +130,7 @@ describe("hosted thread delivery-route repair", () => {
       }),
     });
     const harness = createRepairHarness({
+      accountLookupKey: null,
       channel: expectedRoute.channel,
       containerMemberId: "linq-container",
       deliveryRouteEncrypted: mismatchedCiphertext,
@@ -161,6 +164,7 @@ describe("hosted thread delivery-route repair", () => {
 });
 
 interface MutableHostedThreadRouteRow {
+  accountLookupKey: string | null;
   channel: HostedThreadDeliveryRouteChannel;
   containerMemberId: string;
   deliveryRouteEncrypted: string | null;
@@ -175,12 +179,14 @@ function createRepairHarness(input: MutableHostedThreadRouteRow) {
     data,
   }: {
     data: {
+      accountLookupKey: string;
       deliveryRouteEncrypted: string;
       pendingGroupReactionContextEncrypted?: string | null;
       threadIdentityLookupKey: string;
       threadLookupKey: string;
     };
   }) => {
+    row.accountLookupKey = data.accountLookupKey;
     row.deliveryRouteEncrypted = data.deliveryRouteEncrypted;
     row.threadIdentityLookupKey = data.threadIdentityLookupKey;
     row.threadLookupKey = data.threadLookupKey;
@@ -260,6 +266,9 @@ async function expectRepairedRoute(input: {
   harness: ReturnType<typeof createRepairHarness>;
 }): Promise<void> {
   const row = input.harness.readRow();
+  expect(row.accountLookupKey).toBe(
+    projectHostedThreadDeliveryRouteAccountLookupKey(input.expectedRoute),
+  );
   await expect(openHostedThreadDeliveryRoute({
     channel: row.channel,
     containerMemberId: row.containerMemberId,

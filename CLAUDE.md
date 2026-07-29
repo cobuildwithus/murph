@@ -63,3 +63,10 @@ and use opaque IDs (`hid_`, `usr_`, thread UUIDs) or synthetic placeholders
 `@Dad_User`) for any illustrative data. Product/provider/brand names (Murph,
 Apple Health, Function Health, etc.) are fine; the repo owner's own identity is
 not — keep it out of committed text too.
+
+Screenshots, chat transcripts, and user feedback are confidential evidence, not
+repository-ready source material. Never copy, closely paraphrase, or hardcode
+them, including names, handles, images, identifying details, distinctive
+wording, or exact scenarios, into system prompts, tests, fixtures, snapshots,
+evals, documentation, comments, PR descriptions, or source code that may become
+public.

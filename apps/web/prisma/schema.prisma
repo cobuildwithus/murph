@@ -1737,6 +1737,9 @@ model HostedThreadContainerParticipant {
 
 model HostedThreadRoute {
   channel                 String
+  /// Blinded canonical delivery-account projection. Null is limited to the
+  /// additive rollout window and legacy rows awaiting the one-shot backfill.
+  accountLookupKey        String?               @map("account_lookup_key")
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
@@ -1748,6 +1751,7 @@ model HostedThreadRoute {
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
 
   @@id([channel, threadIdentityLookupKey])
+  @@index([channel, accountLookupKey])
   @@index([channel, threadLookupKey])
   @@index([containerMemberId])
   @@map("hosted_thread_route")
@@ -1782,6 +1786,8 @@ model HostedLinqLine {
   totalDeliveredCount        Int       @default(0) @map("total_delivered_count")
   totalFailedCount           Int       @default(0) @map("total_failed_count")
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
+  /// Deprecated rollout compatibility for builds predating weighted planning.
+  /// Current assignment does not read this column.
   activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
   proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")

@@ -299,6 +299,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
+      imessageContactAvailable: true,
       messageTargetingAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,

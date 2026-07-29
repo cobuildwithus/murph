@@ -123,6 +123,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Verify built package boundaries
+        run: |
+          pnpm --dir packages/messaging-ingress verify:package-boundary:prepared
+          pnpm --dir packages/inboxd verify:package-boundary:prepared
+          pnpm --dir packages/hosted-local-harness verify:package-boundary:prepared
+
       - name: Test repo verification tools
         run: pnpm test:repo-tools
 
@@ -160,6 +166,8 @@ jobs:
               packages/query
               packages/vault-usecases
               packages/device-syncd
+              packages/exercise-library
+              packages/health-metrics
               packages/inboxd
               packages/importers
               packages/runtime-state
