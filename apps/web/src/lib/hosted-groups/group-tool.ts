@@ -425,9 +425,14 @@ async function handleHostedRuntimePendingGroupSetup(input: {
     action: input.action,
     result: { status: "unavailable", unavailableReason },
   });
-  const prisma = getPrisma();
 
   try {
+    const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
+    if (access.status !== "ok") {
+      return unavailable(access.unavailableReason);
+    }
+    const prisma = access.prisma;
+
     if (input.action === "read_next_group") {
       const setup = await readHostedPendingGroupSetup({
         ownerMemberId: input.memberId,

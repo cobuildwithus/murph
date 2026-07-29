@@ -204,7 +204,8 @@ handling. Selection and prepared-route tests prove lone-candidate ownership,
 sender-only conflict resolution, canonical route composition, referral binding,
 and existing-route restoration. Linq webhook tests prove the bounded provider
 roster read happens before the transaction and only resolved member ids cross
-that boundary, while provider failure preserves sender-owner admission. The
+that boundary, while provider failure or an oversized roster preserves
+sender-owner admission. The
 opt-in PostgreSQL concurrency proof verifies that simultaneous groups can claim
 one intent at most once and that member deletion cascades pending state.
 

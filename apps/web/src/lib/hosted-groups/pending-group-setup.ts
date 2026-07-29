@@ -185,7 +185,16 @@ export async function readHostedPendingGroupSetup(input: {
     LIMIT 1
   `);
   const row = rows[0];
-  return row ? projectHostedPendingGroupSetupSnapshot(row) : null;
+  if (
+    !row
+    || !(await hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: [row.recipientPhoneLookupKey],
+      prisma,
+    }))
+  ) {
+    return null;
+  }
+  return projectHostedPendingGroupSetupSnapshot(row);
 }
 
 export async function cancelHostedPendingGroupSetupTx(input: {

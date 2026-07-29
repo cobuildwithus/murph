@@ -910,15 +910,25 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       logHostedLinqPendingGroupRoster("empty_roster");
       return null;
     }
-    const participantHandles = handles
-      .filter((handle) =>
-        !handle.isMe
-        && (!handle.status || handle.status.trim().toLowerCase() === "active")
-      )
-      .slice(0, HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS);
+    const participantHandles = [...new Set(handles.flatMap((handle) => {
+      const value = handle.handle.trim();
+      const status = handle.status?.trim().toLowerCase() ?? null;
+      return !value
+          || handle.isMe
+          || (status !== null && status !== "active")
+        ? []
+        : [value];
+    }))];
+    if (
+      participantHandles.length
+        > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
+    ) {
+      logHostedLinqPendingGroupRoster("oversized_roster");
+      return null;
+    }
     const resolved = await Promise.all(participantHandles.map(async (handle) =>
       await lookupHostedGroupParticipantMemberByHandle({
-        handle: handle.handle,
+        handle,
         prisma: input.prisma,
       })
     ));
@@ -937,7 +947,12 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
 }
 
 function logHostedLinqPendingGroupRoster(
-  outcome: "empty_roster" | "provider_not_group" | "resolved" | "unavailable",
+  outcome:
+    | "empty_roster"
+    | "oversized_roster"
+    | "provider_not_group"
+    | "resolved"
+    | "unavailable",
 ): void {
   logHostedOnboardingDiagnostic(
     "hosted-onboarding.webhook.linq.pending-group-roster",

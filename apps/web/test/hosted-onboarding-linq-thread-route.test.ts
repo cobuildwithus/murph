@@ -5100,6 +5100,60 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it("does not select ownership from a partial oversized roster", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    let transactionOpen = false;
+    prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
+      transactionOpen = true;
+      try {
+        return await callback(prisma);
+      } finally {
+        transactionOpen = false;
+      }
+    });
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
+    mockSenderLookup(senderCore);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
+      expect(transactionOpen).toBe(false);
+      return {
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          ...Array.from({ length: 33 }, (_, index) => ({
+            handle: `+1555${String(index).padStart(7, "0")}`,
+            isMe: false,
+            status: "active",
+          })),
+        ],
+        isGroup: true,
+      };
+    });
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
+      { handle: "+15550000000", isMe: true, status: "active" },
+      { handle: "+15551112222", isMe: false, status: "active" },
+    ]);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      participantMemberIds: [],
+      senderMemberId: "member_owner_123",
+    }));
+  });
+
   it("still provisions and hands off the first group message when roster fetch fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();

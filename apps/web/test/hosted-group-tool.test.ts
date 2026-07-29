@@ -497,6 +497,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("prepares, reads, and cancels the member's next group intent", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     const expiresAt = new Date("2026-07-29T18:30:00.000Z");
     const setup = {
       armedAt: new Date("2026-07-29T18:00:00.000Z"),
@@ -543,6 +544,25 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "cancel_next_group",
       result: { status: "canceled" },
     });
+  });
+
+  it("does not expose next-group setup actions to an inactive runtime", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_next_group" },
+    })).resolves.toEqual({
+      action: "read_next_group",
+      result: {
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(mocks.readHostedPendingGroupSetup).not.toHaveBeenCalled();
+    expect(mocks.cancelHostedPendingGroupSetupTx).not.toHaveBeenCalled();
+    expect(mocks.armHostedPendingGroupSetupTx).not.toHaveBeenCalled();
   });
 
   it("returns currency-free quantified usage and the first-party group funding link", async () => {
