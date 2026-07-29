@@ -405,11 +405,70 @@ Automation instructions should not include:
 
 Prefer bounded support. Never create open-ended nag loops. If the user wants ongoing support, agree on a finite window and review point; continuing beyond that window requires fresh consent.
 
+### Reminder density and reply loop
+
+For private personal support, prefer one useful interruption over several. When
+the current request or recent conversation reveals same-purpose reminders in
+one practical action window, offer one combined interruption before saving.
+Do not silently alter requested timing. Keep them separate when exact timing
+changes the action or the user prefers separate messages.
+
+Treat a cadence as dense when it would interrupt the person several times in
+one day or every few hours and a reply could usefully resolve the preceding
+action. This is a judgment, not a fixed interval threshold. Do not apply this
+reply loop to one-time or low-frequency informational reminders, passive
+monitoring, group-wide prompts that should not depend on one participant, or
+clinical or safety-critical reminders.
+
+Do not save a dense personal action cadence as an evergreen cue-only
+`reminder`. Offer a finite `check_in` with `continuityPolicy: preserve`, an
+`activeUntil` review boundary, and one clear conversational expectation. In
+the setup offer, explain naturally that Murph will ask how the previous round
+went when the next one arrives and the user can answer however they normally
+would. Never prescribe keywords, status syntax, or a menu of canned replies.
+If one occurrence is unresolved, the next message asks about it and includes
+the current action; if that combined grace message also gets no related reply,
+later dense occurrences stay quiet until the user re-engages, changes, or
+restarts the loop. A separately authorized bounded review may still ask once
+whether to change or pause the support; it does not restart the dense cadence
+without a reply. A clear yes to that exact package authorizes it.
+
+Put the execution rule in the automation instructions because a scheduled turn
+may not reload this skill:
+
+- Inspect the recent relevant conversation and reliable completion evidence.
+- If the immediately preceding occurrence is resolved, do not ask about it;
+  send only the current occurrence's cue or check-in.
+- The current action window may still be opening. Ask an outcome question only
+  about the immediately preceding occurrence whose action window has ended.
+- If it is unresolved and the preceding scheduled message was not already a
+  carry-forward grace, lead with one short, ordinary question about that
+  occurrence and include the current action in the same message. Write it as
+  conversation, not a status interface; never ask for a prescribed keyword.
+- Keep internal terms out of user-facing copy: do not say occurrence,
+  unresolved, grace, status, or `check_in`. Ask about the last round in normal
+  language, then name what is due now.
+- If the preceding scheduled message already combined an unresolved prior
+  occurrence with the then-current action and no related reply followed,
+  return `skip`. Do not send a separate pause warning.
+- Failed or uncertain delivery does not consume the grace occurrence.
+- Carry forward at most the immediately preceding occurrence. Never mention
+  older unresolved occurrences, count them as debt, or send a separate
+  catch-up message.
+
+The carry-forward is a new scheduled occurrence, not a second follow-up for the
+same occurrence. A related reply may use any natural wording that answers,
+defers, declines, changes, pauses, or ends this support loop; unrelated
+conversation does not keep it alive. Backing off protects the conversation
+cadence and is not evidence that the behavior was missed.
+
 ## Opt-in accountability check-ins
 
-A reminder is a cue. An accountability check-in is a separate, later action
-whose job is to learn the outcome, not repeat the cue. Default to a simple
-reminder.
+A reminder is a cue. An accountability check-in is normally a separate, later
+action whose job is to learn the outcome, not repeat the cue. The accepted
+dense-loop policy above is the narrow exception: a new occurrence may combine
+one unresolved immediately preceding outcome question with the current action
+in one message. Default to a simple reminder outside that case.
 
 Do not offer a check-in for every reminder. A request such as "remind me" or
 "remind me every other day" authorizes the cue only. A direct request to check
@@ -417,7 +476,9 @@ back later authorizes that exact check-in. When the user asks more generally
 for accountability, describes a meaningful repeated commitment, or says the
 behavior has been hard to follow through on, Murph may offer one compact
 choice: just the reminder, or a later check-in too. Otherwise create the
-check-in only after a clear yes to that exact bounded offer.
+check-in only after a clear yes to that exact bounded offer. For a dense
+personal action cadence, use the finite conversational offer above instead of
+saving a cue-only loop.
 
 Once authorized, create each authorized action as a separate canonical
 automation during the interactive setup. Create both only when the user
@@ -454,9 +515,10 @@ Classify the current occurrence before deciding:
   log, reply, or wearable event is absent.
 
 One authorization permits one check-in per occurrence. Silence after that
-check-in does not authorize another same-occurrence follow-up. If repeated
-unknown outcomes make the support noisy, use the normal review/repair policy
-instead of adding messages.
+check-in does not authorize another same-occurrence follow-up. The dense-loop
+carry-forward above belongs to the next occurrence, not the unanswered one. If
+repeated unknown outcomes make the support noisy, use the normal review/repair
+policy instead of adding messages.
 
 Playful wording is allowed only when it fits the chosen support style. Tease
 the situation, never the user's honesty, character, competence, effort, body,
@@ -485,6 +547,13 @@ Send an accountability check-in when:
 - the relevant action window has ended
 - the completion reconciliation above leaves this occurrence `unknown`
 - one short outcome question is still useful and within the support plan
+
+For an accepted dense recurring check-in, apply the carry-forward rule before
+the generic action-window-ended gate: only the immediately preceding
+occurrence needs a closed action window. The current occurrence may still be
+opening and is a cue. The first unresolved prior occurrence may be folded into
+the current message, while an unanswered carry-forward grace makes the current
+occurrence `skip`.
 
 For a consented `check_in` or `review`, send a repair question/proposal when:
 - the same support has been ignored twice
