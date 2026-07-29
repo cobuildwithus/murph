@@ -536,6 +536,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-03-26T10:56:40.000Z"),
         ownerMemberId: "member_telegram_owner",
+        targetChannel: "telegram",
         targetContainerMemberId: "member_telegram_group_container",
         tx: prisma,
       });

@@ -2539,6 +2539,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       await bindArmedHostedUsageReferralToNewContainerTx({
         occurredAt: new Date(occurredAt),
         ownerMemberId: sender.id,
+        targetChannel: "linq",
         targetContainerMemberId: ensureResult.containerMemberId,
         tx: input.prisma,
       });

@@ -79,7 +79,9 @@ Arming freezes the referrer, beneficiary, policy code and version, reward,
 seven-day window, and—only for a personal destination—the blinded source
 conversation. The referrer's next newly created thread container binds only
 when its durable owner is that exact referrer and creation happened after
-arming. Existing rooms cannot bind.
+arming. The new-person policy additionally requires a Linq target container;
+Telegram containers leave it armed for a later eligible group. Existing rooms
+cannot bind.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,

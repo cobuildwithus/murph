@@ -107,6 +107,9 @@ Updated: 2026-07-29
 - The natural new-person handoff depends on the ordinary Linq group onboarding
   path. Runtime-injected source context therefore limits that mission to Linq
   while Telegram continues to offer the provider-neutral active-group mission.
+- New-group binding enforces the same channel rule from provider-owned target
+  context. A Linq-armed new-person mission stays armed when its referrer creates
+  a Telegram group, but can still bind to a later eligible Linq group.
 - Email ingress cannot authenticate referral actions. Settings omits the
   mission handoff for an email-only member instead of linking to a conversation
   that cannot complete the request.
@@ -131,6 +134,9 @@ Current evidence:
 - Follow-up channel-eligibility coverage passed: 43 hosted-web tests, 20
   assistant-runtime tests, and 62 hosted-execution parser tests. Prepared
   hosted-web, assistant-runtime, and hosted-execution typechecks also passed.
+- Target-channel binding coverage passed: 146 hosted-web tests across referral
+  policy plus Linq and Telegram container creation. Prepared hosted-web
+  typecheck and touched-file ESLint passed on the same remediation.
 - Desktop and mobile browser proof covered the production ordering study,
   production-composed history without a current usage bar, and enabled,
   selected/waiting, and disabled-new-missions history states. Every captured

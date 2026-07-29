@@ -385,9 +385,9 @@ export async function handleHostedUsageReferralGroupTool(input: {
 
     const policy = POLICIES[input.request.policyCode];
     if (
-      !isHostedUsageReferralPolicyAvailableFromSource({
+      !isHostedUsageReferralPolicyAvailableOnChannel({
+        channel: requestSourceConversation?.channel ?? null,
         policyCode: policy.code,
-        sourceConversation: requestSourceConversation,
       })
     ) {
       return unavailableToolResponse(
@@ -576,6 +576,7 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
   enabled?: boolean;
   occurredAt: Date;
   ownerMemberId: string;
+  targetChannel: HostedRuntimeUsageReferralSourceConversation["channel"];
   targetContainerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedUsageReferralBindResult> {
@@ -599,7 +600,7 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
 
   const referral = await input.tx.hostedUsageReferral.findFirst({
     orderBy: [{ armedAt: "desc" }, { id: "desc" }],
-    select: { armedAt: true, id: true },
+    select: { armedAt: true, id: true, policyCode: true },
     where: {
       armedAt: { lte: input.occurredAt },
       expiresAt: { gt: input.occurredAt },
@@ -608,6 +609,14 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
     },
   });
   if (!referral) {
+    return { referralId: null };
+  }
+  if (
+    !isHostedUsageReferralPolicyAvailableOnChannel({
+      channel: input.targetChannel,
+      policyCode: referral.policyCode,
+    })
+  ) {
     return { referralId: null };
   }
 
@@ -1637,9 +1646,9 @@ async function readHostedUsageReferralSnapshot(input: {
       : null,
     availablePolicies: availablePolicyCodes
       .filter((policyCode) =>
-        isHostedUsageReferralPolicyAvailableFromSource({
+        isHostedUsageReferralPolicyAvailableOnChannel({
+          channel: input.sourceConversation?.channel ?? null,
           policyCode,
-          sourceConversation: input.sourceConversation ?? null,
         })
       )
       .map((code) => ({
@@ -1660,12 +1669,12 @@ async function readHostedUsageReferralSnapshot(input: {
   };
 }
 
-function isHostedUsageReferralPolicyAvailableFromSource(input: {
+function isHostedUsageReferralPolicyAvailableOnChannel(input: {
+  channel: HostedRuntimeUsageReferralSourceConversation["channel"] | null;
   policyCode: HostedUsageReferralPolicyCode;
-  sourceConversation: HostedRuntimeUsageReferralSourceConversation | null;
 }): boolean {
   return input.policyCode !== "new_person_activation_v1"
-    || input.sourceConversation?.channel === "linq";
+    || input.channel === "linq";
 }
 
 async function readHostedUsageReferralDestinationModel(input: {
