@@ -2899,7 +2899,7 @@ export async function executeMurphDynamicToolRequest(input: {
                 JSON.stringify({
                   filename: result.filename,
                   note:
-                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
+                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
                   status: result.status,
                 }),
               ),

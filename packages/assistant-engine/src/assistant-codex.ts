@@ -2813,7 +2813,6 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolReplyTargetPatch
   }> = []
-  const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
@@ -3475,24 +3474,18 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
   }
 
-  const canApplyNoReplyPatch = (
+  const hasReplyRequiredPatchThrough = (
     deliveryContextOrdinal: number,
-    options: {
-      allowSameContextReplyRequired?: boolean
-    } = {},
-  ): boolean => {
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.patch.kind === 'reply-required' &&
+      entry.deliveryContextOrdinal <= deliveryContextOrdinal
+    )
+
+  const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
     const trailingSteerCandidateOrdinal =
       trailingSteerCandidate?.deliveryContextOrdinal
-    if (
-      finalActionPatches.some((entry) =>
-        entry.patch.kind === 'reply-required' &&
-        entry.deliveryContextOrdinal <= deliveryContextOrdinal &&
-        !(
-          options.allowSameContextReplyRequired === true &&
-          entry.deliveryContextOrdinal === deliveryContextOrdinal
-        )
-      )
-    ) {
+    if (hasReplyRequiredPatchThrough(deliveryContextOrdinal)) {
       return false
     }
     if (
@@ -3520,28 +3513,6 @@ async function runCodexAppServerTurnOnProcess(
     return true
   }
 
-  const reserveNoReplyDeliveryContext = (
-    deliveryContextOrdinal: number,
-  ): (() => void) => {
-    reservedNoReplyDeliveryContextOrdinals.add(deliveryContextOrdinal)
-    let released = false
-    return () => {
-      if (released) {
-        return
-      }
-      released = true
-      if (
-        !finalActionPatches.some(
-          (action) =>
-            action.deliveryContextOrdinal === deliveryContextOrdinal &&
-            action.patch.kind === 'none',
-        )
-      ) {
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-      }
-    }
-  }
-
   const applyFinalActionPatch = async (
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
@@ -3554,14 +3525,17 @@ async function runCodexAppServerTurnOnProcess(
         ),
         { deliveryContextOrdinal, patch },
       ]
-      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      return true
+    }
+    if (
+      patch.owner === 'vault-file' &&
+      hasReplyRequiredPatchThrough(deliveryContextOrdinal)
+    ) {
       return true
     }
     if (
       (computerToolsLockedAfterUserPause ||
-        !canApplyNoReplyPatch(deliveryContextOrdinal, {
-          allowSameContextReplyRequired: patch.owner === 'vault-file',
-        }))
+        !canApplyNoReplyPatch(deliveryContextOrdinal))
     ) {
       return false
     }
@@ -3577,7 +3551,6 @@ async function runCodexAppServerTurnOnProcess(
         replyTargetPatches = replyTargetPatches.filter(
           (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
         )
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
       }
       return true
     }
@@ -3592,7 +3565,6 @@ async function runCodexAppServerTurnOnProcess(
     replyTargetPatches = replyTargetPatches.filter(
       (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
     )
-    reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     return true
   }
 
@@ -3613,11 +3585,6 @@ async function runCodexAppServerTurnOnProcess(
   const shouldSuppressDeliveryContext = (
     deliveryContextOrdinal: number,
   ): boolean => {
-    if (
-      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal)
-    ) {
-      return true
-    }
     const patch = resolveFinalActionPatch(deliveryContextOrdinal)
     return patch?.kind === 'none'
   }
@@ -3808,17 +3775,6 @@ async function runCodexAppServerTurnOnProcess(
       dynamicToolRequest.kind === 'send-progress-update'
         ? resolveCodexAppServerProgressDelivery(input)
         : null
-    const releaseNoReplyRequestReservation =
-      dynamicToolRequest.kind === 'finish-without-reply' &&
-      dynamicToolDeliveryContextOrdinal !== null &&
-      canApplyNoReplyPatch(dynamicToolDeliveryContextOrdinal) &&
-      !finalActionPatches.some(
-        (action) =>
-          action.deliveryContextOrdinal === dynamicToolDeliveryContextOrdinal,
-      )
-        ? reserveNoReplyDeliveryContext(dynamicToolDeliveryContextOrdinal)
-        : null
-
     if (
       dynamicToolRequest.kind === 'send-progress-update' &&
       shouldSuppressDeliveryContext(dynamicToolDeliveryContextOrdinal ?? 0)
@@ -3872,9 +3828,6 @@ async function runCodexAppServerTurnOnProcess(
           entry.deliveryContextOrdinal !==
             dynamicToolRequestDeliveryContextOrdinal,
       )
-      reservedNoReplyDeliveryContextOrdinals.delete(
-        dynamicToolRequestDeliveryContextOrdinal,
-      )
       computerToolsLockedAfterUserPause = true
       closeLiveTurn()
     }
@@ -3891,6 +3844,22 @@ async function runCodexAppServerTurnOnProcess(
         const vaultFileMayClassifyAfterGenericNoReply =
           dynamicToolRequest.kind === 'send-vault-file' &&
           !vaultFileOwnsFinalAction
+        if (
+          dynamicToolRequest.kind === 'select-reply-target' &&
+          shouldSuppressDeliveryContext(
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        ) {
+          return {
+            rpcResult: {
+              contentItems: [{
+                text: 'reply target unavailable after finish_without_reply',
+                type: 'inputText' as const,
+              }],
+              success: false,
+            },
+          }
+        }
         if (
           shouldSuppressDeliveryContext(
             dynamicToolRequestDeliveryContextOrdinal,
@@ -4086,8 +4055,6 @@ async function runCodexAppServerTurnOnProcess(
           ],
         },
       })
-    }).finally(() => {
-      releaseNoReplyRequestReservation?.()
     })
 
     if (

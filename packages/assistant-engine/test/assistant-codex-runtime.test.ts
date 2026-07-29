@@ -215,7 +215,7 @@ async function runToolAfterNoReply(input: {
   expectedText: string
   finalText: string
   followupNoReplyExpectedText?: string
-  ordering: 'applied' | 'reserved'
+  ordering: 'applied' | 'in-flight'
   tool: string
 }) {
   const workingDirectory = await createTempDir(
@@ -232,7 +232,7 @@ async function runToolAfterNoReply(input: {
   let toolExecutionCount = 0
   const beforeToolExecution = async (): Promise<void> => {
     toolExecutionCount += 1
-    if (input.ordering === 'reserved' && toolExecutionCount === 1) {
+    if (input.ordering === 'in-flight' && toolExecutionCount === 1) {
       firstToolExecutionStarted.resolve(undefined)
       await releaseFirstToolExecution.promise
     }
@@ -284,7 +284,7 @@ async function runToolAfterNoReply(input: {
           },
         }))
         const toolResponse = waitForRpcResponse(child, 71)
-        if (input.ordering === 'reserved') {
+        if (input.ordering === 'in-flight') {
           releaseFirstToolExecution.resolve(undefined)
           await expect(noReplyResponse).resolves.toMatchObject({
             id: 70,
@@ -2814,8 +2814,8 @@ describe('assistant codex runtime', () => {
     {
       expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
       expectedTranscriptMessage: null,
-      name: 'overrides an in-flight no-reply reservation',
-      noReplyBeforeApproval: 'reserved',
+      name: 'overrides an in-flight no-reply request',
+      noReplyBeforeApproval: 'in-flight',
     },
     {
       approvalCount: 2,
@@ -3063,7 +3063,7 @@ describe('assistant codex runtime', () => {
 
   it.each(
     nonOwningVaultSendScenarios.flatMap((scenario) =>
-      (['applied', 'reserved'] as const).map((ordering) => ({
+      (['applied', 'in-flight'] as const).map((ordering) => ({
         ...scenario,
         ordering,
       }))
@@ -3144,7 +3144,7 @@ describe('assistant codex runtime', () => {
 
   it.each(
     noReplyMediaEffectScenarios.flatMap((scenario) =>
-      (['applied', 'reserved'] as const).map((ordering) => ({
+      (['applied', 'in-flight'] as const).map((ordering) => ({
         ...scenario,
         ordering,
       }))
@@ -19437,6 +19437,179 @@ describe('steered final segments', () => {
     expect(result.responseMedia).toEqual([])
   })
 
+  it.each([
+    {
+      expectedMediaText:
+        'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+      media: [{
+        kind: 'vault_image',
+        ref: 'raw/captures/incomplete-overlap.png',
+      }],
+      name: 'malformed',
+    },
+    {
+      expectedMediaText:
+        'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+      media: [{
+        alt: 'Unavailable private image',
+        contentType: 'image/png',
+        filename: 'missing-overlap.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/missing-overlap.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 123,
+        source: 'missing-overlap',
+      }],
+      name: 'unreadable',
+    },
+  ])(
+    'applies an overlapping $name media failure before a later no-reply request',
+    async ({ expectedMediaText, media }) => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-overlapping-media-failure-work-',
+      )
+      const vaultRoot = await createTempDir(
+        'assistant-codex-overlapping-media-failure-vault-',
+      )
+      await initializeVault({ vaultRoot })
+      const firstToolExecutionStarted = createDeferred<void>()
+      const releaseFirstToolExecution = createDeferred<void>()
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const onFinishWithoutReplyRecorded = vi.fn()
+      let toolExecutionCount = 0
+      let replyTargetResponse: unknown
+      let mediaResponse: unknown
+      let noReplyResponse: unknown
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-overlapping-media-failure',
+              turnId: 'turn-overlapping-media-failure',
+            })
+
+            child.stdout.write(jsonLine({
+              id: 108,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  message_ref: `ain_${'1'.repeat(32)}`,
+                },
+                namespace: 'murph',
+                tool: 'select_reply_target',
+                turnId: 'turn-overlapping-media-failure',
+              },
+            }))
+            const replyTargetResponsePromise = waitForRpcResponse(child, 108)
+            await firstToolExecutionStarted.promise
+            child.stdout.write(jsonLine({
+              id: 109,
+              method: 'item/tool/call',
+              params: {
+                arguments: { media },
+                namespace: 'murph',
+                tool: 'attach_response_media',
+                turnId: 'turn-overlapping-media-failure',
+              },
+            }))
+            const mediaResponsePromise = waitForRpcResponse(child, 109)
+            child.stdout.write(jsonLine({
+              id: 110,
+              method: 'item/tool/call',
+              params: {
+                arguments: {},
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                turnId: 'turn-overlapping-media-failure',
+              },
+            }))
+            const noReplyResponsePromise = waitForRpcResponse(child, 110)
+            await new Promise<void>((resolve) => setImmediate(resolve))
+            releaseFirstToolExecution.resolve(undefined)
+            replyTargetResponse = await replyTargetResponsePromise
+            mediaResponse = await mediaResponsePromise
+            noReplyResponse = await noReplyResponsePromise
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'The requested image is unavailable.',
+              threadId: 'thread-overlapping-media-failure',
+              turnId: 'turn-overlapping-media-failure',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        authorizeAcceptedMessageTarget: async (input) => ({
+          targetInputId: input.messageRef,
+        }),
+        hostedToolContext: createHostedToolContext({
+          beforeToolExecution: async () => {
+            toolExecutionCount += 1
+            if (toolExecutionCount === 1) {
+              firstToolExecutionStarted.resolve(undefined)
+              await releaseFirstToolExecution.promise
+            }
+          },
+          computerToolsAvailable: false,
+        }),
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        prompt: 'Send the requested image.',
+        requireHostedPrivateImageDelivery: true,
+        vaultRoot,
+        workingDirectory,
+      })
+
+      expect(replyTargetResponse).toEqual({
+        id: 108,
+        result: {
+          contentItems: [{
+            text: 'selection recorded',
+            type: 'inputText',
+          }],
+          success: true,
+        },
+      })
+      expect(mediaResponse).toEqual({
+        id: 109,
+        result: {
+          contentItems: [{
+            text: expectedMediaText,
+            type: 'inputText',
+          }],
+          success: false,
+        },
+      })
+      expect(noReplyResponse).toEqual({
+        id: 110,
+        result: {
+          contentItems: [{
+            text: 'finish_without_reply unavailable after assistant output',
+            type: 'inputText',
+          }],
+          success: false,
+        },
+      })
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+      expect(result.finalAction).toBeNull()
+      expect(result.finalMessage).toBe('The requested image is unavailable.')
+      expect(result.responseMedia).toEqual([])
+      expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+      expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
+    },
+  )
+
   it('keeps an earlier private-media reply obligation across a later steer', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
@@ -19487,7 +19660,64 @@ describe('steered final segments', () => {
     expect(result.responseMedia).toEqual([])
   })
 
-  it('lets an approved vault-file send close its own same-context reply requirement', async () => {
+  it('keeps a failed private-media reply obligation after an unrelated vault-file approval', async () => {
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedSuccess: false,
+        expectedText:
+          'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
+        id: 111,
+        kind: 'attach-response-media',
+        media: [{
+          alt: 'Unavailable private image',
+          contentType: 'image/png',
+          filename: 'missing-mixed-output.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/missing-mixed-output.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 123,
+          source: 'missing-mixed-output',
+        }],
+      },
+      {
+        expectedText: JSON.stringify({
+          filename: 'report.pdf',
+          note:
+            'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
+          status: 'approved',
+        }),
+        id: 112,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+      completedItemEvent({
+        id: 'assistant-mixed-output-recovery',
+        type: 'assistant_message',
+        message:
+          'The image is unavailable, but the requested file is still being delivered.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+    })
+
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      'The image is unavailable, but the requested file is still being delivered.',
+    )
+    expect(result.responseMedia).toEqual([])
+  })
+
+  it('keeps a reply obligation after a same-turn vault-file failure later succeeds', async () => {
     const sendVaultFile = vi.fn()
       .mockResolvedValueOnce({
         filename: 'report.pdf',
@@ -19509,7 +19739,7 @@ describe('steered final segments', () => {
         expectedText: JSON.stringify({
           filename: 'report.pdf',
           note:
-            'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
+            'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
           status: 'approved',
         }),
         id: 108,
@@ -19519,7 +19749,7 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'assistant-approved-vault-file',
         type: 'assistant_message',
-        message: 'This companion reply should not be delivered.',
+        message: 'The file is now being delivered.',
       }),
     ], {
       hostedToolContext: createHostedToolContext({
@@ -19530,9 +19760,9 @@ describe('steered final segments', () => {
     })
 
     expect(sendVaultFile).toHaveBeenCalledTimes(2)
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.finalAction).toEqual({ kind: 'none' })
-    expect(result.finalMessage).toBe('')
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('The file is now being delivered.')
   })
 
   it('keeps a different generated-file request replyable while a prior send is active', async () => {

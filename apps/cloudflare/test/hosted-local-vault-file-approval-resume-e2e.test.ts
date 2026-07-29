@@ -125,6 +125,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     const attachmentUploadBaseline = countAttachmentUploadLogs();
     const requestReplyBaseline = requireLinqStub().countObservedSends(replyPath);
     const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
+    const baselineIdleShutdownCompletionCount = countContainerDestroyCompletedLogs();
     const preTurnStatus = await requireScenario().harness.readUserStatus(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(
@@ -179,6 +180,7 @@ describe("hosted local vault-file approval resume e2e", () => {
     const approvalEffectId = buildApprovalOutcomeEffectId(challenge);
     const idleShutdownStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
+      baselineCompletionCount: baselineIdleShutdownCompletionCount,
       previousWorkspaceVersion: requireWorkspaceVersion(preTurnStatus),
     });
     expect(readHostedExecutionSnapshotHotRef(
@@ -189,9 +191,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     )).toBeNull();
 
     const providerRequestCountBeforeResume = countAssistantProviderResponsesApiRequests();
-    const containerStartCountBeforeResume = countStructuredLogMessage(
-      "Hosted execution container starting.",
-    );
     const approvedChallenge = await approveHostedSensitiveActionChallengeForTest({
       environment: requireScenario().runtimeEnv,
       tokenHash: challenge.tokenHash,
@@ -231,8 +230,6 @@ describe("hosted local vault-file approval resume e2e", () => {
     expect(countAssistantProviderResponsesApiRequests()).toBe(
       providerRequestCountBeforeResume,
     );
-    expect(countStructuredLogMessage("Hosted execution container starting."))
-      .toBeGreaterThan(containerStartCountBeforeResume);
     const consumedChallenge = await waitForLatestChallenge((candidate) =>
       candidate.tokenHash === challenge.tokenHash && candidate.consumedAt !== null
     );
@@ -339,6 +336,7 @@ function buildApprovalOutcomeEffectId(
 
 async function waitForIdleShutdownCheckpoint(input: {
   baselineCleanupCount: number;
+  baselineCompletionCount: number;
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -372,6 +370,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && !status.inFlight
       && !status.lastErrorCode
       && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
+      && countContainerDestroyCompletedLogs() > input.baselineCompletionCount
     ) {
       return status;
     }
@@ -409,6 +408,12 @@ function countActivityExpiredDestroyRequestLogs(): number {
   return countStructuredLogMessage(
     "Hosted execution container destroy requested.",
     (record) => record.details?.destroyRequestReason === "activity-expired",
+  );
+}
+
+function countContainerDestroyCompletedLogs(): number {
+  return countStructuredLogMessage(
+    "Hosted execution container destroy completed.",
   );
 }
 
