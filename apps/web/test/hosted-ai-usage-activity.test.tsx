@@ -234,6 +234,51 @@ describe("readHostedAiUsageActivity", () => {
     ]);
     expect(activity.missionsEnabled).toBe(true);
   });
+
+  it("does not fan out its bounded database reads", async () => {
+    let resolveCredits!: (rows: unknown[]) => void;
+    let resolveOutstanding!: (rows: unknown[]) => void;
+    let resolveRewarded!: (rows: unknown[]) => void;
+    const credits = new Promise<unknown[]>((resolve) => {
+      resolveCredits = resolve;
+    });
+    const outstanding = new Promise<unknown[]>((resolve) => {
+      resolveOutstanding = resolve;
+    });
+    const rewarded = new Promise<unknown[]>((resolve) => {
+      resolveRewarded = resolve;
+    });
+    mocks.creditFindMany.mockReturnValueOnce(credits);
+    mocks.missionFindMany
+      .mockReturnValueOnce(outstanding)
+      .mockReturnValueOnce(rewarded);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activityPromise = readHostedAiUsageActivity({
+      memberId: "member_123",
+      now: new Date("2026-07-29T12:00:00.000Z"),
+    });
+
+    expect(mocks.creditFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.missionFindMany).not.toHaveBeenCalled();
+
+    resolveCredits([]);
+    await Promise.resolve();
+    expect(mocks.missionFindMany).toHaveBeenCalledTimes(1);
+
+    resolveOutstanding([]);
+    await Promise.resolve();
+    expect(mocks.missionFindMany).toHaveBeenCalledTimes(2);
+
+    resolveRewarded([]);
+    await expect(activityPromise).resolves.toEqual({
+      credits: [],
+      missions: [],
+      missionsEnabled: true,
+    });
+  });
 });
 
 describe("HostedAiUsageActivity", () => {
@@ -273,8 +318,9 @@ describe("HostedAiUsageActivity", () => {
       },
     }));
 
-    assert.match(markup, /Credits &amp; missions/);
-    assert.match(markup, /Recent usage credits/);
+    assert.match(markup, /<h3[^>]*>Credits &amp; missions<\/h3>/);
+    assert.match(markup, /<h4[^>]*>Recent usage credits<\/h4>/);
+    assert.match(markup, /<h4[^>]*>Missions<\/h4>/);
     assert.match(markup, /Purchased by you/);
     assert.match(markup, /Amounts show what was added, not what remains/);
     assert.doesNotMatch(markup, /bar above/);

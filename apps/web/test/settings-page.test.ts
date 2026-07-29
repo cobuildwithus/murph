@@ -710,10 +710,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     assert.match(markup, /href="\/connect"/);
     assert.match(markup, /Hosted passkey settings true configured/);
     assert.match(markup, /Hosted data privacy settings/);
-    assert.match(markup, /Your account/);
+    assert.match(markup, /<h1[^>]*>Your account<\/h1>/);
     assert.match(markup, /Plan, AI usage, model, connected accounts, and data privacy\./);
     assert.match(markup, /id="subscription"/);
     assert.match(markup, /id="ai-usage"/);
+    assert.match(markup, /<h2[^>]*>AI usage<\/h2>/);
     assert.ok(markup.indexOf("Hosted billing settings") < markup.indexOf("id=\"ai-usage\""));
     assert.ok(markup.indexOf("id=\"ai-usage\"") < markup.indexOf("Hosted assistant model"));
     assert.doesNotMatch(markup, /ChatGPT/);
@@ -1688,6 +1689,13 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       status: "unavailable",
     }),
   );
+  mocks.readHostedAiUsageActivity.mockImplementation(
+    trackDatabaseRead("usageActivity", {
+      credits: [],
+      missions: [],
+      missionsEnabled: false,
+    }),
+  );
   mocks.readHostedPersonalUsageCreditOfferCodes.mockImplementation(
     trackDatabaseRead("usageTopUpOfferCodes", []),
   );
@@ -1716,6 +1724,7 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       "familyOwner",
       "familyAccess",
       "usageStatus",
+      "usageActivity",
       "usageTopUpOfferCodes",
       "usageTopUpActivePurchase",
     ]);

@@ -380,9 +380,9 @@ export default async function SettingsPage({
           usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
           usageActivityDetail={visibleUsageActivity ? (
             <section id="ai-usage" className="flex scroll-mt-24 flex-col gap-4">
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 AI usage
-              </div>
+              </h2>
               <HostedAiUsageActivity
                 activity={visibleUsageActivity}
                 missionContactOption={usageMissionContactOption}
