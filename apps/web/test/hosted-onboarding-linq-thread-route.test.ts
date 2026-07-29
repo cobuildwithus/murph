@@ -7,7 +7,7 @@ import {
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ensureHostedThreadContainerRouteTx,
@@ -294,6 +294,10 @@ beforeEach(() => {
     signalAccepted: true,
     workflowId: "workflow_group_123",
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function buildLinqMessageReceivedEvent(input: {
@@ -5369,6 +5373,8 @@ describe("Linq group chat auto-provision", () => {
   });
 
   it("keeps recovery silent when every healthy line is capped", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-24T12:00:00.000Z"));
     const prisma = createStatefulThreadRoutePrisma();
     const dayUtc = new Date("2026-06-24T00:00:00.000Z");
     prisma.seedActiveManagedLinqLine("+15550000000", {
@@ -5405,6 +5411,178 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects).toEqual([]);
     expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("uses the current UTC day, not the stale webhook day, when claiming recovery capacity", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T00:05:00.000Z"));
+    const prisma = createStatefulThreadRoutePrisma();
+    const staleDayUtc = new Date("2026-06-24T00:00:00.000Z");
+    const currentDayUtc = new Date("2026-06-25T00:00:00.000Z");
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000042", {
+      healthStatus: "healthy",
+      maxNewConversationsPerDay: 1,
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: staleDayUtc,
+      providerStatus: "active",
+    });
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        createdAt: "2026-06-24T23:59:30.000Z",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-line-recovery",
+    });
+    expect(plan.desiredSideEffects[0]).toMatchObject({
+      payload: {
+        assignedRecipientPhone: "+15550000042",
+        template: "group_line_recovery",
+      },
+    });
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          proactiveConversationCount: 1,
+          proactiveConversationDayUtc: currentDayUtc,
+        },
+        where: expect.objectContaining({
+          OR: [
+            { proactiveConversationDayUtc: null },
+            { proactiveConversationDayUtc: { not: currentDayUtc } },
+          ],
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          proactiveConversationDayUtc: staleDayUtc,
+        }),
+      }),
+    );
+  });
+
+  it("increments current UTC-day recovery capacity for stale webhook events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T12:00:00.000Z"));
+    const prisma = createStatefulThreadRoutePrisma();
+    const staleDayUtc = new Date("2026-06-24T00:00:00.000Z");
+    const currentDayUtc = new Date("2026-06-25T00:00:00.000Z");
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000042", {
+      healthStatus: "healthy",
+      maxNewConversationsPerDay: 50,
+      proactiveConversationCount: 49,
+      proactiveConversationDayUtc: currentDayUtc,
+      providerStatus: "active",
+    });
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        createdAt: "2026-06-24T23:59:30.000Z",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-line-recovery",
+    });
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          proactiveConversationCount: { increment: 1 },
+        },
+        where: expect.objectContaining({
+          proactiveConversationCount: { lt: 50 },
+          proactiveConversationDayUtc: currentDayUtc,
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          proactiveConversationDayUtc: staleDayUtc,
+        }),
+      }),
+    );
+  });
+
+  it("does not reopen a current-day capped recovery line for stale webhook events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T12:00:00.000Z"));
+    const prisma = createStatefulThreadRoutePrisma();
+    const staleDayUtc = new Date("2026-06-24T00:00:00.000Z");
+    const currentDayUtc = new Date("2026-06-25T00:00:00.000Z");
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000042", {
+      healthStatus: "healthy",
+      maxNewConversationsPerDay: 1,
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: currentDayUtc,
+      providerStatus: "active",
+    });
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        createdAt: "2026-06-24T23:59:30.000Z",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          proactiveConversationDayUtc: staleDayUtc,
+        }),
+      }),
+    );
   });
 
   it("keeps a hard-blocked group line silent when no healthy recovery sender is available", async () => {

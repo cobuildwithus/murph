@@ -2720,7 +2720,7 @@ async function planHostedLinqHardBlockedGroupLineRecovery(input: {
     prisma: input.prisma,
   });
   const line = await claimHostedLinqGroupLineRecoverySenderTx({
-    now: new Date(occurredAt),
+    capacityObservedAt: new Date(),
     pinnedLineLookupKey: existingIntent?.phoneNumberLookupKey ?? null,
     prisma: input.prisma,
   });
@@ -2739,7 +2739,7 @@ async function planHostedLinqHardBlockedGroupLineRecovery(input: {
 }
 
 async function claimHostedLinqGroupLineRecoverySenderTx(input: {
-  now: Date;
+  capacityObservedAt: Date;
   pinnedLineLookupKey: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqAssignableHomeLine | null> {
@@ -2752,7 +2752,7 @@ async function claimHostedLinqGroupLineRecoverySenderTx(input: {
     ) ?? null;
   }
 
-  const dayUtc = startOfUtcDay(input.now);
+  const dayUtc = startOfUtcDay(input.capacityObservedAt);
   const newAssignmentsByRecipientPhone = new Map(
     healthyLines.map((line) => [
       line.phoneNumber,
