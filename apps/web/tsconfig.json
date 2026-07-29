@@ -123,6 +123,9 @@
       "@murphai/hosted-execution/phone-calls": [
         "../../packages/hosted-execution/src/phone-calls.ts"
       ],
+      "@murphai/hosted-execution/pending-group-setup": [
+        "../../packages/hosted-execution/src/pending-group-setup.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],

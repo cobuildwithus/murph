@@ -2430,11 +2430,10 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "sender-inactive";
 
 /**
- * Group chats with no explicit thread route stay ignored unless the sender is
- * an active member and the recipient resolves to an active managed Murph Linq
- * line; only then is the dedicated thread-container runtime provisioned and
- * the triggering message routed into it. The webhook recipient alone is never
- * line authority. Existing routes are handled before this admission path.
+ * An unbound group can be admitted by either one roster-matched pending setup
+ * or the existing active-sender fallback. The recipient must still resolve to
+ * an active managed Murph Linq line; the webhook recipient alone is never line
+ * authority. Existing routes are handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -2502,20 +2501,11 @@ async function planHostedLinqGroupChatWebhook(input: {
         prisma: input.prisma,
       });
   const sender = senderLookup?.core ?? null;
-  if (!sender) {
-    return ignored("sender-identity-unresolved");
-  }
-  const senderIdentityMatch: HostedLinqExistingMemberMatch =
-    participantContact.kind === "phone" ? "phone-identity" : "verified-email";
-  if (
-    isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readHostedRuntimeAiAccessDecision({
-      memberId: sender.id,
-      prisma: input.prisma,
-    })).allowed
-  ) {
-    return ignored("sender-inactive", senderIdentityMatch);
-  }
+  const senderIdentityMatch: HostedLinqExistingMemberMatch = sender
+    ? participantContact.kind === "phone"
+      ? "phone-identity"
+      : "verified-email"
+    : "none";
 
   if (!(await hasActiveHostedLinqManagedLine({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
@@ -2524,23 +2514,39 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("recipient-line-unmanaged", senderIdentityMatch);
   }
 
+  const activeSenderMemberId = sender
+    && !isHostedMemberSuspended(sender.suspendedAt)
+    && (await readHostedRuntimeAiAccessDecision({
+      memberId: sender.id,
+      prisma: input.prisma,
+    })).allowed
+      ? sender.id
+      : null;
+  const pendingSetupParticipantMemberIds = activeSenderMemberId
+    ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+    : input.participantMemberIds;
+
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
   try {
     const preparedResult = await ensureHostedPreparedLinqThreadContainerRouteTx({
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
-      fallbackOwnerMemberId: sender.id,
+      fallbackOwnerMemberId: activeSenderMemberId,
       mailboxDedupeKey: input.event.event_id,
       occurredAt: new Date(occurredAt),
-      participantMemberIds: input.participantMemberIds,
+      participantMemberIds: pendingSetupParticipantMemberIds,
       recipientPhoneLookupKeys: input.threadRouteAccountLookupKeys,
-      senderMemberId: sender.id,
+      senderMemberId: activeSenderMemberId,
       threadId: summary.chatId,
       tx: input.prisma,
     });
     if (preparedResult.kind !== "ensured") {
-      return ignored("provision-unavailable", senderIdentityMatch);
+      return !sender
+        ? ignored("sender-identity-unresolved")
+        : activeSenderMemberId === null
+          ? ignored("sender-inactive", senderIdentityMatch)
+          : ignored("provision-unavailable", senderIdentityMatch);
     }
     const ensureResult = preparedResult.ensure;
     createdContainerMemberId = ensureResult.created
@@ -2574,7 +2580,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     context: input.context,
     event: input.event,
     prisma: input.prisma,
-    resolvedParticipantMemberId: sender.id,
+    ...(activeSenderMemberId
+      ? { resolvedParticipantMemberId: activeSenderMemberId }
+      : {}),
     route,
     sourceMailboxConsumedAt: demotedMailboxConsumedAt,
   });

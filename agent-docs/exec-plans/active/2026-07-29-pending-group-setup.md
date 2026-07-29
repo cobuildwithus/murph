@@ -18,7 +18,8 @@ Updated: 2026-07-29
 - One encrypted, expiring setup exists per member and is scoped to the Murph
   Linq line from which it was prepared.
 - A lone roster-matched prepared member owns and initializes the new synthetic
-  group runtime even when another participant sends the first message.
+  group runtime even when another participant, including a person without their
+  own Murph account, sends the first message.
 - With several candidates, the sender's setup wins only when the sender owns one;
   otherwise no setup is guessed and the existing sender-owner fallback remains.
 - One setup can initialize at most one newly created route under concurrent
@@ -75,9 +76,10 @@ Updated: 2026-07-29
    - otherwise: select none.
 5. `DELETE ... RETURNING` claims the selected setup exactly once. A concurrent
    claimant re-evaluates without it.
-6. The selected setup owner, or the existing sender fallback, is passed to
-   `ensureHostedThreadContainerRouteTx`. That primitive remains the only route
-   and owner writer.
+6. The selected setup owner, or the existing active-sender fallback, is passed
+   to `ensureHostedThreadContainerRouteTx`. A uniquely selected setup does not
+   require the first speaker to be a registered Murph member. The canonical
+   route primitive remains the only route and owner writer.
 7. On a newly created route, style is applied through the existing hosted-member
    preference mutation owner, the activation event carries the optional initial
    room-model Markdown, and the existing usage-referral binding runs once.
@@ -104,6 +106,11 @@ Updated: 2026-07-29
 7. **Setup becomes a second room profile.** Numeric behavior stays in existing
    preferences and qualitative context is written once to the existing room
    model; the pending row is deleted after binding.
+8. **An unregistered first speaker defeats the prepared owner.** New-group
+   admission resolves the sender when possible but consults the pending roster
+   setup before requiring an active sender; a focused regression proves the
+   parent-prepares/child-speaks-first path while the no-setup fallback remains
+   unchanged.
 
 ## Tasks
 
@@ -119,8 +126,8 @@ Updated: 2026-07-29
    conversation turn.
 6. [x] Complete webhook scenarios, payload/privacy/account-deletion proof, and
    production-faithful activation/replay coverage.
-7. [x] Reconcile current `main`, remove temporary source-snapshot scaffolding,
-   and run focused verification.
+7. [x] Reconcile current `main`, remove temporary source/repair scaffolding, fix
+   the unregistered first-speaker admission path, and run focused verification.
 8. [ ] Complete preliminary specialist review, parent final review, exact-head
    CI, and final ReviewGPT before marking the PR ready.
 
@@ -139,10 +146,15 @@ Updated: 2026-07-29
 
 ## Verification
 
-- The ownership-only foundation has focused Web, hosted-execution,
-  assistant-engine, and PostgreSQL race proof recorded in the PR.
+- Focused Web, hosted-execution, assistant-engine, assistant-runtime, migration,
+  privacy, and PostgreSQL race/restore proof is recorded in the PR.
 - The configured payload, activation contract, room-model replay, secret-safe
-  runtime handling, migration/privacy assertions, and real-PostgreSQL
-  claim/restore/corruption/deletion proof pass locally.
-- Specialist review, parent final review, exact-head CI, and final ReviewGPT
-  remain to be completed.
+  runtime handling, and corruption/deletion behavior pass the focused suites.
+- The repaired planner has direct regression coverage for a uniquely prepared
+  roster owner when an unregistered participant sends the first message, plus
+  the unchanged no-setup non-member rejection case.
+- Runner-bundle assembly was re-baselined to the exact measured feature head
+  without admitting a forbidden boot subsystem, and Web source aliases include
+  the new hosted-execution subpath.
+- Exact-head CI is running from the repaired branch. Preliminary specialist
+  review, parent final review, final ReviewGPT, and final merge proof remain.
