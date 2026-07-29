@@ -1,0 +1,62 @@
+name: Agent apply Linq fix
+
+on:
+  push:
+    branches:
+      - agent/linq-chat-health-preflight
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply scoped type fix and remove temporary workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("packages/assistant-engine/src/assistant/cron/execution.ts")
+          text = path.read_text()
+          old = '''          const postureExecutionContext =
+            appendAssistantHostedDynamicContextPrompt({
+              executionContext: automationTurn.executionContext,
+              prompt: buildAssistantLinqDeliveryPosturePrompt(
+                authorizedDelivery.deliveryPosture,
+              ),
+            })
+'''
+          new = '''          const postureExecutionContext = automationTurn.executionContext
+            ? appendAssistantHostedDynamicContextPrompt({
+                executionContext: automationTurn.executionContext,
+                prompt: buildAssistantLinqDeliveryPosturePrompt(
+                  authorizedDelivery.deliveryPosture,
+                ),
+              })
+            : automationTurn.executionContext
+'''
+          if text.count(old) != 1:
+              raise SystemExit("Expected scheduled posture context block was not found exactly once.")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/repo-hygiene.yml
+          git rm --ignore-unmatch \
+            .github/workflows/agent-apply-linq-fix.yml \
+            .github/workflows/agent-source-export.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix nullable Linq posture context"
+          git push origin "HEAD:agent/linq-chat-health-preflight"
