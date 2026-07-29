@@ -508,7 +508,7 @@ function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
     httpStatus: 403,
-    message: "Linq participant egress requires signup welcome authority for the runtime user.",
+    message: "Linq participant egress requires an exact approved first-contact authority.",
     retryable: false,
   });
 }

@@ -12,6 +12,7 @@ import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-pho
 
 interface HostedPhoneAuthProps {
   disableSignup?: boolean;
+  inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
   onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onCodeSent?: () => void;
@@ -27,6 +28,7 @@ interface HostedPhoneAuthProps {
 
 export function HostedPhoneAuth({
   disableSignup = false,
+  inviteCode,
   intent = "auth",
   onAuthCompleted,
   onCodeSent,
@@ -41,6 +43,7 @@ export function HostedPhoneAuth({
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     disableSignup,
+    inviteCode,
     intent,
     onAuthCompleted,
     onCodeSent,

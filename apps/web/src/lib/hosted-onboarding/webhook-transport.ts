@@ -13,6 +13,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
+  readHostedLinqDeliveryProviderDispatchIntentTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
@@ -26,12 +27,22 @@ import {
   type HostedRuntimeAiAccessNoticeCode,
 } from "./member-access";
 import { sanitizeHostedOnboardingLogString } from "./http";
-import { buildHostedInviteUrl } from "./invite-service";
+import { buildHostedGroupAwareInviteUrl } from "../hosted-groups/group-join-invite-link";
+import {
+  beginHostedGroupJoinProviderRequest,
+  createHostedGroupJoinProviderFenceState,
+  HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS,
+  HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
+  type HostedGroupJoinProviderFenceState,
+} from "../hosted-groups/group-join-provider-fence";
 import { normalizePhoneNumber } from "./phone";
-import { buildHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
+import {
+  buildHostedLinqInviteSignupEffectId,
+} from "./linq-invite-signup-effect-id";
 import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
+  readHostedLinqDailyState,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
@@ -58,6 +69,9 @@ import {
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  readHostedGroupJoinOutreachReplyDeliveryContextTx,
+} from "../hosted-groups/group-join-outreach-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
@@ -127,11 +141,14 @@ export type HostedLinqAiUsageQuotaPayload =
 
 export type HostedLinqInviteSignupMessagePayload = {
   chatId: string;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteId: string;
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
   service?: string | null;
+  sourceEventId: string;
   threadIsDirect?: boolean | null;
   template: "invite_signup";
 };
@@ -139,11 +156,14 @@ export type HostedLinqInviteSignupMessagePayload = {
 export type HostedLinqInviteSignupFallbackMessagePayload = {
   assignedRecipientPhone: string;
   chatId: null;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteId: string;
   memberId: string;
   memberPhone: string;
   occurredAt: string;
   replyToMessageId: null;
+  sourceEventId: string;
   template: "invite_signup_fallback";
 };
 
@@ -237,6 +257,8 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       assignedRecipientPhone: string;
+      groupJoinCode?: string | null;
+      groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
       memberPhone: string;
@@ -246,6 +268,8 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      groupJoinCode?: string | null;
+      groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
       occurredAt: string;
@@ -326,6 +350,12 @@ type HostedLinqSideEffectDrainInput = {
   signal?: AbortSignal;
 };
 
+type HostedLinqSignupMessageSideEffect = HostedLinqMessageSideEffect & {
+  payload:
+    | HostedLinqInviteSignupFallbackMessagePayload
+    | HostedLinqInviteSignupMessagePayload;
+};
+
 type HostedLinqSideEffectDrainSkipReason =
   | "effect_unresolved"
   | "notice_already_claimed"
@@ -333,9 +363,20 @@ type HostedLinqSideEffectDrainSkipReason =
   | "notice_target_unauthorized";
 
 type HostedLinqProviderDispatchPreparation =
-  | "claimed"
-  | "in_flight"
-  | "target_unauthorized";
+  | {
+      effect: HostedLinqMessageSideEffect;
+      status: "claimed";
+    }
+  | {
+      retryAt?: Date;
+      status: "in_flight";
+    }
+  | {
+      status: "already_completed";
+    }
+  | {
+      status: "target_unauthorized";
+    };
 
 type HostedLinqSideEffectSendSkip = {
   reason: Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved">;
@@ -359,50 +400,12 @@ export async function drainHostedLinqSideEffectsDirect(
   const skipped: HostedLinqSideEffectDrainResult["skipped"][number][] = [];
 
   for (const plannedEffect of input.sideEffects) {
-    const effect = await resolveHostedLinqDispatchSideEffect(plannedEffect, input.prisma);
-    if (!effect) {
-      skipped.push({
-        effectId: plannedEffect.effectId,
-        reason: "effect_unresolved",
-        template: plannedEffect.payload.template,
-      });
-      continue;
-    }
-    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
-    if (!noticeClaimed) {
-      skipped.push({
-        effectId: effect.effectId,
-        reason: "notice_already_claimed",
-        template: effect.payload.template,
-      });
-      continue;
-    }
-    let sendSkip: HostedLinqSideEffectSendSkip | null;
-    try {
-      sendSkip = await sendHostedLinqSideEffect(effect, {
-        prisma: input.prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-        signal: input.signal,
-      });
-    } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
-      throw error;
-    }
-    if (sendSkip) {
-      skipped.push({
-        effectId: effect.effectId,
-        reason: sendSkip.reason,
-        ...(sendSkip.retryAt ? { retryAt: sendSkip.retryAt } : {}),
-        template: effect.payload.template,
-      });
-      continue;
-    }
-
-    if (isHostedInviteLinqMessagePayload(effect.payload)) {
-      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
-      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
-    }
-    sentCount += 1;
+    const result = await drainHostedLinqSideEffectWithProviderFence(
+      plannedEffect,
+      input,
+    );
+    sentCount += result.sentCount;
+    skipped.push(...result.skipped);
   }
 
   return {
@@ -411,13 +414,155 @@ export async function drainHostedLinqSideEffectsDirect(
   };
 }
 
+async function drainHostedLinqSideEffectWithProviderFence(
+  plannedEffect: HostedLinqMessageSideEffect,
+  input: HostedLinqSideEffectDrainInput,
+): Promise<HostedLinqSideEffectDrainResult> {
+  const effect = await resolveHostedLinqDispatchSideEffect(
+    plannedEffect,
+    input.prisma,
+  );
+  if (!effect) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: plannedEffect.effectId,
+        reason: "effect_unresolved",
+        template: plannedEffect.payload.template,
+      }],
+    };
+  }
+  const requiresProviderFence =
+    await requiresHostedGroupJoinProviderFence(effect, input.prisma);
+  if (!requiresProviderFence) {
+    return drainHostedLinqSideEffectDirect(effect, {
+      ...input,
+      completeProviderOutcomeBeforeReturn: false,
+    });
+  }
+
+  const run = async (
+    prisma: Prisma.TransactionClient,
+  ): Promise<
+    | { result: HostedLinqSideEffectDrainResult; status: "completed" }
+    | { error: unknown; status: "failed" }
+  > => {
+    const providerFenceState = createHostedGroupJoinProviderFenceState();
+    try {
+      return {
+        result: await drainHostedLinqSideEffectDirect(effect, {
+          ...input,
+          completeProviderOutcomeBeforeReturn: true,
+          prisma,
+          providerFenceState,
+        }),
+        status: "completed",
+      };
+    } catch (error) {
+      if (
+        !providerFenceState.providerRequestStarted
+        || providerFenceState.providerRequestCompleted
+      ) {
+        throw error;
+      }
+      // Commit the attempted/failed delivery consequence and reopened exact
+      // outreach before surfacing the provider failure to webhook retry.
+      return { error, status: "failed" };
+    }
+  };
+
+  const outcome = isHostedLinqTransportRootClient(input.prisma)
+    ? await input.prisma.$transaction(
+        run,
+        HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
+      )
+    : await run(input.prisma);
+  if (outcome.status === "failed") {
+    throw outcome.error;
+  }
+  return outcome.result;
+}
+
+async function drainHostedLinqSideEffectDirect(
+  effect: HostedLinqMessageSideEffect,
+  input: HostedLinqSideEffectDrainInput & {
+    completeProviderOutcomeBeforeReturn: boolean;
+    providerFenceState?: HostedGroupJoinProviderFenceState;
+  },
+): Promise<HostedLinqSideEffectDrainResult> {
+  const noticeClaimed = await claimHostedLinqNoticeForSideEffect(
+    effect,
+    input.prisma,
+  );
+  if (!noticeClaimed) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_already_claimed",
+        template: effect.payload.template,
+      }],
+    };
+  }
+  let sendSkip: HostedLinqSideEffectSendSkip | null;
+  try {
+    sendSkip = await sendHostedLinqSideEffect(effect, {
+      completeProviderOutcomeBeforeReturn:
+        input.completeProviderOutcomeBeforeReturn,
+      prisma: input.prisma,
+      providerFenceState: input.providerFenceState,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      signal: input.signal,
+    });
+  } catch (error) {
+    await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+    throw error;
+  }
+  if (sendSkip) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: sendSkip.reason,
+        ...(sendSkip.retryAt ? { retryAt: sendSkip.retryAt } : {}),
+        template: effect.payload.template,
+      }],
+    };
+  }
+
+  if (isHostedInviteLinqMessagePayload(effect.payload)) {
+    if (!input.completeProviderOutcomeBeforeReturn) {
+      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+    }
+    await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
+  }
+  return { sentCount: 1, skipped: [] };
+}
+
+async function requiresHostedGroupJoinProviderFence(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<boolean> {
+  if (!isHostedLinqSignupMessageSideEffect(effect)) {
+    return false;
+  }
+  if (effect.payload.groupJoinOutreachId?.trim()) {
+    return true;
+  }
+  const persistedIntent =
+    await readHostedLinqDeliveryProviderDispatchIntentTx({
+      idempotencyKey: effect.effectId,
+      prisma,
+    });
+  return Boolean(persistedIntent?.groupJoinOutreachId);
+}
+
 /**
- * Signup-link sends run as explicit delivery attempts: the planner emits the
- * member/day base effect id and dispatch resolves it to the first attempt
- * whose delivery row is absent or still actionable. A terminally failed
- * attempt advances the ordinal so the provider idempotency key is fresh and
- * Linq cannot dedupe the retry against the dead message. Returns null (drops
- * the send) once the day's attempt budget is exhausted.
+ * Signup-link sends run as explicit delivery attempts. Generic links keep the
+ * member/day base identity; group-aware links add the exact source-event
+ * digest. A retry whose current lookup no longer sees its group first recovers
+ * that exact-source identity from the delivery row. Terminal failure advances
+ * only that identity's attempt ordinal.
  */
 async function resolveHostedLinqDispatchSideEffect(
   effect: HostedLinqMessageSideEffect,
@@ -430,21 +575,63 @@ async function resolveHostedLinqDispatchSideEffect(
     return effect;
   }
 
+  let dispatchEffect = effect;
+  if (!effect.payload.groupJoinOutreachId?.trim()) {
+    const exactSourceEffectId = buildHostedLinqInviteSignupEffectId({
+      memberId: effect.payload.memberId,
+      occurredAt: effect.payload.occurredAt,
+      sourceEventId: effect.payload.sourceEventId,
+      sourceEventIdentity: true,
+    });
+    const persistedExactSource =
+      await readHostedLinqDeliveryProviderDispatchIntentTx({
+        idempotencyKey: exactSourceEffectId,
+        prisma,
+      });
+    if (persistedExactSource) {
+      const persistedOutreachId =
+        persistedExactSource.groupJoinOutreachId?.trim() ?? "";
+      const persistedReplyOccurredAt =
+        persistedExactSource.groupJoinReplyOccurredAt;
+      if (Boolean(persistedOutreachId) !== Boolean(persistedReplyOccurredAt)) {
+        console.warn("Hosted Linq signup-link intent has incomplete group context.", {
+          effectIdSuffix:
+            toHostedOnboardingLogIdSuffix(exactSourceEffectId) ?? "unknown",
+        });
+        return null;
+      }
+      dispatchEffect = {
+        ...effect,
+        effectId: exactSourceEffectId,
+        ...(persistedOutreachId && persistedReplyOccurredAt
+          ? {
+              payload: {
+                ...effect.payload,
+                groupJoinCode: undefined,
+                groupJoinOutreachId: persistedOutreachId,
+                occurredAt: persistedReplyOccurredAt.toISOString(),
+              },
+            }
+          : {}),
+      };
+    }
+  }
+
   const effectId = await resolveHostedLinqInviteSignupDispatchEffectIdTx({
-    effectId: effect.effectId,
+    effectId: dispatchEffect.effectId,
     prisma,
   });
   if (!effectId) {
-    console.warn("Hosted Linq signup-link attempt budget exhausted for the day.", {
+    console.warn("Hosted Linq signup-link attempt budget exhausted.", {
       effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
       template: effect.payload.template,
     });
     return null;
   }
-  return effectId === effect.effectId
-    ? effect
+  return effectId === dispatchEffect.effectId
+    ? dispatchEffect
     : {
-        ...effect,
+        ...dispatchEffect,
         effectId,
       };
 }
@@ -455,7 +642,9 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
+    completeProviderOutcomeBeforeReturn: boolean;
     prisma: HostedLinqTransportPersistenceClient;
+    providerFenceState?: HostedGroupJoinProviderFenceState;
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
@@ -466,10 +655,14 @@ async function sendHostedLinqSideEffect(
       ? effect.payload
       : null;
   const deliveryAttemptTask = usageLimitPayload
-    ? Promise.resolve<HostedLinqProviderDispatchPreparation>("claimed")
+    ? Promise.resolve<HostedLinqProviderDispatchPreparation>({
+        effect,
+        status: "claimed",
+      })
     : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
+        providerFenceState: options.providerFenceState,
         startedAtMs,
       });
   let deliveryEffect = effect;
@@ -478,36 +671,63 @@ async function sendHostedLinqSideEffect(
 
   try {
     const preparation = await deliveryAttemptTask;
-    if (preparation === "target_unauthorized") {
+    if (preparation.status === "target_unauthorized") {
       return { reason: "notice_target_unauthorized" };
     }
-    if (preparation === "in_flight") {
-      return { reason: "notice_in_flight" };
+    if (preparation.status === "already_completed") {
+      return { reason: "notice_already_claimed" };
+    }
+    if (preparation.status === "in_flight") {
+      return {
+        reason: "notice_in_flight",
+        ...(preparation.retryAt ? { retryAt: preparation.retryAt } : {}),
+      };
     }
 
-    if (effect.payload.template === "invite_signup_fallback") {
-      const result = await createHostedLinqChat({
-        from: effect.payload.assignedRecipientPhone,
-        idempotencyKey: effect.effectId,
-        message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
-        signal: options.signal,
-        to: [effect.payload.memberPhone],
-      });
+    deliveryEffect = preparation.effect;
+    providerIdempotencyKey = deliveryEffect.effectId;
 
-      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-        attemptTask: deliveryAttemptTask,
-        milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
-          chatId: result.chatId,
-          effect,
-          messageId: result.messageId,
-          prisma: options.prisma,
-        }),
-        scheduleAfterResponse: options.scheduleAfterResponse,
+    if (deliveryEffect.payload.template === "invite_signup_fallback") {
+      const message = await buildHostedLinqSideEffectMessage(
+        deliveryEffect,
+        options.prisma,
+      );
+      beginHostedGroupJoinProviderRequest(options.providerFenceState);
+      const result = await createHostedLinqChat({
+        from: deliveryEffect.payload.assignedRecipientPhone,
+        idempotencyKey: deliveryEffect.effectId,
+        message,
+        signal: options.signal,
+        to: [deliveryEffect.payload.memberPhone],
       });
+      if (options.providerFenceState) {
+        options.providerFenceState.providerRequestCompleted = true;
+      }
+
+      const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
+        chatId: result.chatId,
+        effect: deliveryEffect,
+        messageId: result.messageId,
+        prisma: options.prisma,
+        throwOnError: options.completeProviderOutcomeBeforeReturn,
+      });
+      if (options.completeProviderOutcomeBeforeReturn) {
+        await deliveryAttemptTask;
+        await acceptedMilestone();
+      } else {
+        scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+          attemptTask: deliveryAttemptTask,
+          milestoneTask: acceptedMilestone,
+          scheduleAfterResponse: options.scheduleAfterResponse,
+        });
+      }
       return null;
     }
 
-    const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
+    const message = await buildHostedLinqSideEffectMessage(
+      deliveryEffect,
+      options.prisma,
+    );
     if (usageLimitPayload) {
       requireHostedOnboardingLinqConfig();
       options.signal?.throwIfAborted();
@@ -551,21 +771,38 @@ async function sendHostedLinqSideEffect(
         : { ...effect, effectId: dispatch.idempotencyKey };
     }
 
+    const deliveryChatId = readHostedLinqSideEffectChatId(
+      deliveryEffect.payload,
+    );
+    if (!deliveryChatId) {
+      throw new TypeError(
+        "Hosted Linq thread side-effect dispatch requires a chat id.",
+      );
+    }
+    beginHostedGroupJoinProviderRequest(options.providerFenceState);
     const result = await sendHostedLinqChatMessage({
-      chatId: effect.payload.chatId,
+      chatId: deliveryChatId,
       idempotencyKey: providerIdempotencyKey,
       message,
-      replyToMessageId: effect.payload.replyToMessageId,
+      replyToMessageId: deliveryEffect.payload.replyToMessageId,
       signal: options.signal,
     });
+    if (options.providerFenceState) {
+      options.providerFenceState.providerRequestCompleted = true;
+    }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
-      chatId: result.chatId ?? effect.payload.chatId,
+      chatId: result.chatId ?? deliveryChatId,
       effect: deliveryEffect,
       messageId: result.messageId,
       prisma: options.prisma,
-      throwOnError: deliveryEffect.payload.template === "ai_usage_quota",
+      throwOnError:
+        deliveryEffect.payload.template === "ai_usage_quota"
+        || options.completeProviderOutcomeBeforeReturn,
     });
-    if (deliveryEffect.payload.template === "ai_usage_quota") {
+    if (
+      deliveryEffect.payload.template === "ai_usage_quota"
+      || options.completeProviderOutcomeBeforeReturn
+    ) {
       await deliveryAttemptTask;
       await acceptedMilestone();
     } else {
@@ -581,11 +818,19 @@ async function sendHostedLinqSideEffect(
       || effect.payload.template === "invite_signup_fallback"
     ) {
       await deliveryAttemptTask;
-      await markHostedLinqDeliveryFailedBestEffort({
-        effect,
-        error,
-        prisma: options.prisma,
-      });
+      if (
+        (
+          !options.providerFenceState
+          || options.providerFenceState.providerRequestStarted
+        )
+        && !options.providerFenceState?.providerRequestCompleted
+      ) {
+        await markHostedLinqDeliveryFailedBestEffort({
+          effect: deliveryEffect,
+          error,
+          prisma: options.prisma,
+        });
+      }
     } else if (
       effect.payload.template === "ai_usage_quota"
       && usageLimitPayload
@@ -607,7 +852,7 @@ async function sendHostedLinqSideEffect(
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({
         attemptTask: deliveryAttemptTask,
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
-          effect,
+          effect: deliveryEffect,
           error,
           prisma: options.prisma,
         }),
@@ -811,52 +1056,247 @@ function readHostedLinqSideEffectDeliveryTarget(payload: HostedLinqMessagePayloa
 async function prepareHostedLinqSideEffectProviderDispatch(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
+  providerFenceState?: HostedGroupJoinProviderFenceState;
   startedAtMs: number;
 }): Promise<HostedLinqProviderDispatchPreparation> {
-  const template = input.effect.payload.template;
-  const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
+  const signupEffect = isHostedLinqSignupMessageSideEffect(input.effect)
+    ? input.effect
+    : null;
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
-    if (
-      input.effect.payload.template === "invite_signup"
-      || input.effect.payload.template === "invite_signup_fallback"
-    ) {
-      await lockHostedMemberRow(prisma, input.effect.payload.memberId);
+    let dispatchEffect = input.effect;
+    let dispatchSourceRef = input.effect.effectId;
+    if (signupEffect) {
+      await lockHostedMemberRow(
+        prisma,
+        signupEffect.payload.memberId,
+        input.providerFenceState
+          ? { timeoutMs: HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS }
+          : {},
+      );
       const invite = await prisma.hostedInvite.findUnique({
         select: { id: true },
         where: {
-          id: input.effect.payload.inviteId,
+          id: signupEffect.payload.inviteId,
           member: { suspendedAt: null },
-          memberId: input.effect.payload.memberId,
+          memberId: signupEffect.payload.memberId,
         },
       });
       if (!invite) {
-        return "target_unauthorized";
+        return { status: "target_unauthorized" };
       }
+      const persistedIntent =
+        await readHostedLinqDeliveryProviderDispatchIntentTx({
+          idempotencyKey: signupEffect.effectId,
+          prisma,
+        });
+      if (persistedIntent?.providerCorrelated) {
+        return { status: "already_completed" };
+      }
+      const recoveredIntent = await resolveHostedLinqSignupDispatchIntentTx({
+        effect: signupEffect,
+        persistedDeliveryId: persistedIntent?.id ?? null,
+        persistedGroupJoinOutreachId:
+          persistedIntent?.groupJoinOutreachId ?? null,
+        persistedGroupJoinReplyOccurredAt:
+          persistedIntent?.groupJoinReplyOccurredAt ?? null,
+        persistedSourceRef: persistedIntent?.sourceRef ?? null,
+        persistedIntentExists: persistedIntent !== null,
+        prisma,
+      });
+      if (recoveredIntent.status !== "resolved") {
+        return { status: recoveredIntent.status };
+      }
+      const signupDispatchEffect = recoveredIntent.effect;
+      if (
+        !persistedIntent
+        && !signupDispatchEffect.payload.groupJoinOutreachId?.trim()
+      ) {
+        const dailyState = await readHostedLinqDailyState({
+          memberId: signupDispatchEffect.payload.memberId,
+          occurredAt: signupDispatchEffect.payload.occurredAt,
+          prisma,
+        });
+        if (dailyState?.onboardingLinkSentAt) {
+          return { status: "already_completed" };
+        }
+      }
+      dispatchEffect = signupDispatchEffect;
+      dispatchSourceRef = recoveredIntent.sourceRef;
     }
 
+    const template = dispatchEffect.payload.template;
+    const target = readHostedLinqSideEffectDeliveryTarget(dispatchEffect.payload);
     if (target.linqChatId) {
       await acquireHostedLinqChatOwnershipLockTx({
         chatId: target.linqChatId,
         tx: prisma,
       });
-      await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+      await assertHostedLinqSideEffectRouteAuthority(dispatchEffect, prisma);
     }
+    const groupJoinOutreachId = isHostedLinqSignupMessageSideEffect(dispatchEffect)
+      ? dispatchEffect.payload.groupJoinOutreachId?.trim() || null
+      : null;
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
-      idempotencyKey: input.effect.effectId,
+      groupJoinOutreachId,
+      groupJoinReplyOccurredAt: groupJoinOutreachId
+        && isHostedLinqSignupMessageSideEffect(dispatchEffect)
+          ? new Date(dispatchEffect.payload.occurredAt)
+          : null,
+      idempotencyKey: dispatchEffect.effectId,
       ...(target.linqChatId
         ? { linqChatId: target.linqChatId }
         : { phoneNumber: target.phoneNumber }),
       prisma,
+      ...(signupEffect
+        ? { reclaimStalePreProviderAttempt: true }
+        : {}),
       source: "hosted_webhook_side_effect",
-      sourceRef: input.effect.effectId,
-      status: "provider_dispatch_started",
+      sourceRef: dispatchSourceRef,
+      // The effect id is also the stable provider idempotency key and message
+      // seed. Until provider correlation exists, a restart must be able to
+      // reclaim this exact payload instead of stranding it as in-flight.
+      status: signupEffect ? "attempted" : "provider_dispatch_started",
       targetKind: target.targetKind,
       template,
     });
-    return claim.claimed ? "claimed" : "in_flight";
+    if (claim.claimed) {
+      return {
+        effect: dispatchEffect,
+        status: "claimed",
+      };
+    }
+    if (claim.outcome === "completed") {
+      return { status: "already_completed" };
+    }
+    if (claim.outcome === "incompatible") {
+      return { status: "target_unauthorized" };
+    }
+    return {
+      ...(claim.retryAt ? { retryAt: claim.retryAt } : {}),
+      status: "in_flight",
+    };
   });
+}
+
+async function resolveHostedLinqSignupDispatchIntentTx(input: {
+  effect: HostedLinqSignupMessageSideEffect;
+  persistedDeliveryId: string | null;
+  persistedGroupJoinOutreachId: string | null;
+  persistedGroupJoinReplyOccurredAt: Date | null;
+  persistedIntentExists: boolean;
+  persistedSourceRef: string | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<
+  | {
+      effect: HostedLinqSignupMessageSideEffect;
+      sourceRef: string;
+      status: "resolved";
+    }
+  | {
+      status: "target_unauthorized";
+    }
+> {
+  const currentSourceRef = input.effect.effectId;
+  if (
+    input.persistedIntentExists
+    && input.persistedSourceRef !== currentSourceRef
+  ) {
+    return { status: "target_unauthorized" };
+  }
+
+  const persistedOutreachId =
+    input.persistedGroupJoinOutreachId?.trim() ?? "";
+  if (
+    input.persistedIntentExists
+    && Boolean(persistedOutreachId)
+      !== Boolean(input.persistedGroupJoinReplyOccurredAt)
+  ) {
+    return { status: "target_unauthorized" };
+  }
+
+  const payload = input.effect.payload;
+  const outreachId = input.persistedIntentExists
+    ? persistedOutreachId
+    : payload.groupJoinOutreachId?.trim() ?? "";
+  if (!outreachId) {
+    return {
+      effect: {
+        ...input.effect,
+        payload: {
+          ...payload,
+          groupJoinCode: undefined,
+          groupJoinOutreachId: undefined,
+        },
+      },
+      sourceRef: currentSourceRef,
+      status: "resolved",
+    };
+  }
+
+  const replyOccurredAt = input.persistedIntentExists
+    ? input.persistedGroupJoinReplyOccurredAt
+    : new Date(payload.occurredAt);
+  if (!replyOccurredAt || Number.isNaN(replyOccurredAt.getTime())) {
+    return { status: "target_unauthorized" };
+  }
+
+  const originalContext =
+    await readHostedGroupJoinOutreachReplyDeliveryContextTx({
+      excludeSignupDeliveryId: input.persistedDeliveryId,
+      memberId: payload.memberId,
+      outreachId,
+      tx: input.prisma,
+    });
+  if (originalContext?.kind === "already_member") {
+    if (!input.persistedIntentExists) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_MEMBERSHIP_CHANGED",
+        httpStatus: 503,
+        message:
+          "Group membership changed while the reply was being prepared. Retry the inbound message against current membership.",
+        retryable: true,
+      });
+    }
+    return {
+      effect: {
+        ...input.effect,
+        payload: {
+          ...payload,
+          groupJoinCode: originalContext.joinCode,
+          groupJoinOutreachId: outreachId,
+          occurredAt: replyOccurredAt.toISOString(),
+        },
+      },
+      sourceRef: currentSourceRef,
+      status: "resolved",
+    };
+  }
+  if (!originalContext) {
+    return { status: "target_unauthorized" };
+  }
+
+  return {
+    effect: {
+      ...input.effect,
+      payload: {
+        ...payload,
+        groupJoinCode: originalContext.joinCode,
+        groupJoinOutreachId: outreachId,
+        occurredAt: replyOccurredAt.toISOString(),
+      },
+    },
+    sourceRef: currentSourceRef,
+    status: "resolved",
+  };
+}
+
+function isHostedLinqSignupMessageSideEffect(
+  effect: HostedLinqMessageSideEffect,
+): effect is HostedLinqSignupMessageSideEffect {
+  return effect.payload.template === "invite_signup"
+    || effect.payload.template === "invite_signup_fallback";
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
@@ -871,9 +1311,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // A terminal receipt can beat this milestone write (it only just learned
     // the provider message id); the milestone replays that receipt and this
     // applies the same daily-state consequence as live receipt ingestion.
-    // Milestone and consequence commit atomically: a replayed failure must
-    // never mark the delivery terminally failed while leaving the member/day
-    // marked sent, or the planner suppresses retries for the rest of the day.
+    // Milestone and consequence commit atomically. Group reply availability is
+    // derived from live delivery rows; the shared member/day suppression clears
+    // only after the final live signup delivery fails.
     const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
@@ -882,16 +1322,34 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         prisma,
       });
       if (milestone.reopenOnboardingLink) {
-        await releaseHostedLinqOnboardingLinkNoticeClaim({
-          memberId: milestone.reopenOnboardingLink.memberId,
-          occurredAt: milestone.reopenOnboardingLink.occurredAt,
-          prisma,
-        });
+        const groupJoinReplyContext =
+          milestone.reopenOnboardingLink.groupJoinReplyContext;
+        if (
+          !groupJoinReplyContext
+          || milestone.reopenOnboardingLink.releaseDailySuppression === true
+        ) {
+          await releaseHostedLinqOnboardingLinkNoticeClaim({
+            memberId: milestone.reopenOnboardingLink.memberId,
+            occurredAt: milestone.reopenOnboardingLink.occurredAt,
+            prisma,
+          });
+        }
       }
-      if (milestone.restoreOnboardingLink) {
+      const payload = input.effect.payload;
+      if (
+        (
+          milestone.deliveryStatus === "accepted"
+          || milestone.deliveryStatus === "delivered"
+        )
+        &&
+        (
+          payload.template === "invite_signup"
+          || payload.template === "invite_signup_fallback"
+        )
+      ) {
         await markHostedLinqOnboardingLinkNoticeSent({
-          memberId: milestone.restoreOnboardingLink.memberId,
-          occurredAt: milestone.restoreOnboardingLink.occurredAt,
+          memberId: payload.memberId,
+          occurredAt: payload.occurredAt,
           prisma,
         });
       }
@@ -1115,7 +1573,12 @@ async function buildHostedInviteSideEffectMessage(input: {
   }
 
   return buildHostedInviteReply({
-    joinUrl: buildHostedInviteUrl(invite.inviteCode),
+    joinUrl: buildHostedGroupAwareInviteUrl({
+      groupJoinCode: "groupJoinCode" in input.payload
+        ? input.payload.groupJoinCode
+        : null,
+      inviteCode: invite.inviteCode,
+    }),
     seed: input.effectId,
   });
 }
@@ -1191,11 +1654,18 @@ function buildHostedWebhookLinqMessagePayload(
     case "invite_signup":
       return {
         chatId: input.chatId,
+        ...(input.groupJoinCode
+          ? { groupJoinCode: input.groupJoinCode }
+          : {}),
+        ...(input.groupJoinOutreachId
+          ? { groupJoinOutreachId: input.groupJoinOutreachId }
+          : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,
         ...(input.service === undefined ? {} : { service: input.service }),
+        sourceEventId: input.sourceEventId,
         ...(input.threadIsDirect === undefined ? {} : { threadIsDirect: input.threadIsDirect }),
         template: input.template,
       };
@@ -1203,11 +1673,18 @@ function buildHostedWebhookLinqMessagePayload(
       return {
         assignedRecipientPhone: input.assignedRecipientPhone,
         chatId: null,
+        ...(input.groupJoinCode
+          ? { groupJoinCode: input.groupJoinCode }
+          : {}),
+        ...(input.groupJoinOutreachId
+          ? { groupJoinOutreachId: input.groupJoinOutreachId }
+          : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
         memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
         replyToMessageId: null,
+        sourceEventId: input.sourceEventId,
         template: input.template,
       };
   }
@@ -1302,6 +1779,9 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
   try {
     switch (effect.payload.template) {
       case "invite_signup_fallback":
+        if (effect.payload.groupJoinOutreachId?.trim()) {
+          return;
+        }
         await releaseHostedLinqOnboardingLinkNoticeClaim({
           memberId: effect.payload.memberId,
           occurredAt: effect.payload.occurredAt,
@@ -1342,7 +1822,6 @@ async function markHostedLinqNoticeSentForSideEffect(
   ) {
     return;
   }
-
   await markHostedLinqOnboardingLinkNoticeSent({
     memberId: effect.payload.memberId,
     occurredAt: effect.payload.occurredAt,

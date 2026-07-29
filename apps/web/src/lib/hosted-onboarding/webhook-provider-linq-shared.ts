@@ -3,8 +3,8 @@ import type { Prisma } from "@prisma/client";
 import type { HostedRuntimeAiAccessNoticeCode } from "./member-access";
 
 import {
-  buildHostedInviteUrl,
-} from "./invite-service";
+  buildHostedGroupAwareInviteUrl,
+} from "../hosted-groups/group-join-invite-link";
 import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
@@ -129,6 +129,8 @@ export function buildIgnoredLinqWebhookPlan(
 
 export function buildSignupLinkResponse(input: {
   chatId: string;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -138,12 +140,17 @@ export function buildSignupLinkResponse(input: {
   sourceEventId: string;
   threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
-  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+  const joinUrl = buildHostedGroupAwareInviteUrl({
+    groupJoinCode: input.groupJoinCode,
+    inviteCode: input.inviteCode,
+  });
 
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
@@ -165,6 +172,8 @@ export function buildSignupLinkResponse(input: {
 
 export function buildFallbackSignupLinkResponse(input: {
   assignedPhone: string;
+  groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -172,12 +181,17 @@ export function buildFallbackSignupLinkResponse(input: {
   occurredAt: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
-  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+  const joinUrl = buildHostedGroupAwareInviteUrl({
+    groupJoinCode: input.groupJoinCode,
+    inviteCode: input.inviteCode,
+  });
 
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         assignedRecipientPhone: input.assignedPhone,
+        groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         memberPhone: input.memberPhone,
