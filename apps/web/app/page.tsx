@@ -28,6 +28,7 @@ import {
   formatHostedLandingTrialDurationPhrase,
   formatHostedLandingTrialPricingNote,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
@@ -151,7 +152,7 @@ export default async function HomePage() {
         <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <HowItWorksSection />
         <SecurityTeaserSection />
-        <FaqSection />
+        <FaqSection veniceAvailable={isHostedVeniceAssistantEnabled()} />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>

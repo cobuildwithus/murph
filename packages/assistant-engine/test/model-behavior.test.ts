@@ -820,19 +820,19 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never guess voice, model, or reasoning ids',
+      'never guess voice, model, provider, or reasoning ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use `/settings` for tone, model, or reasoning changes',
+      'Use `/settings` for tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model or reasoning changes',
+      'explicit user-requested model, core-reply provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',
@@ -2612,7 +2612,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'Model and reasoning controls remain unavailable in a group',
+      'Model, provider, and reasoning controls remain unavailable in a group',
     )
     expect(prompt).toContain(
       'Saved room-style changes begin on a later group turn',

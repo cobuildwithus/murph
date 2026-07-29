@@ -60,6 +60,9 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
           ? {}
           : { model: updateRequest.model }),
         prisma: tx,
+        ...(updateRequest.provider === undefined
+          ? {}
+          : { provider: updateRequest.provider }),
         ...(updateRequest.reasoningEffort === undefined
           ? {}
           : { reasoningEffort: updateRequest.reasoningEffort }),
@@ -81,6 +84,7 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       !isHostedOnboardingError(error) ||
       (
         error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" &&
+        error.code !== "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE" &&
         error.code !== "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED" &&
         error.code !== "HOSTED_ACCESS_REQUIRED"
       )
@@ -109,19 +113,23 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
 
 function projectHostedRuntimeAssistantConfigurationSnapshot(input: {
   availableModels: readonly HostedRuntimeAssistantConfigurationSnapshot["model"][];
+  availableProviders: readonly HostedRuntimeAssistantConfigurationSnapshot["provider"][];
   availableReasoningEfforts: readonly HostedRuntimeAssistantConfigurationSnapshot["reasoningEffort"][];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedRuntimeAssistantConfigurationSnapshot["model"];
+  provider: HostedRuntimeAssistantConfigurationSnapshot["provider"];
   reasoningEffort: HostedRuntimeAssistantConfigurationSnapshot["reasoningEffort"];
   solAvailable: boolean;
 }): HostedRuntimeAssistantConfigurationSnapshot {
   return {
     availableModels: [...input.availableModels],
+    availableProviders: [...input.availableProviders],
     availableReasoningEfforts: [...input.availableReasoningEfforts],
     configurationAvailable: input.configurationAvailable,
     dormantSolPreference: input.dormantSolPreference,
     model: input.model,
+    provider: input.provider,
     reasoningEffort: input.reasoningEffort,
     solAvailable: input.solAvailable,
   };
