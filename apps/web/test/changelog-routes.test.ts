@@ -35,14 +35,15 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(22);
+    expect(items).toHaveLength(23);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 9 }, () => "2026-07-29"),
+      ...Array.from({ length: 10 }, () => "2026-07-29"),
       ...Array.from({ length: 13 }, () => "2026-07-28"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
         "post-onboarding-choice-point",
+        "telegram-imessage-contact-handoff",
         "imessage-edits-become-corrections",
         "clubs-challenge-pilot-page",
         "imessage-instant-start",

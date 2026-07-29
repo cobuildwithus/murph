@@ -67,7 +67,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-29",
     title: "Corrections that carry forward",
     summary:
-      "iMessage edits now become real corrections, Murph can circle back once after onboarding, clubs have a place to plan a challenge pilot, and group context, experiment history, image updates, and the public site all read more clearly.",
+      "iMessage edits now become real corrections, Telegram can hand off the right iMessage line, Murph can circle back once after onboarding, clubs have clearer planning, and group context, experiment history, image updates, and the public site all read more clearly.",
     items: [
       {
         id: "post-onboarding-choice-point",
@@ -108,6 +108,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Missing, synthetic, or unavailable titles stay unnamed, and the title is treated as display text rather than an instruction.",
         relevanceTags: ["groups", "assistant", "messaging", "setup"],
         sourcePullRequests: [1088],
+      },
+      {
+        id: "telegram-imessage-contact-handoff",
+        kind: "feature",
+        priority: 4,
+        title: "Ask Telegram for your iMessage number",
+        summary:
+          "In a private Telegram chat, ask Murph for its iMessage number and it can return your existing assigned line or reserve one healthy line for the exact verified phone on your account.",
+        details:
+          "A success names the masked phone that should send the first iMessage. Email-only, mismatched-phone, or unavailable-capacity cases keep Telegram working and point to Settings when account proof needs attention.",
+        relevanceTags: ["telegram", "imessage", "messaging", "setup"],
+        sourcePullRequests: [1103],
       },
       {
         id: "imessage-edits-become-corrections",

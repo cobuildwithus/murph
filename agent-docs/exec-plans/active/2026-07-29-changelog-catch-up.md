@@ -54,13 +54,17 @@ Updated: 2026-07-29
 - Refreshed `origin/main` after verification and folded the later Clubs
   iMessage-and-supported-wearables presentation into the same July 29 item
   rather than publishing a duplicate entry.
+- Rebased the task commit onto the current root snapshot after `main` history
+  changed, then added the newly merged Telegram-to-iMessage contact handoff to
+  the same July 29 edition.
 - Updated the existing changelog archive design study with synthetic correction
   evidence and no new component or screen.
-- Focused changelog coverage passed: 26 tests.
+- Focused changelog coverage passed: 27 tests.
 - `pnpm test:frontend-design-proof` passed: 10 tests.
-- Canonical `pnpm test:diff` passed dependency and boundary guards, web
-  typecheck, 7,386 tests, lint with no errors, dev smoke, and the production
-  Next build.
+- Canonical `pnpm test:diff` passed on the final candidate through the required
+  Crabbox fallback after the local shared-host admission wait exceeded ten
+  minutes: dependency and boundary guards, web typecheck, 7,404 tests, lint
+  with no errors, dev smoke, and the production Next build.
 - Desktop and mobile direct-route checks passed at 1440 by 1100 and 390 by 844:
   the latest edition rendered, the Clubs action resolved to `/clubs`, and
   neither viewport had horizontal overflow.
@@ -73,3 +77,5 @@ Updated: 2026-07-29
   groups, focused registry coverage preserves that boundary, and the bounded
   re-review returned no findings after inspecting both editions at desktop and
   mobile widths.
+- A focused product follow-up reviewed the later Telegram-to-iMessage handoff
+  entry and refreshed July 29 route captures with no findings.

@@ -64,6 +64,17 @@ describe("changelog registry", () => {
     });
   });
 
+  it("keeps the Telegram handoff bound to the exact verified phone", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "telegram-imessage-contact-handoff",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1103],
+      summary: expect.stringContaining("exact verified phone"),
+    });
+  });
+
   it("publishes the complete July 20 through July 29 shipment set", () => {
     expect(
       listChangelogEditions().slice(0, 10).map((edition) => ({
@@ -77,6 +88,7 @@ describe("changelog registry", () => {
           "post-onboarding-choice-point",
           "clubs-challenge-pilot-page",
           "group-chat-title-on-demand",
+          "telegram-imessage-contact-handoff",
           "imessage-edits-become-corrections",
           "group-participant-changes-in-context",
           "confident-image-generation-status",
