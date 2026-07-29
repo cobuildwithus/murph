@@ -22,11 +22,21 @@ import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
+import {
   FieldDescription,
   FieldLegend,
   FieldSet,
 } from "@/src/components/ui/field";
-import { RadioGroup } from "@/src/components/ui/radio-group";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@/src/components/ui/radio-group";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import {
@@ -107,6 +117,85 @@ interface HostedAssistantModelSettingsProps {
   veniceAvailable?: boolean;
 }
 
+interface AssistantProviderDialogProps {
+  onOpenChange: (open: boolean) => void;
+  onProviderChange: (provider: HostedAssistantProvider) => void;
+  open: boolean;
+  provider: HostedAssistantProvider;
+}
+
+export function AssistantProviderDialog({
+  onOpenChange,
+  onProviderChange,
+  open,
+  provider,
+}: AssistantProviderDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[min(28rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[28rem] md:p-7">
+        <DialogHeader className="gap-2 pr-10">
+          <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal">
+            Choose model provider
+          </DialogTitle>
+          <DialogDescription className="max-w-[38ch] text-sm/6">
+            Choose where Murph runs core assistant inference. Your choice is
+            applied when you save this form.
+          </DialogDescription>
+        </DialogHeader>
+        <RadioGroup
+          aria-label="Model provider"
+          className="divide-y divide-border border-y border-border"
+          value={provider}
+          onValueChange={(value) => {
+            if (!isHostedAssistantProvider(value)) {
+              return;
+            }
+            onProviderChange(value);
+            onOpenChange(false);
+          }}
+        >
+          {PROVIDER_OPTIONS.map((option) => {
+            const titleId = `assistant-provider-${option.provider}-title`;
+            const descriptionId =
+              `assistant-provider-${option.provider}-description`;
+            return (
+              <label
+                className="flex min-h-16 cursor-pointer items-center gap-4 py-3 text-left hover:text-foreground has-[:focus-visible]:rounded-lg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                htmlFor={`assistant-provider-${option.provider}`}
+                key={option.provider}
+              >
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span
+                    className="text-sm font-medium text-foreground"
+                    id={titleId}
+                  >
+                    {option.name}
+                  </span>
+                  <span
+                    className="text-sm text-muted-foreground"
+                    id={descriptionId}
+                  >
+                    {option.description}
+                  </span>
+                </span>
+                <RadioGroupItem
+                  aria-describedby={descriptionId}
+                  aria-labelledby={titleId}
+                  id={`assistant-provider-${option.provider}`}
+                  value={option.provider}
+                />
+              </label>
+            );
+          })}
+        </RadioGroup>
+        <p className="text-sm/6 text-pretty text-muted-foreground">
+          Specialized tools can continue using their own managed providers.
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function HostedAssistantModelSettings(
   props: HostedAssistantModelSettingsProps,
 ) {
@@ -136,6 +225,7 @@ function HostedAssistantModelSettingsForm(
   const [veniceAvailable, setVeniceAvailable] = useState(
     props.veniceAvailable === true,
   );
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
@@ -212,6 +302,7 @@ function HostedAssistantModelSettingsForm(
         setCurrentProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
         setDraftProvider(HOSTED_ASSISTANT_OPENAI_PROVIDER);
         setVeniceAvailable(false);
+        setProviderDialogOpen(false);
       }
       setStatus({
         message: solNoLongerAvailable
@@ -240,52 +331,6 @@ function HostedAssistantModelSettingsForm(
       <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
         Choose the intelligence behind your personal health assistant.
       </p>
-
-      {veniceAvailable ? (
-        <>
-          <FieldSet
-            className="w-full gap-3"
-            disabled={controlsDisabled}
-          >
-            <FieldLegend className="sr-only">Inference provider</FieldLegend>
-            <FieldDescription className="sr-only">
-              Choose where Murph runs its core assistant inference.
-            </FieldDescription>
-            <RadioGroup
-              className="grid gap-3 md:grid-cols-2"
-              disabled={controlsDisabled}
-              value={draftProvider}
-              onValueChange={(value) => {
-                if (!isHostedAssistantProvider(value)) {
-                  return;
-                }
-                setDraftProvider(value);
-                setStatus(null);
-              }}
-            >
-              {PROVIDER_OPTIONS.map((option) => (
-                <ChoiceCard
-                  badge={readProviderOptionBadge({
-                    current: option.provider === currentProvider,
-                    selected: option.provider === draftProvider,
-                  })}
-                  description={option.description}
-                  disabled={controlsDisabled}
-                  id={`assistant-provider-${option.provider}`}
-                  key={option.provider}
-                  meta="Luna, Terra, and Sol"
-                  title={option.name}
-                  value={option.provider}
-                />
-              ))}
-            </RadioGroup>
-          </FieldSet>
-          <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
-            Provider changes apply to core assistant inference. Specialized tools
-            can continue using their own managed providers.
-          </p>
-        </>
-      ) : null}
 
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
@@ -359,6 +404,39 @@ function HostedAssistantModelSettingsForm(
         </RadioGroup>
       </FieldSet>
 
+      {veniceAvailable ? (
+        <>
+          <div className="flex w-full items-center gap-2 px-1">
+            <p className="text-sm text-muted-foreground">
+              Served on{" "}
+              <span className="font-medium text-foreground">
+                {readProviderName(draftProvider)}
+              </span>
+            </p>
+            <Button
+              aria-label={`Change model provider. Current selection: ${readProviderName(draftProvider)}`}
+              className="text-muted-foreground"
+              disabled={controlsDisabled}
+              onClick={() => setProviderDialogOpen(true)}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              Change
+            </Button>
+          </div>
+          <AssistantProviderDialog
+            onOpenChange={setProviderDialogOpen}
+            onProviderChange={(provider) => {
+              setDraftProvider(provider);
+              setStatus(null);
+            }}
+            open={providerDialogOpen}
+            provider={draftProvider}
+          />
+        </>
+      ) : null}
+
       {props.configurationAvailable && !solAvailable ? (
         <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-pretty text-muted-foreground">
@@ -386,16 +464,6 @@ function HostedAssistantModelSettingsForm(
       </div>
     </form>
   );
-}
-
-function readProviderOptionBadge(input: {
-  current: boolean;
-  selected: boolean;
-}): React.ReactNode {
-  if (input.current) {
-    return <ModelOptionBadge>Current</ModelOptionBadge>;
-  }
-  return input.selected ? <ModelOptionBadge>Selected</ModelOptionBadge> : null;
 }
 
 function readModelOptionBadge(input: {
