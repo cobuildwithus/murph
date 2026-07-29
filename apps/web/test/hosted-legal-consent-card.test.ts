@@ -53,6 +53,12 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
   expect(compactMarkup).toContain("w-full");
   expect(panelMarkup).toContain('role="status"');
   expect(panelMarkup).toContain('aria-busy="true"');
+  expect(panelMarkup).toContain('data-consent-skeleton="launch"');
+  expect(panelMarkup).toContain("h-24");
+  expect(panelMarkup).toContain("sm:h-[4.5rem]");
+  expect(panelMarkup).toContain("h-28");
+  expect(panelMarkup).toContain("sm:h-[5.75rem]");
+  expect(panelMarkup).toContain("max-w-[13rem]");
   expect(panelMarkup).not.toContain("shadow-");
   expect(panelMarkup).not.toContain("#c4a882");
   expect(panelMarkup).not.toContain("#fefdf8");

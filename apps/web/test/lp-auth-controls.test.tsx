@@ -30,7 +30,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
       }) => Promise<void> | void;
-      onViewChange?: (view: "auth" | "consent" | "finishing") => void;
+      onViewChange?: (view: "auth" | "consent") => void;
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -96,14 +96,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             onClick: () => props.onViewChange?.("consent"),
           },
           "Show consent",
-        ),
-        createElement(
-          "button",
-          {
-            type: "button",
-            onClick: () => props.onViewChange?.("finishing"),
-          },
-          "Show finishing",
         ),
       );
     },
@@ -236,7 +228,7 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
-test("LandingAuthActions gives consent and finishing views matching dialog titles", async () => {
+test("LandingAuthActions gives the consent view a matching dialog title", async () => {
   const { button, cleanup, container, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
@@ -269,16 +261,6 @@ test("LandingAuthActions gives consent and finishing views matching dialog title
       (candidate) => candidate.textContent?.trim() === "Close",
     ),
   ).toBe(false);
-
-  const finishingButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent === "Show finishing",
-  );
-  await act(async () => {
-    finishingButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-
-  expect(container.textContent).toContain("Setting things up");
-  expect(container.textContent).toContain("Murph is preparing your account.");
 });
 
 test("LandingAuthActions sends completed homepage signups through the initial-visit home dialog", async () => {

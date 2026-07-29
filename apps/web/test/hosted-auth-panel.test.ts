@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     }) => Promise<void> | void;
     onCodeSent?: () => void;
     onCompleted?: (payload: unknown) => Promise<void> | void;
+    sendCodeGated?: boolean;
   } | null,
   loginWithCode: vi.fn(),
   loginWithTelegram: vi.fn(),
@@ -384,7 +385,7 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
 });
 
-test("HostedAuthPanel swaps to the shared finishing notice while completion runs", async () => {
+test("HostedAuthPanel keeps auth mounted and puts completion progress on the active button", async () => {
   mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
 
   const { cleanup, container, window } = await renderClientComponent(
@@ -402,9 +403,18 @@ test("HostedAuthPanel swaps to the shared finishing notice while completion runs
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(container.textContent).toContain("Setting things up");
-  expect(container.textContent).toContain("Keep this tab open");
-  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
+  const pendingTelegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Finishing..."),
+  ) as HTMLButtonElement | undefined;
+
+  expect(pendingTelegramButton).toBeTruthy();
+  expect(pendingTelegramButton?.disabled).toBe(true);
+  expect(pendingTelegramButton?.getAttribute("aria-busy")).toBe("true");
+  expect(pendingTelegramButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+  expect(container.textContent).not.toContain("Setting things up");
+  expect(container.textContent).not.toContain("Keep this tab open");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.sendCodeGated).toBe(true);
 });
 
 test("HostedAuthPanel surfaces shared completion failures and restores the auth methods", async () => {

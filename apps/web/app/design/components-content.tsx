@@ -30,8 +30,9 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
-import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import {
+  ConsentSkeleton,
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
 } from "@/src/components/legal/hosted-legal-consent-card";
@@ -490,6 +491,74 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Homepage auth transitions">
+          <div
+            className="flex flex-col gap-6"
+            data-design-homepage-auth-transitions
+          >
+            <p className="text-sm text-muted-foreground">
+              Account completion stays on the active method, then the loading
+              placeholder mirrors the real launch-consent structure so the dialog
+              keeps a stable footprint while consent status loads.
+            </p>
+            <DialogPreviewFrame label="Account completion stays on the action">
+              <div className="grid grid-cols-2 gap-3">
+                <HostedInlineAuthButton
+                  active
+                  busy
+                  disabled
+                  icon={<Spinner aria-hidden="true" />}
+                  onClick={() => {}}
+                >
+                  Finishing...
+                </HostedInlineAuthButton>
+                <HostedInlineAuthButton
+                  disabled
+                  icon={<CheckCircle2 aria-hidden="true" className="size-5" />}
+                  onClick={() => {}}
+                >
+                  Email
+                </HostedInlineAuthButton>
+              </div>
+            </DialogPreviewFrame>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Consent loading to decision
+            </p>
+            <div className="grid items-start gap-5 lg:grid-cols-2" inert>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="loading"
+              >
+                <ConsentSkeleton
+                  secondaryAction={
+                    <Button
+                      className="px-3 text-muted-foreground"
+                      size="lg"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Decline
+                    </Button>
+                  }
+                />
+              </div>
+              <div
+                className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 ring-1 ring-[#1A1F16]/[0.06] sm:p-7"
+                data-design-homepage-consent="loaded"
+              >
+                <HostedLegalConsentCard
+                  initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+                  mode="compact"
+                  onDecline={() => {}}
+                  source="design-homepage-consent"
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Dashboard legal update">
           <div
             className="rounded-2xl border border-border bg-background px-5 py-6 sm:px-8"
@@ -797,21 +866,6 @@ export function ComponentsContent() {
                 itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
               />
             </div>
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Auth Finishing Notice">
-          <p className="text-sm text-muted-foreground">
-            Shown inside the sign-in dialog while the account is being provisioned.
-            The animated Murph mark ripples outward from its warm center — core dots
-            breathe first, mid amber ring trails by 200ms, sage outer ring by 400ms.
-          </p>
-          <div className="max-w-md">
-            <DialogPreviewFrame label="In dialog context">
-              <HostedAuthFinishingNotice />
-            </DialogPreviewFrame>
           </div>
         </Section>
 

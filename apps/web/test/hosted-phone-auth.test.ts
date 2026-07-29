@@ -1096,6 +1096,29 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
+  it("shows verification progress inside the submit button", async () => {
+    const { HostedVerificationCodeStep } = await import(
+      "@/src/components/hosted-onboarding/hosted-verification-code-step"
+    );
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedVerificationCodeStep, {
+        code: "123456",
+        description: "We emailed a code.",
+        disabled: true,
+        pendingAction: "verify-code",
+        primaryActionLabel: "Verify email",
+        primaryActionPendingLabel: "Finishing...",
+        onCodeChange() {},
+        onResendCode() {},
+        onSubmit() {},
+      }),
+    );
+
+    assert.match(markup, /aria-busy="true"/);
+    assert.match(markup, /data-slot="spinner"/);
+    assert.match(markup, /Finishing\.\.\./);
+  });
+
   it("uses neutral code-entry copy for no-signup public login phone checks", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 

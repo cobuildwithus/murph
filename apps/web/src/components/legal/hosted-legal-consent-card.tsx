@@ -772,27 +772,46 @@ export function ConsentSkeleton({
   secondaryAction?: React.ReactNode;
 } = {}) {
   return (
-    <div className="flex w-full flex-col gap-5">
-      <div className="flex flex-col gap-3.5">
-        <Skeleton className="h-2.5 w-28 rounded-full" />
-        <Skeleton className="h-6 w-64 max-w-full rounded-full" />
+    <div className="flex w-full flex-col gap-5" data-consent-skeleton="launch">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2.5">
-          <Skeleton className="h-4 w-full rounded-full" />
-          <Skeleton className="h-4 w-4/5 rounded-full" />
+          <Skeleton className="h-7 w-56 max-w-full rounded-full" />
+          <div className="flex h-24 flex-col justify-between sm:h-[4.5rem]">
+            <Skeleton className="h-4 w-full rounded-full" />
+            <Skeleton className="h-4 w-full rounded-full" />
+            <Skeleton className="h-4 w-3/4 rounded-full" />
+            <Skeleton className="h-4 w-1/2 rounded-full sm:hidden" />
+          </div>
         </div>
-        <div className="flex gap-2.5">
+        <div className="flex h-28 flex-col gap-2 rounded-xl bg-muted/50 px-3.5 py-3 sm:h-[5.75rem]">
+          <div className="flex h-5 items-center gap-2.5">
+            <Skeleton className="size-3.5 shrink-0 rounded-full" />
+            <Skeleton className="h-3.5 w-44 max-w-[80%] rounded-full" />
+          </div>
+          <div className="flex min-h-10 items-start gap-2.5">
+            <Skeleton className="mt-[3px] size-3.5 shrink-0 rounded-full" />
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Skeleton className="h-3.5 w-full rounded-full" />
+              <Skeleton className="h-3.5 w-3/4 rounded-full" />
+              <Skeleton className="h-3.5 w-1/2 rounded-full sm:hidden" />
+            </div>
+          </div>
+        </div>
+        <div className="flex h-5 flex-wrap content-start items-center gap-x-4 gap-y-1.5 max-[350px]:h-10">
           <Skeleton className="h-3 w-12 rounded-full" />
           <Skeleton className="h-3 w-16 rounded-full" />
           <Skeleton className="h-3 w-20 rounded-full" />
+          <Skeleton className="h-3 w-16 rounded-full" />
         </div>
       </div>
       <div
-        className={cn({
-          "grid grid-cols-[7rem_minmax(0,1fr)] gap-3": secondaryAction,
-        })}
+        className={cn(
+          "flex items-center gap-3",
+          secondaryAction ? "justify-between" : "justify-end",
+        )}
       >
         {secondaryAction}
-        <Skeleton className="h-11 rounded-2xl" />
+        <Skeleton className="h-11 w-full max-w-[13rem] rounded-2xl" />
       </div>
     </div>
   );

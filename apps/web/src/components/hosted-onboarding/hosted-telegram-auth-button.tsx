@@ -3,6 +3,7 @@
 import { useLoginWithTelegram, usePrivy } from "@privy-io/react-auth";
 
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import {
   describeTelegramAuthError,
@@ -13,13 +14,17 @@ import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion
 
 export function HostedTelegramAuthButton({
   active = false,
+  completionPending = false,
   disableSignup = false,
+  disabled = false,
   onActivate,
   onAuthenticated,
   onNoticeChange,
 }: {
   active?: boolean;
+  completionPending?: boolean;
   disableSignup?: boolean;
+  disabled?: boolean;
   onActivate: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
@@ -48,11 +53,16 @@ export function HostedTelegramAuthButton({
   return (
     <HostedInlineAuthButton
       active={active}
-      disabled={!ready || loading}
-      icon={<TelegramIcon className="h-5 w-5" />}
+      busy={completionPending}
+      disabled={disabled || !ready || loading || completionPending}
+      icon={
+        completionPending
+          ? <Spinner aria-hidden="true" />
+          : <TelegramIcon className="h-5 w-5" />
+      }
       onClick={handleClick}
     >
-      {loading ? "Connecting..." : "Telegram"}
+      {completionPending ? "Finishing..." : loading ? "Connecting..." : "Telegram"}
     </HostedInlineAuthButton>
   );
 }

@@ -6,6 +6,7 @@ import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { Spinner } from "@/src/components/ui/spinner";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/privy-client";
 import {
@@ -20,7 +21,6 @@ import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
-  HostedAuthFinishingNotice,
   HostedAuthLegalNotice,
   type TelegramAuthNotice,
 } from "./hosted-auth-shared";
@@ -40,7 +40,7 @@ type HostedResumableAuth = {
   method: HostedResumableAuthMethod;
 };
 
-export type HostedAuthPanelView = "auth" | "consent" | "finishing";
+export type HostedAuthPanelView = "auth" | "consent";
 
 export function HostedAuthPanel({
   inviteCode,
@@ -93,12 +93,11 @@ export function HostedAuthPanel({
     !codeSent && primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
+  const authCompletionPending = completion.completingMethod !== null;
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
-    : completion.completingMethod
-      ? "finishing"
-      : "auth";
+    : "auth";
   useEffect(() => {
     onViewChange?.(view);
   }, [onViewChange, view]);
@@ -205,10 +204,6 @@ export function HostedAuthPanel({
     );
   }
 
-  if (completion.completingMethod) {
-    return <HostedAuthFinishingNotice />;
-  }
-
   return (
     <div className="space-y-4">
       <HostedPrivyCaptcha />
@@ -216,7 +211,8 @@ export function HostedAuthPanel({
       {showResumableAuthState ? (
         <HostedResumableAuthState
           auth={resumableAuth}
-          disabled={completion.completingMethod !== null}
+          disabled={authCompletionPending}
+          pending={completion.completingMethod === resumableAuth.method}
           onContinue={handleContinueResumableAuth}
           onSignOut={handleSignOutResumableAuth}
         />
@@ -228,6 +224,7 @@ export function HostedAuthPanel({
           onSignOut={onSignOut}
           phoneInputAutoFocus
           renderCaptcha={false}
+          sendCodeGated={authCompletionPending}
           size={size}
           suppressAuthenticatedSessionIssue={telegramActive || resumableAuth !== null}
         />
@@ -236,6 +233,8 @@ export function HostedAuthPanel({
       {primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
+          completionPending={completion.completingMethod === "email"}
+          disabled={authCompletionPending}
           onAuthenticated={completion.completeAuth}
           onActivate={() => {}}
           inline
@@ -253,6 +252,8 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
+                completionPending={completion.completingMethod === "telegram"}
+                disabled={authCompletionPending}
                 onAuthenticated={completion.completeAuth}
                 onActivate={() => {
                   setPrimaryMethod("phone");
@@ -265,6 +266,7 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
+                  disabled={authCompletionPending}
                   onAuthenticated={completion.completeAuth}
                   onActivate={() => {
                     setPrimaryMethod("email");
@@ -275,7 +277,7 @@ export function HostedAuthPanel({
               ) : (
                 <HostedInlineAuthButton
                   active={false}
-                  disabled={false}
+                  disabled={authCompletionPending}
                   icon={<PhoneIcon className="h-5 w-5" />}
                   onClick={() => {
                     setPrimaryMethod("phone");
@@ -319,11 +321,13 @@ export function HostedAuthPanel({
 function HostedResumableAuthState({
   auth,
   disabled,
+  pending,
   onContinue,
   onSignOut,
 }: {
   auth: HostedResumableAuth;
   disabled: boolean;
+  pending: boolean;
   onContinue: () => Promise<void> | void;
   onSignOut: () => Promise<void> | void;
 }) {
@@ -338,13 +342,19 @@ function HostedResumableAuthState({
       <AlertDescription>{description}</AlertDescription>
       <div className="mt-3 flex flex-wrap gap-3">
         <Button
+          aria-busy={pending}
           type="button"
           onClick={onContinue}
           disabled={disabled}
           size="lg"
           className="min-w-32 flex-1"
         >
-          Continue
+          {pending ? (
+            <>
+              <Spinner aria-hidden="true" />
+              Finishing...
+            </>
+          ) : "Continue"}
         </Button>
         <Button
           type="button"

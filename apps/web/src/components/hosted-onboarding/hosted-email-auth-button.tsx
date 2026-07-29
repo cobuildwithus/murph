@@ -21,7 +21,9 @@ import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion
 
 export function HostedEmailAuthButton({
   active = false,
+  completionPending = false,
   disableSignup = false,
+  disabled: externallyDisabled = false,
   inline = false,
   initialEmailAddress = null,
   lockedEmailAddress = null,
@@ -29,7 +31,9 @@ export function HostedEmailAuthButton({
   onAuthenticated,
 }: {
   active?: boolean;
+  completionPending?: boolean;
   disableSignup?: boolean;
+  disabled?: boolean;
   inline?: boolean;
   initialEmailAddress?: string | null;
   lockedEmailAddress?: string | null;
@@ -53,7 +57,7 @@ export function HostedEmailAuthButton({
 
   const loading =
     state.status === "sending-code" || state.status === "submitting-code";
-  const disabled = !ready || loading;
+  const disabled = externallyDisabled || !ready || loading || completionPending;
   const showCodeEntry = pendingEmailAddress !== null;
 
   function clearCode() {
@@ -246,9 +250,11 @@ export function HostedEmailAuthButton({
             }
             disabled={disabled}
             inputRef={codeInputRef}
-            pendingAction={loading ? "verify-code" : null}
+            pendingAction={loading || completionPending ? "verify-code" : null}
             primaryActionLabel="Verify email"
-            primaryActionPendingLabel="Verifying..."
+            primaryActionPendingLabel={
+              completionPending ? "Finishing..." : "Verifying..."
+            }
             secondaryAction={codeStepSecondaryAction}
             onCodeChange={setCode}
             onResendCode={handleResendCode}
@@ -322,9 +328,11 @@ export function HostedEmailAuthButton({
               }
               disabled={disabled}
               inputRef={codeInputRef}
-              pendingAction={loading ? "verify-code" : null}
+              pendingAction={loading || completionPending ? "verify-code" : null}
               primaryActionLabel="Verify email"
-              primaryActionPendingLabel="Verifying..."
+              primaryActionPendingLabel={
+                completionPending ? "Finishing..." : "Verifying..."
+              }
               secondaryAction={codeStepSecondaryAction}
               onCodeChange={setCode}
               onResendCode={handleResendCode}

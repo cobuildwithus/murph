@@ -155,14 +155,10 @@ export function AuthDialog({
 
   const resolvedTitle = panelView === "consent"
     ? "Use your health data with Murph"
-    : panelView === "finishing"
-      ? "Setting things up"
-      : title;
+    : title;
   const resolvedDescription = panelView === "consent"
     ? "Review how Murph uses health data before continuing."
-    : panelView === "finishing"
-      ? "Murph is preparing your account."
-      : description;
+    : description;
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && panelView === "consent") {
