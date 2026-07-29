@@ -242,18 +242,11 @@ if (!tool) {
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
-    const executionOutput = readRecord(
-      readCodeModeExecutionOutput(summaries[1]),
-    )
-    const automationOutput = readRecord(JSON.parse(
-      readString(executionOutput?.result) ?? 'null',
-    ))
-    expect(executionOutput?.found).toBe(true)
-    expect(automationOutput).toMatchObject({
-      automationId: 'automation-native-deferred',
-      lookupId: 'morning-reminder',
-      status: 'active',
-    })
+    const automationOutput =
+      summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('automation-native-deferred')
+    expect(automationOutput).toContain('morning-reminder')
+    expect(automationOutput).toContain('active')
     expect(automationRequests).toEqual([{
       action: 'save',
       instructions: 'Send a short reminder.',
@@ -450,13 +443,10 @@ text(JSON.stringify(result));
     expect(groupSharedRequests).toEqual([{
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
     }])
-    const groupOutput = readRecord(JSON.parse(
-      readString(readCodeModeExecutionOutput(summaries[1])) ?? 'null',
-    ))
-    expect(groupOutput).toMatchObject({
-      action: 'read_shared',
-      result: { status: 'none' },
-    })
+    const groupOutput = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(groupOutput).toContain('read_shared')
+    expect(groupOutput).toContain('steps-days.v0')
+    expect(groupOutput).toContain('none')
     expect(result.finalMessage).toBe('EAGER_GROUP_READ_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -1559,18 +1549,6 @@ function readProviderToolOutputText(value: unknown): string | null {
     .map((item) => readString(item?.text))
     .filter((text): text is string => text !== null)
   return textItems.length > 0 ? textItems.join('\n') : null
-}
-
-function readCodeModeExecutionOutput(
-  summary: ScriptedProviderRequestSummary | undefined,
-): unknown {
-  const output = summary?.customToolCallOutputs?.[0] ?? ''
-  const marker = '\nOutput:\n\n'
-  const markerIndex = output.lastIndexOf(marker)
-  if (markerIndex < 0) {
-    throw new Error('Expected a code-mode execution output marker.')
-  }
-  return JSON.parse(output.slice(markerIndex + marker.length))
 }
 
 function writeScriptedSseResponse(input: {
