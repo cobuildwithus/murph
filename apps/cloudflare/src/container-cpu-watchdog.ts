@@ -1,12 +1,8 @@
-import {
-  emitHostedExecutionStructuredLog,
-  sanitizeHostedExecutionStructuredLogText,
-} from "@murphai/hosted-execution";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 10_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
 const HOSTED_CONTAINER_CPU_WATCHDOG_TOP_PROCESS_COUNT = 3;
-const HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM = "[redacted]";
 const HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES = new Set([
   "bash",
   "cat",
@@ -69,10 +65,11 @@ interface HostedContainerCpuWatchdogSample {
 // Always-on CPU attribution sampler for the hosted runner container. Samples
 // cgroup CPU totals plus per-process tick counters on a fixed interval and
 // emits one structured log per interval whose CPU usage crosses the threshold,
-// naming the top processes by kernel comm plus an allowlisted executable
-// basename read from /proc/<pid>/exe (never command lines, arguments, or
-// executable paths), so production CPU burns are attributable to a specific
-// process. Diagnostics only: sampling failures never affect the runner.
+// naming the top processes only by an allowlisted executable basename read
+// from /proc/<pid>/exe, with an allowlisted kernel comm as the unavailable-exe
+// fallback (never arbitrary comm values, command lines, arguments, or paths),
+// so production CPU burns are attributable without exposing private names.
+// Diagnostics only: sampling failures never affect the runner.
 export function startHostedContainerCpuWatchdog(input: {
   processApi: HostedContainerCpuWatchdogProcessApi;
 }): () => void {
@@ -288,10 +285,8 @@ function emitHostedContainerCpuWatchdogReport(input: {
   }
   const intervalSeconds = intervalMs / 1000;
   const topCpuProcesses: Array<{
-    comm: string;
-    commRedacted: boolean;
     cpuCores: number;
-    executable?: string;
+    executable: string;
     pid: number;
   }> = [];
   let perPidTicksDelta = 0;
@@ -323,16 +318,23 @@ function emitHostedContainerCpuWatchdogReport(input: {
     }
     perPidTicksDelta += deltaTicks;
     if (deltaTicks > 0) {
-      const redactedComm = redactHostedContainerCpuWatchdogComm(current.comm);
-      topCpuProcesses.push({
-        comm: redactedComm.comm,
-        commRedacted: redactedComm.redacted,
-        cpuCores: roundHostedContainerCpuCores(
-          deltaTicks / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND / intervalSeconds,
-        ),
-        ...(current.executable ? { executable: current.executable } : {}),
-        pid,
-      });
+      const executable = current.executable
+        ?? (
+          HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(current.comm)
+            ? current.comm
+            : null
+        );
+      if (executable) {
+        topCpuProcesses.push({
+          cpuCores: roundHostedContainerCpuCores(
+            deltaTicks
+              / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND
+              / intervalSeconds,
+          ),
+          executable,
+          pid,
+        });
+      }
     }
   }
   const cgroupUsageUsecDelta =
@@ -377,16 +379,6 @@ function emitHostedContainerCpuWatchdogReport(input: {
     phase: "wake.running",
     userId: null,
   });
-}
-
-function redactHostedContainerCpuWatchdogComm(
-  comm: string,
-): { comm: string; redacted: boolean } {
-  const sanitized = sanitizeHostedExecutionStructuredLogText(comm);
-  if (!sanitized) {
-    return { comm: HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM, redacted: true };
-  }
-  return { comm: sanitized, redacted: sanitized !== comm };
 }
 
 function subtractOptionalCpuWatchdogCounters(
