@@ -29,6 +29,10 @@ import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../managed-automations.js'
 import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+  MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
+} from '../onboarding-goal-checkin-automation.js'
+import {
   normalizeAssistantExecutionContext,
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
@@ -469,6 +473,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const onboardingGoalCheckinTurn =
+    input.input.scheduledInvocationAuthority?.automationId ===
+      MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
   const systemNotificationTurn =
     input.profile.promptProfile === 'system-notification' ||
     input.profile.promptProfile === 'creative-notification'
@@ -479,7 +486,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
-    input.profile.promptProfile === 'creative-notification'
+    input.profile.promptProfile === 'creative-notification' ||
+    onboardingGoalCheckinTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -742,6 +750,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       promptResult.layers.staticCacheableCorePrompt,
       promptResult.layers.stableRouteCapabilityPrompt,
       promptResult.layers.threadContextPrompt,
+      onboardingGoalCheckinTurn
+        ? MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY
+        : null,
     ]
       .filter((section): section is string =>
         Boolean(normalizeNullableString(section)),
@@ -783,7 +794,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const availableDynamicTools = outputOnlyTurn
+  const availableDynamicTools = outputOnlyTurn || onboardingGoalCheckinTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
@@ -926,7 +937,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
       }
     : null
   const systemPromptResult = threadStartPromptResult
-  const systemPrompt = systemPromptResult.prompt
+  const systemPrompt = onboardingGoalCheckinTurn
+    ? [
+        systemPromptResult.prompt,
+        MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
+      ].join('\n\n')
+    : systemPromptResult.prompt
   const developerInstructions =
     resumeCodexThreadId === null
       ? threadStartDeveloperInstructions

@@ -48,6 +48,9 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
   context collection or split onboarding into competing lifecycle owners.
+- Keep the post-onboarding choice point separate from unfinished-onboarding
+  recovery. It is one finite managed one-shot for members who answered
+  onboarding, not another collection flow, recurring cadence, or profile.
 - Do not add persisted step state, branch state, profile completion, context
   maturity, or a data-point score. Infer progress from visible conversation,
   the existing resume snapshot, and a targeted canonical read only when the
@@ -542,6 +545,41 @@ including after onboarding closes. Honor requested timing and skip whenever
 there is no timely onboarding continuation. Every user-facing scheduled
 continuation includes exactly one easy question that invites a reply; a
 reflection-only scheduled message returns skip.
+
+## Post-Onboarding Choice Point
+
+After answered onboarding, Murph gets one low-pressure chance to ask what
+deserves attention now. The one-shot is scheduled 21 local-calendar days after
+completion and expires seven days later. Existing eligible members receive one
+future same-weekday catch-up rather than an immediate late message; once
+installed, its occurrence does not drift. A quiet rollout wake may reuse the
+route of an active immutable member-owned managed automation, so an existing
+member does not need to send another message before the catch-up is installed.
+
+This is an ordinary member-owned managed automation in the current private
+conversation. Murph uses recent conversation and targeted canonical vault
+reads to understand current goals or open threads, relevant progress, and
+whether another review already owns the moment. If the goal was unclear,
+unshared, deliberately open, or exploratory, Murph must not pretend one exists
+or manufacture a problem; keeping the thread open is a valid answer. Murph
+sends two to four short sentences with one easy question or skips quietly.
+Missing or messy data is not failure, and praise requires specific evidence.
+The scheduled turn does not create or change goals, plans, experiments,
+regimens, memories, or automations; normal conversation owns any change after
+the member replies. That boundary is immutable rather than relying on editable
+task wording: this exact managed identity suspends ordinary save/ingestion
+guidance, removes hosted mutation tools and external network access, and keeps
+only read access to the current private vault.
+
+If live Linq authority replaces an older personal route with the member's
+current home chat, that same authority supplies the raw delivery target and its
+privacy-blinded conversation locator. Murph resumes the current private
+conversation rather than reasoning in the old chat and delivering in the new
+one.
+
+Canonical onboarding state remains the scheduling and execution authority.
+Open, declined, and manual completion do not create the one-shot, and reopened
+or replaced completion state blocks a pending occurrence before delivery.
 
 ## Success Criteria
 
