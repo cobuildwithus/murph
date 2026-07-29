@@ -8,6 +8,7 @@ import {
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   type HostedAssistantModelOverride,
+  type HostedAssistantProviderOverride,
   type HostedAssistantReasoningEffortOverride,
 } from "@murphai/hosted-execution/assistant-model";
 
@@ -326,6 +327,51 @@ describe("hosted runner container identity", () => {
       .toBe(expectedModel);
   });
 
+  it("applies Venice per member while retaining a scoped OpenAI tool credential", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const sourceOpenAiKey = "test-openai-key";
+    const sourceVeniceKey = "test-venice-key";
+    const service = createRuntimeInvocationService({
+      hostedAssistantProviderOverride: "venice",
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: {
+          id: "version_1",
+        },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: sourceOpenAiKey,
+        VENICE_API_KEY: sourceVeniceKey,
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_provider_override",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+    const forwardedEnv = prepared.job.runtime?.forwardedEnv;
+
+    expect(forwardedEnv?.HOSTED_ASSISTANT_PROVIDER).toBe("venice");
+    expect(forwardedEnv?.OPENAI_API_KEY).toEqual(expect.any(String));
+    expect(forwardedEnv?.OPENAI_API_KEY).not.toBe(sourceOpenAiKey);
+    expect(forwardedEnv?.VENICE_API_KEY).toEqual(expect.any(String));
+    expect(forwardedEnv?.VENICE_API_KEY).not.toBe(sourceVeniceKey);
+  });
+
   it("projects the saved reasoning effort into the next runtime invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -558,6 +604,7 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 
 function createRuntimeInvocationService(input: {
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   invokedContainerNames: string[];
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
@@ -581,6 +628,9 @@ function createRuntimeInvocationService(input: {
       fetchedAt: FIXED_NOW,
       ...(input.hostedAssistantModelOverride
         ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
+        : {}),
+      ...(input.hostedAssistantProviderOverride
+        ? { hostedAssistantProviderOverride: input.hostedAssistantProviderOverride }
         : {}),
       ...(input.hostedAssistantReasoningEffortOverride
         ? {

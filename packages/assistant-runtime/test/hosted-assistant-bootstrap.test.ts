@@ -45,7 +45,7 @@ afterEach(async () => {
 });
 
 describe("ensureHostedAssistantOperatorDefaults", () => {
-  it("accepts only hosted Codex App Server profiles with OpenAI as the model provider", () => {
+  it("accepts hosted Codex App Server profiles with a supported model provider", () => {
     const hostedConfig = {
       activeProfileId: "platform-default",
       profiles: [
@@ -171,7 +171,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
   it("fails closed for unsupported hosted provider env", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
-    for (const provider of ["legacy", "openrouter", "venice", "custom", "unsupported-provider"]) {
+    for (const provider of ["legacy", "openrouter", "custom", "unsupported-provider"]) {
       await expect(
         ensureHostedAssistantOperatorDefaults({
           allowMissing: false,

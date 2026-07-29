@@ -40,6 +40,7 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
@@ -555,7 +556,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model or reasoning changes only when that separate tool is available.',
+    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -603,7 +604,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows those names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -616,6 +617,11 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
         type: 'string',
         enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
         description: 'Optional next-turn model for action="update".',
+      },
+      provider: {
+        type: 'string',
+        enum: [...HOSTED_ASSISTANT_PROVIDERS],
+        description: 'Optional next-turn core-reply provider for action="update".',
       },
       reasoningEffort: {
         type: 'string',
@@ -1740,6 +1746,12 @@ const assistantConfigurationArgumentsSchema = z
     z.object({
       action: z.literal('update'),
       model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
+      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS).optional(),
+      reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
+    }).strict(),
+    z.object({
+      action: z.literal('update'),
+      provider: z.enum(HOSTED_ASSISTANT_PROVIDERS),
       reasoningEffort: z.enum(HOSTED_ASSISTANT_REASONING_EFFORTS).optional(),
     }).strict(),
     z.object({
@@ -3580,6 +3592,7 @@ async function executeAssistantConfigurationTool(input: {
   try {
     const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
       model: null,
+      provider: null,
       reasoningEffort: null,
     }
     if (input.request.action === 'read') {
@@ -3609,6 +3622,7 @@ async function executeAssistantConfigurationTool(input: {
     const savedForNextTurn = readResult.result
     const requestedForNextTurn = {
       model: input.request.model ?? savedForNextTurn.model,
+      provider: input.request.provider ?? savedForNextTurn.provider,
       reasoningEffort:
         input.request.reasoningEffort ?? savedForNextTurn.reasoningEffort,
     }
@@ -3637,22 +3651,30 @@ async function executeAssistantConfigurationTool(input: {
         },
       }))
     }
-    const result = input.request.model === undefined
+    const result = input.request.model !== undefined
       ? await assistantConfigurationTool.request({
           action: 'update',
           assistantInputId,
-          reasoningEffort: requestedForNextTurn.reasoningEffort,
+          model: requestedForNextTurn.model,
+          ...(input.request.provider === undefined
+            ? {}
+            : { provider: requestedForNextTurn.provider }),
+          ...(input.request.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
         })
-      : input.request.reasoningEffort === undefined
+      : input.request.provider !== undefined
         ? await assistantConfigurationTool.request({
             action: 'update',
             assistantInputId,
-            model: requestedForNextTurn.model,
+            provider: requestedForNextTurn.provider,
+            ...(input.request.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
           })
         : await assistantConfigurationTool.request({
             action: 'update',
             assistantInputId,
-            model: requestedForNextTurn.model,
             reasoningEffort: requestedForNextTurn.reasoningEffort,
           })
     if (result.action !== 'update') {
@@ -5602,7 +5624,7 @@ function parseAssistantConfigurationArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.assistant_configuration.input',
-        schemaRootKeys: ['action', 'model', 'reasoningEffort'],
+        schemaRootKeys: ['action', 'model', 'provider', 'reasoningEffort'],
         toolName: 'murph.assistant_configuration',
       }),
     }
