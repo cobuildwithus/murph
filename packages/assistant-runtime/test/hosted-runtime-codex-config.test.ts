@@ -891,6 +891,15 @@ testHostedCodexAuthE2e(
           .slice(0, fixedRequestCount)
           .some((request) => /hello hosted auth regression/u.test(request)),
       );
+      const currentTimeReminders = requests
+        .slice(0, fixedRequestCount)
+        .flatMap(
+          (request) =>
+            request.match(
+              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+            ) ?? [],
+        );
+      assert.equal(currentTimeReminders.length, 1);
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,

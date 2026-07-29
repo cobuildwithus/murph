@@ -629,7 +629,8 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
     conversationScope === "unverified-external"
       ? ASSISTANT_DATE_STYLE_GUIDANCE_TEXT
       : buildAssistantTimeStyleContextText({
-          currentTimeAvailable: input.hostedRuntime === true,
+          personalCurrentTimeAvailable:
+            input.hostedRuntime === true && conversationScope === "direct",
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
@@ -946,7 +947,7 @@ function buildAssistantProductBaseUrlLineText(
 }
 
 function buildAssistantTimeStyleContextText(input: {
-  currentTimeAvailable: boolean;
+  personalCurrentTimeAvailable: boolean;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
@@ -955,7 +956,7 @@ function buildAssistantTimeStyleContextText(input: {
       buildAssistantTimezoneLineText(input.currentTimeZone),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
       ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
-      ...(input.currentTimeAvailable
+      ...(input.personalCurrentTimeAvailable
         ? [ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT]
         : []),
     ].join("\n"),

@@ -30,7 +30,21 @@ exercise instead of proposing something that no longer makes sense at that hour.
 
 ## Verification
 
-- Focused assistant-engine prompt and planning tests.
-- Canonical `pnpm test:diff` for changed paths.
-- Required prompt/coverage specialist review and product-experience review.
-- Parent scope, diff, and regression review.
+- Prompt/model-behavior proof: 73 passed. The generated-config suite passed
+  40 tests with 2 unrelated opt-in lanes skipped; its enabled real-Codex lane
+  passed 41 tests with 1 unrelated lane skipped.
+- Pinned Codex 0.145.0 accepted the exact reminder table and injected its
+  current-time developer message into a captured provider request.
+- Identical provider-boundary fixtures measured +160 `o200k_base` tokens and
+  +596 UTF-8 bytes for direct Murph, including the stable instruction and
+  Codex-generated reminder. Group Murph receives only the native reminder:
+  +37 tokens and +112 bytes.
+- Product-experience review passed after the advice rule was gated to hosted
+  runtime only.
+- Preliminary ReviewGPT found that the personal-time rule must exclude
+  synthetic group rooms and that the real-Codex test needed a provider-boundary
+  reminder assertion; both findings are resolved with focused passing proof.
+- Parent final review.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
