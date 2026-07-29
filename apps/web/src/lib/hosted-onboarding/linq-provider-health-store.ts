@@ -237,3 +237,48 @@ export async function readHostedLinqChatHealth(input: {
     providerUpdatedAt: state.providerUpdatedAt,
   };
 }
+
+export async function filterHostedLinqNewConversationLines<
+  TLine extends { phoneNumberLookupKey: string },
+>(input: {
+  lines: readonly TLine[];
+  prisma: HostedLinqProviderHealthClient;
+}): Promise<TLine[]> {
+  if (input.lines.length === 0) {
+    return [];
+  }
+
+  const states = await input.prisma.hostedLinqLineProviderState.findMany({
+    select: {
+      phoneNumberLookupKey: true,
+      reputationStatus: true,
+      serviceStatus: true,
+    },
+    where: {
+      phoneNumberLookupKey: {
+        in: [...new Set(input.lines.map((line) => line.phoneNumberLookupKey))],
+      },
+    },
+  });
+  const stateByLine = new Map(
+    states.map((state) => [state.phoneNumberLookupKey, state] as const),
+  );
+  return input.lines.filter((line) => {
+    const state = stateByLine.get(line.phoneNumberLookupKey);
+    return isHostedLinqLineProviderStateEligibleForNewConversation({
+      reputationStatus: state?.reputationStatus ?? null,
+      serviceStatus: state?.serviceStatus ?? null,
+    });
+  });
+}
+
+export function isHostedLinqLineProviderStateEligibleForNewConversation(input: {
+  reputationStatus: unknown;
+  serviceStatus: unknown;
+}): boolean {
+  const serviceStatus = parseHostedLinqLineServiceStatus(input.serviceStatus);
+  const reputationStatus = parseHostedLinqLineReputationStatus(input.reputationStatus);
+  return serviceStatus !== "FLAGGED"
+    && reputationStatus !== "AT_RISK"
+    && reputationStatus !== "CRITICAL";
+}
