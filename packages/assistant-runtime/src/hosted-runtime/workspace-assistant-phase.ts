@@ -487,6 +487,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { group: null, status: "unavailable", unavailableReason },
       };
+    case "read_chat_name":
+      return {
+        action: request.action,
+        result: { displayName: null, status: "unavailable", unavailableReason },
+      };
     case "read_chat_participants":
       return {
         action: request.action,

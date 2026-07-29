@@ -1,7 +1,10 @@
 interface GrowthScorecardProps {
   activeUsers: {
     trailing30Days: number;
+    trailing30DaysComplete: boolean;
     trailing7Days: number;
+    trailing7DaysComplete: boolean;
+    wowComparisonComplete: boolean;
     wowPercent: number | null;
   };
   conversion: {
@@ -83,12 +86,12 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             />
             <GrowthSignal
               className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
-              detail={`${formatInteger(input.activeUsers.trailing30Days)} MAU across personal + group chats`}
+              detail={formatMonthlyActiveUsers(input.activeUsers)}
               helper={formatActiveUserChange(
-                input.activeUsers.wowPercent,
+                input.activeUsers,
               )}
               label="Weekly active users"
-              value={`${formatInteger(input.activeUsers.trailing7Days)} WAU`}
+              value={formatWeeklyActiveUsers(input.activeUsers)}
             />
           </div>
         </div>
@@ -263,15 +266,40 @@ function formatWindowChange(value: number | null): string {
   return `${formatGrowthRate(value)} versus the prior seven days`;
 }
 
-function formatActiveUserChange(value: number | null): string {
-  const activityDefinition =
-    "Each distinct sender counts once across personal + group chats";
+function formatMonthlyActiveUsers(
+  activeUsers: GrowthScorecardProps["activeUsers"],
+): string {
+  const prefix = activeUsers.trailing30DaysComplete ? "" : "At least ";
+  return `${prefix}${formatInteger(activeUsers.trailing30Days)} MAU across personal + group chats`;
+}
 
-  if (value === null) {
-    return `No prior-week WAU baseline · ${activityDefinition}`;
+function formatWeeklyActiveUsers(
+  activeUsers: GrowthScorecardProps["activeUsers"],
+): string {
+  const prefix = activeUsers.trailing7DaysComplete ? "" : "At least ";
+  return `${prefix}${formatInteger(activeUsers.trailing7Days)} WAU`;
+}
+
+function formatActiveUserChange(
+  activeUsers: GrowthScorecardProps["activeUsers"],
+): string {
+  const activityDefinition =
+    "Each retained distinct sender counts once across personal + group chats";
+
+  if (!activeUsers.wowComparisonComplete) {
+    return `Prior-week comparison unavailable because older group sender evidence was intentionally retired · ${activityDefinition}`;
   }
 
-  return `${formatGrowthRate(value)} WAU versus the prior seven days · ${activityDefinition}`;
+  const monthlyHistory =
+    activeUsers.trailing30DaysComplete
+      ? ""
+      : "MAU is a lower bound because older group sender evidence was intentionally retired · ";
+
+  if (activeUsers.wowPercent === null) {
+    return `${monthlyHistory}No prior-week WAU baseline · ${activityDefinition}`;
+  }
+
+  return `${formatGrowthRate(activeUsers.wowPercent)} WAU versus the prior seven days · ${monthlyHistory}${activityDefinition}`;
 }
 
 function formatInteger(value: number): string {
