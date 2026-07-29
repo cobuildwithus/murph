@@ -212,6 +212,20 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { ownerMemberId },
         })).toBe(0);
 
+        await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
+          now: new Date("2026-07-29T18:06:00.000Z"),
+          ownerMemberId,
+          setup: {
+            roomContextMarkdown:
+              "Replacement state should cascade with the member.",
+            style: { personality: { detail: 2, humor: 1 } },
+          },
+          tx,
+        }));
+        expect(await observer.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(1);
+
         await observer.hostedMember.delete({ where: { id: ownerMemberId } });
         expect(await observer.hostedPendingGroupSetup.count({
           where: { ownerMemberId },
