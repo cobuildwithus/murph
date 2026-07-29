@@ -2147,14 +2147,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...result.members[0],
           projections: [{
             ...projection,
-            records: Array.from({ length: 8 }, (_, index) => ({
+            records: Array.from({ length: 9 }, (_, index) => ({
               ...projection.records[0],
               recordKey: `2026-07-0${index + 1}`,
             })),
           }],
         }],
       },
-    })).toThrow(/at most 7/u);
+    })).toThrow(/at most 8/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
