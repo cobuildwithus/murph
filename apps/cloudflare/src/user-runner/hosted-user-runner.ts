@@ -123,7 +123,8 @@ export class HostedUserRunner {
       assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
         this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
       },
-      readHostedRuntimeStatusFromWeb: async (userId) => await this.readHostedRuntimeStatusFromWeb(userId),
+      readHostedRuntimeStatusFromWeb: async (userId) =>
+        await this.readHostedRuntimeStatusFromWeb(userId, { logLimit: 0 }),
       readHostedWebControlBaseUrl: () => this.readHostedWebControlBaseUrl(),
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
     });
@@ -429,7 +430,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_STATUS_PATH,
-      search: input.logLimit ? `?logLimit=${input.logLimit}` : null,
+      search: input.logLimit === undefined ? null : `?logLimit=${input.logLimit}`,
       timeoutMs: this.env.webControlTimeoutMs,
     });
 

@@ -182,6 +182,18 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
 
+### Experiment Start Channel Picker
+When more than one connected channel can continue a public experiment start,
+use one compact dialog rather than a stack of large destination cards. Lead
+with a mono `START EXPERIMENT · {N}-DAY PROTOCOL` line, then show the full
+Fraunces protocol title without truncation and one sentence explaining that
+Murph prepares a reviewable message. Channel links are flat 64–72px rows with
+one muted icon tile, channel name, plain-language destination description, and
+a right chevron. Do not repeat the protocol inside a nested card, add
+availability counts, or show redundant channel badges. End with the quiet
+review-before-send reminder. On phones the dialog sits above the safe-area edge;
+on larger screens it centers at no more than 540px wide.
+
 ### Cards
 - **Corner Style:** rounded-lg (10–12px).
 - **Background:** `rgba(255, 252, 246, 0.9)` — translucent card surface, warmer than cream.
@@ -377,6 +389,16 @@ server-owned bit duration beside that field. Stack amount cards and actions on
 narrow screens, preserve visible focus and selection states, and render the
 production components on both the Components and Sections tabs of `/design`
 for review.
+
+When group funding is fulfilled, switch from the payment-status composition to
+one confident success hierarchy: a compact sage confirmation mark and mono
+`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
+sentence confirming that the contribution is ready, then a warm-divider handoff
+to **Open Messages**. State that Messages opens without a group deep link and
+the member must choose the group. Do not repeat the confirmation in a bordered
+status card, keep payment-pending copy visible, invent an amount, or add
+celebration graphics. Once fulfillment is verified, do not carry frozen sponsor
+details or their payment-recovery instructions into the success receipt.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
