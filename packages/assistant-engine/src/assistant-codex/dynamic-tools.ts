@@ -2745,7 +2745,7 @@ export async function executeMurphDynamicToolRequest(input: {
         return {
           ...toolTextResult(
             false,
-            'private response image could not be prepared; rerun the trusted command and attach its returned media',
+            'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
           ),
           finalActionPatch: { kind: 'reply-required' },
         }

@@ -108,6 +108,13 @@ Updated: 2026-07-29
   that code means the bytes changed later; a fresh attachment read is the
   existing recovery path and may succeed. Globally terminalizing it would
   convert a repairable change into silence.
+- Accept both preliminary specialist findings. A generic preparation failure
+  must not invite an unbounded producer rerun or another
+  `finish_without_reply`; the existing reply-required state and tool result now
+  direct one immediate visible final reply. Because production intentionally
+  did not identify the mismatched descriptor field, the owner-level regression
+  supplies wrong-but-valid hash, size, filename, and MIME hints and proves all
+  four are derived from the selected bytes.
 
 ## Verification
 
@@ -151,3 +158,11 @@ Updated: 2026-07-29
   concurrent load. Its immediate isolated rerun passed all 13 tests in 1.8
   seconds, proving the failure was suite contention rather than the private
   media change.
+- Preliminary `completion-specialists` ReviewGPT returned two accepted medium
+  findings: bound the failed-tool recovery contract to one visible reply, and
+  prove canonicalization of every untrusted metadata field. The corrected
+  focused private-media suite passed 26/26.
+- The first PR media E2E attempt never started its tests because the hosted web
+  process could not bind an occupied fixed CI port. All three cases were
+  skipped; an unchanged-head job rerun was requested rather than changing
+  product code.

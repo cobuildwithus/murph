@@ -359,12 +359,12 @@ describe('assistant vault-file send', () => {
         arguments: {
           media: [{
             alt: 'Experiment progress',
-            contentType: 'image/png',
-            filename: 'progress-card.png',
+            contentType: 'image/jpeg',
+            filename: 'wrong-progress-card.jpg',
             kind: 'vault_image',
             ref,
             sha256: 'a'.repeat(64),
-            sizeBytes: bytes.byteLength,
+            sizeBytes: bytes.byteLength + 1,
             source: 'murph.experiment-progress-card',
           }],
         },
@@ -451,6 +451,15 @@ describe('assistant vault-file send', () => {
       }],
       success: false,
     })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'do not retry, regenerate it, or call finish_without_reply',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'explain that the image is unavailable in the final reply now',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      'rerun the trusted command',
+    )
     expect(result.finalActionPatch).toEqual({ kind: 'reply-required' })
     expect(result.responseMediaPatch).toBeUndefined()
   })
