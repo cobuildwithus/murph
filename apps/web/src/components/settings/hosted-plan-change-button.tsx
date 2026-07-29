@@ -80,11 +80,6 @@ export function HostedPlanChangeButton(props: {
     }
   }
 
-  const price = formatHostedBillingPrice(
-    plan.recurringAmountUsdCents,
-  );
-  const effectiveDate = formatHostedBillingDate(props.currentPeriodEnd);
-
   return (
     <div className={cn(
       "flex flex-col gap-2",
@@ -101,67 +96,98 @@ export function HostedPlanChangeButton(props: {
       </Button>
       <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
         <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              {verb} to {plan.displayName}
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              {props.mode === "schedule"
-                ? `Your current plan continues through ${effectiveDate}. Then ${plan.displayName} starts at ${price}/month.`
-                : `${plan.displayName} starts now at ${price}/month. Stripe applies the prorated plan change to your current billing period.`}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="rounded-xl border border-[#c4a882]/25 bg-white/55 px-5 py-4">
-            <p className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
-              {price}
-              <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">
-                / month
-              </span>
-            </p>
-            {props.targetPlanCode === "launch_group_monthly" ? (
-              <p className="mt-2 text-sm leading-6 text-[#736a58]">
-                For confirmed group members who want wearable syncing, group
-                participation, and lighter private Murph usage.
-              </p>
-            ) : null}
-          </div>
-
-          {errorMessage ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-            >
-              {errorMessage}
-            </p>
-          ) : null}
-
-          <div className="flex flex-col gap-2">
-            <Button
-              type="button"
-              size="xl"
-              onClick={() => void handleConfirm()}
-              disabled={pending}
-              className="w-full"
-            >
-              {pending
-                ? props.mode === "schedule" ? "Scheduling..." : "Upgrading..."
-                : `Confirm ${props.mode === "schedule" ? "switch" : "upgrade"}`}
-            </Button>
-            <Button
-              type="button"
-              size="xl"
-              variant="ghost"
-              onClick={() => setConfirmationOpen(false)}
-              disabled={pending}
-              className="w-full"
-            >
-              Cancel
-            </Button>
-          </div>
+          <HostedPlanChangeConfirmationContent
+            currentPeriodEnd={props.currentPeriodEnd}
+            errorMessage={errorMessage}
+            mode={props.mode}
+            onClose={() => setConfirmationOpen(false)}
+            onConfirm={() => void handleConfirm()}
+            pending={pending}
+            targetPlanCode={props.targetPlanCode}
+          />
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export function HostedPlanChangeConfirmationContent(props: {
+  currentPeriodEnd?: string | null;
+  errorMessage: string | null;
+  mode: "schedule" | "upgrade";
+  onClose: () => void;
+  onConfirm: () => void;
+  pending: boolean;
+  targetPlanCode: HostedBillingPlanCode;
+}) {
+  const plan = getHostedBillingPlanDefinition(props.targetPlanCode);
+  const verb = props.mode === "schedule" ? "Switch" : "Upgrade";
+  const price = formatHostedBillingPrice(
+    plan.recurringAmountUsdCents,
+  );
+  const effectiveDate = formatHostedBillingDate(props.currentPeriodEnd);
+
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          {verb} to {plan.displayName}
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          {props.mode === "schedule"
+            ? `Your current plan continues through ${effectiveDate}. Then ${plan.displayName} starts at ${price}/month.`
+            : `${plan.displayName} starts now at ${price}/month. Stripe applies the prorated plan change to your current billing period.`}
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="rounded-xl border border-[#c4a882]/25 bg-white/55 px-5 py-4">
+        <p className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
+          {price}
+          <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">
+            / month
+          </span>
+        </p>
+        {props.targetPlanCode === "launch_group_monthly" ? (
+          <p className="mt-2 text-sm leading-6 text-[#736a58]">
+            For confirmed group members who want wearable syncing, group
+            participation, and lighter private Murph usage.
+          </p>
+        ) : null}
+      </div>
+
+      {props.errorMessage ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+        >
+          {props.errorMessage}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          size="xl"
+          onClick={props.onConfirm}
+          disabled={props.pending}
+          className="w-full"
+        >
+          {props.pending
+            ? props.mode === "schedule" ? "Scheduling..." : "Upgrading..."
+            : `Confirm ${props.mode === "schedule" ? "switch" : "upgrade"}`}
+        </Button>
+        <Button
+          type="button"
+          size="xl"
+          variant="ghost"
+          onClick={props.onClose}
+          disabled={props.pending}
+          className="w-full"
+        >
+          Cancel
+        </Button>
+      </div>
+    </>
   );
 }
 
