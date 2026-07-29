@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   readAssistantTargetProviderScalar,
+  resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
   supportsAssistantAcceptedMessageTargetingRoute,
 } from '../src/assistant/message-target-selection.ts'
@@ -208,6 +209,109 @@ describe('accepted message target selection', () => {
     })
   })
 
+  it('derives the exact participant from each accepted mixed-sender group message', async () => {
+    const context = await createTempVaultContext('assistant-message-participant-')
+    tempRoots.push(context.parentRoot)
+    const first = await createTargetFixture({
+      actorId: 'actor-a',
+      channel: 'linq',
+      externalThreadRouteAuthorityPresent: true,
+      messageId: 'linq-group-participant-a',
+      reactionEligible: true,
+      senderHandle: '+15551110000',
+      service: 'iMessage',
+      threadIsDirect: false,
+      vault: context.vaultRoot,
+    })
+    const second = await createTargetFixture({
+      actorId: 'actor-b',
+      channel: 'linq',
+      externalThreadRouteAuthorityPresent: true,
+      messageId: 'linq-group-participant-b',
+      reactionEligible: true,
+      senderHandle: '+15552220000',
+      service: 'iMessage',
+      threadIsDirect: false,
+      vault: context.vaultRoot,
+    })
+    const acceptedInputIds = [first.inputId, second.inputId]
+
+    await expect(resolveParticipant(first, acceptedInputIds, first.inputId))
+      .resolves.toEqual({
+        participant: {
+          assistantInputId: first.inputId,
+          senderHandle: '+15551110000',
+          source: 'linq',
+        },
+        targetInputId: first.inputId,
+      })
+    await expect(resolveParticipant(first, acceptedInputIds, second.inputId))
+      .resolves.toEqual({
+        participant: {
+          assistantInputId: second.inputId,
+          senderHandle: '+15552220000',
+          source: 'linq',
+        },
+        targetInputId: second.inputId,
+      })
+  })
+
+  it('rejects invented, cross-turn, and cross-room participant refs', async () => {
+    const fixture = await createTargetFixture({
+      channel: 'telegram',
+      externalThreadRouteAuthorityPresent: true,
+      messageId: '424242',
+      senderHandle: '7770001',
+      threadIsDirect: false,
+    })
+    const inventedRef = 'ain_ffffffffffffffffffffffffffffffff'
+
+    await expect(
+      resolveParticipant(fixture, [inventedRef], inventedRef),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+    })
+    await expect(
+      resolveParticipant(fixture, [], fixture.inputId),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+    })
+
+    fixture.route.threadId = 'another-room'
+    await expect(
+      resolveParticipant(fixture, [fixture.inputId], fixture.inputId),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+    })
+    fixture.route.threadId = 'thread-hash'
+    fixture.route.explicitTarget = 'another-provider-room'
+    await expect(
+      resolveParticipant(fixture, [fixture.inputId], fixture.inputId),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+    })
+  })
+
+  it('fails participant effects closed when sender evidence is missing without disabling normal reply targeting', async () => {
+    const fixture = await createTargetFixture({
+      channel: 'linq',
+      externalThreadRouteAuthorityPresent: true,
+      messageId: 'linq-group-unattributed',
+      reactionEligible: true,
+      service: 'iMessage',
+      threadIsDirect: false,
+    })
+
+    await expect(resolveTarget(fixture, 'native-reply')).resolves.toMatchObject({
+      targetInputId: fixture.inputId,
+    })
+    await expect(
+      resolveParticipant(fixture, [fixture.inputId], fixture.inputId),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_MESSAGE_TARGET_UNAVAILABLE',
+    })
+  })
+
   it('gates static tool availability on a real conversational route', () => {
     expect(
       supportsAssistantAcceptedMessageTargetingRoute({
@@ -266,26 +370,47 @@ async function resolveTarget(
   })
 }
 
+async function resolveParticipant(
+  fixture: TargetFixture,
+  acceptedInputIds: readonly string[],
+  messageRef: string,
+) {
+  return await resolveAssistantAcceptedMessageParticipant({
+    acceptedInputIds,
+    messageRef,
+    route: fixture.route,
+    vault: fixture.vault,
+  })
+}
+
 async function createTargetFixture(input: {
+  actorId?: string
   channel: 'linq' | 'telegram'
   explicitTarget?: string
   externalThreadRouteAuthorityPresent?: boolean
   messageId: string
   reactionEligible?: boolean
+  senderHandle?: string | null
   service?: string | null
   threadIsDirect?: boolean
+  vault?: string
 }): Promise<TargetFixture> {
-  const context = await createTempVaultContext('assistant-message-target-')
-  tempRoots.push(context.parentRoot)
+  const context = input.vault
+    ? null
+    : await createTempVaultContext('assistant-message-target-')
+  if (context) {
+    tempRoots.push(context.parentRoot)
+  }
+  const vault = input.vault ?? context!.vaultRoot
   const accountId = 'account-hash'
   const explicitTarget = input.explicitTarget ?? 'provider-thread'
   const stored = await upsertAssistantInputEvent({
-    vault: context.vaultRoot,
+    vault,
     event: {
       content: { text: 'target message' },
       conversation: {
         accountId,
-        actorId: 'actor-hash',
+        actorId: input.actorId ?? 'actor-hash',
         actorIsSelf: false,
         source: input.channel,
         threadId: 'thread-hash',
@@ -308,12 +433,21 @@ async function createTargetFixture(input: {
               partCount: 1,
               reactionEligible: input.reactionEligible ?? false,
               replyToMessageId: null,
+              ...(input.senderHandle !== undefined
+                ? { senderHandle: input.senderHandle }
+                : {}),
               service: input.service ?? null,
             }
           : {
+              ...(input.externalThreadRouteAuthorityPresent
+                ? { externalThreadRouteAuthorityPresent: true }
+                : {}),
               kind: 'telegram',
               mediaGroupId: null,
               replyContext: null,
+              ...(input.senderHandle !== undefined
+                ? { senderHandle: input.senderHandle }
+                : {}),
             },
       sourceRef: {
         dedupeKey: `dedupe-${input.messageId}`,
@@ -334,13 +468,13 @@ async function createTargetFixture(input: {
     accountId,
     inputId: stored.inputId,
     route: {
-      actorId: 'actor-hash',
+      actorId: input.actorId ?? 'actor-hash',
       channel: input.channel,
       explicitTarget,
       identityId: input.channel === 'linq' ? accountId : null,
       threadId: 'thread-hash',
       threadIsDirect: input.threadIsDirect ?? true,
     },
-    vault: context.vaultRoot,
+    vault,
   }
 }

@@ -761,27 +761,7 @@ describe("appendHostedMailboxItemTx", () => {
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.appended",
-        level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          bytes: payloadBytes,
-          dedupeKeyPresent: true,
-          duplicate: false,
-          inserted: true,
-          kind: "conversation.message",
-          schema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          storage: "inline",
-        }),
-        userId: "member_mailbox_1",
-      }),
-    });
+    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
   });
 
   it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
@@ -952,6 +932,7 @@ describe("appendHostedMailboxItemTx", () => {
   });
 
   it("returns the first item for duplicate dedupe keys without rewriting payload storage", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const existing = buildHostedMailboxItemRow({
       dedupeKey: "dedupe_existing_1",
       kind: "conversation.message",
@@ -994,40 +975,23 @@ describe("appendHostedMailboxItemTx", () => {
     );
     expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.dedupe_conflict",
-        level: "warn",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          existingKind: "conversation.message",
-          requestedKind: "member.activated",
-        }),
-        userId: "member_mailbox_1",
-      }),
+    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalledWith("Hosted mailbox dedupe conflict.", {
+      component: "mailbox",
+      eventCode: "mailbox.dedupe_conflict",
+      existingBytes: 64,
+      existingHasHash: false,
+      existingKind: "conversation.message",
+      existingLane: "conversation",
+      existingSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      requestedBytes: expect.any(Number),
+      requestedHasHash: true,
+      requestedKind: "member.activated",
+      requestedLane: "system",
+      requestedSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     });
-    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        component: "mailbox",
-        eventCode: "mailbox.appended",
-        level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: 1n,
-        mailboxSeqStart: 1n,
-        phase: "import",
-        redactedJson: expect.objectContaining({
-          duplicate: true,
-          inserted: false,
-          kind: "conversation.message",
-          storage: "inline",
-        }),
-        userId: "member_mailbox_1",
-      }),
-    });
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("dedupe_existing_1");
+    consoleWarn.mockRestore();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });

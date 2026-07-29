@@ -41,6 +41,8 @@ import type {
   HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupParticipantDisplayName,
+  HostedRuntimeGroupParticipantDisplayNameSource,
   HostedRuntimeGroupSharedMember,
   HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadRequest,
@@ -303,6 +305,18 @@ export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
 export type AssistantHostedGroupSharedReadResponse =
   HostedRuntimeGroupSharedReadResult
 
+export type AssistantGroupParticipantDisplayNameSource =
+  HostedRuntimeGroupParticipantDisplayNameSource
+export type AssistantGroupParticipantDisplayName =
+  HostedRuntimeGroupParticipantDisplayName
+
+export interface AssistantHostedGroupParticipantDisplayNameReader {
+  read(input: {
+    channel: 'linq'
+    senderHandles: readonly string[]
+  }): Promise<readonly AssistantGroupParticipantDisplayName[]>
+}
+
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
@@ -399,6 +413,7 @@ export interface AssistantHostedExecutionContext {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
@@ -497,6 +512,10 @@ export function normalizeAssistantExecutionContext(
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupParticipantDisplayNameReader =
+    normalizeAssistantGroupParticipantDisplayNameReader(
+      hosted?.groupParticipantDisplayNameReader,
+    )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
     hosted?.groupPermissionOfferTool,
   )
@@ -545,6 +564,9 @@ export function normalizeAssistantExecutionContext(
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
@@ -802,6 +824,20 @@ function normalizeAssistantGroupTool(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupParticipantDisplayNameReader(
+  input:
+    | AssistantHostedExecutionContext['groupParticipantDisplayNameReader']
+    | undefined,
+): AssistantHostedGroupParticipantDisplayNameReader | undefined {
+  if (!input || typeof input.read !== 'function') {
+    return undefined
+  }
+
+  return {
+    read: input.read.bind(input),
   }
 }
 
