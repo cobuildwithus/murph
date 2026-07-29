@@ -38,6 +38,30 @@ Last verified: 2026-07-28
 
 ## Runtime Security Posture
 
+- The database-health cron is a platform operation, not runner provider egress.
+  Its PlanetScale service-token id/token, Linq token, and operator chat id are
+  required Worker-only secrets and must never enter runner env, URLs, logs,
+  persisted samples, fixtures with real values, or alert copy. The configured
+  PlanetScale organization, database, branch-name, and branch-ID selectors are
+  deploy vars, not request input. The dedicated service token is
+  organization-scoped because that is where PlanetScale grants
+  `read_metrics_endpoints`, and it has no other permission. Service discovery
+  uses the fixed PlanetScale API origin and the
+  documented `token <id>:<token>` authorization contract; the authenticated
+  response may select only one HTTPS/443 scrape target with a bounded path and
+  bounded signed `__param_*` query values. The service credential is sent only
+  to the fixed discovery origin; signed scrape parameters are never persisted
+  or logged. Discovery and scrape disable redirects, enforce ten-second
+  timeouts and byte caps, and reduce responses to allowlisted connection
+  metrics before persistence. Before Linq message egress, the dedicated sender
+  reads the configured direct chat and current line reputation, requires both
+  to be healthy, canonicalizes only the documented phone-number formatting,
+  accepts the current nested reputation status plus the documented deprecated
+  top-level health-status alias, derives its sole external phone recipient in
+  memory, and persists or logs none of that provider response. It then uses Linq's
+  no-`from` auto-selection endpoint so a line that becomes flagged after
+  preflight can fail over; no model, runner, request, or stored state can select
+  another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - `murph.group action="read_chat_name"` is a read-only, Web-owned provider
   metadata boundary. The signed callback member selects the synthetic group

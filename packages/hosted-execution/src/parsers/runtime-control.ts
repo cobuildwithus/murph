@@ -5809,8 +5809,37 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
           recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
             .map((entry) => parseHostedRuntimeLogEntry(entry)),
         }),
+    ...(record.r2Cutover === undefined
+      ? {}
+      : { r2Cutover: parseHostedRunnerR2CutoverStatus(record.r2Cutover) }),
     userId: requireString(record.userId, "Hosted runner status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+function parseHostedRunnerR2CutoverStatus(
+  value: unknown,
+): NonNullable<HostedRunnerStatusResponse["r2Cutover"]> {
+  const record = requireObject(value, "Hosted runner status response r2Cutover");
+  const phase = requireString(
+    record.phase,
+    "Hosted runner status response r2Cutover.phase",
+  );
+  if (phase !== "source_active" && phase !== "destination_active") {
+    throw new TypeError(
+      "Hosted runner status response r2Cutover.phase must be source_active or destination_active.",
+    );
+  }
+  return {
+    coexisting: requireBoolean(
+      record.coexisting,
+      "Hosted runner status response r2Cutover.coexisting",
+    ),
+    phase,
+    protocolVersion: requireString(
+      record.protocolVersion,
+      "Hosted runner status response r2Cutover.protocolVersion",
+    ),
   };
 }
 

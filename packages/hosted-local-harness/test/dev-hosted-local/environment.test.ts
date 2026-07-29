@@ -370,6 +370,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -387,6 +389,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
@@ -405,6 +409,8 @@ describe("mergeCloudflareLocalEnv", () => {
       expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBeUndefined();
+      expect(merged.HOSTED_R2_CUTOVER_PHASE).toBeUndefined();
+      expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBeUndefined();
       expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBeUndefined();
     }
   });
@@ -430,6 +436,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
     expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
@@ -454,6 +462,8 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
     expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
     expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_CUTOVER_PHASE).toBe("source_active");
+    expect(merged.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME).toBe("hosted-local-r2-bundles-enam");
   });
 
   it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
@@ -1599,6 +1609,23 @@ describe("buildWranglerLocalDevConfig", () => {
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
     ]);
+    expect(config.durable_objects).toMatchObject({
+      bindings: expect.arrayContaining([
+        {
+          class_name: "DatabaseHealthDurableObject",
+          name: "DATABASE_HEALTH_MONITOR",
+        },
+      ]),
+    });
+    expect(config.migrations).toEqual(expect.arrayContaining([
+      {
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+        tag: "v4",
+      },
+    ]));
+    expect(config.triggers).toEqual({
+      crons: ["*/5 * * * *"],
+    });
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({
