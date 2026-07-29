@@ -27,8 +27,9 @@ Current responsibilities:
   Ask, consented private candidate, and private disclosure review; a missing or
   invalid owner response uses the existing typed retry, while a mismatch closes
   detached work in the stale invocation, requeues any claimed ask through its
-  existing encrypted mailbox with no delay, and forces the dirty checkpoint
-  and fresh invocation without consuming the input
+  existing encrypted mailbox with no delay, suppresses provider-backed idle
+  compaction, and forces the dirty checkpoint and fresh invocation without
+  consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, the structured group-newsletter write accepts only current group routes and system-owned delivery configuration, and the automation tool remains unavailable to scheduled turns and descendants
 - seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker

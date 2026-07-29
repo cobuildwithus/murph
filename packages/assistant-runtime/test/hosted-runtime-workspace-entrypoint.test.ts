@@ -26255,6 +26255,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const prepareStarted = createDeferred<void>();
+    const prepareRelease = createDeferred<void>();
+    const idleMaintenanceCallCount =
+      mocks.runHostedIdleCheckpointMaintenance.mock.calls.length;
     const askItem = createMailboxItem({
       dedupeKey: "ask_event_detached_provider_handoff",
       id: "mailbox_item_detached_provider_handoff",
@@ -26314,6 +26318,8 @@ describe("hosted workspace runtime entrypoint", () => {
                     return { action: "complete", status: "completed" };
                   }
                   events.push("ask.prepared");
+                  prepareStarted.resolve();
+                  await prepareRelease.promise;
                   return {
                     action: "prepare",
                     question: "What did the group decide?",
@@ -26349,6 +26355,8 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
             async runAssistantPhase() {
               events.push("foreground");
+              await prepareStarted.promise;
+              prepareRelease.resolve();
               return { progressed: false };
             },
             runtimeWakeSignal,
@@ -26369,6 +26377,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeReason, "assistant");
       assert.ok(result.nextWakeAt);
+      assert.equal(
+        mocks.runHostedIdleCheckpointMaintenance.mock.calls[
+          idleMaintenanceCallCount
+        ]?.[0].pendingWork,
+        true,
+      );
       assert.equal(checkpointRequests.length, 1);
       const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
       assert.equal(pending.length, 1);
@@ -26376,6 +26390,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(pending[0]?.status, "pending");
       assert.equal(pending[0]?.nextAttemptAt, null);
     } finally {
+      prepareRelease.resolve();
       await removeTempRoot(vaultRoot);
     }
   }, 45_000);

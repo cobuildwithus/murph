@@ -3385,7 +3385,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointWakeLatencySeed ??= pendingWakeLatencySeed;
         }
         const idleMaintenancePendingWork =
-          invocationStatus === "budget_exhausted"
+          assistantProviderHandoffRequested
+          || invocationStatus === "budget_exhausted"
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
