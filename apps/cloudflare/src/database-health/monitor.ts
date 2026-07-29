@@ -887,8 +887,10 @@ function readDatabaseHealthMonitorConfig(
     environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
     "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
   );
-  const secondaryLinqChatId =
-    environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?.trim();
+  const secondaryLinqChatId = requireConfiguredString(
+    environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
+    "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
+  );
   if (secondaryLinqChatId === primaryLinqChatId) {
     throw new Error("Database health alert chat IDs must be distinct.");
   }
@@ -910,9 +912,7 @@ function readDatabaseHealthMonitorConfig(
       environment.LINQ_API_TOKEN,
       "LINQ_API_TOKEN",
     ),
-    linqChatIds: secondaryLinqChatId
-      ? [primaryLinqChatId, secondaryLinqChatId]
-      : [primaryLinqChatId],
+    linqChatIds: [primaryLinqChatId, secondaryLinqChatId],
     organization: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION,
       "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
