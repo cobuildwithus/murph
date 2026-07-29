@@ -202,6 +202,14 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
   fails.
+- A pre-member group-join reaction accepted for proactive outreach is Web-owned
+  durable work. Its stable offer-and-participant identity collapses webhook
+  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
+  and durable: line health and capacity defer with a bounded next attempt, and a
+  condition whose inputs cannot change terminates instead of deferring, so no row
+  retries forever and none is dropped unrecorded. Pre-member contact data that a
+  reaction creates participates in the existing account-deletion and
+  group-deletion owners rather than outliving them.
 
 ## Authority, Ownership, And State
 
@@ -212,6 +220,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
+- Participant-target phone egress is denied unless its exact send kind has a
+  narrow durable authority binding the idempotency key, participant identity,
+  and source line. Adding one allowed first-contact kind must not widen another
+  kind's assertion or create a generic participant-target bypass.
 - Match state lifetime to scope. User-facing or queryable product truth is
   never assistant runtime state and never begins in process, request, turn,
   wake, orchestration, or other operational state. Durable obligations must be

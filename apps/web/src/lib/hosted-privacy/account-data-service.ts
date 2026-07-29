@@ -23,7 +23,19 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
-import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
+} from "@/src/lib/hosted-groups/group-join-outreach-store";
+import {
+  hasHostedLinqInviteSignupLiveDeliveryTx,
+} from "../hosted-onboarding/linq-delivery-store";
+import {
+  releaseHostedLinqOnboardingLinkNoticeClaim,
+} from "../hosted-onboarding/linq-daily-state";
+import {
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
+  parseHostedLinqInviteSignupEffectId,
+} from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import { retrieveAndExpireHostedSubscriptionCheckout } from "../hosted-onboarding/subscription-checkout-lifecycle";
@@ -31,6 +43,7 @@ import { listHostedMemberSubscriptionCheckoutSessionIds } from "../hosted-onboar
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
@@ -72,6 +85,14 @@ export type HostedAccountStoreDeletionMode =
   | "best-effort-delete"
   | "local-reference-delete"
   | "documented-retention";
+
+const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  // Group-aware provider fences expire after fifteen seconds. Deletion gets a
+  // strictly larger callback budget so an admitted bounded send can commit its
+  // correlated consequence before suspension crosses the shared drain.
+  timeout: 20_000,
+} as const;
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -314,6 +335,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted product feedback rows",
     deletion: "live-delete",
     note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach",
+    label: "Pre-member group-join outreach intent",
+    deletion: "live-delete",
+    note: "Deletes outreach rows this account can reach: those matching the member's phone blind index, and those whose canonical offer belongs to a group the account owns or runs. Rows are resolved by phone because the participant may never have become a member. The outreach row covers encrypted participant contact, scheduling, dedupe, and reaction convergence only; selected line, chat, provider lifecycle, and exact reply occurrence live on related delivery rows. Export omits this pre-member operational intent.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach_delivery",
+    label: "Group-join outreach provider correlation",
+    deletion: "live-delete",
+    note: "Deletes opener and group-aware signup-link deliveries through their direct outreach relation, so selected-line, chat, provider attempt, receipt, and exact reply-occurrence history does not outlive the account. The canonical offer supplies group ownership; no hashed source-reference reconstruction is required.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -760,12 +793,36 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
-
-    for (const memberId of transactionDeletionMemberIds.slice(1)) {
-      await lockHostedMemberForAccountDeletionTx({
-        memberId,
+    const transactionDeletionMemberIdFilter = buildStringInFilter(
+      transactionDeletionMemberIds,
+    );
+    const projectionSnapshot =
+      await readHostedGroupJoinOutreachDeletionSnapshot({
+        memberIdFilter: transactionDeletionMemberIdFilter,
         prisma: tx,
       });
+    const projectionMemberIds = uniqueStrings(
+      readHostedLinqSignupProjectionIdentities(
+        projectionSnapshot.deliveries,
+      ).map((identity) => identity.memberId),
+    );
+    const deletionMemberIdSet = new Set(transactionDeletionMemberIds);
+    const lockedProjectionMemberIds = new Set(
+      [...transactionDeletionMemberIds, ...projectionMemberIds].sort(),
+    );
+
+    for (const memberId of lockedProjectionMemberIds) {
+      if (memberId === input.memberId) {
+        continue;
+      }
+      if (deletionMemberIdSet.has(memberId)) {
+        await lockHostedMemberForAccountDeletionTx({
+          memberId,
+          prisma: tx,
+        });
+      } else {
+        await lockHostedMemberRow(tx, memberId);
+      }
     }
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
@@ -1049,8 +1106,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         id: buildStringInFilter(memberIds),
       },
     });
+    // Suspension is the account-deletion authority fence for group replies.
+    // A group-aware provider effect that already owns the drain finishes before
+    // this commits. Every later preparation acquires it after commit and rejects
+    // the suspended group runtime.
+    await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
 }
 
 async function refreshHostedMembersAccountDeletionFenceTx(input: {
@@ -1155,6 +1217,7 @@ function buildHostedLinqInviteSignupDeliveryWhere(
   memberIds: readonly string[],
 ): Prisma.HostedLinqDeliveryWhereInput {
   return {
+    groupJoinOutreachId: null,
     OR: uniqueStrings(memberIds).map((memberId) => ({
       sourceRef: {
         startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
@@ -1164,6 +1227,145 @@ function buildHostedLinqInviteSignupDeliveryWhere(
       in: ["invite_signup", "invite_signup_fallback"],
     },
   };
+}
+
+type HostedGroupJoinOutreachDeletionSnapshot = {
+  deliveries: Array<{ sourceRef: string | null }>;
+  deliveryWhere: Prisma.HostedLinqDeliveryWhereInput | null;
+  outreachIds: string[];
+};
+
+type HostedLinqSignupProjectionIdentity = {
+  dayUtc: string;
+  memberId: string;
+};
+
+async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
+  memberIdFilter: string | { in: string[] };
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOutreachDeletionSnapshot> {
+  const identities = await input.prisma.hostedMemberIdentity.findMany({
+    where: { memberId: input.memberIdFilter },
+    select: { phoneLookupKey: true },
+  });
+  const phoneLookupKeys = uniqueStrings(
+    identities
+      .map((identity) => identity.phoneLookupKey)
+      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
+  );
+  const ownedGroups = await input.prisma.hostedGroup.findMany({
+    where: {
+      OR: [
+        { ownerMemberId: input.memberIdFilter },
+        { runtimeMemberId: input.memberIdFilter },
+      ],
+    },
+    select: { id: true },
+  });
+  const ownedGroupIds = ownedGroups.map((group) => group.id);
+  if (phoneLookupKeys.length === 0 && ownedGroupIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const outreaches = await input.prisma.hostedGroupJoinOutreach.findMany({
+    where: {
+      OR: [
+        ...(phoneLookupKeys.length > 0
+          ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
+          : []),
+        ...(ownedGroupIds.length > 0
+          ? [{
+              offer: {
+                groupId: { in: ownedGroupIds },
+              },
+            }]
+          : []),
+      ],
+    },
+    select: { id: true },
+  });
+  const outreachIds = outreaches.map((outreach) => outreach.id);
+  if (outreachIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const deliveryWhere: Prisma.HostedLinqDeliveryWhereInput = {
+    groupJoinOutreachId: { in: outreachIds },
+  };
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    select: { sourceRef: true },
+    where: deliveryWhere,
+  });
+
+  return { deliveries, deliveryWhere, outreachIds };
+}
+
+function readHostedLinqSignupProjectionIdentities(
+  deliveries: readonly { sourceRef: string | null }[],
+): HostedLinqSignupProjectionIdentity[] {
+  const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
+  for (const delivery of deliveries) {
+    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
+    if (!attempt) {
+      continue;
+    }
+    const identity = {
+      dayUtc: attempt.dayUtc,
+      memberId: attempt.memberId,
+    };
+    identities.set(`${identity.memberId}\0${identity.dayUtc}`, identity);
+  }
+  return [...identities.values()];
+}
+
+async function deleteHostedGroupJoinOutreachRowsForMembers(
+  prisma: Prisma.TransactionClient,
+  memberIdFilter: string | { in: string[] },
+): Promise<{ deliveryCount: number; outreachCount: number }> {
+  // The outreach row and its delivery rows are one privacy record. Both the
+  // minute drain and group-reply delivery preparation cross this same drain, so
+  // no related delivery can appear after the delete and before the outreach row
+  // is gone.
+  await acquireHostedGroupJoinOutreachDrainLockTx(prisma);
+
+  const snapshot = await readHostedGroupJoinOutreachDeletionSnapshot({
+    memberIdFilter,
+    prisma,
+  });
+  if (!snapshot.deliveryWhere) {
+    return { deliveryCount: 0, outreachCount: 0 };
+  }
+  const projectionIdentities = readHostedLinqSignupProjectionIdentities(
+    snapshot.deliveries,
+  );
+
+  // The earlier suspension transaction crossed this same drain before commit.
+  // A provider effect admitted first therefore committed its correlation and
+  // projection before suspension, while every later preparation observes the
+  // suspended group runtime and stops before provider dispatch. No group-aware
+  // provider effect can still be in flight when these rows are removed.
+  const deliveries = await prisma.hostedLinqDelivery.deleteMany({
+    where: snapshot.deliveryWhere,
+  });
+  for (const identity of projectionIdentities) {
+    const hasLiveDelivery = await hasHostedLinqInviteSignupLiveDeliveryTx({
+      dayUtc: identity.dayUtc,
+      memberId: identity.memberId,
+      prisma,
+    });
+    if (!hasLiveDelivery) {
+      await releaseHostedLinqOnboardingLinkNoticeClaim({
+        memberId: identity.memberId,
+        occurredAt: identity.dayUtc,
+        prisma,
+      });
+    }
+  }
+  const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
+    where: { id: { in: snapshot.outreachIds } },
+  });
+
+  return { deliveryCount: deliveries.count, outreachCount: removed.count };
 }
 
 async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
@@ -1459,6 +1661,24 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
   }));
+  // Pre-member group-join outreach is keyed by the participant's phone and by
+  // the group, not by a member id, so it is resolved before the identity rows
+  // and the owned groups are deleted below. Running after either one would strand
+  // the encrypted phone, its group association, or the provider correlation that
+  // only the outreach id can find.
+  const groupJoinOutreachDeletion =
+    await deleteHostedGroupJoinOutreachRowsForMembers(
+      input.prisma,
+      memberIdFilter,
+    );
+  recordCount(
+    "prisma.hosted_group_join_outreach",
+    groupJoinOutreachDeletion.outreachCount,
+  );
+  recordCount(
+    "prisma.hosted_group_join_outreach_delivery",
+    groupJoinOutreachDeletion.deliveryCount,
+  );
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));

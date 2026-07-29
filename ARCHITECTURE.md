@@ -1324,7 +1324,11 @@ excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer
 acceptance remains the earlier exact owner. Removals and nonaffirmative
 reactions remain on the silent group context path above (or ignored outside
-groups).
+groups), with one exception: a removal of the exact canonical join offer by a
+nonmember whose phone region has no derivable safe send window is consumed by
+the join-offer owner before that path runs, so a participant the outreach
+feature declines cannot have their phone and reaction persisted into
+group-owned context.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the first-contact path. It runs after cheap deterministic ingress filters and

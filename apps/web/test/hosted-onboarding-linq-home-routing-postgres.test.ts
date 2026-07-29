@@ -36,7 +36,10 @@ import {
 import { updateHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { buildHostedMemberIdentityPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import {
+  acquireHostedLinqParticipantPhoneLockTx,
+  createHostedLinqParticipantContact,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
@@ -445,7 +448,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("keeps the uncommitted signup identity authoritative when the admitted create loses", async () => {
+    it("keeps the uncommitted signup identity authoritative while an admitted inbound waits", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
         "https://join.example.test",
@@ -559,6 +562,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         })).resolves.toBe(0);
 
         signupTransaction = signup.$transaction(async (tx) => {
+          await acquireHostedLinqParticipantPhoneLockTx({
+            phoneNumber: memberPhone,
+            tx,
+          });
           await tx.hostedMember.create({
             data: {
               billingStatus: HostedBillingStatus.not_started,
@@ -617,28 +624,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const fallbackPlan = await signupTransaction;
         expect(fallbackPlan.response.reason).toBe("sent-signup-link");
         expect(fallbackPlan.instantStartEnrollment).toBeUndefined();
-        await expect(admittedTransaction).rejects.toMatchObject({
-          code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
-          retryable: true,
-        });
-
-        const retryPlan = await admitted.$transaction(
-          (tx) => planHostedOnboardingLinqWebhook({
-            event: admissionEvent,
-            firstContactAdmissionDecision: {
-              confidence: 0.99,
-              kind: "allow",
-              source: "model",
-            },
-            instantStartAllowed: true,
-            prisma: tx,
-          }),
-          transactionOptions,
-        );
-        expect(retryPlan.response.reason).toBe("sent-signup-link");
-        expect(retryPlan.instantStartEnrollment).toBeUndefined();
-        expect(retryPlan.desiredSideEffects).toHaveLength(1);
-        expect(retryPlan.desiredSideEffects[0]?.effectId).toBe(
+        const admittedPlan = await admittedTransaction;
+        expect(admittedPlan.response.reason).toBe("sent-signup-link");
+        expect(admittedPlan.instantStartEnrollment).toBeUndefined();
+        expect(admittedPlan.desiredSideEffects).toHaveLength(1);
+        expect(admittedPlan.desiredSideEffects[0]?.effectId).toBe(
           fallbackPlan.desiredSideEffects[0]?.effectId,
         );
         await expect(observer.hostedInvite.findFirst({

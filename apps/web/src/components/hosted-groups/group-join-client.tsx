@@ -11,8 +11,14 @@ import {
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  JoinInviteSignOutButtonIsland,
+} from "@/src/components/hosted-onboarding/join-invite-islands";
 import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
@@ -35,7 +41,9 @@ export interface GroupJoinPermissionDisplay {
   projectionScopeKey: string;
 }
 
-export function GroupJoinSignInButton() {
+export function GroupJoinSignInButton(input: {
+  inviteCode?: string | null;
+}) {
   const [open, setOpen] = useState(true);
 
   function handleCompleted(payload: HostedPrivyCompletionPayload) {
@@ -51,6 +59,13 @@ export function GroupJoinSignInButton() {
         Continue to join
       </Button>
       <AuthDialog
+        inviteCode={input.inviteCode}
+        // A group-join invite reached by cold outreach is phone-bound: the
+        // provisional member was created from an inbound text, and
+        // authentication-service resolves that invite to the phone method and
+        // rejects a Privy identity without one. Offering Telegram or email here
+        // would let someone finish an entire sign-in that cannot complete.
+        {...(input.inviteCode ? { methods: ["phone"] as const } : {})}
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}
@@ -103,6 +118,7 @@ export function GroupJoinAcceptForm(props: {
   alreadyActiveMember: boolean;
   expectedMembershipId: string | null;
   groupName: string;
+  inviteCode?: string | null;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
   postJoinContactOption: MurphContactOption | null;
@@ -120,6 +136,7 @@ export function GroupJoinAcceptForm(props: {
   );
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [inviteMismatch, setInviteMismatch] = useState(false);
   const selectedVaultShareProjectionScopes = useMemo(
     () => props.permissions
       .filter((permission) => selected.has(permission.projectionScopeKey))
@@ -152,12 +169,14 @@ export function GroupJoinAcceptForm(props: {
 
   async function submit() {
     setErrorMessage(null);
+    setInviteMismatch(false);
     setStatus("submitting");
     try {
       await requestHostedOnboardingJson({
         method: "POST",
         payload: {
           expectedMembershipId: props.expectedMembershipId,
+          ...(props.inviteCode ? { inviteCode: props.inviteCode } : {}),
           selectedVaultShareProjectionScopes,
         },
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/accept`,
@@ -165,6 +184,14 @@ export function GroupJoinAcceptForm(props: {
       setStatus("joined");
     } catch (error) {
       setStatus("idle");
+      if (
+        props.inviteCode
+        && error instanceof HostedOnboardingApiError
+        && error.code === "AUTH_INVITE_MISMATCH"
+      ) {
+        setInviteMismatch(true);
+        return;
+      }
       setErrorMessage(toErrorMessage(error, "Could not join this group right now."));
     }
   }
@@ -256,26 +283,52 @@ export function GroupJoinAcceptForm(props: {
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <Button
-          type="button"
-          size="xl"
-          onClick={() => void submit()}
-          disabled={status === "submitting"}
-        >
-          {status === "submitting"
-            ? props.alreadyActiveMember
-              ? "Saving..."
-              : "Joining..."
-            : props.alreadyActiveMember
-              ? "Save changes"
-              : "Join group"}
-        </Button>
-        {errorMessage ? (
-          <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
-            {errorMessage}
-          </p>
-        ) : null}
+        {inviteMismatch ? (
+          <GroupJoinInviteMismatchRecovery />
+        ) : (
+          <>
+            <Button
+              type="button"
+              size="xl"
+              onClick={() => void submit()}
+              disabled={status === "submitting"}
+            >
+              {status === "submitting"
+                ? props.alreadyActiveMember
+                  ? "Saving..."
+                  : "Joining..."
+                : props.alreadyActiveMember
+                  ? "Save changes"
+                  : "Join group"}
+            </Button>
+            {errorMessage ? (
+              <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
+                {errorMessage}
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+export function GroupJoinInviteMismatchRecovery() {
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-muted/40 p-4"
+      role="alert"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-semibold text-foreground">
+          Use the invited phone number
+        </p>
+        <p className="text-sm leading-5 text-muted-foreground">
+          This browser is signed into a different Murph account. Sign out, then
+          verify the phone number that received this invite.
+        </p>
+      </div>
+      <JoinInviteSignOutButtonIsland idleLabel="Sign out and continue" />
     </div>
   );
 }

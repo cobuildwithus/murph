@@ -792,6 +792,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOutreachMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260724190000_hosted_group_join_outreach/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedObservabilityRetentionMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260725120000_hosted_observability_retention/migration.sql",
@@ -979,6 +986,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260724190000_hosted_group_join_outreach",
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
       "20260725190000_hosted_mailbox_content_retention",
@@ -1424,6 +1432,42 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_outreach"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_encrypted" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_group_join_outreach_offer_participant_key',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_group_join_offer"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_outreach_id" TEXT',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_reply_occurred_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_offer_handled_at" TIMESTAMP(3)',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_group_join_outreach"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_linq_delivery_group_join_outreach_status_idx',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      '"participant_phone_number"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      'REFERENCES "hosted_linq_line"("phone_number_lookup_key")',
     );
     for (const sql of [
       'CREATE TABLE "hosted_group_disclosure_permission"',
