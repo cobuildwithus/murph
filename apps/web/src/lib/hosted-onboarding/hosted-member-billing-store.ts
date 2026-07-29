@@ -26,10 +26,7 @@ import {
   buildHostedMemberBillingPrivateColumns,
   readHostedMemberBillingPrivateState,
 } from "./member-private-codecs";
-import {
-  assertHostedMemberNotSuspended,
-  isHostedMemberSuspended,
-} from "./entitlement";
+import { assertHostedMemberNotSuspended } from "./entitlement";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -108,12 +105,6 @@ export interface HostedMemberStripeCheckoutAttempt {
 export interface PreparedHostedMemberStripeCheckoutSession {
   stripeCheckoutSessionIdEncrypted: string;
   stripeCheckoutSessionLookupKey: string;
-}
-
-export interface PreparedHostedMemberStripeCustomer {
-  stripeCustomerId: string;
-  stripeCustomerIdEncrypted: string;
-  stripeCustomerLookupKey: string;
 }
 
 export interface PreparedHostedMemberStripeCheckoutCompletion {
@@ -504,33 +495,6 @@ export async function prepareHostedMemberStripeCheckoutSession(input: {
   };
 }
 
-export async function prepareHostedMemberStripeCustomer(input: {
-  memberId: string;
-  prisma: PrismaClient;
-  stripeCustomerId: string;
-}): Promise<PreparedHostedMemberStripeCustomer> {
-  const stripeCustomerLookupKey =
-    createHostedStripeCustomerLookupKey(input.stripeCustomerId);
-  if (!stripeCustomerLookupKey) {
-    throw new TypeError("Stripe Customer ID is invalid.");
-  }
-  const { stripeCustomerIdEncrypted } =
-    await buildHostedMemberBillingPrivateColumns({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      stripeCustomerId: input.stripeCustomerId,
-      stripeSubscriptionId: null,
-    });
-  if (!stripeCustomerIdEncrypted) {
-    throw new TypeError("Stripe Customer ID encryption failed.");
-  }
-  return {
-    stripeCustomerId: input.stripeCustomerId,
-    stripeCustomerIdEncrypted,
-    stripeCustomerLookupKey,
-  };
-}
-
 export async function bindHostedMemberStripeCheckoutSessionTx(input: {
   attemptId: string;
   intentHash: string;
@@ -655,11 +619,13 @@ export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: 
 }
 
 /**
- * Binds exactly one completed standard Checkout. Later completions for a
- * different subscription become cleanup candidates instead of replacing the
- * paid owner.
+ * Binds exactly one completed direct Checkout. Standard Checkout preserves an
+ * existing billing identity. Pulse Trial may replace an identity only after
+ * its caller classifies that identity as stale while holding the same member
+ * lock.
  */
 export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
+  allowBillingIdentityReplacement?: boolean;
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
   checkoutSessionId: string;
@@ -695,7 +661,8 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     where: { memberId: input.memberId },
   });
   if (
-    currentRecord?.stripeSubscriptionLookupKey
+    !input.allowBillingIdentityReplacement
+    && currentRecord?.stripeSubscriptionLookupKey
     && !subscriptionLookupKeys.includes(
       currentRecord.stripeSubscriptionLookupKey,
     )
@@ -703,7 +670,8 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     return { kind: "cleanup_superseded" };
   }
   if (
-    currentRecord?.stripeCustomerLookupKey
+    !input.allowBillingIdentityReplacement
+    && currentRecord?.stripeCustomerLookupKey
     && !customerLookupKeys.includes(currentRecord.stripeCustomerLookupKey)
   ) {
     return { kind: "cleanup_superseded" };
@@ -958,65 +926,6 @@ export async function writeHostedMemberStripeBillingRefTx(
   }
 
   return projectHostedMemberStripeBillingRefSnapshot(billingRef, input.tx);
-}
-
-export async function bindPreparedHostedMemberStripeCustomerIfMissingTx(input: {
-  memberId: string;
-  preparedCustomer: PreparedHostedMemberStripeCustomer;
-  tx: Prisma.TransactionClient;
-}): Promise<
-  "bound" | "existing_customer" | "member_missing" | "member_suspended"
-> {
-  await lockHostedMemberRow(input.tx, input.memberId);
-  const member = await input.tx.hostedMember.findUnique({
-    select: { suspendedAt: true },
-    where: { id: input.memberId },
-  });
-  if (!member) {
-    return "member_missing";
-  }
-  if (isHostedMemberSuspended(member.suspendedAt)) {
-    return "member_suspended";
-  }
-  await assertHostedMemberStripeBillingIdentifiersAvailableTx({
-    memberId: input.memberId,
-    stripeCustomerId: input.preparedCustomer.stripeCustomerId,
-    tx: input.tx,
-  });
-
-  const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
-    select: { stripeCustomerLookupKey: true },
-    where: { memberId: input.memberId },
-  });
-  if (currentBillingRef?.stripeCustomerLookupKey) {
-    return "existing_customer";
-  }
-
-  try {
-    await input.tx.hostedMemberBillingRef.upsert({
-      where: { memberId: input.memberId },
-      create: {
-        memberId: input.memberId,
-        stripeCustomerIdEncrypted:
-          input.preparedCustomer.stripeCustomerIdEncrypted,
-        stripeCustomerLookupKey:
-          input.preparedCustomer.stripeCustomerLookupKey,
-      },
-      update: {
-        stripeCustomerIdEncrypted:
-          input.preparedCustomer.stripeCustomerIdEncrypted,
-        stripeCustomerLookupKey:
-          input.preparedCustomer.stripeCustomerLookupKey,
-      },
-    });
-  } catch (error) {
-    if (isPrismaUniqueConstraintError(error)) {
-      throw buildHostedStripeBillingIdentityConflictError("stripeCustomerId");
-    }
-    throw error;
-  }
-
-  return "bound";
 }
 
 export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {

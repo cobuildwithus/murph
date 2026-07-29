@@ -131,6 +131,66 @@ describe("hosted member Checkout completion ownership", () => {
 
     expect(harness.update).toHaveBeenCalledOnce();
   });
+
+  it("lets an eligible Pulse Trial replace a stale identity only through its matching attempt", async () => {
+    const harness = await createBillingRefHarness({
+      checkoutSessionId: "cs_pulse_trial",
+      currentStripeCustomerId: "cus_existing",
+      currentStripeSubscriptionId: "sub_stale_incomplete",
+    });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      allowBillingIdentityReplacement: true,
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_pulse_trial",
+      currentCheckoutOffer: "pulse_trial_7d",
+      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_existing",
+        "sub_pulse_trial",
+      ),
+      tx: harness.tx as never,
+    })).resolves.toMatchObject({
+      kind: "accepted",
+    });
+
+    expect(harness.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        currentCheckoutOffer: "pulse_trial_7d",
+        stripeSubscriptionLookupKey:
+          createHostedStripeSubscriptionLookupKey("sub_pulse_trial"),
+      }),
+    }));
+  });
+
+  it("does not let Pulse Trial identity replacement bypass durable attempt ownership", async () => {
+    const harness = await createBillingRefHarness({
+      checkoutSessionId: "cs_current_attempt",
+      currentStripeCustomerId: "cus_existing",
+      currentStripeSubscriptionId: "sub_stale_incomplete",
+    });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      allowBillingIdentityReplacement: true,
+      checkoutAttemptId: "attempt_superseded",
+      checkoutIntentHash: "intent_superseded",
+      checkoutSessionId: "cs_superseded",
+      currentCheckoutOffer: "pulse_trial_7d",
+      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
+      memberId: "member_123",
+      preparedCompletion: buildPreparedCompletion(
+        "cus_existing",
+        "sub_pulse_trial",
+      ),
+      tx: harness.tx as never,
+    })).resolves.toEqual({
+      kind: "cleanup_superseded",
+    });
+
+    expect(harness.update).not.toHaveBeenCalled();
+  });
 });
 
 function buildPreparedCompletion(
@@ -156,18 +216,23 @@ function buildPreparedCompletion(
 }
 
 async function createBillingRefHarness(input: {
+  checkoutSessionId?: string;
+  currentStripeCustomerId?: string;
+  currentStripeSubscriptionId?: string;
   openAttempt?: boolean;
 } = {}) {
   const openAttempt = input.openAttempt ?? true;
   const privateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId: "member_123",
-    stripeCustomerId: null,
-    stripeSubscriptionId: null,
+    stripeCustomerId: input.currentStripeCustomerId ?? null,
+    stripeSubscriptionId: input.currentStripeSubscriptionId ?? null,
   });
+  const checkoutSessionId =
+    input.checkoutSessionId ?? "cs_winner";
   const checkoutPrivateColumn =
     await buildHostedMemberBillingCheckoutSessionPrivateColumn({
       memberId: "member_123",
-      stripeCheckoutSessionId: openAttempt ? "cs_winner" : null,
+      stripeCheckoutSessionId: openAttempt ? checkoutSessionId : null,
     });
   let state = {
     checkoutAttemptId: openAttempt ? "attempt_123" : null,
@@ -189,10 +254,15 @@ async function createBillingRefHarness(input: {
     scheduledBillingEffectiveAt: null,
     scheduledBillingPlanCode: null,
     stripeCheckoutSessionLookupKey: openAttempt
-      ? createHostedStripeCheckoutSessionLookupKey("cs_winner")
+      ? createHostedStripeCheckoutSessionLookupKey(checkoutSessionId)
       : null,
-    stripeCustomerLookupKey: null,
-    stripeSubscriptionLookupKey: null,
+    stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(
+      input.currentStripeCustomerId ?? null,
+    ),
+    stripeSubscriptionLookupKey:
+      createHostedStripeSubscriptionLookupKey(
+        input.currentStripeSubscriptionId ?? null,
+      ),
     stripeSubscriptionScheduleLookupKey: null,
     ...checkoutPrivateColumn,
     ...privateColumns,

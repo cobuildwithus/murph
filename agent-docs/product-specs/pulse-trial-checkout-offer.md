@@ -364,8 +364,8 @@ For trial checkout, reuse the existing Pulse recurring price:
 await stripe.checkout.sessions.create({
   cancel_url,
   client_reference_id: memberId,
-  customer: existingCustomerId,
-  customer_email: verifiedEmailIfNoCustomer,
+  ...(existingCustomerId ? { customer: existingCustomerId } : {}),
+  ...(existingCustomerId ? {} : { customer_email: verifiedEmailIfNoCustomer }),
   line_items: buildHostedBillingCheckoutLineItems(pulsePriceId),
   metadata: checkoutMetadata,
   mode: "subscription",
@@ -380,6 +380,14 @@ await stripe.checkout.sessions.create({
 });
 ```
 
+When the member has no durable Stripe Customer, do not create one separately.
+Subscription-mode Checkout creates the Customer when the user completes the
+Session. The completed Session supplies the Customer and Subscription
+references that the activation path prepares outside the database transaction
+and binds together by accepting the existing durable attempt. This keeps the
+Checkout Session as the only provider effect after the durable attempt claim
+instead of creating an unowned Customer before the Session exists.
+
 Keep `payment_method_types: ["card"]`. Do not set `payment_method_collection: "if_required"` for this offer because the intended product behavior is automatic conversion to paid Pulse after 14 days.
 
 ### Durable Attempt And Idempotency
@@ -393,6 +401,13 @@ An identical retry reuses the same attempt. A different intent returns a typed
 conflict while that attempt remains open. Once Stripe returns, web stores the
 encrypted Session id plus lookup key on the same attempt. A retry with a bound
 Session retrieves it instead of creating another one.
+
+For a first-time member, Stripe Checkout Session creation is the only provider
+create call in this path. The member-owned attempt is committed before that
+call, and the encrypted direct-Checkout inventory owns the Session before its
+URL is returned. Account deletion can therefore expire the Session or absorb a
+completion race by canceling its Subscription and deleting the Session-created
+Customer; there is no standalone Customer effect to discover.
 
 The Stripe idempotency key is:
 
@@ -785,6 +800,7 @@ The 14-day policy ships as `pulse-trial-2026-07-15-v3` in the same Web bundle th
 | --- | --- | --- |
 | Standard Pulse checkout and Pulse Trial checkout use the same Stripe price | Stripe idempotency collision | The persisted intent hash includes the resolved offer policy and therefore produces a different attempt-bound key. |
 | User double-clicks trial CTA | Duplicate sessions or mixed state | Same request shape reuses the durable attempt and Stripe Session; webhook/success activation is idempotent. |
+| Account deletion races a first-time trial checkout | A provider Customer escapes the deletion receipt | Do not pre-create a Customer. Deletion owns the durable Session, expires it, and absorbs a completion race before final customer cleanup. |
 | User completes Checkout but success redirect never reaches Murph | Trial never activates | Webhook path must perform the same metadata-gated activation. |
 | Stripe webhook arrives after success route | Duplicate activation | Shared trial helper checks current active state before activation; billing ref writes remain freshness-gated. |
 | Stripe initial trial invoice emits `invoice.paid` | Paid access activates before payment | Ignore the trial invoice for paid activation and phase transition; only checkout-completed may trial-activate. |
@@ -816,6 +832,8 @@ The implementation is complete when:
 - `HOSTED_BILLING_PLAN_CODES` still contains only `launch_monthly` and `launch_edge_monthly`.
 - The public checkout API accepts only missing offer or `checkoutOffer: "pulse_trial_7d"`; the server resolves missing offer to internal `standard`.
 - Pulse Trial Checkout Sessions reuse the existing Pulse price and include 14 trial days.
+- First-time Pulse Trial Checkout creates no standalone Stripe Customer before the durable Session; completion binds the Session-created Customer and Subscription.
+- Direct completion retrieves current Pulse Trial provider authority and prepares encrypted billing fields before taking the member lock; the transaction performs database revalidation and writes only.
 - Trial and standard checkout intents cannot collide, identical concurrent requests reuse one Stripe Session, and a later completion cannot replace the first bound standard subscription.
 - `checkout.session.completed` activates only valid Pulse Trial sessions.
 - initial trial invoices do not activate paid access, and only a real paid invoice converts trial phase to paid.

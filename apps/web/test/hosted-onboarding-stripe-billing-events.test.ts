@@ -159,6 +159,7 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+  prepareHostedStripeReversalProviderState,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 import {
   createHostedStripeCustomerLookupKey,
@@ -1630,13 +1631,19 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
+    const refund = makeStripeRefund({
+      amount: 2_500,
+      charge: "ch_123",
+      paymentIntent: "pi_123",
+      status: "succeeded",
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.created",
+      refund,
+    );
+
     await applyStripeRefundCreated(
-      makeStripeRefund({
-        amount: 2_500,
-        charge: "ch_123",
-        paymentIntent: "pi_123",
-        status: "succeeded",
-      }),
+      refund,
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
         sourceEventId: "evt_refund_partial",
@@ -1644,6 +1651,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(mocks.findMemberForStripeReversal).toHaveBeenCalled();
@@ -1670,13 +1678,19 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
+    const refund = makeStripeRefund({
+      amount: 5_000,
+      charge: "ch_123",
+      paymentIntent: "pi_123",
+      status: "succeeded",
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.created",
+      refund,
+    );
+
     await applyStripeRefundCreated(
-      makeStripeRefund({
-        amount: 5_000,
-        charge: "ch_123",
-        paymentIntent: "pi_123",
-        status: "succeeded",
-      }),
+      refund,
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
         sourceEventId: "evt_refund_full",
@@ -1684,6 +1698,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledWith(expect.objectContaining({
@@ -1716,13 +1731,19 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
+    const refund = makeStripeRefund({
+      amount: 5_000,
+      charge: "ch_old",
+      paymentIntent: "pi_old",
+      status: "succeeded",
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.created",
+      refund,
+    );
+
     await applyStripeRefundCreated(
-      makeStripeRefund({
-        amount: 5_000,
-        charge: "ch_old",
-        paymentIntent: "pi_old",
-        status: "succeeded",
-      }),
+      refund,
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
         sourceEventId: "evt_refund_old_invoice",
@@ -1730,6 +1751,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(mocks.findMemberForStripeReversal).toHaveBeenCalled();
@@ -1762,12 +1784,18 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
+    const refund = makeStripeRefund({
+      amount: 5_000,
+      paymentIntent: "pi_123",
+      status: "succeeded",
+    });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "refund.created",
+      refund,
+    );
+
     await applyStripeRefundCreated(
-      makeStripeRefund({
-        amount: 5_000,
-        paymentIntent: "pi_123",
-        status: "succeeded",
-      }),
+      refund,
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
         sourceEventId: "evt_refund_invoice_payment",
@@ -1775,6 +1803,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(retrieveInvoice).toHaveBeenCalledWith("in_123", {
@@ -1833,12 +1862,19 @@ describe("hosted onboarding stripe billing events", () => {
   });
 
   it("clears dispute suspension when reinstated funds match an active subscription", async () => {
-    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+    const member = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.unpaid,
-    }));
+    });
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(member);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(member);
+    const dispute = makeStripeDispute({ status: "won" });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "charge.dispute.funds_reinstated",
+      dispute,
+    );
 
     await applyStripeDisputeUpdated(
-      makeStripeDispute({ status: "won" }),
+      dispute,
       {
         eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
         sourceEventId: "evt_dispute_funds_reinstated",
@@ -1846,6 +1882,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
@@ -1858,17 +1895,24 @@ describe("hosted onboarding stripe billing events", () => {
   });
 
   it("keeps restoration pending when the member has no subscription identity", async () => {
-    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+    const member = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.unpaid,
       billingRef: {
         memberId: "member_123",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: null,
       },
-    }));
+    });
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(member);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(member);
+    const dispute = makeStripeDispute({ status: "won" });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "charge.dispute.funds_reinstated",
+      dispute,
+    );
 
     await expect(applyStripeDisputeUpdated(
-      makeStripeDispute({ status: "won" }),
+      dispute,
       {
         eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
         sourceEventId: "evt_dispute_funds_reinstated_without_subscription",
@@ -1876,6 +1920,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     )).resolves.toBe("subscription_identity_pending");
 
     expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
@@ -1883,17 +1928,24 @@ describe("hosted onboarding stripe billing events", () => {
   });
 
   it("does not clear dispute suspension when the canonical subscription is not active", async () => {
-    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+    const member = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.unpaid,
-    }));
+    });
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(member);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(member);
     mocks.requireHostedStripeApi.mockReturnValueOnce({
       subscriptions: {
         retrieve: vi.fn(async () => makeStripeSubscription({ status: "past_due" })),
       },
     });
+    const dispute = makeStripeDispute({ status: "won" });
+    const preparedProviderState = await prepareStripeReversalProviderState(
+      "charge.dispute.closed",
+      dispute,
+    );
 
     await applyStripeDisputeUpdated(
-      makeStripeDispute({ status: "won" }),
+      dispute,
       {
         eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
         sourceEventId: "evt_dispute_won_past_due",
@@ -1901,6 +1953,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
+      preparedProviderState,
     );
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
@@ -1932,6 +1985,20 @@ function makePreparedStandardCheckoutCompletion(input: {
         }
       : null,
   };
+}
+
+async function prepareStripeReversalProviderState(
+  type: Stripe.Event.Type,
+  object: Stripe.Refund | Stripe.Dispute,
+) {
+  return prepareHostedStripeReversalProviderState({
+    event: {
+      data: { object },
+      type,
+    } as Stripe.Event,
+    memberId: "member_123",
+    prisma: {} as never,
+  });
 }
 
 function makeMemberSnapshot(input?: {

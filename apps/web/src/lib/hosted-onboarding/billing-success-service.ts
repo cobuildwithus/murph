@@ -29,7 +29,7 @@ import {
   applyStripeCheckoutCompleted,
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
-  prepareHostedStandardStripeCheckoutCompletion,
+  prepareHostedStripeCheckoutCompletion,
 } from "./stripe-billing-events";
 import {
   cleanupHostedStandardCheckoutLoser,
@@ -128,8 +128,8 @@ async function applyHostedCheckoutSessionSuccess(input: {
           userId: input.memberId,
         })
       : null;
-  const preparedStandardCompletion =
-    await prepareHostedStandardStripeCheckoutCompletion({
+  const preparedCheckoutCompletion =
+    await prepareHostedStripeCheckoutCompletion({
       memberId: input.memberId,
       prisma: input.prisma,
       session: input.session,
@@ -164,13 +164,13 @@ async function applyHostedCheckoutSessionSuccess(input: {
         });
       }
 
-      if (preparedStandardCompletion) {
+      if (preparedCheckoutCompletion) {
         return applyStripeCheckoutCompleted(
           input.session,
           tx,
           undefined,
           preparedCryptoDomainRoots ?? undefined,
-          preparedStandardCompletion,
+          preparedCheckoutCompletion,
         );
       }
       return preparedCryptoDomainRoots

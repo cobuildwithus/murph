@@ -123,12 +123,24 @@ Last verified: 2026-07-28
   report convergence before the receipt itself is deleted.
 - Every direct subscription Checkout attempt is an encrypted member-owned row;
   Family retains its single encrypted session in the existing billing attempt
-  owner. After Stripe creates a session, Checkout creation re-locks the owner
-  and returns the URL only after binding that reference; if suspension or
-  deletion won, it expires the session instead. Account deletion suspends
-  first, re-reads all direct attempts and Family billing owners, expires every
-  open session, absorbs an expiry/completion race by canceling the resulting
-  subscription, and only then prepares the final customer-cleanup receipt.
+  owner. A first-time direct subscription Checkout never pre-creates a
+  standalone Customer: subscription-mode Checkout creates it only when the
+  owned Session completes, and completion binds the Customer and Subscription
+  together. Direct Checkout completion prepares its live provider snapshot,
+  encrypted billing identifiers, and email before taking the member lock; the
+  transaction only revalidates durable ownership, accepts the existing attempt,
+  and writes the prepared values. Stripe event reconciliation likewise
+  prepares its canonical provider snapshot before the lock and revalidates the
+  database owner inside it. After Stripe creates a session, Checkout creation
+  re-locks the owner and returns the URL only after binding that reference; if
+  suspension or deletion won, it expires the session instead. Account deletion
+  suspends first, re-reads all direct attempts and Family billing owners,
+  expires every open session, absorbs an expiry/completion race by canceling
+  the resulting subscription, and only then prepares the final
+  customer-cleanup receipt.
+  Pulse Trial loser cleanup validates exact provider targets before one short
+  member-owner revalidation transaction and cancels them only after that
+  transaction releases; no Stripe request is made while that lock is held.
 - Participant-derived hosted-group access is bounded by the shared seven-day
   observation lease. Provider rosters larger than the reconciliation cap cannot
   leave a participant authoritative forever: stale relationships age out.
@@ -382,6 +394,11 @@ Last verified: 2026-07-28
   not silently complete the event.
 - Subscription refund and dispute reversals keep event freshness, the billing
   cursor, unpaid status, and suspension in the same locked billing owner.
+  Subscription, latest-invoice, and invoice-payment evidence is prepared before
+  that owner lock. The transaction re-resolves the reversal owner and checks
+  that the prepared Subscription is still the member's current durable
+  identity before applying only the database transition; it never waits on a
+  Stripe request.
   Exact replay may repeat that atomic transition, but an already-suspended
   snapshot cannot substitute for event freshness: a distinct newer reversal
   must advance the cursor so an older restore cannot reactivate the member.

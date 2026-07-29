@@ -151,14 +151,31 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
     return;
   }
 
-  const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+  const cleanupSubscriptionIds: string[] = [];
+  for (const subscriptionId of subscriptionIds) {
+    const subscription = await retrieveHostedPulseTrialCleanupTarget({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+      stripe: input.stripe,
+      subscriptionId,
+    });
+    if (subscription) {
+      cleanupSubscriptionIds.push(subscriptionId);
+    }
+  }
+  if (cleanupSubscriptionIds.length === 0) {
+    return;
+  }
+
+  const revalidate = async (tx: Prisma.TransactionClient): Promise<void> => {
     const currentMember = await readHostedMemberBillingSnapshot({
       memberId: input.memberId,
       prisma: tx,
     });
     if (
       !currentMember ||
-      subscriptionIds.some((subscriptionId) =>
+      cleanupSubscriptionIds.some((subscriptionId) =>
         classifyHostedPulseTrialCandidateDisposition({
           billingStatus: currentMember.core.billingStatus,
           currentBillingPhase: currentMember.billingRef?.currentBillingPhase ?? null,
@@ -177,24 +194,6 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
         retryable: true,
       });
     }
-
-    for (const subscriptionId of subscriptionIds) {
-      const subscription = await retrieveHostedPulseTrialCleanupTarget({
-        memberId: input.memberId,
-        priceId: input.priceId,
-        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-        stripe: input.stripe,
-        subscriptionId,
-      });
-      if (!subscription) {
-        continue;
-      }
-      await cancelHostedPulseTrialLoserSubscription({
-        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-        stripe: input.stripe,
-        subscriptionId,
-      });
-    }
   };
 
   if (input.lockBudget) {
@@ -202,17 +201,24 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
       acquisitionTimeoutMs: input.lockBudget.acquisitionTimeoutMs,
       memberId: input.memberId,
       prisma: input.prisma,
-      run,
+      run: revalidate,
       transactionTimeoutMs: input.lockBudget.transactionTimeoutMs,
     });
-    return;
+  } else {
+    await withHostedMemberStripeMutationLock({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      run: revalidate,
+    });
   }
 
-  await withHostedMemberStripeMutationLock({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    run,
-  });
+  for (const subscriptionId of cleanupSubscriptionIds) {
+    await cancelHostedPulseTrialLoserSubscription({
+      ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+      stripe: input.stripe,
+      subscriptionId,
+    });
+  }
 }
 
 export async function retrieveHostedPulseTrialCleanupTarget(input: {

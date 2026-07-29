@@ -30,10 +30,8 @@ import {
   type HostedOnboardingError,
 } from "./errors";
 import {
-  bindPreparedHostedMemberStripeCustomerIfMissingTx,
   bindHostedMemberStripeCheckoutSessionTx,
   clearHostedMemberStripeCheckoutAttemptTx,
-  prepareHostedMemberStripeCustomer,
   prepareHostedMemberStripeCheckoutSession,
   readHostedMemberStripeBillingRef,
   revalidateHostedMemberStripeCheckoutAttemptUnderLockTx,
@@ -65,11 +63,7 @@ import {
   lockHostedMemberRow,
   normalizeNullableString,
 } from "./shared";
-import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
-import {
-  closeUnboundHostedSubscriptionCheckout,
-  deleteUnboundHostedStripeCustomer,
-} from "./subscription-checkout-lifecycle";
+import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
 import {
   bindHostedMemberSubscriptionCheckoutUnderLockTx,
   prepareHostedMemberSubscriptionCheckout,
@@ -197,31 +191,12 @@ export async function createHostedBillingCheckout(
       routing: invite.member.routing,
     });
 
-    const preliminaryBillingRef = await readHostedMemberStripeBillingRef({
-      memberId: invite.member.id,
-      prisma,
-    });
-    const preliminaryOffer = resolveHostedBillingCheckoutOffer({
-      billingPlanCode,
-      checkoutOffer,
-      currentBillingRef: preliminaryBillingRef,
-    });
     const { priceId, stripe } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     const verifiedEmailAddress =
       extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
-    if (
-      preliminaryOffer === HOSTED_PULSE_TRIAL_OFFER
-      && !preliminaryBillingRef?.stripeCustomerId
-    ) {
-      await reserveHostedPulseTrialCheckoutCustomer({
-        memberId: invite.member.id,
-        prisma,
-        stripe,
-      });
-    }
     const checkout = await createOrReuseHostedBillingCheckoutAttempt({
       billingPlanCode,
       checkoutOffer,
@@ -868,91 +843,6 @@ function buildHostedBillingCheckoutStateChangedError() {
     message: "Billing checkout changed while Stripe was responding. Try again.",
     retryable: true,
   });
-}
-
-async function reserveHostedPulseTrialCheckoutCustomer(input: {
-  memberId: string;
-  prisma: PrismaClient;
-  stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
-}): Promise<string> {
-  const existingBillingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  if (existingBillingRef?.stripeCustomerId) {
-    return existingBillingRef.stripeCustomerId;
-  }
-
-  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
-    memberId: input.memberId,
-    requestOptions: {
-      maxNetworkRetries: 0,
-      timeout: 5_000,
-    },
-    stripe: input.stripe,
-  });
-  const preparedCustomer = await prepareHostedMemberStripeCustomer({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    stripeCustomerId: candidateStripeCustomerId,
-  });
-  const bindOutcome = await input.prisma.$transaction(
-    (tx) => bindPreparedHostedMemberStripeCustomerIfMissingTx({
-      memberId: input.memberId,
-      preparedCustomer,
-      tx,
-    }),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
-  if (bindOutcome === "bound") {
-    return candidateStripeCustomerId;
-  }
-
-  const currentBillingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const candidateIsBound =
-    currentBillingRef?.stripeCustomerId === candidateStripeCustomerId;
-  if (!candidateIsBound) {
-    await deleteUnboundHostedStripeCustomer({
-      customerId: candidateStripeCustomerId,
-      stripe: input.stripe,
-    });
-  }
-  if (bindOutcome === "member_suspended") {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      httpStatus: 403,
-      message: "This hosted account is suspended. Contact support to restore access.",
-    });
-  }
-  if (bindOutcome === "member_missing") {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-      httpStatus: 409,
-      message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-      retryable: true,
-    });
-  }
-  if (candidateIsBound) {
-    return candidateStripeCustomerId;
-  }
-
-  if (currentBillingRef?.stripeCustomerId) {
-    return currentBillingRef.stripeCustomerId;
-  }
-  if (bindOutcome === "existing_customer") {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-      httpStatus: 409,
-      message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-      retryable: true,
-    });
-  }
-
-  bindOutcome satisfies never;
-  throw new TypeError("Unexpected Pulse Trial Stripe Customer bind outcome.");
 }
 
 async function resolveHostedBillingCheckoutAuth(

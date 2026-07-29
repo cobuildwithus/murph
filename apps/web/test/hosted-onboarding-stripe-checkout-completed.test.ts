@@ -141,24 +141,26 @@ async function applyStripeCheckoutCompleted(
     typeof session.subscription === "string"
       ? session.subscription
       : session.subscription?.id;
-  const isStandardCheckout =
-    session.metadata?.kind !== "hosted_family_plan"
-    && session.metadata?.checkoutOffer !== "pulse_trial_7d";
+  const isDirectCheckout =
+    session.metadata?.kind !== "hosted_family_plan";
+  const isPulseTrialCheckout =
+    session.metadata?.checkoutOffer === "pulse_trial_7d";
   const stripeCheckoutEmail = (
     session.customer_details?.email ?? session.customer_email
   )?.trim().toLowerCase() ?? null;
   const canonicalSubscription =
-    isStandardCheckout && stripeSubscriptionId
+    isDirectCheckout && stripeSubscriptionId
       ? (
-          typeof session.subscription === "object"
+          !isPulseTrialCheckout
+          && typeof session.subscription === "object"
             ? session.subscription
             : await mocks.retrieveStripeSubscription(stripeSubscriptionId)
         )
       : null;
-  const preparedStandardCompletion =
+  const preparedCheckoutCompletion =
     args[4]
     ?? (
-      isStandardCheckout
+      isDirectCheckout
         ? {
             billingCompletion:
               stripeCustomerId && stripeSubscriptionId
@@ -189,7 +191,7 @@ async function applyStripeCheckoutCompleted(
     args[1],
     args[2],
     args[3],
-    preparedStandardCompletion,
+    preparedCheckoutCompletion,
   );
 }
 
@@ -742,8 +744,17 @@ describe("applyStripeCheckoutCompleted", () => {
       freshnessPolicy: "trial-checkout-entitlement",
       pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
       pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+    }));
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      checkoutSessionId: "cs_trial_123",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      preparedCompletion: expect.objectContaining({
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -798,7 +809,6 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
       currentBillingPhase: "trial",
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      stripeSubscriptionId: "sub_123",
     }));
   });
 
@@ -821,7 +831,6 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
       currentBillingPhase: "trial",
-      stripeSubscriptionId: "sub_123",
     }));
   });
 
@@ -899,7 +908,6 @@ describe("applyStripeCheckoutCompleted", () => {
       currentPeriodStart: null,
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeSubscriptionId: "sub_123",
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -942,7 +950,6 @@ describe("applyStripeCheckoutCompleted", () => {
       currentPeriodStart: null,
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeSubscriptionId: "sub_123",
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -1180,9 +1187,11 @@ describe("applyStripeCheckoutCompleted", () => {
     );
 
     expect(outcome).not.toHaveProperty("cleanupPulseTrialStripeSubscriptionId");
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        stripeSubscriptionId: "sub_trial_replacement",
+        preparedCompletion: expect.objectContaining({
+          stripeSubscriptionId: "sub_trial_replacement",
+        }),
       }),
     );
   });
@@ -1266,25 +1275,61 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
   });
 
-  it("cancels a loser when the locked reread confirms active non-trial access without a subscription", async () => {
-    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: null,
+  it("validates and cancels a loser outside the short owner-revalidation transaction", async () => {
+    let transactionActive = false;
+    const prisma = {
+      $transaction: async (run: (tx: object) => Promise<unknown>) => {
+        transactionActive = true;
+        try {
+          return await run({});
+        } finally {
+          transactionActive = false;
+        }
       },
-      billingStatus: HostedBillingStatus.active,
-    }));
+    };
+    mocks.retrieveStripeSubscription.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(false);
+      return {
+        ...makePulseTrialSubscription(),
+        id: "sub_delayed_checkout",
+      };
+    });
+    mocks.readHostedMemberBillingSnapshot.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(true);
+      return makeMemberSnapshot({
+        billingRef: {
+          currentBillingPhase: null,
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: null,
+        },
+        billingStatus: HostedBillingStatus.active,
+      });
+    });
+    mocks.cancelStripeSubscription.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(false);
+      return {
+        id: "sub_delayed_checkout",
+        status: "canceled",
+      };
+    });
 
     await expect(cancelHostedPulseTrialCheckoutLoserSubscription({
       memberId: "member_123",
-      prisma: {
-        $transaction: async (run: (tx: object) => Promise<unknown>) => run({}),
-      } as never,
+      prisma: prisma as never,
       subscriptionId: "sub_delayed_checkout",
     })).resolves.toBeUndefined();
 
+    expect(
+      mocks.retrieveStripeSubscription.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readHostedMemberBillingSnapshot.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.readHostedMemberBillingSnapshot.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.cancelStripeSubscription.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.cancelStripeSubscription).toHaveBeenCalledWith("sub_delayed_checkout");
   });
 

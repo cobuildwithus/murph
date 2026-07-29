@@ -26,8 +26,10 @@ import {
   cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
-  prepareHostedStandardStripeCheckoutCompletion,
-  type PreparedHostedStandardStripeCheckoutCompletion,
+  prepareHostedStripeCheckoutCompletion,
+  prepareHostedStripeReversalProviderState,
+  type PreparedHostedStripeCheckoutCompletion,
+  type PreparedHostedStripeReversalProviderState,
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
@@ -38,6 +40,7 @@ import {
 import {
   findMemberForStripeInvoice,
   findMemberForStripeCheckoutSession,
+  findMemberForStripeReversal,
   findMemberForStripeSubscription,
   listHostedStripeCheckoutSessionMemberIds,
   resolveStripeCustomerContext,
@@ -341,7 +344,7 @@ async function processHostedStripeEventRecord(
 
   switch (event.type) {
     case "checkout.session.completed":
-      if (processingContext.preparedStandardCheckoutCompletion) {
+      if (processingContext.preparedCheckoutCompletion) {
         return mapHostedStripeActivationOutcome(
           await applyStripeCheckoutCompleted(
             payload as Stripe.Checkout.Session,
@@ -350,7 +353,7 @@ async function processHostedStripeEventRecord(
             processingContext.preparedCryptoDomainRoots.size > 0
               ? processingContext.preparedCryptoDomainRoots
               : undefined,
-            processingContext.preparedStandardCheckoutCompletion,
+            processingContext.preparedCheckoutCompletion,
           ),
         );
       }
@@ -444,6 +447,7 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
         processingContext.customerId,
+        processingContext.preparedReversalProviderState,
       );
       return buildEmptyHostedStripeEventProcessingResult();
     case "charge.dispute.created":
@@ -455,6 +459,7 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
         processingContext.customerId,
+        processingContext.preparedReversalProviderState,
       ) === "subscription_identity_pending") {
         throw new HostedStripeSubscriptionIdentityPendingError(
           "Stripe subscription identity is pending.",
@@ -472,8 +477,10 @@ type HostedStripeEventProcessingContext = {
   customerId: string | null;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyCryptoDomainRoots: PreparedHostedFamilyCryptoDomainRoots;
-  preparedStandardCheckoutCompletion:
-    PreparedHostedStandardStripeCheckoutCompletion | null;
+  preparedCheckoutCompletion:
+    PreparedHostedStripeCheckoutCompletion | null;
+  preparedReversalProviderState:
+    PreparedHostedStripeReversalProviderState | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
@@ -491,7 +498,8 @@ async function prepareHostedStripeEventProcessingContext(
       customerId: null,
       preparedCryptoDomainRoots: new Map(),
       preparedFamilyCryptoDomainRoots: new Map(),
-      preparedStandardCheckoutCompletion: null,
+      preparedCheckoutCompletion: null,
+      preparedReversalProviderState: null,
     };
   }
 
@@ -507,7 +515,8 @@ async function prepareHostedStripeEventProcessingContext(
     customerId: customerContext.customerId,
     preparedCryptoDomainRoots: new Map(),
     preparedFamilyCryptoDomainRoots: new Map(),
-    preparedStandardCheckoutCompletion: null,
+    preparedCheckoutCompletion: null,
+    preparedReversalProviderState: null,
   };
 }
 
@@ -544,6 +553,21 @@ async function resolveHostedStripeEventDirectBillingMemberId(
       prisma,
       subscription,
     });
+  }
+
+  if (
+    event.type === "refund.created"
+    || event.type.startsWith("charge.dispute.")
+  ) {
+    const object = readHostedStripeEventObject(event.data.object);
+    const member = await findMemberForStripeReversal({
+      chargeId: readHostedStripeEventChargeId(event.type, object),
+      customerId: preflightProcessingContext?.customerId ?? null,
+      paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
+      prisma,
+      subscriptionId: null,
+    });
+    return member?.core.id ?? null;
   }
 
   if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
@@ -595,6 +619,21 @@ async function resolveHostedStripeEventProcessingMemberId(
       prisma,
       subscription: processingContext.canonicalSubscription,
     });
+  }
+
+  if (
+    event.type === "refund.created"
+    || event.type.startsWith("charge.dispute.")
+  ) {
+    const object = readHostedStripeEventObject(event.data.object);
+    const member = await findMemberForStripeReversal({
+      chargeId: readHostedStripeEventChargeId(event.type, object),
+      customerId: processingContext.customerId,
+      paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
+      prisma,
+      subscriptionId: null,
+    });
+    return member?.core.id ?? null;
   }
 
   if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
@@ -784,7 +823,7 @@ async function processClaimedHostedStripeEvent(
     usageCreditEventHandled = usageCreditReconciliation.handled;
     const preflightProcessingContext =
       !usageCreditReconciliation.handled
-      && hostedStripeEventNeedsFamilyPreparationContext(stripeEvent)
+      && hostedStripeEventNeedsPreflightProcessingContext(stripeEvent)
         ? await prepareHostedStripeEventProcessingContext(stripeEvent)
         : undefined;
     const directBillingMemberId = usageCreditReconciliation.handled
@@ -1080,9 +1119,9 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
   const preflightProcessingContext =
     input.preflightProcessingContext
     ?? await prepareHostedStripeEventProcessingContext(input.stripeEvent);
-  const preparedStandardCheckoutCompletion =
+  const preparedCheckoutCompletion =
     input.stripeEvent.type === "checkout.session.completed"
-      ? await prepareHostedStandardStripeCheckoutCompletion({
+      ? await prepareHostedStripeCheckoutCompletion({
           canonicalSubscription:
             preflightProcessingContext.canonicalSubscription,
           memberId: input.memberId,
@@ -1090,12 +1129,19 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
           session: input.stripeEvent.data.object as Stripe.Checkout.Session,
         })
       : null;
+  const preparedReversalProviderState =
+    await prepareHostedStripeReversalProviderState({
+      event: input.stripeEvent,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
   const preparedProcessingContext = {
     ...preflightProcessingContext,
     canonicalSubscription:
-      preparedStandardCheckoutCompletion?.canonicalSubscription
+      preparedCheckoutCompletion?.canonicalSubscription
       ?? preflightProcessingContext.canonicalSubscription,
-    preparedStandardCheckoutCompletion,
+    preparedCheckoutCompletion,
+    preparedReversalProviderState,
   };
   const preparedFamilyCryptoDomainRoots =
     preparedProcessingContext.canonicalSubscription
@@ -1117,16 +1163,9 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
     prisma: input.prisma,
     run: async (transaction) => {
       const processingContext = {
-        ...(
-          input.stripeEvent.type === "checkout.session.completed"
-            ? preparedProcessingContext
-            : await prepareHostedStripeEventProcessingContext(
-                input.stripeEvent,
-              )
-        ),
+        ...preparedProcessingContext,
         preparedCryptoDomainRoots,
         preparedFamilyCryptoDomainRoots,
-        preparedStandardCheckoutCompletion,
       };
       const processingMemberId =
         await resolveHostedStripeEventProcessingMemberId(
@@ -1164,13 +1203,15 @@ function hostedStripeEventMayActivateDirectMember(
     === HOSTED_PULSE_TRIAL_OFFER;
 }
 
-function hostedStripeEventNeedsFamilyPreparationContext(
+function hostedStripeEventNeedsPreflightProcessingContext(
   stripeEvent: Stripe.Event,
 ): boolean {
   return (
     isHostedStripeSubscriptionBillingEvent(stripeEvent.type)
     || stripeEvent.type === "invoice.paid"
     || stripeEvent.type === "invoice.payment_failed"
+    || stripeEvent.type === "refund.created"
+    || stripeEvent.type.startsWith("charge.dispute.")
   );
 }
 
