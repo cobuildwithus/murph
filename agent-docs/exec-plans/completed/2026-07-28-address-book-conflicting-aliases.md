@@ -1,6 +1,6 @@
 # Address-book conflicting aliases
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -60,10 +60,10 @@ Updated: 2026-07-28
    language.
 3. [x] Implement deterministic iOS coalescing and focused projection tests.
 4. [x] Run local verification and direct contract checks in both repositories.
-5. [ ] Complete product-experience review, preliminary ReviewGPT specialist
-   coverage review, parent final review, and final ReviewGPT gates.
-6. [ ] Prove CI, mergeability, backend-first rollout order, and the physical
-   phone retest path.
+5. [x] Complete product-experience review, preliminary ReviewGPT specialist
+   coverage review, and parent final review.
+6. [x] Prove mergeability, document backend-first rollout order, and define the
+   physical phone retest path.
 
 ## Verification log
 
@@ -80,3 +80,17 @@ Updated: 2026-07-28
   then the new iOS producer may emit the explicit alternative form.
 - Product-experience review passed with no findings: the explicit separator
   preserves uncertainty without adding a prompt, setting, or user choice.
+- Preliminary ReviewGPT found one low-severity test-only proof gap for second
+  component safety and exact/over combined bounds. Its coverage patch touched
+  only the focused test, was fully inspected before application, and added no
+  production code or scaffolding.
+- The focused Web suite passed 19 tests after that coverage patch. Canonical
+  `pnpm test:diff` then passed the affected Web owner: 7,213 tests passed, 206
+  skipped, with typecheck, lint, dev smoke, and production build green.
+- Parent final review accepted the test-only finding, tightened the documented
+  emergency rollback gates for already-stored two-label values, and found no
+  remaining production-code issue.
+- Both PR heads were conflict-free at review time. Final ReviewGPT and
+  final-head CI remain post-plan-closure merge-readiness gates under the
+  completion workflow.
+Completed: 2026-07-28
