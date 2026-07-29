@@ -9,6 +9,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   backfillHostedThreadRouteAccountProjections,
+  createHostedThreadRouteAccountProjectionBackfillStore,
   readHostedThreadRouteAccountProjectionReadiness,
   type HostedThreadRouteAccountProjectionBackfillCandidate,
 } from "@/src/lib/hosted-routing/thread-route-account-projection-backfill";
@@ -80,6 +81,40 @@ describe("hosted thread route account projection backfill", () => {
     expect(storedAccountLookupKey).toBe(accountLookupKey);
   });
 
+  it("dry-runs a valid projection without invoking the mutation owner", async () => {
+    const accountLookupKey = requireValue(
+      createHostedPhoneLookupKey("+15550100001"),
+    );
+    const candidate = buildCandidate({ accountLookupKey });
+    const store = {
+      applyCandidate: vi.fn(),
+      countCandidates: vi.fn().mockResolvedValue(1),
+      listCandidates: vi.fn().mockResolvedValue([candidate]),
+    };
+
+    await expect(backfillHostedThreadRouteAccountProjections({
+      openRoute: vi.fn().mockResolvedValue(
+        buildHostedThreadDeliveryRoute({
+          accountLookupKey,
+          channel: "linq",
+          threadId: "chat_group_123",
+        }),
+      ),
+      store,
+    })).resolves.toMatchObject({
+      appliedRows: 0,
+      conflicts: 0,
+      hasMore: true,
+      invalidRows: 0,
+      mode: "dry-run",
+      remainingRows: 1,
+      selectedRows: 1,
+      wouldApplyRows: 1,
+    });
+    expect(store.applyCandidate).not.toHaveBeenCalled();
+    expect(store.countCandidates).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces invalid legacy authority without claiming projection readiness", async () => {
     const accountLookupKey = requireValue(
       createHostedPhoneLookupKey("+15550100001"),
@@ -115,6 +150,76 @@ describe("hosted thread route account projection backfill", () => {
         pendingRows: 1,
       });
     expect(store.applyCandidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("hosted thread route account projection store", () => {
+  it("fences writes to the exact still-unprojected route authority", async () => {
+    const accountLookupKey = requireValue(
+      createHostedPhoneLookupKey("+15550100001"),
+    );
+    const candidate = buildCandidate({ accountLookupKey });
+    const count = vi.fn().mockResolvedValue(1);
+    const findMany = vi.fn().mockResolvedValue([candidate]);
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const store = createHostedThreadRouteAccountProjectionBackfillStore({
+      hostedThreadRoute: {
+        count,
+        findMany,
+        updateMany,
+      },
+    } as never);
+    const candidateWhere = {
+      accountLookupKey: null,
+      channel: {
+        in: ["linq", "telegram"],
+      },
+    };
+
+    await expect(store.listCandidates({ take: 51 })).resolves.toEqual([candidate]);
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [
+        { channel: "asc" },
+        { threadIdentityLookupKey: "asc" },
+      ],
+      select: {
+        channel: true,
+        containerMemberId: true,
+        deliveryRouteEncrypted: true,
+        threadIdentityLookupKey: true,
+        threadLookupKey: true,
+        updatedAt: true,
+      },
+      take: 51,
+      where: candidateWhere,
+    });
+    await expect(store.countCandidates()).resolves.toBe(1);
+    expect(count).toHaveBeenCalledWith({ where: candidateWhere });
+
+    await expect(store.applyCandidate({
+      accountLookupKey,
+      candidate,
+    })).resolves.toBe(true);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        accountLookupKey,
+      },
+      where: {
+        accountLookupKey: null,
+        channel: candidate.channel,
+        containerMemberId: candidate.containerMemberId,
+        deliveryRouteEncrypted: candidate.deliveryRouteEncrypted,
+        threadIdentityLookupKey: candidate.threadIdentityLookupKey,
+        threadLookupKey: candidate.threadLookupKey,
+        updatedAt: candidate.updatedAt,
+      },
+    });
+    await expect(store.applyCandidate({
+      accountLookupKey,
+      candidate,
+    })).resolves.toBe(false);
   });
 });
 
