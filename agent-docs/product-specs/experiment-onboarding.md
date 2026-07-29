@@ -54,8 +54,20 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 ## Start Drafts Today, Start Intents Later
 
 - Today, a hosted `Run Experiment` click opens channel-specific draft/contact options for the user to send, such as text, email, or Telegram.
-- The draft includes a structured `Protocol reference` containing the exact protocol key, page revision, and run-spec revision. It starts a protocol-aware onboarding conversation in the user's configured channel but creates no private state by itself.
-- The reference is untrusted user input. The assistant resolves the key, preserves both supplied revisions as compare-and-swap expectations, and continues to apply this contract's safety and setup rules.
+- The draft contains one human-readable sentence naming the experiment. It does
+  not expose protocol keys, field names, or revision hashes. It starts a
+  protocol-aware onboarding conversation in the user's configured channel but
+  creates no private state by itself.
+- The sentence is untrusted user input. The assistant resolves the name or alias
+  through Health Commons discovery and requires one unique exact title or alias
+  match. That match is authoritative; a discovery `starterCandidate`,
+  canonical starter, or same-family variant cannot replace it without explicit
+  user agreement. The assistant then uses the exact page's current revision
+  pair as compare-and-swap expectations while continuing to apply this
+  contract's safety and setup rules.
+- Legacy drafts or copied messages may still contain a structured
+  `Protocol reference`. Preserve both supplied revisions for those messages;
+  never replace them with the newly resolved current pair.
 - A persisted short-lived start intent is the desired future contract. When that exists, it should carry the structured onboarding block plus the exact protocol revision instead of relying on a prefilled sentence as durable state.
 
 ## Revision-Preserving Handoff
@@ -63,7 +75,15 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 Before Murph writes a private run, it should already know the exact Health Commons page it is using.
 
 - Read the protocol page before planning.
-- Pass both supplied revision ids through the dry run and real protocol-backed start. They are compare-and-swap expectations, not revision overrides. If either differs from the current protocol, stop and ask the member to refresh or reopen it rather than silently starting another revision.
+- For a name-first draft, pass both revision ids returned by the exact resolved
+  protocol page through the dry run and real protocol-backed start. They are
+  compare-and-swap expectations, not revision overrides. If the runnable
+  contract changes before creation, explain the material change and revisit
+  affected setup rather than silently starting another revision.
+- For a legacy structured reference, pass both supplied revision ids through the
+  dry run and real start. If either differs from the current protocol, stop and
+  ask the member to refresh or reopen it rather than substituting the current
+  revision.
 - Preserve `commonsProtocolRef.key`, `commonsProtocolRef.pageRevisionId`, `commonsProtocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record. Store a private `protocolRef` only when the run uses a saved private adaptation.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, measurement plan, and compact experiment-onboarding deltas. Copy edits, generic assistant-policy wording, vault-read behavior, or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.
