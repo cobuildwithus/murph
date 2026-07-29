@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import { applyHostedDeviceSyncRuntimeResult } from "@/src/lib/device-sync/hosted-runtime-authority";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import {
@@ -28,6 +30,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   return jsonOk(await applyHostedDeviceSyncRuntimeResult({
     request,
+    scheduleFailureDiagnostics: after,
     trustedUserId: userId,
   }));
 });

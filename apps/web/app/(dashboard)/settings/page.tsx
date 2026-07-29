@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from "@murphai/hosted-execution/assistant-model";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
@@ -30,6 +33,7 @@ import {
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
@@ -406,7 +410,11 @@ export default async function SettingsPage({
             account?.assistant?.dormantSolPreference === true
           }
           initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          initialProvider={
+            account?.assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
+          }
           solAvailable={account?.assistant?.solAvailable === true}
+          veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
 

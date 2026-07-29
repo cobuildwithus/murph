@@ -21,6 +21,7 @@ import {
 import {
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from './assistant/target-runtime.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
@@ -69,13 +70,14 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 )
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
-const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_LABEL =
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
 export const HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
 ] as const
+const HOSTED_ASSISTANT_SUPPORTED_PROVIDER_LABEL =
+  HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS.join(' or ')
+const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_LABEL =
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
 const hostedAssistantAllowedProviderIdSet = new Set<string>(
   HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS,
 )
@@ -550,10 +552,9 @@ function resolveHostedAssistantCodexModelProvider(providerToken: string): {
   label: string
   modelProvider: string | null
 } {
-  const providerConfig =
-    providerToken === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
-      ? resolveAssistantCodexModelProviderConfig(providerToken)
-      : null
+  const providerConfig = hostedAssistantAllowedProviderIdSet.has(providerToken)
+    ? resolveAssistantCodexModelProviderConfig(providerToken)
+    : null
   if (providerConfig) {
     return {
       label: providerConfig.id,

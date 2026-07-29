@@ -1,12 +1,27 @@
-import {
-  emitHostedExecutionStructuredLog,
-  sanitizeHostedExecutionStructuredLogText,
-} from "@murphai/hosted-execution";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
-const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 20_000;
+const HOSTED_CONTAINER_CPU_WATCHDOG_INTERVAL_MS = 10_000;
 const HOSTED_CONTAINER_CPU_WATCHDOG_EMIT_THRESHOLD_CORES = 0.5;
 const HOSTED_CONTAINER_CPU_WATCHDOG_TOP_PROCESS_COUNT = 3;
-const HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM = "[redacted]";
+const HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES = new Set([
+  "bash",
+  "cat",
+  "codex",
+  "dash",
+  "grep",
+  "murph",
+  "node",
+  "pnpm",
+  "python",
+  "python3",
+  "rg",
+  "sed",
+  "sh",
+  "tail",
+  "tini",
+  "vault-cli",
+  "zsh",
+]);
 // Linux exports per-process utime/stime in USER_HZ ticks; USER_HZ is 100 on the
 // linux/amd64 hosted runner image. Diagnostics-only conversion, not authority.
 const HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND = 100;
@@ -20,12 +35,13 @@ interface HostedContainerCpuWatchdogDirectoryEntryLike {
 // watchdog stays decoupled from the entrypoint module graph.
 export interface HostedContainerCpuWatchdogProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
+  readlink?(path: string): Promise<string>;
   readdir(path: string): Promise<HostedContainerCpuWatchdogDirectoryEntryLike[]>;
 }
 
 interface HostedContainerCpuWatchdogProcessSample {
-  comm: string;
   cpuTicks: number;
+  executable: string | null;
   // stat field 22 kept as an opaque equality token: same pid + same start time
   // is the same process; a changed start time is a reused pid.
   startTimeTicks: string | null;
@@ -48,9 +64,11 @@ interface HostedContainerCpuWatchdogSample {
 // Always-on CPU attribution sampler for the hosted runner container. Samples
 // cgroup CPU totals plus per-process tick counters on a fixed interval and
 // emits one structured log per interval whose CPU usage crosses the threshold,
-// naming the top processes by kernel comm name only (never command lines), so
-// production CPU burns are attributable to a specific process. Diagnostics
-// only: sampling failures never affect the runner.
+// naming the top processes only by an allowlisted executable basename read
+// from /proc/<pid>/exe, with an allowlisted kernel comm as the unavailable-exe
+// fallback (never arbitrary comm values, command lines, arguments, or paths),
+// so production CPU burns are attributable without exposing private names.
+// Diagnostics only: sampling failures never affect the runner.
 export function startHostedContainerCpuWatchdog(input: {
   processApi: HostedContainerCpuWatchdogProcessApi;
 }): () => void {
@@ -98,7 +116,7 @@ export function startHostedContainerCpuWatchdog(input: {
   };
   // Seed the baseline immediately: boot-time burns are a primary target, and
   // waiting for the first setInterval firing would bake the whole boot window
-  // into a t≈20s baseline, making the first reportable interval start there.
+  // into a t≈10s baseline, making the first reportable interval start there.
   void tick();
   const interval = setInterval(() => {
     void tick();
@@ -143,7 +161,17 @@ async function readHostedContainerCpuWatchdogSample(
     }
     const parsed = parseHostedContainerProcPidStat(stat);
     if (parsed) {
-      perPid.set(Number.parseInt(entry.name, 10), parsed);
+      const executable = await readHostedContainerCpuWatchdogExecutable(
+        processApi,
+        entry.name,
+      );
+      perPid.set(Number.parseInt(entry.name, 10), {
+        cpuTicks: parsed.cpuTicks,
+        executable: executable === undefined
+          ? parsed.fallbackExecutable
+          : executable,
+        startTimeTicks: parsed.startTimeTicks,
+      });
     } else {
       procScanComplete = false;
     }
@@ -199,12 +227,16 @@ function parseHostedContainerCgroupCpuStat(text: string | null): {
   };
 }
 
-// Parses `pid (comm) state ppid ... utime stime ...`. Only the comm name (the
-// kernel-truncated executable name, never arguments or paths) is retained, so
-// watchdog logs stay free of command-line content.
+// Parses `pid (comm) state ppid ... utime stime ...`. The process-controlled
+// comm value is discarded unless it exactly matches the fixed executable
+// allowlist needed for readlink-unavailable fallback.
 function parseHostedContainerProcPidStat(
   text: string,
-): HostedContainerCpuWatchdogProcessSample | null {
+): {
+  cpuTicks: number;
+  fallbackExecutable: string | null;
+  startTimeTicks: string | null;
+} | null {
   const commStart = text.indexOf("(");
   const commEnd = text.lastIndexOf(")");
   if (commStart === -1 || commEnd <= commStart) {
@@ -220,10 +252,37 @@ function parseHostedContainerProcPidStat(
     return null;
   }
   return {
-    comm,
     cpuTicks: utime + stime,
+    fallbackExecutable:
+      HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(comm)
+        ? comm
+        : null,
     startTimeTicks: rest[19] ?? null,
   };
+}
+
+async function readHostedContainerCpuWatchdogExecutable(
+  processApi: HostedContainerCpuWatchdogProcessApi,
+  pid: string,
+): Promise<string | null | undefined> {
+  if (!processApi.readlink) {
+    return undefined;
+  }
+
+  let target: string;
+  try {
+    target = await processApi.readlink(`/proc/${pid}/exe`);
+  } catch {
+    return undefined;
+  }
+  const basename = target
+    .replace(/ \(deleted\)$/u, "")
+    .split("/")
+    .at(-1);
+  return basename
+    && HOSTED_CONTAINER_CPU_WATCHDOG_SAFE_EXECUTABLE_BASENAMES.has(basename)
+    ? basename
+    : null;
 }
 
 function emitHostedContainerCpuWatchdogReport(input: {
@@ -236,9 +295,8 @@ function emitHostedContainerCpuWatchdogReport(input: {
   }
   const intervalSeconds = intervalMs / 1000;
   const topCpuProcesses: Array<{
-    comm: string;
-    commRedacted: boolean;
     cpuCores: number;
+    executable?: string;
     pid: number;
   }> = [];
   let perPidTicksDelta = 0;
@@ -270,13 +328,13 @@ function emitHostedContainerCpuWatchdogReport(input: {
     }
     perPidTicksDelta += deltaTicks;
     if (deltaTicks > 0) {
-      const redactedComm = redactHostedContainerCpuWatchdogComm(current.comm);
       topCpuProcesses.push({
-        comm: redactedComm.comm,
-        commRedacted: redactedComm.redacted,
         cpuCores: roundHostedContainerCpuCores(
-          deltaTicks / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND / intervalSeconds,
+          deltaTicks
+            / HOSTED_CONTAINER_CPU_WATCHDOG_TICKS_PER_SECOND
+            / intervalSeconds,
         ),
+        ...(current.executable ? { executable: current.executable } : {}),
         pid,
       });
     }
@@ -323,16 +381,6 @@ function emitHostedContainerCpuWatchdogReport(input: {
     phase: "wake.running",
     userId: null,
   });
-}
-
-function redactHostedContainerCpuWatchdogComm(
-  comm: string,
-): { comm: string; redacted: boolean } {
-  const sanitized = sanitizeHostedExecutionStructuredLogText(comm);
-  if (!sanitized) {
-    return { comm: HOSTED_CONTAINER_CPU_WATCHDOG_REDACTED_COMM, redacted: true };
-  }
-  return { comm: sanitized, redacted: sanitized !== comm };
 }
 
 function subtractOptionalCpuWatchdogCounters(
