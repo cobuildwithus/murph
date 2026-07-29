@@ -269,7 +269,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-challenge',
     name: 'group-challenge',
     triggerHint:
-      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns social-first formation grounded in the current room, metric and window selection, human-owned real-world stakes, challenge buy-in, room-native cast material and approved photos, baselines, consented scoring, the durable challenge page, daily dispatches, rulings, confounders, and close-out. A vague challenge request is not exercise programming. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns social-first formation grounded in the current room, metric and window selection, human-owned real-world stakes, challenge buy-in, room-native cast material and approved photos, baselines, consented scoring, the durable challenge page, daily dispatches, rulings, confounders, and close-out. A vague challenge request is not exercise programming. Use group-challenge-scorecards alongside it for teams, collective targets, weighted points, or multiple metrics. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+  },
+  {
+    slug: 'group-challenge-scorecards',
+    name: 'group-challenge-scorecards',
+    triggerHint:
+      'Read alongside group-challenge whenever a challenge uses teams, a shared or participant target, multiple metrics, weighted additive points, or a long-running cumulative group goal, and on every scheduled dispatch for such a challenge. Owns only format, up-to-five-component scorecard mechanics, point-balance preview, aggregate scoring, and format-specific presentation; group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out.',
   },
   {
     slug: 'music-generation',
