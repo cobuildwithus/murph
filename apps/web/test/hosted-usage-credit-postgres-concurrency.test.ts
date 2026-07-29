@@ -27,6 +27,7 @@ import {
   HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  observeHostedUsageReferralInboundTx,
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "@/src/lib/hosted-growth/usage-referral";
 import {
@@ -1359,6 +1360,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
       const sourceConversation = {
         channel: "linq" as const,
+        linqService: "imessage" as const,
         threadId: `hid_${fixtureId.replaceAll("-", "")}`,
         threadIsDirect: true,
       };
@@ -1549,6 +1551,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const now = new Date();
       const armedAt = new Date(now.getTime() - 20 * 60_000);
       const targetBoundAt = new Date(now.getTime() - 15 * 60_000);
+      const preActivationMessageAt = new Date(now.getTime() - 12 * 60_000);
       const activatedAt = new Date(now.getTime() - 10 * 60_000);
       const qualifiedAt = new Date(now.getTime() - 5 * 60_000);
       const celebrationDedupeKey =
@@ -1593,6 +1596,49 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             threadLookupKey: sourceThreadLookupKey,
           },
         });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt,
+            beneficiaryMemberId: sourceContainerMemberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            humanMessageCount: 0,
+            id: referralId,
+            nonReferrerMessageCount: 0,
+            policyCode: "new_person_activation_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt,
+            targetContainerMemberId,
+          },
+        });
+
+        await expect(observer.$transaction((tx) =>
+          observeHostedUsageReferralInboundTx({
+            containerMemberId: targetContainerMemberId,
+            enabled: true,
+            eventKey: "introduced-member-before-activation",
+            occurredAt: preActivationMessageAt,
+            senderMemberId: introducedMemberId,
+            senderSubjectKey: "introduced-member",
+            tx,
+          })
+        )).resolves.toEqual({
+          isBoundReferralTarget: true,
+          qualificationCandidateReferralId: null,
+        });
+        await expect(observer.hostedUsageReferral.findUniqueOrThrow({
+          select: { introducedMemberId: true, qualifiedAt: true, status: true },
+          where: { id: referralId },
+        })).resolves.toEqual({
+          introducedMemberId: null,
+          qualifiedAt: null,
+          status: "target_bound",
+        });
+
         await observer.hostedMailboxItem.create({
           data: {
             dedupeKey: `member.activated:${introducedMemberId}`,
@@ -1605,30 +1651,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             userId: introducedMemberId,
           },
         });
-        await observer.hostedUsageReferral.create({
-          data: {
-            armedAt,
-            beneficiaryMemberId: sourceContainerMemberId,
-            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
-            firstHumanMessageAt: qualifiedAt,
-            humanMessageCount: 1,
-            id: referralId,
-            introducedMemberId,
-            lastHumanMessageAt: qualifiedAt,
-            nonReferrerMessageCount: 1,
-            observedEventKeysJson: ["introduced-member-first-message"],
-            observedSpeakerKeysJson: ["introduced-member"],
-            policyCode: "new_person_activation_v1",
-            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
-            qualifiedAt,
-            referrerMemberId,
-            referrerSubjectKey: "authenticated-member",
-            rewardUsdMicros:
-              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-            status: "target_bound",
-            targetBoundAt,
-            targetContainerMemberId,
-          },
+        await expect(observer.$transaction((tx) =>
+          observeHostedUsageReferralInboundTx({
+            containerMemberId: targetContainerMemberId,
+            enabled: true,
+            eventKey: "introduced-member-after-activation",
+            occurredAt: qualifiedAt,
+            senderMemberId: introducedMemberId,
+            senderSubjectKey: "introduced-member",
+            tx,
+          })
+        )).resolves.toEqual({
+          isBoundReferralTarget: true,
+          qualificationCandidateReferralId: referralId,
         });
 
         const first = await reconcileHostedUsageReferralRewardAfterCommit({
@@ -2050,6 +2085,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const now = new Date();
+      const sourceConversation = {
+        channel: "linq" as const,
+        linqService: "imessage" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: false,
+      };
 
       try {
         await observer.hostedMember.createMany({
@@ -2140,6 +2181,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             request: {
               action: "read_usage_referral",
               linqSenderHandles: [phoneNumbers[index]!],
+              sourceConversation,
             },
           });
           expect(read).toMatchObject({
@@ -2165,6 +2207,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 action: "arm_usage_referral",
                 linqSenderHandles: [phoneNumbers[index]!],
                 policyCode: "new_person_activation_v1",
+                sourceConversation,
               },
             })
           ),

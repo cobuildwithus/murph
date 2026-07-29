@@ -79,6 +79,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       policyCode: "active_group_v1",
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
       },
@@ -98,8 +99,46 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       linqSenderHandles: ["+15550000001"],
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
+      },
+    });
+  });
+
+  it("injects the observed non-iMessage Linq service for fail-closed policy gating", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_usage_referral",
+      result: { outcome: "read", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-direct-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
+      },
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          service: "SMS",
+          target: "raw-direct-thread",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await groupTool.request({ action: "read_usage_referral" });
+
+    expect(request).toHaveBeenCalledWith({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "sms",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: true,
       },
     });
   });

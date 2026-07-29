@@ -168,6 +168,9 @@ describe('assistant hosted low-usage skill', () => {
       'The ordinary first-reply group setup flow owns the rest',
     )
     expect(normalizedSkill).toContain(
+      'asks them to come back and say hi in the group once setup is done',
+    )
+    expect(normalizedSkill).toContain(
       'confirm the handoff in one short sentence',
     )
     expect(normalizedSkill).not.toContain(

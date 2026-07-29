@@ -314,10 +314,13 @@ export default async function SettingsPage({
           userEmailAddress: account.email.address,
         })[0] ?? null
       : null;
+  const canStartUsageMissions =
+    usageActivity?.missionsEnabled === true
+    && usageMissionContactOption !== null;
   const visibleUsageActivity =
     usageActivity
     && (
-      usageActivity.missionsEnabled
+      canStartUsageMissions
       || usageActivity.credits.length > 0
       || usageActivity.missions.length > 0
     )

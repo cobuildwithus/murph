@@ -4933,6 +4933,7 @@ describe("Linq group chat auto-provision", () => {
         occurredAt: new Date("2026-06-24T12:00:00.000Z"),
         ownerMemberId: "member_owner_123",
         targetChannel: "linq",
+        targetLinqService: "iMessage",
         targetContainerMemberId: containerCreate.data.memberId,
         tx: prisma,
       });

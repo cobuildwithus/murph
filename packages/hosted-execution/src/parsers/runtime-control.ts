@@ -1569,7 +1569,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
   );
   assertAllowedObjectKeys(
     source,
-    new Set(["channel", "threadId", "threadIsDirect"]),
+    new Set(["channel", "linqService", "threadId", "threadIsDirect"]),
     "Hosted runtime usage referral source conversation",
   );
   const channel = requireString(
@@ -1581,9 +1581,31 @@ function parseHostedRuntimeUsageReferralSourceContext(
       "Hosted runtime usage referral source conversation channel is invalid.",
     );
   }
+  const linqService = source.linqService === undefined
+    ? null
+    : requireString(
+        source.linqService,
+        "Hosted runtime usage referral source conversation linqService",
+      );
+  if (
+    linqService !== null
+    && (
+      channel !== "linq"
+      || (
+        linqService !== "imessage"
+        && linqService !== "rcs"
+        && linqService !== "sms"
+      )
+    )
+  ) {
+    throw new TypeError(
+      "Hosted runtime usage referral source conversation linqService is invalid.",
+    );
+  }
   return {
     sourceConversation: {
       channel,
+      ...(linqService === null ? {} : { linqService }),
       threadId: parseHostedRuntimeUsageReferralBlindedIdentifier(
         source.threadId,
         "Hosted runtime usage referral source conversation threadId",

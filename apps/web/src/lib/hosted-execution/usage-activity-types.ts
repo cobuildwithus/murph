@@ -6,6 +6,7 @@ export interface HostedAiUsageCreditActivityRow {
 }
 
 export type HostedAiUsageMissionActivityStatus =
+  | "checking_final_activity"
   | "completed"
   | "in_progress"
   | "reward_pending"

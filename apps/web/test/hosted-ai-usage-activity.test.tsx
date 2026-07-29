@@ -105,6 +105,17 @@ describe("readHostedAiUsageActivity", () => {
         status: "target_bound",
       },
       {
+        armedAt: new Date("2026-07-28T10:00:00.000Z"),
+        beneficiaryMemberId: "member_group",
+        expiresAt: new Date("2026-07-29T11:00:00.000Z"),
+        id: "hur_checking_final",
+        policyCode: "active_group_v1",
+        qualifiedAt: null,
+        rewardedAt: null,
+        rewardUsdMicros: 3_500_000n,
+        status: "target_bound",
+      },
+      {
         armedAt: new Date("2026-07-28T12:00:00.000Z"),
         beneficiaryMemberId: "member_group",
         expiresAt: new Date("2026-08-04T12:00:00.000Z"),
@@ -166,7 +177,7 @@ describe("readHostedAiUsageActivity", () => {
       },
     }));
     expect(mocks.missionFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      take: 47,
+      take: 46,
       where: {
         referrerMemberId: "member_123",
         status: "rewarded",
@@ -206,12 +217,22 @@ describe("readHostedAiUsageActivity", () => {
       },
       {
         destinationLabel: "the group",
+        id: "hur_checking_final",
+        rewardLabel: "$3.50",
+        selectedLabel: "Jul 28, 2026",
+        status: "checking_final_activity",
+        statusLabel: "Checking final activity",
+        timingLabel:
+          "Action closed Jul 29, 2026, 11:00:00 AM UTC; checking delayed activity",
+      },
+      {
+        destinationLabel: "the group",
         id: "hur_in_progress",
         rewardLabel: "$3.50",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
-        timingLabel: "Ends Aug 3, 2026",
+        timingLabel: "Ends Aug 3, 2026, 12:00:00 PM UTC",
       },
       {
         destinationLabel: "your Murph",
@@ -220,7 +241,7 @@ describe("readHostedAiUsageActivity", () => {
         selectedLabel: "Jul 26, 2026",
         status: "waiting_for_group",
         statusLabel: "Waiting for a new group",
-        timingLabel: "Start a new group by Aug 2, 2026",
+        timingLabel: "Start a new group by Aug 2, 2026, 12:00:00 PM UTC",
       },
       {
         destinationLabel: "your Murph",
@@ -233,6 +254,61 @@ describe("readHostedAiUsageActivity", () => {
       },
     ]);
     expect(activity.missionsEnabled).toBe(true);
+  });
+
+  it("switches an unqualified bound mission to final checking at its exact cutoff", async () => {
+    const now = new Date("2026-07-29T12:00:00.000Z");
+    const row = (input: { expiresAt: Date; id: string }) => ({
+      armedAt: new Date("2026-07-28T12:00:00.000Z"),
+      beneficiaryMemberId: "member_group",
+      expiresAt: input.expiresAt,
+      id: input.id,
+      policyCode: "active_group_v1",
+      qualifiedAt: null,
+      rewardedAt: null,
+      rewardUsdMicros: 3_500_000n,
+      status: "target_bound",
+    });
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([
+      row({
+        expiresAt: new Date(now.getTime() - 1),
+        id: "hur_after_cutoff",
+      }),
+      row({
+        expiresAt: new Date(now.getTime() + 1),
+        id: "hur_before_cutoff",
+      }),
+    ]).mockResolvedValueOnce([]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(activity.missions.map((mission) => ({
+      id: mission.id,
+      status: mission.status,
+      statusLabel: mission.statusLabel,
+      timingLabel: mission.timingLabel,
+    }))).toEqual([
+      {
+        id: "hur_after_cutoff",
+        status: "checking_final_activity",
+        statusLabel: "Checking final activity",
+        timingLabel:
+          "Action closed Jul 29, 2026, 11:59:59 AM UTC; checking delayed activity",
+      },
+      {
+        id: "hur_before_cutoff",
+        status: "in_progress",
+        statusLabel: "In progress",
+        timingLabel: "Ends Jul 29, 2026, 12:00:00 PM UTC",
+      },
+    ]);
   });
 
   it("does not fan out its bounded database reads", async () => {
@@ -374,5 +450,60 @@ describe("HostedAiUsageActivity", () => {
       /aria-label="Ask Murph about usage missions/,
     );
     assert.doesNotMatch(markup, /href="sms:/);
+  });
+
+  it("renders email-only credit history without a mission invitation", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [{
+          addedLabel: "$5.00",
+          dateLabel: "Jul 29, 2026",
+          id: "credit_email_history",
+          sourceLabel: "Added for you",
+        }],
+        missions: [],
+        missionsEnabled: true,
+      },
+      missionContactOption: null,
+    }));
+
+    assert.match(markup, /<h3[^>]*>Usage credits<\/h3>/);
+    assert.match(markup, /Added for you/);
+    assert.doesNotMatch(markup, /<h4[^>]*>Missions<\/h4>/);
+    assert.doesNotMatch(markup, /Ask Murph/);
+  });
+
+  it("renders email-only mission history without action-oriented copy", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [],
+        missions: [{
+          destinationLabel: "your Murph",
+          id: "mission_email_history",
+          requirementsLabel: "Complete the selected mission.",
+          rewardLabel: "$2.00",
+          selectedLabel: "Jul 20, 2026",
+          status: "completed",
+          statusLabel: "Completed",
+          timingLabel: "Earned Jul 27, 2026",
+          title: "Completed mission",
+        }],
+        missionsEnabled: true,
+      },
+      missionContactOption: null,
+    }));
+
+    assert.match(markup, /<h3[^>]*>Credits &amp; missions<\/h3>/);
+    assert.match(markup, /Your existing mission activity remains below/);
+    assert.match(markup, /New missions are not available/);
+    assert.match(markup, /Completed mission/);
+    assert.doesNotMatch(markup, /Ask Murph what is available/);
+    assert.doesNotMatch(markup, /aria-label="Ask Murph about usage missions/);
   });
 });

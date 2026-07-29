@@ -57,9 +57,10 @@ tells the referrer only to bring one new person and Murph together in a fresh
 group. The ordinary first-reply group setup flow owns the reciprocal onboarding:
 Murph shares its contact card once and naturally invites the newcomer to save
 and text it. Setup happens in the newcomer's 1:1 thread after they initiate it.
-Because that group onboarding path is currently Linq-owned, the runtime offers
-and arms the new-person mission only from a Linq conversation. Telegram remains
-eligible for the provider-neutral active-group mission.
+Because that contact-card onboarding path is currently iMessage-owned, the
+runtime offers and arms the new-person mission only from an exact current Linq
+iMessage conversation. SMS, RCS, and Telegram remain eligible only for the
+provider-neutral active-group mission.
 The person completes the ordinary activation flow with the same provider
 identity observed in the target, returns to the group, and says hi. The
 combination of post-arm activation and target presence provides attribution;
@@ -77,11 +78,12 @@ armed -> target_bound -> rewarded
 
 Arming freezes the referrer, beneficiary, policy code and version, reward,
 seven-day window, and—only for a personal destination—the blinded source
-conversation. The referrer's next newly created thread container binds only
-when its durable owner is that exact referrer and creation happened after
-arming. The new-person policy additionally requires a Linq target container;
-Telegram containers leave it armed for a later eligible group. Existing rooms
-cannot bind.
+conversation. The current Linq transport service is trusted runtime context,
+not persisted referral state. The referrer's next newly created thread
+container binds only when its durable owner is that exact referrer and creation
+happened after arming. The new-person policy additionally requires an exact
+Linq iMessage target container; SMS, RCS, and Telegram containers leave it
+armed for a later eligible group. Existing rooms cannot bind.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,
@@ -194,11 +196,16 @@ owner. Its detail surface is a read-only projection:
   expose aggregate or per-grant remaining capacity;
 - mission rows include only the referrer's canonical outstanding commitments and
   rewarded history;
+- a bound mission remains visible as `Checking final activity` between its exact
+  UTC deadline and the end of the bounded late-evidence grace; this is only a
+  projection of the durable referral state, not a second lifecycle;
 - the surface never creates another balance, mission lifecycle, qualification
   counter, participant list, or group-name store;
 - the action opens the member's existing Murph channel with a prefilled question
   about available missions; opening or sending that question does not arm a
   mission by itself;
+- accounts without a supported Murph conversation keep existing credits and
+  mission history visible but receive no empty invitation or action;
 - disabling new referrals hides that action but does not hide current
   commitments or already-earned history.
 

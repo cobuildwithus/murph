@@ -305,24 +305,56 @@ describe("hosted usage referral policy", () => {
       expectedReferralId: null,
       policyCode: "new_person_activation_v1" as const,
       targetChannel: "telegram" as const,
+      targetLinqService: null,
       title: "keeps a Linq-armed new-person mission unbound from Telegram",
     },
     {
       expectedReferralId: "referral_1",
       policyCode: "new_person_activation_v1" as const,
       targetChannel: "linq" as const,
-      title: "binds a new-person mission to a new Linq group",
+      targetLinqService: "iMessage",
+      title: "binds a new-person mission to a new iMessage group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "sms",
+      title: "keeps a new-person mission unbound from a new SMS group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "RCS",
+      title: "keeps a new-person mission unbound from a new RCS group",
+    },
+    {
+      expectedReferralId: null,
+      policyCode: "new_person_activation_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: null,
+      title: "keeps a new-person mission unbound from an unknown Linq service",
+    },
+    {
+      expectedReferralId: "referral_1",
+      policyCode: "active_group_v1" as const,
+      targetChannel: "linq" as const,
+      targetLinqService: "sms",
+      title: "binds an active-group mission to a new SMS group",
     },
     {
       expectedReferralId: "referral_1",
       policyCode: "active_group_v1" as const,
       targetChannel: "telegram" as const,
+      targetLinqService: null,
       title: "binds an active-group mission to a new Telegram group",
     },
   ])("$title", async ({
     expectedReferralId,
     policyCode,
     targetChannel,
+    targetLinqService,
   }) => {
     const occurredAt = new Date("2026-07-26T12:00:00.000Z");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -344,6 +376,7 @@ describe("hosted usage referral policy", () => {
       occurredAt,
       ownerMemberId: "member_referrer",
       targetChannel,
+      targetLinqService,
       targetContainerMemberId: "member_target_container",
       tx: tx as never,
     })).resolves.toEqual({ referralId: expectedReferralId });
@@ -608,6 +641,7 @@ describe("hosted usage referral policy", () => {
       occurredAt: new Date(expiresAt.getTime() + 1),
       ownerMemberId: "member_referrer",
       targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_later_container",
       tx: tx as never,
     })).resolves.toEqual({ referralId: null });
@@ -638,6 +672,7 @@ describe("hosted usage referral policy", () => {
       ),
       ownerMemberId: "member_referrer",
       targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_after_grace_container",
       tx: tx as never,
     })).resolves.toEqual({ referralId: null });

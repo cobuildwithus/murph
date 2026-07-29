@@ -385,8 +385,9 @@ export async function handleHostedUsageReferralGroupTool(input: {
 
     const policy = POLICIES[input.request.policyCode];
     if (
-      !isHostedUsageReferralPolicyAvailableOnChannel({
+      !isHostedUsageReferralPolicyAvailableForConversation({
         channel: requestSourceConversation?.channel ?? null,
+        linqService: requestSourceConversation?.linqService ?? null,
         policyCode: policy.code,
       })
     ) {
@@ -577,6 +578,7 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
   occurredAt: Date;
   ownerMemberId: string;
   targetChannel: HostedRuntimeUsageReferralSourceConversation["channel"];
+  targetLinqService: string | null;
   targetContainerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedUsageReferralBindResult> {
@@ -612,8 +614,9 @@ export async function bindArmedHostedUsageReferralToNewContainerTx(input: {
     return { referralId: null };
   }
   if (
-    !isHostedUsageReferralPolicyAvailableOnChannel({
+    !isHostedUsageReferralPolicyAvailableForConversation({
       channel: input.targetChannel,
+      linqService: input.targetLinqService,
       policyCode: referral.policyCode,
     })
   ) {
@@ -1234,8 +1237,23 @@ function readHostedUsageReferralSourceConversation(
   ) {
     return null;
   }
+  const linqService = source.linqService;
+  if (
+    linqService !== undefined
+    && (
+      source.channel !== "linq"
+      || (
+        linqService !== "imessage"
+        && linqService !== "rcs"
+        && linqService !== "sms"
+      )
+    )
+  ) {
+    return null;
+  }
   return {
     channel: source.channel,
+    ...(linqService === undefined ? {} : { linqService }),
     threadId: source.threadId,
     threadIsDirect: source.threadIsDirect,
   };
@@ -1646,8 +1664,9 @@ async function readHostedUsageReferralSnapshot(input: {
       : null,
     availablePolicies: availablePolicyCodes
       .filter((policyCode) =>
-        isHostedUsageReferralPolicyAvailableOnChannel({
+        isHostedUsageReferralPolicyAvailableForConversation({
           channel: input.sourceConversation?.channel ?? null,
+          linqService: input.sourceConversation?.linqService ?? null,
           policyCode,
         })
       )
@@ -1669,12 +1688,16 @@ async function readHostedUsageReferralSnapshot(input: {
   };
 }
 
-function isHostedUsageReferralPolicyAvailableOnChannel(input: {
+function isHostedUsageReferralPolicyAvailableForConversation(input: {
   channel: HostedRuntimeUsageReferralSourceConversation["channel"] | null;
+  linqService: string | null;
   policyCode: HostedUsageReferralPolicyCode;
 }): boolean {
   return input.policyCode !== "new_person_activation_v1"
-    || input.channel === "linq";
+    || (
+      input.channel === "linq"
+      && input.linqService?.trim().toLowerCase() === "imessage"
+    );
 }
 
 async function readHostedUsageReferralDestinationModel(input: {
