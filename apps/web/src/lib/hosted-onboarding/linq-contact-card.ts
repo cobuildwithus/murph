@@ -80,10 +80,10 @@ export async function reconcileHostedLinqContactCards(input: {
   };
 
   for (const line of lines) {
-    if (line.providerStatus === "AT_RISK") {
+    if (line.providerReputationStatus === "AT_RISK") {
       result.atRiskLines += 1;
     }
-    if (line.providerStatus === "CRITICAL") {
+    if (line.providerReputationStatus === "CRITICAL") {
       result.criticalLines += 1;
     }
 
@@ -192,7 +192,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   signal?: AbortSignal;
 }): Promise<Array<{
   phoneNumber: string;
-  providerStatus: string | null;
+  providerReputationStatus: string | null;
 }>> {
   const maxLines = normalizeLineLimit(input.maxLines);
 
@@ -209,7 +209,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   });
   return lines.map((line) => ({
     phoneNumber: line.phoneNumber,
-    providerStatus: line.providerStatus,
+    providerReputationStatus: line.providerReputationStatus,
   }));
 }
 
@@ -451,9 +451,9 @@ export function buildMurphHostedLinqContactCardVcf(input: {
 
 /**
  * Second healthy configured conversation line (excluding the chat's own) for
- * the vCard's `backup` slot. Reads the existing `HostedLinqLine` projection
- * maintained by the scheduled reconciler; lines last marked AT_RISK/CRITICAL
- * are skipped. Fails soft to null.
+ * the vCard's `backup` slot. Reads the provider reputation projection
+ * maintained by reconciliation; AT_RISK and CRITICAL lines are skipped.
+ * Fails soft to null.
  */
 export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: {
   excludePhoneNumber: string;
@@ -467,8 +467,8 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
     });
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
-      && line.providerStatus !== "AT_RISK"
-      && line.providerStatus !== "CRITICAL"
+      && line.providerReputationStatus !== "AT_RISK"
+      && line.providerReputationStatus !== "CRITICAL"
     )?.phoneNumber ?? null;
   } catch {
     return null;
