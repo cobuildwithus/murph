@@ -69,6 +69,15 @@ const REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES = [
 
 const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_PRODUCTION_BASE_URL",
+  "HOSTED_DATABASE_ALERT_ENABLED",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
+  "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
+  "LINQ_API_TOKEN",
 ] as const;
 
 const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
@@ -225,6 +234,26 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (!deployContext) {
     return errors;
+  }
+
+  const databaseAlertEnabled = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_ENABLED,
+  );
+  if (
+    deployContext === "production"
+    && databaseAlertEnabled
+    && databaseAlertEnabled !== "1"
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be 1 for production deploys.",
+    );
+  } else if (
+    deployContext !== "production"
+    && databaseAlertEnabled
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
+    );
   }
 
   const privateMediaCapabilitySecret = normalizeOptionalString(

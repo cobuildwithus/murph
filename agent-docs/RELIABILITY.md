@@ -39,6 +39,55 @@ Last verified: 2026-07-28
 
 ## Runtime Expectations
 
+- The production database-health operator alert is an independent Cloudflare
+  singleton so the monitored Postgres database cannot take down its own page
+  owner. A five-minute Cron Trigger records one normalized PlanetScale sample
+  or classified failure in Durable Object SQLite and prunes history after 30
+  days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
+  required-metric absence must recur on two consecutive runs before paging.
+  A newly opened incident or one-shot direct migration admission failure admits
+  its exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances any direct-error counter baseline.
+  If another immutable page already owns the single pending-message slot, the
+  same transaction advances the sample baseline and accumulates the later
+  direct-error count plus latest check time in the existing alert row instead
+  of dropping it. An acknowledged older page cannot close the incident while
+  that evidence remains. The next run with a free slot atomically promotes the
+  accumulated count into one direct-error page, which then follows the ordinary
+  attempt fence, health preflight, exact-body retry, and restart contract.
+  When a direct error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  direct-error evidence; co-occurring replayable gauges remain in the persisted
+  sample but cannot become stale pending claims. That exact direct-error page
+  owns the next eligible attempt. A replayable condition still unsafe at that
+  boundary remains eligible for the following paced recurrence. The same
+  one-slot ordering applies in reverse: a later direct-error obligation waits
+  behind an older page but cannot be consumed by the counter baseline. This
+  explicit prioritization keeps admitted bodies immutable without another
+  message queue or delivery lifecycle.
+  An acknowledged incident's replayable gauge or monitoring recurrence does
+  not admit stale evidence while the attempt fence is closed; once the fence
+  opens, a still-unsafe current sample admits the recurrence, while recovery
+  closes the incident without another page. An already pending page is
+  processed or deferred before a later clean sample can close the incident,
+  and only an acknowledged provider response clears it. Provider entry is
+  globally fenced by the persisted last-attempt
+  timestamp, so neither a new incident, recurrence, retry, nor worker restart
+  can attempt Linq more often than once every 30 minutes. The attempt time is
+  actual wall time, not the Cron slot, and is written before network egress.
+  The message's UTC check time likewise comes from the actual completed
+  collection run while the Cron slot remains only the persisted sample
+  identity. Every eligible attempt retrieves the configured direct chat and
+  current line reputation; unhealthy or indeterminate delivery health produces
+  no message POST and retains the pending alert for the next paced attempt.
+  Healthy delivery uses Linq's no-`from` auto-selection route. A
+  transport-ambiguous or rejected send keeps the exact persisted body and Linq
+  idempotency key for the next eligible attempt; acknowledged recurrences
+  advance the alert sequence and choose another fixed opening from current
+  metric evidence. Message variation must remain contextual and
+  deterministic, never random padding. Database pages intentionally have no
+  quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
