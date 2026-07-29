@@ -10,10 +10,11 @@ to decide who receives the usage and how it is consumed. Current-policy
 personal and Family funding reuses the exact Murph billing Subscription's
 attached default card, or the attached Customer default that Subscription
 inherits. The billing Subscription must match the frozen purchase Customer;
-missing, stale, terminal, customer-mismatched, or unattached state falls back
-to Checkout, and unrelated Subscriptions never participate. Hosted-group
-funding does not require a Murph billing Subscription and may use the attached
-Customer default or sole attached card. Stripe's `allow_redisplay` setting
+missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only
+state falls back to Checkout, and unrelated Subscriptions never participate.
+Hosted-group funding does not require a Murph billing Subscription and may use
+the attached Customer default or sole attached card only when no legacy
+Customer default Source exists. Stripe's `allow_redisplay` setting
 controls whether Checkout may show a stored method again; it does not gate the
 payer's explicit use of the existing subscription card for a top-up.
 
@@ -690,18 +691,22 @@ funding route share this sequence:
     billing Subscription already owned by the target and require its Customer
     to match the frozen purchase. Use that Subscription's attached explicit
     default, or its inherited attached Customer default. Missing, stale,
-    terminal, customer-mismatched, or unattached exact-subscription state skips
-    this path, and unrelated Subscriptions never participate. Group funding
-    has no required billing Subscription and may use the attached Customer
-    default or require exactly one attached card. Do not treat
+    terminal, customer-mismatched, unattached, or legacy Source-only
+    exact-subscription state skips this path, and unrelated Subscriptions never
+    participate. Group funding has no required billing Subscription and may
+    use the attached Customer default or require exactly one attached card only
+    when no legacy Customer default Source exists. Do not treat
     `allow_redisplay` as a chargeability signal.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
-    payer and purchase, bind only an active payer's still-`created` purchase to
-    that exact intent, and only then confirm it off session. If suspension,
-    deletion, or another terminal transition wins that lock, cancel the
-    unbound intent and never confirm it. A retry retrieves and continues only
-    an exact already-bound intent. A definitive authentication or card failure
+    payer and purchase. Personal and Family attempts also re-read the current
+    persisted billing Customer and Subscription under that lock. Bind only an
+    active payer's still-`created` purchase whose billing authority still
+    matches to that exact intent, and only then confirm it off session. If a
+    billing change, suspension, deletion, or another terminal transition wins
+    that lock, cancel the unbound intent and never confirm it. A retry retrieves
+    and continues only an exact already-bound intent without retargeting after a
+    later billing change. A definitive authentication or card failure
     must reach verified `canceled` state before its binding is cleared and
     Checkout may begin. An ambiguous outcome remains `payment_pending` and
     cannot start a second payment. The client keeps the original amount and
@@ -768,7 +773,8 @@ binds personal and Family card selection to the target's exact Murph billing
 Subscription. It uses that Subscription's explicit default or inherited
 Customer default regardless of whether Stripe may redisplay the card in
 Checkout. Group funding remains Customer-scoped because it has no required
-Murph billing Subscription.
+Murph billing Subscription. Legacy default Sources are unsupported for direct
+v4 reuse and stay in Checkout.
 Versions one through three retain their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
@@ -916,9 +922,12 @@ expose debt in a group chat, or charge another participant.
   For personal and Family purchases, Murph selects only the exact billing
   Subscription's attached explicit default or inherited Customer default,
   after matching the Subscription owner to the verified Customer. Unrelated
-  Subscriptions never participate. Group funding may use the attached Customer
-  default or sole attached card because it has no required billing
-  Subscription. `allow_redisplay` is used only for Stripe Checkout
+  Subscriptions never participate, and legacy default Sources stay in Checkout.
+  Group funding may use the attached Customer default or sole attached card
+  because it has no required billing Subscription, but it does not replace a
+  legacy Customer default Source. The exact personal or Family billing
+  reference is revalidated under the payer lock before bind; a mismatch cancels
+  the unbound intent before Checkout. `allow_redisplay` is used only for Stripe Checkout
   presentation. Murph persists the resulting PaymentIntent before confirmation
   and never stores raw card details.
 - Payment records and health-sharing permissions remain separate. Buying usage

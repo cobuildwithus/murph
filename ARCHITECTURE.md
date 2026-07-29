@@ -726,13 +726,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Murph billing Subscription whose Customer matches the purchase. They use
   that Subscription's attached default card, or the attached Customer default
   it inherits. Unrelated Subscriptions never participate; missing, stale,
-  terminal, or customer-mismatched billing identity stays in Checkout.
+  terminal, customer-mismatched, or legacy Source-only billing identity stays
+  in Checkout.
   Hosted-group funding has no required Murph billing Subscription, so it may
   use the attached Customer default or the only attached card. Stripe's
   `allow_redisplay` controls Checkout presentation, not whether the
-  subscription card can fund the payer's explicit top-up. Web persists the unconfirmed
-  PaymentIntent on the purchase and then confirms it; only verified cancellation
-  may release that binding before Checkout fallback. Only verified Stripe-event
+  subscription card can fund the payer's explicit top-up. Web revalidates the
+  same billing reference under the existing payer lock, persists the
+  unconfirmed PaymentIntent on the purchase, and then confirms it. A billing
+  change before bind cancels the unbound intent and uses Checkout; after bind,
+  recovery remains tied to that exact intent. Only verified cancellation may
+  release that binding before Checkout fallback. Only verified Stripe-event
   reconciliation
   can grant purchased credit; a browser return or synchronous PaymentIntent
   response cannot. Conversational referrals instead require explicit arming by

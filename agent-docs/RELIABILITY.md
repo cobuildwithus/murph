@@ -229,19 +229,22 @@ Last verified: 2026-07-28
   policy binds personal and Family selection to the exact Murph billing
   Subscription whose Customer matches the frozen purchase, using its attached
   explicit default or its inherited attached Customer default. Missing, stale,
-  terminal, customer-mismatched, or unattached exact-subscription state remains
-  in Checkout, and unrelated Subscriptions never participate. Group funding
-  has no required billing Subscription and may use the attached Customer
-  default or the only attached method; multiple non-default methods remain in
-  Checkout.
+  terminal, customer-mismatched, unattached, or legacy Source-only
+  exact-subscription state remains in Checkout, and unrelated Subscriptions
+  never participate. Group funding has no required billing Subscription and
+  may use the attached Customer default or the only attached method only when
+  no legacy Customer default Source exists; multiple non-default methods remain
+  in Checkout.
   `allow_redisplay` affects Checkout presentation rather than direct
   chargeability. Current-policy Checkout exposes Stripe's explicit save choice;
   older policy requests remain byte-for-byte reconstructible.
   The producer must bind its encrypted exact reference under the payer lock
-  before confirmation. The
-  locked bind must re-read both payer suspension and purchase status; a
-  suspension, deletion, or terminal transition that wins first leaves the
-  intent unbound, canceled, and never confirmed. A succeeded or processing
+  before confirmation. For personal and Family v4 attempts, that locked bind
+  also re-reads the current persisted billing Customer and Subscription. A
+  billing change, suspension, deletion, or terminal transition that wins first
+  leaves the intent unbound, canceled, and never confirmed. Once bound, retries
+  remain tied to that exact intent rather than retargeting after a later billing
+  change. A succeeded or processing
   event for an unbound intent remains in the existing Stripe receipt retry lane
   instead of being acknowledged without a grant.
   Confirmation and cancellation use separate stable keys. An ambiguous

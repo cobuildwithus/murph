@@ -69,8 +69,10 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
-import { tryChargeHostedUsageCreditSavedCard } from
-  "./usage-credit-saved-card-payment";
+import {
+  tryChargeHostedUsageCreditSavedCard,
+  type HostedUsageCreditSavedCardBillingAuthority,
+} from "./usage-credit-saved-card-payment";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
@@ -901,29 +903,27 @@ async function continueHostedUsageCreditCheckout(input: {
   if (!stripeCustomerId) {
     throw buildHostedUsageCreditInvariantError("purchase_customer_missing");
   }
-  const stripeSubscriptionBinding =
+  const billingAuthority =
     canStartSavedCardPayment &&
       !purchase.stripePaymentIntentLookupKey &&
       policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
-      ? await resolveHostedUsageCreditStripeSubscriptionBinding({
+      ? await resolveHostedUsageCreditSavedCardBillingAuthority({
           payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
           prisma: input.prisma,
           stripeCustomerId,
           target,
         })
-      : { required: false, stripeSubscriptionId: null };
+      : { kind: "group" as const };
   let checkoutPurchase = purchase;
   if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
+      billingAuthority,
       checkoutRequest,
       now: input.now,
       policyVersion,
       prisma: input.prisma,
       purchase,
       stripe,
-      stripeSubscriptionId:
-        stripeSubscriptionBinding.stripeSubscriptionId,
-      stripeSubscriptionRequired: stripeSubscriptionBinding.required,
     });
     if (directPaymentPurchase) {
       const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
@@ -987,17 +987,14 @@ async function continueHostedUsageCreditCheckout(input: {
   return finalProjection.checkout;
 }
 
-async function resolveHostedUsageCreditStripeSubscriptionBinding(input: {
+async function resolveHostedUsageCreditSavedCardBillingAuthority(input: {
   payerMemberId: string;
   prisma: PrismaClient;
   stripeCustomerId: string;
   target: HostedUsageCreditPurchaseTargetProjection;
-}): Promise<{
-  required: boolean;
-  stripeSubscriptionId: string | null;
-}> {
+}): Promise<HostedUsageCreditSavedCardBillingAuthority> {
   if (input.target.kind === "group") {
-    return { required: false, stripeSubscriptionId: null };
+    return { kind: "group" };
   }
   const billingRef = input.target.kind === "family"
     ? await readHostedAccountGroupStripeBillingRef({
@@ -1009,7 +1006,12 @@ async function resolveHostedUsageCreditStripeSubscriptionBinding(input: {
         prisma: input.prisma,
       });
   return {
-    required: true,
+    ...(input.target.kind === "family"
+      ? {
+          familyGroupId: input.target.familyGroupId,
+          kind: "family" as const,
+        }
+      : { kind: "personal" as const }),
     stripeSubscriptionId:
       billingRef?.stripeCustomerId === input.stripeCustomerId
         ? billingRef.stripeSubscriptionId

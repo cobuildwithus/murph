@@ -848,7 +848,7 @@ describe("createHostedUsageCreditCheckout", () => {
     "family",
     "group",
   ] as const)(
-    "continues a retryable %s saved-card payment during recovery without creating another purchase",
+    "continues a retryable %s saved-card payment from its exact bound intent",
     async (targetKind) => {
       const fake = createFakePrisma();
       const customerId = targetKind === "personal"
@@ -941,6 +941,19 @@ describe("createHostedUsageCreditCheckout", () => {
       });
       clearStripeProviderMockHistory();
       mocks.ensureHostedMemberStripeCustomer.mockClear();
+      if (targetKind === "family") {
+        mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
+          groupId: "hbag_abcdefghijklmnop",
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: "sub_family_replacement",
+        });
+      } else if (targetKind === "personal") {
+        mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+          memberId: MEMBER_ID,
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: "sub_personal_replacement",
+        });
+      }
 
       await expect(createCheckout(
         "unbound_recovery_key_12",
@@ -2274,6 +2287,116 @@ describe("createHostedUsageCreditCheckout", () => {
     },
   );
 
+  it.each([
+    ["personal", "cus_123", "sub_123"],
+    ["family", "cus_family_owner", "sub_family_owner"],
+  ] as const)(
+    "uses Checkout when the exact %s subscription has a legacy default Source",
+    async (targetKind, customerId, subscriptionId) => {
+      const fake = createFakePrisma();
+      mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+        default_source: null,
+        id: customerId,
+        invoice_settings: {
+          default_payment_method: "pm_customer_default",
+        },
+        livemode: false,
+        object: "customer",
+      });
+      mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+        data: [{
+          allow_redisplay: "limited",
+          customer: customerId,
+          id: "pm_customer_default",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/payment_methods",
+      });
+      mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+        data: [{
+          customer: customerId,
+          default_payment_method: null,
+          default_source: "card_legacy_subscription",
+          id: subscriptionId,
+          livemode: false,
+          object: "subscription",
+          status: "active",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/subscriptions",
+      });
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      const result = targetKind === "family"
+        ? await createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : await createHostedUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            memberId: MEMBER_ID,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            prisma: fake.prisma as never,
+          });
+
+      expect(result).toMatchObject({ status: "checkout_open" });
+      expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+      expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+      expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("uses Checkout instead of replacing a group Customer's legacy default Source", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+      default_source: "card_legacy_customer",
+      id: "cus_group_payer",
+      invoice_settings: { default_payment_method: null },
+      livemode: false,
+      object: "customer",
+    });
+    mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+      data: [{
+        customer: "cus_group_payer",
+        id: "pm_other_attached",
+        livemode: false,
+        object: "payment_method",
+        type: "card",
+      }],
+      has_more: false,
+      object: "list",
+      url: "/v1/payment_methods",
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "checkout_open" });
+
+    expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+  });
+
   it("reconstructs a frozen v1 group Checkout without changing its payment shape", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -2468,6 +2591,98 @@ describe("createHostedUsageCreditCheckout", () => {
       stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
     });
   });
+
+  it.each([
+    ["personal", "cus_123", "sub_123"],
+    ["family", "cus_family_owner", "sub_family_owner"],
+  ] as const)(
+    "cancels an unbound %s intent when billing authority changes before bind",
+    async (targetKind, customerId, subscriptionId) => {
+      const fake = createFakePrisma();
+      mockCanonicalSavedCard(customerId);
+      mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+        data: [{
+          customer: customerId,
+          default_payment_method: null,
+          id: subscriptionId,
+          livemode: false,
+          object: "subscription",
+          status: "active",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/subscriptions",
+      });
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(async () => {
+        if (targetKind === "family") {
+          mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
+            groupId: "hbag_abcdefghijklmnop",
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: "sub_family_replacement",
+          });
+        } else {
+          mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+            memberId: MEMBER_ID,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: "sub_personal_replacement",
+          });
+        }
+        return buildSavedCardPaymentIntent({
+          amountReceived: 0,
+          customerId,
+          latestCharge: null,
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status: "requires_confirmation",
+        });
+      });
+      mocks.stripePaymentIntentCancel.mockImplementationOnce(async () => ({
+        ...buildSavedCardPaymentIntent({
+          amountReceived: 0,
+          customerId,
+          latestCharge: null,
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status: "canceled",
+        }),
+      }));
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      const result = targetKind === "family"
+        ? await createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : await createHostedUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            memberId: MEMBER_ID,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            prisma: fake.prisma as never,
+          });
+
+      expect(result).toMatchObject({ status: "checkout_open" });
+      expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+        "pi_saved_card_123",
+        { cancellation_reason: "abandoned" },
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining(":cancel"),
+        }),
+      );
+      expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
+        mocks.stripeCheckoutCreate,
+      );
+      expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+      expect(onlyPurchase(fake.purchases)).toMatchObject({
+        status: "checkout_open",
+        stripePaymentIntentLookupKey: null,
+      });
+    },
+  );
 
   it("never confirms an intent that lost the account-deletion binding race", async () => {
     const fake = createFakePrisma();
