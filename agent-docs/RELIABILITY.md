@@ -39,6 +39,55 @@ Last verified: 2026-07-28
 
 ## Runtime Expectations
 
+- The production database-health operator alert is an independent Cloudflare
+  singleton so the monitored Postgres database cannot take down its own page
+  owner. A five-minute Cron Trigger records one normalized PlanetScale sample
+  or classified failure in Durable Object SQLite and prunes history after 30
+  days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
+  required-metric absence must recur on two consecutive runs before paging.
+  A newly opened incident or one-shot direct migration admission failure admits
+  its exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances any direct-error counter baseline.
+  If another immutable page already owns the single pending-message slot, the
+  same transaction advances the sample baseline and accumulates the later
+  direct-error count plus latest check time in the existing alert row instead
+  of dropping it. An acknowledged older page cannot close the incident while
+  that evidence remains. The next run with a free slot atomically promotes the
+  accumulated count into one direct-error page, which then follows the ordinary
+  attempt fence, health preflight, exact-body retry, and restart contract.
+  When a direct error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  direct-error evidence; co-occurring replayable gauges remain in the persisted
+  sample but cannot become stale pending claims. That exact direct-error page
+  owns the next eligible attempt. A replayable condition still unsafe at that
+  boundary remains eligible for the following paced recurrence. The same
+  one-slot ordering applies in reverse: a later direct-error obligation waits
+  behind an older page but cannot be consumed by the counter baseline. This
+  explicit prioritization keeps admitted bodies immutable without another
+  message queue or delivery lifecycle.
+  An acknowledged incident's replayable gauge or monitoring recurrence does
+  not admit stale evidence while the attempt fence is closed; once the fence
+  opens, a still-unsafe current sample admits the recurrence, while recovery
+  closes the incident without another page. An already pending page is
+  processed or deferred before a later clean sample can close the incident,
+  and only an acknowledged provider response clears it. Provider entry is
+  globally fenced by the persisted last-attempt
+  timestamp, so neither a new incident, recurrence, retry, nor worker restart
+  can attempt Linq more often than once every 30 minutes. The attempt time is
+  actual wall time, not the Cron slot, and is written before network egress.
+  The message's UTC check time likewise comes from the actual completed
+  collection run while the Cron slot remains only the persisted sample
+  identity. Every eligible attempt retrieves the configured direct chat and
+  current line reputation; unhealthy or indeterminate delivery health produces
+  no message POST and retains the pending alert for the next paced attempt.
+  Healthy delivery uses Linq's no-`from` auto-selection route. A
+  transport-ambiguous or rejected send keeps the exact persisted body and Linq
+  idempotency key for the next eligible attempt; acknowledged recurrences
+  advance the alert sequence and choose another fixed opening from current
+  metric evidence. Message variation must remain contextual and
+  deterministic, never random padding. Database pages intentionally have no
+  quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
@@ -92,6 +141,22 @@ Last verified: 2026-07-28
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq participant add/remove context is a bounded optional sidecar on the
+  existing routed group, not another work owner. Provider-event deduplication
+  and optional staging run in one transaction under chat, owner, then route
+  lock order, so the next ordinary group message cannot overtake a unique
+  change after ledger insertion and projection cleanup cannot deadlock against
+  a labeled append. A unique addition atomically retains the existing anonymous
+  route bit; a removal has no send or wake fallback. Identity and
+  owner-address-book reads happen only on the
+  participant webhook path, never on ordinary message ingress. Optional lookup
+  failure falls back to handle-only context, optional staging failure preserves
+  the addition bit, and duplicate events never restage. Address-book
+  replacement/deletion takes the same owner lock and clears that owner's
+  pending optional group-event buffers, so revoked labels cannot surface later
+  and ordinary message ingress adds no query. Route-account lookup keys also
+  reject Murph's own line when `is_me` is absent. Append and consume retain the
+  existing 500 ms context-crypto bound.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at
@@ -145,7 +210,8 @@ Last verified: 2026-07-28
   coalesce against the bounded four-minute send lease until the attempt settles
   or expires; only then may the persisted incident become healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
-- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.

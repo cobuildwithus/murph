@@ -3334,7 +3334,7 @@ function renderHostedImageGenerationLaunchResult(input: {
   status: 'pending' | 'queued' | null
 }): string {
   if (input.launch === 'started') {
-    return 'image generation started in the background. tell the user it is still generating and that, if it succeeds, the completed image should return here in a separate message. until a trusted hosted image completion result arrives, keep treating later user questions steered into this live turn as pending. do not claim that it already attached, failed, or restarted, and do not guarantee success before completion'
+    return 'image generation started in the background. briefly and confidently tell the user you are making it now and that the result should come back here in a separate message when it is ready. for a simple request, you may say it usually takes about a minute, without promising an exact deadline. until a trusted hosted image completion result arrives, keep treating later user questions steered into this live turn as pending. keep the acknowledgement to that current-status-and-expected-next-step shape; omit internal processing details'
   }
   if (input.launch === 'already-started') {
     return 'no new image was started because this exact image operation was already accepted. do not infer its current state from another pending or queued image in the conversation, and do not claim it failed or restarted; rely only on the earlier tool result, trusted completion evidence, or conversation history'

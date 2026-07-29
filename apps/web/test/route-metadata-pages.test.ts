@@ -4,6 +4,7 @@ import { test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import { metadata as clubMetadata } from "../app/clubs/page";
 import { metadata as designMetadata } from "../app/design/page";
 import { metadata as securityMetadata } from "../app/security/page";
 import SubprocessorsPage, { metadata as subprocessorsMetadata } from "../app/subprocessors/page";
@@ -30,6 +31,36 @@ test("DesignPage metadata keeps the shared preview image and product copy", () =
       height: 630,
       type: "image/png",
       url: "/opengraph-image",
+      width: 1200,
+    },
+  ]);
+});
+
+test("ClubPage metadata keeps the dedicated club preview and canonical route", () => {
+  assert.equal(
+    clubMetadata.title,
+    "Murph for Clubs · Run community fitness challenges",
+  );
+  assert.equal(
+    clubMetadata.description,
+    "Run mileage, movement, workout, and team challenges for your club without spreadsheets or manual scorekeeping.",
+  );
+  assert.equal(clubMetadata.alternates?.canonical, "/clubs");
+  assert.deepEqual(clubMetadata.openGraph?.images, [
+    {
+      alt: "You run the club. Murph runs the challenge.",
+      height: 630,
+      type: "image/png",
+      url: "/clubs/opengraph-image",
+      width: 1200,
+    },
+  ]);
+  assert.deepEqual(clubMetadata.twitter?.images, [
+    {
+      alt: "You run the club. Murph runs the challenge.",
+      height: 630,
+      type: "image/png",
+      url: "/clubs/opengraph-image",
       width: 1200,
     },
   ]);

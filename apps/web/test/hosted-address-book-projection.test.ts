@@ -277,6 +277,7 @@ describe("hosted address-book projection lifecycle", () => {
     expect(new Set(store.contacts.map((row) => row.phoneToken)).size).toBe(
       HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
     );
+    expect(store.pendingGroupEventContextClearCount).toBe(1);
     expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
   });
 
@@ -677,6 +678,7 @@ describe("hosted address-book projection lifecycle", () => {
       storedContactCount: 0,
     });
     expect(ownerStore.contacts).toEqual([]);
+    expect(ownerStore.pendingGroupEventContextClearCount).toBe(2);
     vi.mocked(crypto.kms.macSign).mockClear();
     await expect(readHostedOwnerAddressBookAdvisoryNames({
       containerMemberId: "thread-container",
@@ -698,6 +700,7 @@ describe("hosted address-book projection lifecycle", () => {
       request: deletion,
       source: SOURCE,
     })).resolves.toMatchObject({ revision: 2 });
+    expect(ownerStore.pendingGroupEventContextClearCount).toBe(2);
   });
 
   it("drains an old-key replacement before retirement and fences stale retries", async () => {
@@ -843,6 +846,7 @@ class AddressBookPrismaStub {
   projection: ProjectionRow | null = null;
   contacts: ContactRow[] = [];
   ownerSuspendedAt: Date | null = null;
+  pendingGroupEventContextClearCount = 0;
   threadContainerExists = true;
   readonly hostedThreadContainer: {
     findUnique: () => Promise<{
@@ -889,6 +893,12 @@ class AddressBookPrismaStub {
         && condition.phoneToken.in.includes(row.phoneToken)
       )
     ),
+  };
+  readonly hostedThreadRoute = {
+    updateMany: async () => {
+      this.pendingGroupEventContextClearCount += 1;
+      return { count: 1 };
+    },
   };
   readonly $queryRaw = async () => [];
 

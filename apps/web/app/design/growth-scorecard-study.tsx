@@ -6,7 +6,10 @@ import {
 const STUDY_INPUT = {
   activeUsers: {
     trailing30Days: 143,
+    trailing30DaysComplete: true,
     trailing7Days: 87,
+    trailing7DaysComplete: true,
+    wowComparisonComplete: true,
     wowPercent: 8.8,
   },
   conversion: {
@@ -34,7 +37,10 @@ const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
   activeUsers: {
     trailing30Days: 0,
+    trailing30DaysComplete: true,
     trailing7Days: 0,
+    trailing7DaysComplete: true,
+    wowComparisonComplete: true,
     wowPercent: null,
   },
   conversion: {
@@ -51,6 +57,30 @@ const NO_SUPPORTING_BASELINES_INPUT = {
   payingCustomersWowPercent: null,
   trialStarts: {
     trailing7Days: 0,
+    wowPercent: null,
+  },
+} satisfies Omit<GrowthScorecardProps, "mrrWowPercent">;
+
+const PARTIAL_MAU_INPUT = {
+  ...STUDY_INPUT,
+  activeUsers: {
+    trailing30Days: 119,
+    trailing30DaysComplete: false,
+    trailing7Days: 87,
+    trailing7DaysComplete: true,
+    wowComparisonComplete: true,
+    wowPercent: 8.8,
+  },
+} satisfies Omit<GrowthScorecardProps, "mrrWowPercent">;
+
+const PARTIAL_WEEKLY_INPUT = {
+  ...STUDY_INPUT,
+  activeUsers: {
+    trailing30Days: 119,
+    trailing30DaysComplete: false,
+    trailing7Days: 82,
+    trailing7DaysComplete: false,
+    wowComparisonComplete: false,
     wowPercent: null,
   },
 } satisfies Omit<GrowthScorecardProps, "mrrWowPercent">;
@@ -74,6 +104,18 @@ export function GrowthScorecardStudy() {
         input={NO_SUPPORTING_BASELINES_INPUT}
         label="No supporting baselines"
         mrrWowPercent={null}
+      />
+      <StudyState
+        id="partial-mau-history"
+        input={PARTIAL_MAU_INPUT}
+        label="Partial MAU history"
+        mrrWowPercent={6.2}
+      />
+      <StudyState
+        id="partial-weekly-history"
+        input={PARTIAL_WEEKLY_INPUT}
+        label="Partial weekly history"
+        mrrWowPercent={6.2}
       />
     </div>
   );

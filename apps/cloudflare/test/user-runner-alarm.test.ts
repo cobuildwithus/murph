@@ -35,6 +35,7 @@ import type {
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
+import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -4205,7 +4206,9 @@ describe("HostedUserRunner execution coordination", () => {
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
+    const bucket = new ListableMemoryEncryptedR2Bucket();
     const { alarms, runner, sql } = createRunnerHarness({
+      bucket,
       destroyInstance,
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4219,8 +4222,8 @@ describe("HostedUserRunner execution coordination", () => {
       ok: true,
       r2: {
         deletedObjectCount: 0,
-        skippedUserScopedPrefixes: true,
-        supported: false,
+        skippedUserScopedPrefixes: false,
+        supported: true,
       },
       userId: TEST_USER_ID,
     });
@@ -4309,6 +4312,43 @@ describe("HostedUserRunner execution coordination", () => {
     ]) {
       expect(bucket.objects.has(key)).toBe(false);
     }
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
+  it("reports the destination-active bridge and deletes both fixed-role buckets", async () => {
+    const sourceBucket = new ListableMemoryEncryptedR2Bucket();
+    const destinationBucket = new ListableMemoryEncryptedR2Bucket();
+    const bundlePrefix = await hostedBundleUserPrefix({ userId: TEST_USER_ID });
+    const sourceKey = `${bundlePrefix}source.bundle.json`;
+    const destinationKey = `${bundlePrefix}destination.bundle.json`;
+    await sourceBucket.put(sourceKey, "source-data");
+    await destinationBucket.put(destinationKey, "destination-data");
+    const { runner, sql } = createRunnerHarness({
+      bucket: sourceBucket,
+      destinationBucket,
+      r2CutoverPhase: "destination_active",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      r2Cutover: {
+        coexisting: true,
+        phase: "destination_active",
+        protocolVersion: "r2-oc-enam-v1",
+      },
+    });
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 2,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+      },
+      userId: TEST_USER_ID,
+    });
+
+    expect(sourceBucket.objects.has(sourceKey)).toBe(false);
+    expect(destinationBucket.objects.has(destinationKey)).toBe(false);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
@@ -5122,6 +5162,7 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
+  destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"] | null;
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
@@ -5135,6 +5176,7 @@ function createRunnerHarness(input: {
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
+  r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
@@ -5264,6 +5306,15 @@ function createRunnerHarness(input: {
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
+  const sourceBucket = input.bucket ?? new MemoryEncryptedR2Bucket();
+  const r2CutoverContext = input.destinationBucket
+    ? resolveHostedR2CutoverContext({
+        BUNDLES: sourceBucket,
+        BUNDLES_ENAM: input.destinationBucket,
+        HOSTED_R2_CUTOVER_PHASE:
+          input.r2CutoverPhase ?? "destination_active",
+      })
+    : null;
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
@@ -5271,11 +5322,12 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
-    input.bucket ?? new MemoryEncryptedR2Bucket(),
+    r2CutoverContext?.bucket ?? sourceBucket,
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
+    r2CutoverContext,
   );
 
   return {

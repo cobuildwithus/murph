@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { WideFeature } from "./asks-section";
 import { ChallengeCard, NewsletterCard } from "./group-chat-cards";
 import {
@@ -21,6 +23,13 @@ export function TogetherSection() {
             friends, or set up a weekly newsletter so the whole family knows
             how everyone is doing.
           </p>
+          <Link
+            className="mt-6 inline-flex min-h-10 items-center gap-2 text-[0.875rem] font-semibold text-[#5a6e32] underline decoration-[#5a6e32]/35 underline-offset-4 transition-colors hover:text-[#3d5028]"
+            href="/clubs"
+          >
+            Murph for clubs
+            <span aria-hidden="true">→</span>
+          </Link>
         </div>
 
         <div className="mt-10 space-y-5 sm:mt-12 sm:space-y-6">
