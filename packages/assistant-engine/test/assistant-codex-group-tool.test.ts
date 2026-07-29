@@ -177,7 +177,9 @@ describe("murph.group dynamic tool", () => {
       .toContain('read_shared status="partial" is incomplete');
     expect(MURPH_GROUP_TOOL.description).toContain("ask is asynchronous");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("poll pending by exact replay until completed or unavailable");
+      .toContain(
+        "For scheduled ask_member, poll pending by exact replay until completed or unavailable",
+      );
     expect(MURPH_GROUP_TOOL.description)
       .toContain("a changed question conflicts");
     expect(MURPH_GROUP_TOOL.description)

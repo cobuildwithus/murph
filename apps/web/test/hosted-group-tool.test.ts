@@ -1181,12 +1181,30 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.getHostedTelegramGroupTitle).not.toHaveBeenCalled();
   });
 
-  it("does not expose Linq's synthesized handle list as a group title", async () => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+  it.each([
+    {
+      displayName: "departed@example.test, +15550000002, +15550000001",
+      variant: "all handles",
+    },
+    {
       displayName: "+15550000002, +15550000001",
+      variant: "active handles",
+    },
+    {
+      displayName: "departed@example.test, +15550000002",
+      variant: "non-self handles",
+    },
+    {
+      displayName: "+15550000002",
+      variant: "active non-self handles",
+    },
+  ])("does not expose Linq's synthesized $variant title", async ({ displayName }) => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      displayName,
       handles: [
         { handle: "+15550000001", isMe: true, status: "active" },
         { handle: "+15550000002", isMe: false, status: "active" },
+        { handle: "departed@example.test", isMe: false, status: "left" },
       ],
       isGroup: true,
     });
@@ -1272,6 +1290,36 @@ describe("handleHostedRuntimeGroupTool", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+  });
+
+  it("rejects a direct-member route before provider metadata I/O", async () => {
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValueOnce({
+      conversationShape: "direct-member",
+      externalThreadRouteAuthority: null,
+      route: {
+        actorId: "member_group_runtime",
+        channel: "linq",
+        delivery: { kind: "thread", target: "chat_direct_runtime" },
+        identityId: "identity",
+        threadId: "thread",
+        threadIsDirect: true,
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_chat_name" },
+    })).resolves.toEqual({
+      action: "read_chat_name",
+      result: {
+        displayName: null,
+        status: "unavailable",
+        unavailableReason: "group_chat_unavailable",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(mocks.getHostedTelegramGroupTitle).not.toHaveBeenCalled();
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {

@@ -22,6 +22,7 @@ describe("hosted Telegram client", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -121,6 +122,47 @@ describe("hosted Telegram client", () => {
       code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
       retryable: true,
     });
+  });
+
+  it("rejects an oversized streamed response without a content-length header", async () => {
+    const response = new Response(new Uint8Array(64 * 1024 + 1), {
+      status: 200,
+    });
+    expect(response.headers.get("content-length")).toBeNull();
+    fetchMock.mockResolvedValue(response);
+
+    await expect(getHostedTelegramGroupTitle({
+      threadId: "-42",
+    })).rejects.toMatchObject({
+      code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
+      retryable: true,
+    });
+  });
+
+  it("times out when a successful response body stalls", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation((
+      _url: string,
+      request: RequestInit,
+    ) => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"ok":'));
+        request.signal?.addEventListener("abort", () => {
+          controller.error(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      },
+    }), { status: 200 })));
+
+    const titlePromise = getHostedTelegramGroupTitle({
+      threadId: "-42",
+    });
+    const rejection = expect(titlePromise).rejects.toMatchObject({
+      code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await rejection;
   });
 
   it("rejects a provider refusal instead of reporting a reply that was never sent", async () => {
