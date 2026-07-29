@@ -15,12 +15,17 @@ import { formatStarCount } from "@/src/lib/github-stars";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
-const NAV_LINKS = [
+const NAV_LINKS: ReadonlyArray<{
+  href: string;
+  label: string;
+  wideOnly?: boolean;
+}> = [
   { href: "/#how", label: "How it works" },
+  { href: "/clubs", label: "Clubs", wideOnly: true },
   { href: "/#faq", label: "FAQ" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
-] as const;
+];
 
 // Large tap rows matching the /home sidebar's mobile nav sizing.
 const MOBILE_MENU_ROW =
@@ -106,11 +111,11 @@ export function StickyNav({
         />
       </Link>
       <div className="flex items-center gap-4 sm:gap-6">
-        {NAV_LINKS.map(({ href, label }) => (
+        {NAV_LINKS.map(({ href, label, wideOnly }) => (
           <a
             key={href}
             href={href}
-            className={`hidden text-sm transition-colors md:block ${
+            className={`${wideOnly ? "hidden lg:block" : "hidden md:block"} text-sm transition-colors ${
               onDark
                 ? "text-white/75 hover:text-white"
                 : "text-[#2d3436]/80 hover:text-[#2d3436]"
