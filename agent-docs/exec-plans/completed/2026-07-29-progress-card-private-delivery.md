@@ -1,6 +1,6 @@
 # Progress card private delivery
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -166,3 +166,17 @@ Updated: 2026-07-29
   process could not bind an occupied fixed CI port. All three cases were
   skipped; an unchanged-head job rerun was requested rather than changing
   product code.
+- Corrected-head canonical `pnpm test:diff` passed every affected owner:
+  assistant engine 2,821 tests, assistant CLI 128, assistant runtime 1,953,
+  assistantd 40, CLI 1,084, setup CLI 124, and Cloudflare 2,055 across node and
+  Worker projects, plus all routed guards and typechecks.
+- Exact-head `pnpm verify:acceptance` passed end to end after the unrelated
+  setup-wizard case was isolated at 6/6 and its package coverage passed 124/124.
+  The successful run covered every package, the production web build and tests,
+  Cloudflare verification, package boundaries, typechecks, and repository
+  guards.
+- Exact-head GitHub CI passed every release and hosted E2E gate, including the
+  unchanged-head rerun of Codex media and provider egress.
+- Parent final review found no remaining scope, privacy, architecture, prompt,
+  recovery, or evidence issue. Final ReviewGPT remains the immutable PR gate.
+Completed: 2026-07-29
