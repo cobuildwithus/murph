@@ -655,12 +655,12 @@ export async function sendAssistantMessageLocal(
                 const hosted = hostedExecutionContext
                 if (hosted) {
                   const dependencies = hosted.progressDeliveryDependencies
+                  const progressChannel =
+                    resolveAssistantProgressDeliveryChannel(progressInput)
                   if (
                     !dependencies ||
                     !hasHostedTextDeliveryForChannel({
-                      channel: resolveAssistantProgressDeliveryChannel(
-                        progressInput,
-                      ),
+                      channel: progressChannel,
                       dependencies,
                     })
                   ) {
@@ -669,7 +669,10 @@ export async function sendAssistantMessageLocal(
                       'Hosted model progress updates are unavailable for the current delivery channel.',
                     )
                   }
-                  const sendLinq = dependencies.sendLinq
+                  const sendLinq =
+                    progressChannel === 'linq'
+                      ? dependencies.sendLinq
+                      : undefined
                   if (sendLinq) {
                     await beforeHostedToolExecution()
                   }

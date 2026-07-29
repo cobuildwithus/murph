@@ -2453,6 +2453,20 @@ test('sendAssistantMessageLocal emits a hosted context trace after session resol
 })
 
 test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'linq-progress-message',
+      providerThreadId: 'linq-progress-thread',
+      target: 'linq-progress-thread',
+      targetKind: 'thread' as const,
+    })),
+    sendTelegram: vi.fn(async () => ({
+      providerMessageId: 'telegram-progress-message',
+      providerThreadId: 'thread-1',
+      target: 'thread-1',
+      targetKind: 'thread' as const,
+    })),
+  }
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -2467,17 +2481,30 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       threadIsDirect: false,
     },
   })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
-      ...createSharedPlan(),
+      ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
     session,
   })
   const providerStarted = createDeferred<void>()
+  const providerProgressRequested = createDeferred<void>()
+  const providerProgressDelivered = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const providerBoundInputIds: string[][] = []
   const liveSteeredPrompts: string[] = []
+  mocks.deliverAssistantProgressUpdate.mockImplementationOnce(
+    async (progressInput) => {
+      await progressInput.dependencies?.sendTelegram?.({
+        message: progressInput.text,
+        target: 'thread-1',
+      })
+      return session
+    },
+  )
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
@@ -2490,6 +2517,15 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       turnId: 'turn-1',
     })
     providerStarted.resolve()
+    await providerProgressRequested.promise
+    await providerInput.progressDelivery?.send(
+      'Checking the Telegram follow up.',
+      {
+        required: true,
+        source: 'system',
+      },
+    )
+    providerProgressDelivered.resolve()
     await providerRelease.promise
     releaseLiveTurn?.()
     return {
@@ -2519,9 +2555,19 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
       providerBoundInputIds.push(acceptedInputs.map((item) => item.id))
     },
+    channel: 'telegram',
     deliverResponse: true,
+    deliveryDispatchMode: 'immediate',
     deliveryTarget: 'initial-thread',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
     prompt: 'Initial prompt',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
   await providerStarted.promise
@@ -2541,6 +2587,19 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
+  providerProgressRequested.resolve()
+  await providerProgressDelivered.promise
+  expect(activeTurnCheckpoint).toHaveBeenCalledTimes(0)
+  expect(progressDeliveryDependencies.sendTelegram).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: 'Checking the Telegram follow up.',
+    }),
+  )
+  expect(progressDeliveryDependencies.sendLinq).toHaveBeenCalledTimes(0)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
   providerRelease.resolve()
 
   const [initialResult, steeredResult] = await Promise.all([
