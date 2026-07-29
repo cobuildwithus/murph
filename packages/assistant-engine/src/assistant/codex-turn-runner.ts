@@ -6,6 +6,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   resolveHostedAiUsageTokenPricingBasis,
@@ -33,6 +34,9 @@ import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
 } from './issue-reporting.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from './onboarding-goal-checkin-automation.js'
 import type {
   AssistantRuntimeIssueInput,
 } from './issue-reporting.js'
@@ -117,6 +121,19 @@ const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
   'features.multi_agent_v2=false',
   'features.tool_suggest=false',
 ] as const
+const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
+  'memories.generate_memories=false',
+  'web_search="disabled"',
+  'features.web_search_request=false',
+  'features.standalone_web_search=false',
+  'features.apps=false',
+  'features.enable_mcp_apps=false',
+  'features.browser_use=false',
+  'features.plugins=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+] as const
 const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=false',
   'features.multi_agent=false',
@@ -127,10 +144,14 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
   nativeCapabilitiesRestrictedTurn: boolean
+  readOnlyAutomationTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
   if (input.nativeCapabilitiesRestrictedTurn) {
     return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
+  }
+  if (input.readOnlyAutomationTurn) {
+    return ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES
   }
   if (!input.filesystemDisabledTurn) {
     return input.requested
@@ -455,6 +476,9 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
+    const readOnlyAutomationTurn =
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
     const nativeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -466,6 +490,8 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'group-room-model' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const restrictedOneShotTurn =
+      groupRoomModelMaintenanceTurn || readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
     const groupConversation =
       resolveAssistantConversationScope(audience) === 'group'
@@ -474,7 +500,8 @@ async function executeAssistantCodexAttempt(input: {
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
-        approvalPolicy: nativeCapabilitiesRestrictedTurn
+        approvalPolicy:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? 'never'
           : attemptPlan.route.providerOptions.approvalPolicy,
         codexCommand:
@@ -488,7 +515,10 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: nativeCapabilitiesRestrictedTurn || groupEmailTurn
+        sandbox:
+          nativeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          groupEmailTurn
           ? 'read-only'
           : attemptPlan.route.providerOptions.sandbox,
       },
@@ -505,24 +535,28 @@ async function executeAssistantCodexAttempt(input: {
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
           nativeCapabilitiesRestrictedTurn,
+          readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
-        dynamicTools: outputOnlyTurn
+        dynamicTools: outputOnlyTurn || readOnlyAutomationTurn
           ? []
           : attemptPlan.routePlan.dynamicTools,
-        environments: nativeCapabilitiesRestrictedTurn
+        environments:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        hostedToolContext: nativeCapabilitiesRestrictedTurn
+        hostedToolContext:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts: nativeCapabilitiesRestrictedTurn
+        materializeWorkspaceArtifacts:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -553,32 +587,38 @@ async function executeAssistantCodexAttempt(input: {
           productFeedbackCandidateSink:
             executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
         }),
-        providerThreadEphemeral: groupRoomModelMaintenanceTurn
+        providerThreadEphemeral: restrictedOneShotTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery: nativeCapabilitiesRestrictedTurn
+        progressDelivery:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.progressDelivery ?? null,
-        permissions: groupRoomModelMaintenanceTurn
-          ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-          : null,
-        ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
+        permissions:
+          groupRoomModelMaintenanceTurn
+            ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
+            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+              ? MURPH_MEMBER_READ_PERMISSION_PROFILE
+              : null,
+        ...(systemNotificationTurn || restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
-        providerFetch: outputOnlyTurn
+        providerFetch: outputOnlyTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch: nativeCapabilitiesRestrictedTurn
+        publicInternetFetch:
+          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
           !nativeCapabilitiesRestrictedTurn &&
+          !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
+        runtimeWorkspaceRoots: restrictedOneShotTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
-        resume: attemptPlan.routePlan.resume,
+        resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,
         sessionContext: attemptPlan.routePlan.sessionContext

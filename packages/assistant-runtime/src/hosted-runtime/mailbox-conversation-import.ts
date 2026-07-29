@@ -1623,7 +1623,11 @@ function createHostedConversationAssistantInputSourceMetadata(
   );
   const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
     && wake.message.routeAuthority !== null;
-  if (!mediaGroupId && !replyContext && !externalThreadRouteAuthorityPresent) {
+  if (
+    !mediaGroupId
+    && !replyContext
+    && !externalThreadRouteAuthorityPresent
+  ) {
     return null;
   }
   // Thread-container (group) inbound carries the sending participant so the

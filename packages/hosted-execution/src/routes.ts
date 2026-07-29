@@ -26,6 +26,8 @@ export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
   "/api/internal/hosted-execution/family-plan/tool";
 export const HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH =
   "/api/internal/hosted-execution/plan-usage/tool";
+export const HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH =
+  "/api/internal/hosted-execution/imessage-contact/tool";
 export const HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH =
   "/api/internal/hosted-execution/subscription/tool";
 export const HOSTED_RUNTIME_LABS_TOOL_PATH =

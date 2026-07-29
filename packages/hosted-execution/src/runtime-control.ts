@@ -1747,6 +1747,22 @@ export type HostedRuntimeFamilyPlanToolResponse =
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
     };
 
+export interface HostedRuntimeIMessageContactToolRequest {
+  assistantInputId: string;
+}
+
+export type HostedRuntimeIMessageContactToolResponse =
+  | {
+      phoneNumber: string;
+      status: "assigned" | "existing";
+      verifiedSenderPhoneHint: string;
+    }
+  | {
+      phoneNumber: null;
+      status: "identity_required" | "unavailable";
+      verifiedSenderPhoneHint: null;
+    };
+
 export type HostedRuntimeAssistantConfigurationToolRequest =
   | {
       action: "read";
@@ -2721,6 +2737,11 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
+  r2Cutover?: {
+    coexisting: boolean;
+    phase: "destination_active" | "source_active";
+    protocolVersion: string;
+  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

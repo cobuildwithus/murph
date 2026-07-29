@@ -123,33 +123,42 @@ describe("group phone-call requester activation", () => {
   });
 
   it.each([
-    ["missing requester", null, LINQ_ROUTE_AUTHORITY],
+    [
+      "missing requester",
+      null,
+      LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
+    ],
     [
       "provider mismatch",
       TELEGRAM_REQUESTER,
       LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
     ],
     [
       "malformed accepted input ref",
       { ...LINQ_REQUESTER, assistantInputId: "provider-message-id" },
       LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
     ],
     [
       "missing sender evidence",
       { ...LINQ_REQUESTER, senderHandle: "   " },
       LINQ_ROUTE_AUTHORITY,
+      "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
     ],
   ] as const)("rejects %s before member resolution", async (
     _case,
     groupRequester,
     routeAuthority,
+    expectedCode,
   ) => {
     await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
       groupRequester,
       prisma: {} as never,
       routeAuthority,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: expectedCode,
     });
     expect(
       requesterMocks.lookupHostedGroupParticipantMemberByProviderEvidence,
@@ -398,14 +407,35 @@ describe("group phone-call requester activation", () => {
         threadId: "another-group-thread",
       },
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(
       requesterMocks.lookupHostedGroupParticipantMemberByHandle,
     ).not.toHaveBeenCalled();
   });
 
-  it("rejects legacy mailbox evidence that resolves to multiple requesters", async () => {
+  it("rejects an unresolvable group requester", async () => {
+    requesterMocks.readHostedMailboxWakeByItemId.mockResolvedValue(
+      buildLinqGroupWake({
+        eventId: "mailbox_unresolved",
+        from: "+12125550123",
+      }),
+    );
+    requesterMocks.lookupHostedGroupParticipantMemberByHandle.mockResolvedValue(
+      null,
+    );
+
+    await expect(assertHostedGroupPhoneCallRequesterHasOwnMurph({
+      inboundMailboxItemIds: ["mailbox_unresolved"],
+      prisma: {} as never,
+      routeAuthority: LINQ_ROUTE_AUTHORITY,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
+    });
+    expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox evidence that resolves to more than one requester", async () => {
     const wakes = new Map<string, HostedExecutionWake>([
       ["mailbox_one", buildLinqGroupWake({
         eventId: "mailbox_one",
@@ -434,7 +464,7 @@ describe("group phone-call requester activation", () => {
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
   });

@@ -329,6 +329,10 @@ export async function replaceHostedAddressBookProjection(input: {
           })),
         });
       }
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -387,6 +391,10 @@ export async function deleteHostedAddressBookProjection(input: {
         },
         where: { memberId: input.memberId },
       });
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -394,6 +402,22 @@ export async function deleteHostedAddressBookProjection(input: {
       source,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function clearHostedOwnerPendingGroupEventContextTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedThreadRoute.updateMany({
+    data: {
+      pendingGroupReactionContextEncrypted: null,
+    },
+    where: {
+      container: {
+        ownerMemberId: input.memberId,
+      },
+    },
+  });
 }
 
 export async function readHostedOwnerAddressBookAdvisoryNames(input: {

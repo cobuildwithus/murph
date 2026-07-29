@@ -115,6 +115,11 @@ export interface WorkerUserRunnerStubLike {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
   }): Promise<boolean>;
+  rememberHostedWorkspaceSnapshotPresignedPut?(input: {
+    drainUntil: string;
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    expiresAt: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
   deleteHostedWorkspaceSnapshotUploadSession?(input: {
     snapshotId: string;
     userId: string;
@@ -172,6 +177,7 @@ export interface WorkerEnvironmentContract<
 > extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
+  BUNDLES_ENAM?: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;
@@ -208,7 +214,9 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
   HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?: string;
+  HOSTED_R2_CUTOVER_PHASE?: string;
   HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
+  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;

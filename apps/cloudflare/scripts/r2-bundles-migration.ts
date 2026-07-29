@@ -447,7 +447,7 @@ export async function runR2BundlesMigration(
   dependencies: R2BundlesMigrationDependencies = {},
 ): Promise<void> {
   assertOptionAcknowledgements(options);
-  const runner = dependencies.runner ?? createDefaultCommandRunner();
+  const runner = dependencies.runner ?? createR2BundlesMigrationCommandRunner();
   const environment = readMigrationEnvironment(sourceEnvironment);
   const context: MigrationContext = {
     awsEnvironment: buildAwsMigrationChildEnvironment({
@@ -467,12 +467,28 @@ export async function runR2BundlesMigration(
 
   await assertAwsCliV2(context);
   const [sourceInfo, destinationInfo, sourceLifecycle, destinationLifecycle] = await Promise.all([
-    readBucketInfo(context, options.source),
-    readBucketInfo(context, options.destination),
+    readR2BucketInfoWithWrangler({
+      bucketName: options.source,
+      environment: context.wranglerEnvironment,
+      label: "R2 migration source bucket-info check",
+      runner: context.runner,
+    }),
+    readR2BucketInfoWithWrangler({
+      bucketName: options.destination,
+      environment: context.wranglerEnvironment,
+      label: "R2 migration destination bucket-info check",
+      runner: context.runner,
+    }),
     readLifecycle(context, options.source),
     readLifecycle(context, options.destination),
   ]);
-  assertBucketInfo(sourceInfo, destinationInfo, options);
+  assertR2FixedBucketPair({
+    destination: destinationInfo,
+    destinationName: options.destination,
+    label: "R2 migration",
+    source: sourceInfo,
+    sourceName: options.source,
+  });
   assertExactLifecycle(sourceLifecycle, expectedLifecycle, "source");
   if (!options.apply || destinationLifecycle.length > 0) {
     assertExactLifecycle(destinationLifecycle, expectedLifecycle, "destination");
@@ -516,7 +532,7 @@ export async function runR2BundlesActiveOwnerGate(
     );
   }
 
-  const runner = dependencies.runner ?? createDefaultCommandRunner();
+  const runner = dependencies.runner ?? createR2BundlesMigrationCommandRunner();
   const environment = readMigrationEnvironment(sourceEnvironment);
   const awsEnvironment = buildAwsMigrationChildEnvironment({
     accessKeyId: environment.accessKeyId,
@@ -865,23 +881,34 @@ function assertOptionAcknowledgements(options: R2BundlesMigrationOptions): void 
   }
 }
 
-function assertBucketInfo(
-  source: R2BucketInfo,
-  destination: R2BucketInfo,
-  options: R2BundlesMigrationOptions,
-): void {
-  if (source.name !== options.source || destination.name !== options.destination) {
-    throw new Error("Wrangler bucket-info response did not match the requested bucket.");
+export function assertR2FixedBucketPair(input: {
+  destination: R2BucketInfo;
+  destinationName: string;
+  label: string;
+  source: R2BucketInfo;
+  sourceName: string;
+}): void {
+  if (
+    input.source.name !== input.sourceName
+    || input.destination.name !== input.destinationName
+  ) {
+    throw new Error(
+      `${input.label} bucket-info response did not match the requested fixed-role pair.`,
+    );
   }
-  if (source.location.toUpperCase() !== "OC") {
-    throw new Error("R2 migration source must report the OC location.");
+  if (input.source.location.toUpperCase() !== "OC") {
+    throw new Error(`${input.label} fixed source bucket must report OC.`);
   }
-  if (destination.location.toUpperCase() !== "ENAM") {
-    throw new Error("R2 migration destination must report the ENAM location.");
+  if (input.destination.location.toUpperCase() !== "ENAM") {
+    throw new Error(`${input.label} fixed destination bucket must report ENAM.`);
   }
-  if (source.defaultStorageClass.toLowerCase() !== "standard"
-    || destination.defaultStorageClass.toLowerCase() !== "standard") {
-    throw new Error("R2 migration requires Standard as both buckets' default storage class.");
+  if (
+    input.source.defaultStorageClass.toLowerCase() !== "standard"
+    || input.destination.defaultStorageClass.toLowerCase() !== "standard"
+  ) {
+    throw new Error(
+      `${input.label} fixed-role buckets must both use Standard as their default storage class.`,
+    );
   }
 }
 
@@ -1139,13 +1166,27 @@ async function assertAwsCliV2(context: MigrationContext): Promise<void> {
   }
 }
 
-async function readBucketInfo(
-  context: MigrationContext,
-  bucketName: string,
-): Promise<R2BucketInfo> {
-  const result = await runChild(context, "Wrangler R2 bucket-info check", "pnpm", [
-    "exec", "wrangler", "r2", "bucket", "info", bucketName, "--json",
-  ]);
+export async function readR2BucketInfoWithWrangler(input: {
+  bucketName: string;
+  environment: NodeJS.ProcessEnv;
+  label: string;
+  runner: R2BundlesMigrationCommandRunner;
+}): Promise<R2BucketInfo> {
+  const result = await input.runner.run({
+    args: [
+      "exec",
+      "wrangler",
+      "r2",
+      "bucket",
+      "info",
+      input.bucketName,
+      "--json",
+    ],
+    command: "pnpm",
+    cwd: appDir,
+    env: input.environment,
+    label: input.label,
+  });
   return parseR2BucketInfoJson(result.stdout);
 }
 
@@ -1323,7 +1364,7 @@ function logCopyPlan(
   );
 }
 
-function createDefaultCommandRunner(): R2BundlesMigrationCommandRunner {
+export function createR2BundlesMigrationCommandRunner(): R2BundlesMigrationCommandRunner {
   return {
     async run(input): Promise<CommandResult> {
       return await new Promise((resolve, reject) => {

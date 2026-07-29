@@ -1,5 +1,12 @@
 # Hosted R2 bundles: OC to ENAM migration
 
+> **Emergency frozen-window fallback only.** This command requires a fully
+> fenced source, exact mirror parity, and a writer-exclusive destination. It
+> must not be used for the live two-bucket bridge or after ENAM accepts writes.
+> The zero-user-visible-downtime operator sequence is documented in
+> `R2_BUNDLES_ENAM_ONLINE_CUTOVER.md`; its separate online command never prunes
+> destination-native data.
+
 This temporary operator runbook moves the hosted `BUNDLES` data from Oceania
 (`OC`) to Eastern North America (`ENAM`). Delete it and the migration command
 after the old buckets are retired.

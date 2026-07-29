@@ -33,8 +33,20 @@ Last verified: 2026-07-29
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-production-500-regressions-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed hosted retention and late-runtime-log production 500 repairs. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Retention deletes an expired, already-consumed sequence-less preference row without updating it under the current `NOT VALID` constraint while retiring current rows in place; a diagnostic batch arriving after member deletion returns a truthful zero persisted count only for the exact runtime-log member foreign key |
 
-The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
-local by default. An explicitly forced remote run executes the same coverage
+For PR-bound work, run focused local proof and let required GitHub Actions own
+the broad suite on the exact head. `pnpm test:diff` remains an optional local
+helper, while `pnpm verify:acceptance` is mandatory before a direct push to
+`main` or another shared default branch. If CI fails, reproduce the narrowest
+failing owner or scenario locally before expanding to an umbrella command.
+The required host-support release gate keeps parity with local acceptance by
+assigning every package coverage owner, including Exercise Library and Health
+Metrics, and by running the prepared Messaging Ingress, Inboxd, and Hosted
+Local Harness package-boundary checks. The workflow guard locks those owners
+and commands against drift.
+
+When either canonical root command is selected, `pnpm test:diff` and
+`pnpm verify:acceptance` stay local by default. An explicitly forced remote run
+executes the same coverage
 surface through Crabbox's static SSH provider on a dedicated macOS account or
 through the direct Blacksmith Testbox provider; the command semantics in this
 map remain authoritative and only the finite executor changes. Ordinary GitHub
@@ -74,6 +86,30 @@ action parsing/execution, and stable prompt guidance. Final change proof uses
 the required frontend and coverage specialist audits, the review-only Fable or
 Opus UI pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
+
+Post-onboarding choice-point coverage is owned by assistant-engine tests. The
+seed suite proves answered-onboarding eligibility, 21-day local scheduling,
+seven-day expiry, stable installed occurrences, future same-weekday catch-up
+for older members, quiet-wake route reuse from an existing immutable
+member-owned managed automation, member ownership, and idempotent
+reconciliation. Managed maintenance tests prove that malformed onboarding
+state isolates this optional seed without blocking unrelated automations.
+
+Cron and outbox suites prove that the registered dynamic identity rejects
+non-direct routes, uses the ordinary scheduled-notification turn rather than a
+feature-specific assistant profile, and revalidates canonical onboarding state
+at claim and queued provider entry. Planning, runner, and hosted Codex-config
+tests prove that the exact identity installs an immutable read-only policy,
+retains current-conversation and vault-read continuity, removes hosted dynamic
+mutation tools, denies external network access, and cannot inherit ordinary
+save/ingestion guidance. Web, transport, runtime, and cron coverage also prove
+that a live direct Linq fallback carries its privacy-blinded current
+conversation locator separately from the raw provider delivery target, while a
+changed target without that locator fails retryably before model work and
+preserves the occurrence. Prompt assertions keep unclear or unshared goals,
+evidence-grounded reflection, quiet skip, one easy question, and
+no-mutation-before-reply behavior explicit without adding a second evidence or
+session pipeline.
 
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
@@ -141,6 +177,22 @@ eligible live turn, and renders explicit correction semantics in both prepared
 and captureless prompts. The local Linq tunnel test locks the versioned edit
 subscription without treating local provider traffic as a routine CI
 dependency.
+
+Linq participant-change coverage follows the same provider-to-prompt boundary.
+Shared ingress tests lock the full participant object plus deprecated handle
+fallback. Hosted Web parser tests prove provider-ledger minimization still
+retains no participant identifier; webhook tests prove only unique routed adds
+and removals attempt detailed staging, additions retain their anonymous fallback
+bit, and neither event appends mailbox work, wakes, or sends. Focused context
+tests prove active-route gating, canonical handle normalization, activated
+member label suppression, optional owner-address-book overlay, handle-only
+fallback, chat-locked atomic staging, encrypted route storage, own-line
+rejection, account-bound consumption, address-book replacement/deletion buffer
+clearing, and bounded weak group-event prompt rendering. The existing signed
+hosted-local group-isolation scenario carries a unique addition through Web,
+the encrypted route sidecar, mailbox import, and the next real assistant
+provider request, where both the anonymous fallback and exact handle context
+must be present.
 
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container

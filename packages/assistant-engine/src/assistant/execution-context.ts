@@ -33,6 +33,8 @@ import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupParticipantDisplayName,
@@ -243,6 +245,12 @@ export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
 }
 
+export interface AssistantHostedIMessageContactTool {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>
+}
+
 export interface AssistantHostedSubscriptionTool {
   request(
     request: HostedRuntimeSubscriptionControlRequest,
@@ -399,6 +407,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
@@ -424,6 +433,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    conversationThreadId?: string | null
     target: string
     threadIsDirect: boolean
   }>
@@ -471,6 +481,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.dynamicContextPrompts,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const imessageContactTool = normalizeAssistantIMessageContactTool(
+    hosted?.imessageContactTool,
+  )
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
@@ -524,6 +537,7 @@ export function normalizeAssistantExecutionContext(
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupParticipantDisplayNameReader
         ? { groupParticipantDisplayNameReader }
@@ -725,6 +739,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantIMessageContactTool(
+  input: AssistantHostedExecutionContext['imessageContactTool'] | undefined,
+): AssistantHostedIMessageContactTool | undefined {
+  if (!input || typeof input.ensure !== 'function') {
+    return undefined
+  }
+
+  return {
+    ensure: input.ensure.bind(input),
   }
 }
 

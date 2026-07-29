@@ -27,7 +27,7 @@ import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
 export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
-  groupRequester: HostedPhoneCallGroupRequester | null;
+  groupRequester?: HostedPhoneCallGroupRequester | null;
   inboundMailboxItemIds?: readonly string[];
   prisma?: HostedOnboardingReadClient;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
@@ -105,7 +105,7 @@ async function assertLegacyHostedGroupPhoneCallRequesterHasOwnMurph(input: {
     input.inboundMailboxItemIds ?? [],
   );
   if (mailboxItemIds.length === 0) {
-    throwHostedGroupPhoneCallRequesterActivationRequired();
+    throwHostedGroupPhoneCallRequesterProvenanceRequired();
   }
 
   const prisma = input.prisma ?? getPrisma();
@@ -124,14 +124,14 @@ async function assertLegacyHostedGroupPhoneCallRequesterHasOwnMurph(input: {
       !memberId
       || (requesterMemberId !== null && requesterMemberId !== memberId)
     ) {
-      throwHostedGroupPhoneCallRequesterActivationRequired();
+      throwHostedGroupPhoneCallRequesterProvenanceRequired();
     }
     requesterMemberId = memberId;
   }
 
   input.signal?.throwIfAborted();
   if (!requesterMemberId) {
-    throwHostedGroupPhoneCallRequesterActivationRequired();
+    throwHostedGroupPhoneCallRequesterProvenanceRequired();
   }
   await assertHostedGroupPhoneCallRequesterCurrentMembership({
     memberId: requesterMemberId,
@@ -267,6 +267,16 @@ function matchesHostedGroupPhoneCallRouteAuthority(
     && actual.containerMemberId === expected.containerMemberId
     && actual.threadId === expected.threadId
     && (actual.accountLookupKey ?? null) === (expected.accountLookupKey ?? null);
+}
+
+function throwHostedGroupPhoneCallRequesterProvenanceRequired(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
+    httpStatus: 403,
+    message:
+      "Group phone calls require one trusted requesting participant.",
+    retryable: false,
+  });
 }
 
 function normalizeHostedGroupPhoneCallMailboxItemIds(

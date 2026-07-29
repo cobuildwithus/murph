@@ -1,4 +1,8 @@
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +12,8 @@ import {
 } from "../src/storage-paths.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.js";
 import {
   deleteHostedRunnerUserData,
@@ -46,6 +52,7 @@ const NOW = "2026-04-27T00:00:00.000Z";
 describe("hosted runner user data cleanup", () => {
   afterEach(() => {
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("deletes staged meal photos before deleting runner state", async () => {
@@ -59,7 +66,10 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(unrelatedKey, "other-user-photo");
 
     const result = await deleteHostedRunnerUserData({
-      bucket,
+      buckets: {
+        destination: bucket,
+        source: bucket,
+      },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -67,6 +77,10 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected hosted user-data deletion to complete.");
+    }
     expect(result.r2).toMatchObject({
       deletedObjectCount: 1,
       skippedUserScopedPrefixes: false,
@@ -90,7 +104,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(unrelatedKey, "other-user-private-media");
 
     const result = await deleteHostedRunnerUserData({
-      bucket,
+      buckets: { destination: bucket, source: bucket },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -98,10 +112,13 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
 
-    expect(result.r2).toMatchObject({
-      deletedObjectCount: 1,
-      skippedUserScopedPrefixes: false,
-      supported: true,
+    expect(result).toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 1,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+      },
     });
     expect(bucket.objects.has(stagedMediaKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
@@ -109,34 +126,30 @@ describe("hosted runner user data cleanup", () => {
     expect(durable.deleteAllCount).toBe(1);
   });
 
-  it("reports cleanup incomplete when full Durable Object deletion is unavailable", async () => {
+  it("fails closed before logical state deletion when deleteAll is unavailable", async () => {
     const durable = createDurableObjectHarness();
     durable.state.storage.deleteAll = undefined;
     const stateStore = createDeletionStateStore();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
 
     await expect(deleteHostedRunnerUserData({
-      bucket: new ListableMemoryEncryptedR2Bucket(),
+      buckets: { destination: bucket, source: bucket },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
       stateStore,
       userId: USER_ID,
-    })).resolves.toMatchObject({
-      durableObject: {
-        alarmCleared: true,
-        deleteAllCompleted: false,
-        stateDeleted: false,
-      },
-    });
-    expect(stateStore.deleteStateCallCount).toBe(1);
+    })).rejects.toThrow("deleteAll is required");
+    expect(stateStore.deleteStateCallCount).toBe(0);
   });
 
   it("retries after Durable Object deleteAll fails without reporting completion", async () => {
     const deleteAllError = new Error("Durable Object deleteAll failed");
     const durable = createDurableObjectHarness({ deleteAllError });
     const stateStore = createDeletionStateStore();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
     const request = {
-      bucket: new ListableMemoryEncryptedR2Bucket(),
+      buckets: { destination: bucket, source: bucket },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -170,7 +183,10 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(failedKey, "second");
 
     await expect(deleteHostedRunnerUserData({
-      bucket,
+      buckets: {
+        destination: bucket,
+        source: bucket,
+      },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -197,7 +213,10 @@ describe("hosted runner user data cleanup", () => {
     const leakedPrefix = await hostedBundleUserPrefix({ userId: USER_ID });
 
     await expect(deleteHostedRunnerUserData({
-      bucket,
+      buckets: {
+        destination: bucket,
+        source: bucket,
+      },
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -213,6 +232,229 @@ describe("hosted runner user data cleanup", () => {
     );
     expect(serializedLogs).not.toContain(leakedPrefix);
     expect(serializedLogs).not.toContain("R2 list failed for");
+  });
+
+  it("clears both fixed-role buckets before deleting Durable Object state", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const source = new ListableMemoryEncryptedR2Bucket();
+    const destination = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
+    await source.put(`${prefix}source.bundle.json`, "source");
+    await destination.put(`${prefix}destination.bundle.json`, "destination");
+
+    const result = await deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(source.objects.size).toBe(0);
+    expect(destination.objects.size).toBe(0);
+    expect(stateStore.deleteStateCallCount).toBe(1);
+  });
+
+  it("does not delete Durable Object state when ENAM cleanup fails after OC succeeds", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const source = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
+    const destinationKey = `${prefix}destination.bundle.json`;
+    const destination = new FailingDeleteListableR2Bucket(destinationKey);
+    await destination.put(destinationKey, "destination");
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).rejects.toThrow("Hosted runner R2 cleanup failed");
+
+    expect(stateStore.deleteStateCallCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
+    expect(destination.objects.has(destinationKey)).toBe(true);
+  });
+
+  it("rejects a bucket without list support instead of reporting success", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const unsupported = new MemoryEncryptedR2Bucket();
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination: unsupported, source: unsupported },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).rejects.toThrow("Hosted runner R2 cleanup failed");
+
+    expect(stateStore.deleteStateCallCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
+  });
+
+  it("returns retryable pending before touching R2 while a direct PUT can still finish", async () => {
+    const now = Date.parse("2026-07-28T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const durable = createDurableObjectHarness();
+    durable.storageValues.set("workspace-snapshot:r2-put-drain:v1", {
+      drainUntil: "2026-07-28T12:05:00.000Z",
+      schema: "murph.hosted-workspace-snapshot-r2-put-drain.v1",
+      userId: USER_ID,
+    });
+    const stateStore = createDeletionStateStore();
+    const source = new ListableMemoryEncryptedR2Bucket();
+    const destination = new ListableMemoryEncryptedR2Bucket();
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).resolves.toEqual({
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: 300,
+      userId: USER_ID,
+    });
+
+    expect(source.deleteBatches).toEqual([]);
+    expect(destination.deleteBatches).toEqual([]);
+    expect(stateStore.deleteStateCallCount).toBe(0);
+  });
+
+  it("carries a real owner-recorded monotonic PUT drain into deletion admission", async () => {
+    const now = Date.parse("2026-07-28T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const durable = createDurableObjectHarness();
+    const ownerStateStore = createOwningSnapshotStateStore();
+    const source = new ListableMemoryEncryptedR2Bucket();
+    const destination = new ListableMemoryEncryptedR2Bucket();
+    const snapshotId = "snapshot_destination_ticket";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const session: HostedWorkspaceSnapshotUploadSession = {
+      attemptId: "attempt_1",
+      createdAt: "2026-07-28T12:00:00.000Z",
+      encryption: {
+        aad: buildHostedWorkspaceSnapshotV2Aad({
+          objectKey,
+          snapshotId,
+          userId: USER_ID,
+        }),
+        ivBase64: "AQIDBAUGBwgJCgsM",
+        rootKeyId: "root_1",
+        scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+        wrappedDataKey: "wrapped",
+      },
+      expectedWorkspaceVersion: "7",
+      expiresAt: "2026-07-28T13:00:00.000Z",
+      leaseGeneration: "3",
+      objectKey,
+      r2BucketRole: "destination",
+      schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+      snapshotId,
+      userId: USER_ID,
+      workspaceVersion: "7",
+    };
+    const service = createWorkspaceSnapshotSessionService({
+      bucket: destination,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
+      state: durable.state,
+      stateStore: ownerStateStore,
+      readHostedWorkspaceFromWeb: async (userId) => ({
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      }),
+      assertWorkspaceBelongsToRunnerUser() {},
+    });
+
+    const created = await service.create(session);
+    expect(created).toEqual(session);
+    const first = await service.rememberPresignedPut({
+      drainUntil: "2026-07-28T12:20:00.000Z",
+      expectedSession: session,
+      expiresAt: "2026-07-28T12:10:00.000Z",
+    });
+    if (!first) {
+      throw new Error("Expected the first owner-recorded PUT drain.");
+    }
+    await expect(service.rememberPresignedPut({
+      drainUntil: "2026-07-28T12:15:00.000Z",
+      expectedSession: first,
+      expiresAt: "2026-07-28T12:10:00.000Z",
+    })).resolves.not.toBeNull();
+    expect(durable.storageValues.get("workspace-snapshot:r2-put-drain:v1")).toEqual({
+      drainUntil: "2026-07-28T12:20:00.000Z",
+      schema: "murph.hosted-workspace-snapshot-r2-put-drain.v1",
+      userId: USER_ID,
+    });
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: createDeletionStateStore(),
+      userId: USER_ID,
+    })).resolves.toEqual({
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: 1_200,
+      userId: USER_ID,
+    });
+
+    expect(source.listCalls).toEqual([]);
+    expect(destination.listCalls).toEqual([]);
+    expect(source.deleteBatches).toEqual([]);
+    expect(destination.deleteBatches).toEqual([]);
+  });
+
+  it("withholds completion when a late object appears between empty observations", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
+    const lateKey = `${prefix}late.bundle.json`;
+    const source = new LateWriteListableR2Bucket(prefix, lateKey);
+    const destination = new ListableMemoryEncryptedR2Bucket();
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination, source },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).rejects.toThrow("Hosted runner R2 cleanup failed");
+
+    expect(source.objects.has(lateKey)).toBe(true);
+    expect(stateStore.deleteStateCallCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
+  });
+
+  it("does not report success when logical state deletion declines", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore({ deleted: false });
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+
+    await expect(deleteHostedRunnerUserData({
+      buckets: { destination: bucket, source: bucket },
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    })).rejects.toThrow("logical state was not deleted");
+
+    expect(durable.deleteAllCount).toBe(0);
   });
 
   it("bulk-deletes every listed R2 prefix page without cursor skips", async () => {
@@ -327,7 +569,9 @@ describe("hosted runner user data cleanup", () => {
   });
 });
 
-function createDeletionStateStore(): {
+function createDeletionStateStore(input: {
+  deleted?: boolean;
+} = {}): {
   assertStateForUser(userId: string): Promise<void>;
   clearWriteFenceForUserDeletion(userId: string): Promise<{
     attemptId: string | null;
@@ -354,7 +598,7 @@ function createDeletionStateStore(): {
     async deleteStateForUser(userId) {
       expect(userId).toBe(USER_ID);
       deleteStateCallCount += 1;
-      return { deleted: true };
+      return { deleted: input.deleted ?? true };
     },
   };
 }
@@ -384,6 +628,27 @@ function createBindOnlyStateStore(): {
   };
 }
 
+function createOwningSnapshotStateStore(): {
+  bindUser(userId: string): Promise<string>;
+  validateWriteFenceToken(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<{ owns: true; record: null }>;
+} {
+  return {
+    async bindUser(userId) {
+      return userId;
+    },
+    async validateWriteFenceToken() {
+      return {
+        owns: true,
+        record: null,
+      };
+    },
+  };
+}
+
 function createUnusedRunnerStoreCache() {
   return {
     async ensure(): Promise<never> {
@@ -404,6 +669,7 @@ function createWorkspaceState(userId: string): HostedWorkspaceState {
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   readonly deleteBatches: string[][] = [];
+  readonly listCalls: string[] = [];
 
   override async delete(key: string | string[]): Promise<void> {
     const keys = Array.isArray(key) ? key : [key];
@@ -420,6 +686,7 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
     objects: Array<{ key: string }>;
     truncated: boolean;
   }> {
+    this.listCalls.push(input.prefix ?? "");
     const matchingKeys = [...this.objects.keys()]
       .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
       .sort();
@@ -450,6 +717,36 @@ class FailingDeleteListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
       }
       await super.delete(item);
     }
+  }
+}
+
+class LateWriteListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
+  private targetPrefixListCount = 0;
+
+  constructor(
+    private readonly targetPrefix: string,
+    private readonly lateKey: string,
+  ) {
+    super();
+  }
+
+  override async list(input: {
+    cursor?: string;
+    limit?: number;
+    prefix?: string;
+  }): Promise<{
+    cursor?: string;
+    objects: Array<{ key: string }>;
+    truncated: boolean;
+  }> {
+    const result = await super.list(input);
+    if (input.prefix === this.targetPrefix) {
+      this.targetPrefixListCount += 1;
+      if (this.targetPrefixListCount === 2) {
+        await this.put(this.lateKey, "late");
+      }
+    }
+    return result;
   }
 }
 
