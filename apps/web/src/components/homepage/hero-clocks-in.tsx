@@ -166,7 +166,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
     card: {
       eyebrow: "Day 18 · Caffeine",
       comparison: {
-        label: "18 day window",
+        label: "18 day HRV window",
         rows: [
           {
             label: "Mornings after AM coffee",
@@ -187,7 +187,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       },
     },
     murph:
-      "The clearest pattern is lower deep sleep after afternoon espresso: down 24% on days you have coffee after 2pm.",
+      "The clearest pattern is lower HRV after afternoon espresso: down 24% on days you have coffee after 2pm.",
   },
   {
     topic: "Doctor recap",
@@ -670,6 +670,18 @@ export function HeroClocksIn({
     return next;
   };
 
+  const buildCompletedExchangeItems = (
+    ex: Exchange,
+  ): ReadonlyArray<StreamItem> => [
+    {
+      kind: "text",
+      id: nextId(),
+      from: "user",
+      text: ex.user,
+    },
+    ...buildExchangeReplyItems(ex),
+  ];
+
   const startGroupSequence = ({
     allowAfterEngaged,
   }: {
@@ -948,15 +960,7 @@ export function HeroClocksIn({
           const idx =
             FLOATER_INDEX_BY_TEXT[exchange.topic.toLowerCase()] ?? null;
           markFloaterUsed(idx);
-          setItems([
-            {
-              kind: "text",
-              id: nextId(),
-              from: "user",
-              text: exchange.user,
-            },
-            ...buildExchangeReplyItems(exchange),
-          ]);
+          setItems(buildCompletedExchangeItems(exchange));
         },
         0,
         { allowAfterEngaged: true },
@@ -1063,6 +1067,29 @@ export function HeroClocksIn({
     setResponseInFlight(false);
   };
 
+  const focusConversation = () => {
+    scrollerRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleComposerEngagement = () => {
+    // An explicit topic or person choice already owns the audience. Only
+    // preempt the unattended demo so a draft started in the private composer
+    // cannot be carried into its scheduled group transition.
+    if (engagedRef.current) return;
+
+    const restorePrivateThread = groupMode;
+    engagedRef.current = true;
+    cancelDemoRef.current?.();
+    groupSequenceStartedRef.current = false;
+    setComposeSheet("hidden");
+    setGroupMode(false);
+    setTyping(false);
+
+    if (restorePrivateThread) {
+      setItems(buildCompletedExchangeItems(AUTO_RUN_EXCHANGES[0]));
+    }
+  };
+
   const runExchangeOnce = (ex: Exchange) => {
     if (responseInFlightRef.current) return;
 
@@ -1070,6 +1097,7 @@ export function HeroClocksIn({
     cancelDemoRef.current?.();
     prepareScheduledDemo();
     setResponseInFlight(true);
+    focusConversation();
 
     if (groupMode) {
       groupSequenceStartedRef.current = false;
@@ -1122,6 +1150,7 @@ export function HeroClocksIn({
       engagedRef.current = true;
       cancelDemoRef.current?.();
       prepareScheduledDemo();
+      focusConversation();
       startGroupSequence({ allowAfterEngaged: true });
       return;
     }
@@ -1142,6 +1171,8 @@ export function HeroClocksIn({
   const composeSheetMembers = GROUP_MEMBERS.filter((member) =>
     usedFloaters.has(member.name),
   );
+  const composerBusy = responseInFlight && engagedRef.current;
+  const conversationIsLive = engagedRef.current;
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -1271,7 +1302,17 @@ export function HeroClocksIn({
                     />
                     <div
                       ref={scrollerRef}
-                      className="hero-scroller h-full overflow-hidden lg:overflow-y-auto lg:overscroll-contain"
+                      role={conversationIsLive ? "log" : undefined}
+                      aria-label={
+                        groupMode
+                          ? "Group conversation with Murph"
+                          : "Private conversation with Murph"
+                      }
+                      aria-live={conversationIsLive ? "polite" : "off"}
+                      aria-relevant="additions text"
+                      aria-busy={conversationIsLive && responseInFlight}
+                      tabIndex={-1}
+                      className="hero-scroller h-full overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#5a6e32] lg:overflow-y-auto lg:overscroll-contain"
                       style={{
                         scrollbarWidth: "none",
                         msOverflowStyle: "none",
@@ -1414,7 +1455,9 @@ export function HeroClocksIn({
                   ) : null}
                 </div>
                 <Composer
+                  busy={composerBusy}
                   value={composerValue}
+                  onEngage={handleComposerEngagement}
                   onChange={setComposerValue}
                   onSubmit={handleSend}
                 />
@@ -2117,6 +2160,7 @@ function TimestampSeparator({ text }: { text: string }) {
 function TypingBubble() {
   return (
     <div className="hero-msg-in relative mr-auto max-w-[40%]">
+      <span className="sr-only">Murph is replying</span>
       <div className="flex items-center gap-1 rounded-[15px] bg-white px-3 py-2.5">
         <span
           className="hero-typing-dot size-1.5 rounded-full bg-[#736a58]"
@@ -2146,18 +2190,32 @@ function TypingBubble() {
 }
 
 function Composer({
+  busy,
   value,
+  onEngage,
   onChange,
   onSubmit,
 }: {
+  busy: boolean;
   value: string;
+  onEngage: () => void;
   onChange: (next: string) => void;
   onSubmit: () => void;
 }) {
   const hasText = value.trim().length > 0;
   return (
     <div className="bg-[#f5f0e8] px-3 pb-2 pt-1.5">
+      {busy ? (
+        <p
+          id="hero-composer-status"
+          role="status"
+          className="mb-1 text-center font-mono text-[9px] tracking-[0.08em] text-[#635a48]"
+        >
+          Murph is replying…
+        </p>
+      ) : null}
       <form
+        aria-busy={busy}
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit();
@@ -2183,12 +2241,18 @@ function Composer({
           <input
             type="text"
             value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="iMessage"
+            onFocus={onEngage}
+            onChange={(e) => {
+              onEngage();
+              onChange(e.target.value);
+            }}
+            placeholder={busy ? "Murph is replying…" : "iMessage"}
             aria-label="Message Murph"
+            aria-describedby={busy ? "hero-composer-status" : undefined}
             autoComplete="off"
+            disabled={busy}
             className={cn(
-              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58]/45",
+              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58]/45 disabled:cursor-wait",
               hasText ? "pr-7" : "pr-4",
             )}
           />
@@ -2196,7 +2260,8 @@ function Composer({
             <button
               type="submit"
               aria-label="Send"
-              className="absolute right-[3px] top-1/2 flex size-[26px] shrink-0 -translate-y-1/2 items-center justify-center rounded-full bg-[#5a6e32] text-white transition-colors hover:bg-[#7a8c6e]"
+              disabled={busy}
+              className="absolute right-[3px] top-1/2 flex size-[26px] shrink-0 -translate-y-1/2 items-center justify-center rounded-full bg-[#5a6e32] text-white transition-colors hover:bg-[#7a8c6e] disabled:cursor-wait disabled:opacity-45"
             >
               <svg
                 width="12"

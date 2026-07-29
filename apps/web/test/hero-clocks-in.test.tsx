@@ -177,6 +177,194 @@ test("topic controls wait for Murph to finish the current reply", async () => {
   await view.cleanup();
 });
 
+test("a private composer draft cancels the automatic group handoff", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_500);
+  });
+
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(composer);
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(
+      view.window,
+      composer,
+      "Can you check my private sleep trend?",
+    );
+    dispatchInputValueChange(view.window, composer);
+  });
+  assert.equal(composer.value, "Can you check my private sleep trend?");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(8_000);
+  });
+
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /walk challenge starts tomorrow/,
+  );
+  assert.equal(composer.value, "Can you check my private sleep trend?");
+
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Can you check my private sleep trend\?/);
+  assert.doesNotMatch(privateThread, /walk challenge starts tomorrow/);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+
+  await view.cleanup();
+});
+
+test("the private composer preempts an automatic reply with visible progress", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_500);
+  });
+
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(composer);
+  assert.equal(composer.disabled, false);
+
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(view.window, composer, "Show my latest recovery.");
+    dispatchInputValueChange(view.window, composer);
+  });
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+  });
+
+  assert.match(view.container.textContent ?? "", /Murph is replying/);
+  assert.equal(composer.disabled, true);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Show my latest recovery\./);
+  assert.match(privateThread, /shoot me a message and we can get started/);
+  assert.doesNotMatch(privateThread, /walk challenge starts tomorrow/);
+  assert.equal(composer.disabled, false);
+
+  await view.cleanup();
+});
+
+test("topic activation exposes progress and results in the conversation log", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  const conversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Private conversation with Murph"]',
+  );
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(stepsButton);
+  assert.ok(conversation);
+  assert.ok(composer);
+
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  assert.equal(conversation.getAttribute("tabindex"), "-1");
+  assert.equal(conversation.getAttribute("role"), "log");
+  assert.equal(conversation.getAttribute("aria-live"), "polite");
+  assert.equal(conversation.getAttribute("aria-busy"), "true");
+  assert.equal(composer.disabled, true);
+  assert.match(view.container.textContent ?? "", /Murph is replying/);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  assert.equal(conversation.getAttribute("aria-busy"), "false");
+  assert.match(
+    conversation.textContent ?? "",
+    /How are my steps this week\?.*Average 8\.4k a day/s,
+  );
+  assert.equal(composer.disabled, false);
+
+  await view.cleanup();
+});
+
+test("the Sleep quality evidence and reply both describe HRV", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const sleepButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sleep quality"]',
+  );
+  assert.ok(sleepButton);
+  await act(async () => {
+    sleepButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  const thread = view.container.textContent ?? "";
+  assert.match(thread, /18 day HRV window/);
+  assert.match(thread, /58.*ms.*44.*ms.*-24%/s);
+  assert.match(thread, /lower HRV after afternoon espresso: down 24%/);
+  assert.doesNotMatch(thread, /lower deep sleep.*down 24%/);
+
+  await view.cleanup();
+});
+
 test("topic controls render order and bloodwork artifacts in the private thread", async () => {
   vi.useFakeTimers();
 
@@ -485,6 +673,28 @@ function installGlobals(
     configurable: true,
     value() {},
   });
+  // React's legacy input-event fallback probes these IE hooks when LinkeDOM
+  // does not advertise native input-event support.
+  Object.defineProperty(window.HTMLElement.prototype, "attachEvent", {
+    configurable: true,
+    value(
+      this: HTMLElement,
+      eventName: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      this.addEventListener(eventName.replace(/^on/u, ""), listener);
+    },
+  });
+  Object.defineProperty(window.HTMLElement.prototype, "detachEvent", {
+    configurable: true,
+    value(
+      this: HTMLElement,
+      eventName: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      this.removeEventListener(eventName.replace(/^on/u, ""), listener);
+    },
+  });
 
   const restoreEntries = [
     setGlobal("window", window),
@@ -510,6 +720,42 @@ function installGlobals(
       restore();
     }
   };
+}
+
+function setNativeInputValue(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+  value: string,
+) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  assert.ok(setter);
+  setter.call(input, value);
+}
+
+function dispatchInputValueChange(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+) {
+  const event = new window.Event("propertychange", { bubbles: true });
+  Object.defineProperty(event, "propertyName", {
+    configurable: true,
+    value: "value",
+  });
+  input.dispatchEvent(event);
+}
+
+function submitComposer(
+  window: Window & typeof globalThis,
+  send: HTMLButtonElement,
+) {
+  const form = send.closest("form");
+  assert.ok(form);
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
 }
 
 function setGlobal(key: string, value: unknown) {
