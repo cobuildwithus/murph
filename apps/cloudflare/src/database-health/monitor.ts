@@ -430,31 +430,42 @@ export class DatabaseHealthMonitor {
           })
         ),
       );
+      const primaryResult = destinationResults[0];
+      const secondaryResult = destinationResults[1];
+      if (!primaryResult || !secondaryResult) {
+        throw new Error(
+          "Database health monitor requires two Linq destinations.",
+        );
+      }
       const failures: unknown[] = [];
-      const seenRecipients = new Set<string>();
       const destinations: Array<{
         idempotencyKey: string;
         recipient: string;
       }> = [];
-      for (const [index, result] of destinationResults.entries()) {
-        if (result.status === "rejected") {
-          failures.push(result.reason);
-          continue;
-        }
-        if (seenRecipients.has(result.value.recipient)) {
+      if (primaryResult.status === "rejected") {
+        failures.push(primaryResult.reason);
+      } else {
+        destinations.push({
+          idempotencyKey,
+          recipient: primaryResult.value.recipient,
+        });
+      }
+      if (secondaryResult.status === "rejected") {
+        failures.push(secondaryResult.reason);
+      } else if (primaryResult.status === "fulfilled") {
+        if (
+          secondaryResult.value.recipient
+          === primaryResult.value.recipient
+        ) {
           failures.push(
             new LinqDatabaseAlertError("linq_duplicate_recipient"),
           );
-          continue;
+        } else {
+          destinations.push({
+            idempotencyKey: `${idempotencyKey}-recipient-2`,
+            recipient: secondaryResult.value.recipient,
+          });
         }
-        seenRecipients.add(result.value.recipient);
-        destinations.push({
-          idempotencyKey: buildDatabaseAlertRecipientIdempotencyKey(
-            idempotencyKey,
-            index,
-          ),
-          recipient: result.value.recipient,
-        });
       }
       const sendResults = await Promise.allSettled(
         destinations.map((destination) =>
@@ -915,15 +926,6 @@ function buildDatabaseAlertIdempotencyKey(input: {
   incidentSequence: number;
 }): string {
   return `murph-db-${input.incidentSequence}-${input.alertSequence}`;
-}
-
-function buildDatabaseAlertRecipientIdempotencyKey(
-  alertIdempotencyKey: string,
-  recipientIndex: number,
-): string {
-  return recipientIndex === 0
-    ? alertIdempotencyKey
-    : `${alertIdempotencyKey}-recipient-${recipientIndex + 1}`;
 }
 
 function readDatabaseHealthMonitorConfig(

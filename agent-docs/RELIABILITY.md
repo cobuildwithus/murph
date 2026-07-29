@@ -90,9 +90,12 @@ Last verified: 2026-07-29
   direct chats and current line reputation; unhealthy or indeterminate health
   suppresses that destination's message POST without blocking the other
   destination, and retains the pending alert for the next paced cycle. Healthy
-  destinations are compared before provider entry. Distinct chat ids that
-  resolve to the same external recipient admit only the primary POST and keep
-  the page pending; after configuration is corrected, stable provider
+  destinations are compared before provider entry. Primary recipient identity
+  is required before any secondary POST: an unresolved primary suppresses both
+  positions, while an unresolved secondary does not block a healthy primary.
+  Distinct chat ids that resolve to the same external recipient admit only the
+  primary POST and keep the page pending; after configuration is corrected,
+  stable provider
   idempotency deduplicates that primary replay while the actual secondary
   receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
   route separately for each chat. The primary retains the persisted Linq

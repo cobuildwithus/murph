@@ -227,6 +227,66 @@ describe("database health monitor", () => {
     });
   });
 
+  it("requires primary recipient identity before secondary provider entry", async () => {
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => new Response(null, { status: 503 }),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqRecipient: "+12025550123",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toEqual([]);
+    const pendingAlert = harness.monitor.readAlertState();
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    const collisionPrimaryBody = await readLinqRequestBody(
+      harness.allLinqRequests[0],
+    );
+    expect(collisionPrimaryBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(collisionPrimaryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+
+    harness.setSecondaryLinqRecipient("+12025550124");
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(
+        FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2,
+      ),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(3);
+    const recoveryBodies = await Promise.all(
+      harness.allLinqRequests.slice(1).map(readLinqRequestBody),
+    );
+    expect(recoveryBodies.map((body) => body.message.idempotency_key))
+      .toEqual([
+        pendingAlert.pendingAlertIdempotencyKey,
+        `${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+      ]);
+    expect(
+      recoveryBodies.every(
+        (body) =>
+          body.message.parts[0]?.value === pendingAlert.pendingAlertMessage,
+      ),
+    ).toBe(true);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
   it("retries a partially failed fan-out only after the global fence", async () => {
     const harness = createMonitorHarness({
       linqResponses: [
