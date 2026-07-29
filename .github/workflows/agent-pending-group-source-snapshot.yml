@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/pending-group-setup
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
