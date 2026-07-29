@@ -441,6 +441,42 @@ describe("sendHostedLinqChatMessage", () => {
     );
   });
 
+  it("keeps the outbound deadline active through a stalled response body", async () => {
+    let bodyAborted = false;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const signal = readRequestSignal(init);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(signal.reason ?? new Error("aborted"));
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      message: "hello",
+    });
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound reply timed out.",
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expectation;
+    expect(bodyAborted).toBe(true);
+  });
+
   it("marks 5xx Linq API failures as retryable", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
