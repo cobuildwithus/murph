@@ -178,7 +178,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group usage funding and top-up follow-up">
+      <StudySection title="Group sponsorship amount, optional fields, and follow-up">
         <GroupUsageFundingStudy />
       </StudySection>
 
