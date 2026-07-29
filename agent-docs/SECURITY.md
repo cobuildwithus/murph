@@ -193,17 +193,30 @@ Last verified: 2026-07-28
   route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
-- Current-policy saved-card personal, Family, and group funding may select only
-  one canonical card already attached to the authenticated payer's verified
-  Stripe Customer: one consistent Customer or nonterminal Subscription
-  default, or the sole attached card. Frozen v2 purchases retain this behavior
-  for group targets only; v1 retains no saved-card path.
-  The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
-  attached cards must use Checkout. The server creates the PaymentIntent
-  unconfirmed, stores its encrypted exact reference on the frozen purchase,
-  then confirms it off session. The payer-row lock rechecks that the payer is
-  active and the purchase is still `created`; a deletion or terminal-state
-  race cancels the unbound intent and never confirms it. An ambiguous
+- Current-policy personal and Family saved-card funding resolves the exact
+  Murph billing Subscription whose Customer matches the authenticated payer's
+  verified Stripe Customer. Murph may use that Subscription's attached
+  explicit default or its inherited attached Customer default. Missing, stale,
+  terminal, customer-mismatched, unattached, or legacy Source-only
+  exact-subscription state stays in Checkout; unrelated Subscriptions never
+  participate. Hosted-group funding does not require a Murph billing
+  Subscription and may use the attached Customer default or require exactly
+  one attached method only when no legacy Customer default Source exists.
+  Frozen v2 purchases retain the legacy behavior for group targets only,
+  frozen v3 purchases retain it for all targets, and v1 retains no saved-card
+  path. The browser cannot supply a PaymentMethod. `allow_redisplay` governs
+  whether Stripe may present a method again inside Checkout, not whether the
+  attached subscription card can fund the payer's explicit one-time top-up.
+  Current-policy Checkout enables Stripe's explicit payment-method save choice;
+  Murph does not upgrade or broadly redisplay historical methods. The server
+  creates the PaymentIntent
+  unconfirmed, then revalidates the exact personal or Family billing Customer,
+  Subscription, canonical billing status, suspension state, and last accepted
+  Stripe-event time under the payer lock before storing the intent's encrypted
+  exact reference on the frozen purchase and confirming it off session. A
+  billing-reference change, deletion, or terminal-state race cancels the
+  unbound intent and never confirms it. After bind, a later billing change does
+  not retarget recovery. An ambiguous
   confirmation remains bound and
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
