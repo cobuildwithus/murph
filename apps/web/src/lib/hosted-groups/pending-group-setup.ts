@@ -159,7 +159,7 @@ export async function armHostedPendingGroupSetupTx(input: {
 export async function readHostedPendingGroupSetup(input: {
   now?: Date;
   ownerMemberId: string;
-  prisma?: PrismaClient;
+  prisma?: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupSnapshot | null> {
   const ownerMemberId = normalizeNullableString(input.ownerMemberId);
   if (!ownerMemberId) {
