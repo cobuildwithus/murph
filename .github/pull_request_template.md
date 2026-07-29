@@ -28,6 +28,18 @@
 - Other awaited latency: <!-- Added or moved-on-path work, or None -->
 - Before/after proof: <!-- Call-count test, trace, benchmark, or other focused evidence -->
 
+## Murph runtime system prompt impact
+
+<!-- Report the final assembled system-prompt change for individual and group Murph separately. For a prompt-affecting PR, render the base and head with identical representative inputs that exercise the changed path; shared prompt changes count in both runtimes. Report character counts, the signed character delta, and the signed percentage change (`delta / base * 100`). If no system-prompt surface changed, record a zero delta and explain why measurement was unnecessary. -->
+
+| Runtime | Base characters | Head characters | Delta | Percent |
+| --- | ---: | ---: | ---: | ---: |
+| Individual Murph | <!-- count, or Not measured --> | <!-- count, or Not measured --> | <!-- signed count, or 0 --> | <!-- signed percent, or 0% --> |
+| Group Murph | <!-- count, or Not measured --> | <!-- count, or Not measured --> | <!-- signed count, or 0 --> | <!-- signed percent, or 0% --> |
+
+- Prompt surfaces changed: <!-- Files/builders/layers changed, or None — reason -->
+- Measurement method: <!-- Base/head refs plus the identical fixture, command, or deterministic method; or Not run — no prompt-affecting surface -->
+
 ## Design proof
 
 <!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed hosted screenshots captured from that design-page state. -->
