@@ -952,6 +952,7 @@ model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
   assistantInputLookupKey String?               @map("assistant_input_lookup_key")
+  sourceMessageLookupKey  String?               @map("source_message_lookup_key")
   subscriptionActionClaim String?               @map("subscription_action_claim")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
@@ -980,6 +981,7 @@ model HostedMailboxItem {
   @@unique([userId, assistantInputLookupKey])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
+  @@index([sourceMessageLookupKey, causalSeq])
   @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
   @@index([expiresAt, id])

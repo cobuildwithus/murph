@@ -7,6 +7,9 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+} from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -151,6 +154,73 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.ok(
     (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
       (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
+  )
+})
+
+test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
+  const session = createAssistantSession()
+  const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
+    idempotencyKey: 'feedback-after-reply',
+    kind: 'feature_request',
+    relatedChangelogItemIds: [],
+    summary: 'Speculative: support the missing Murph path.',
+  }
+  const acceptProductFeedbackCandidate = vi.fn(() => {
+    throw new Error('Best-effort product feedback handoff failed.')
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-product-feedback',
+        productFeedbackCandidate,
+        response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        route: {
+          routeId: 'route-product-feedback',
+        },
+        session,
+        transcriptResponse: 'assistant response',
+      },
+    },
+    session,
+  })
+
+  await expect(sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-product-feedback',
+        productFeedbackCandidateSink: {
+          acceptProductFeedbackCandidate,
+        },
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Use a missing Murph path.',
+    vault: '/vaults/test',
+  })).resolves.toMatchObject({
+    response: 'assistant response',
+    status: 'completed',
+  })
+
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
+  ).toBeGreaterThan(
+    mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ??
+      Number.POSITIVE_INFINITY,
+  )
+  expect(
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
+  ).toBeGreaterThan(
+    mocks.dispatchAssistantReply.mock.invocationCallOrder[0] ??
+      Number.POSITIVE_INFINITY,
   )
 })
 
@@ -7695,6 +7765,7 @@ async function loadLocalServiceModule(input?: {
             targetInputId: string
           }[] | null
           rawEvents?: unknown[]
+          productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
           route?: {
             routeId?: string
           }
