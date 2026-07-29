@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import {
+  isHostedVeniceAssistantEnabled,
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
@@ -54,6 +55,13 @@ export const GET = withJsonError(async (request: Request) => {
       ? {
           hostedAssistantModelOverride:
             assistantConfiguration.hostedAssistantModelOverride,
+        }
+      : {}),
+    ...(assistantConfiguration?.hostedAssistantProviderOverride
+        && isHostedVeniceAssistantEnabled()
+      ? {
+          hostedAssistantProviderOverride:
+            assistantConfiguration.hostedAssistantProviderOverride,
         }
       : {}),
     ...(assistantConfiguration?.hostedAssistantReasoningEffortOverride

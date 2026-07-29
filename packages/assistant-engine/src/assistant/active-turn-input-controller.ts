@@ -176,6 +176,18 @@ class AssistantActiveTurnInputController {
     this.closed = true
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
+    this.completedProviderTurnKey = null
+    this.liveProviderTurnEnded = true
+  }
+
+  closeInputAdmission(): void {
+    this.closed = true
+    // First-response closure blocks every new admission, but the exact provider
+    // turn key remains necessary until a steer already started under it settles.
+    this.completedProviderTurnKey =
+      this.liveProviderTurnKey ?? this.completedProviderTurnKey
+    this.liveProviderTurn = null
+    this.liveProviderTurnKey = null
     this.liveProviderTurnEnded = true
   }
 
@@ -270,6 +282,7 @@ class AssistantActiveTurnInputController {
     this.closed = true
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
+    this.completedProviderTurnKey = null
     this.liveProviderTurnEnded = true
     for (const completion of this.manualCompletions) {
       completion.reject(error)
@@ -523,7 +536,10 @@ class AssistantActiveTurnInputController {
         })
         .then(() => {
           if (
-            !this.closed &&
+            (
+              !this.closed ||
+              this.completedProviderTurnKey === liveProviderTurnKey
+            ) &&
             item.providerInputAckTurnKey === liveProviderTurnKey
           ) {
             item.providerInputAcknowledgedTurnKey = liveProviderTurnKey
@@ -623,6 +639,7 @@ export function createAssistantActiveTurnInputController(input: {
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   admitLiveSteered(): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
+  closeInputAdmission(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
   notifyInputAvailable(input?: {
@@ -657,6 +674,11 @@ export function createAssistantActiveTurnInputController(input: {
     }
   }
 
+  const closeInputAdmission = () => {
+    controller.closeInputAdmission()
+    dispose()
+  }
+
   return {
     admitAvailable: (input) => controller.admitAvailable(input),
     admitLiveSteered: () => controller.admitLiveSteered(),
@@ -664,6 +686,7 @@ export function createAssistantActiveTurnInputController(input: {
       controller.close()
       dispose()
     },
+    closeInputAdmission,
     complete: (result) => controller.complete(result),
     fail(error) {
       controller.fail(error)

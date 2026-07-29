@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 ## Decision
 
@@ -263,16 +263,29 @@ existing accepted-input and route-binding work is unchanged. The only Web read
 occurs inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
-Interactive Linq and Telegram group turns are actor-scoped. The importer
-derives blinded `actorId` from the same trimmed sender value stored for the
-prompt; initial batching splits on actor change, and pre-provider plus live
-admission stop at a foreign group actor. Telegram supplies that sender only on
-route-authorized non-direct inbound whose webhook-authenticated user id already
-resolved to exactly one active linked member, so anonymous administrators,
-`sender_chat` messages, bots, and unlinked senders stay unattributed.
-Attribution therefore remains bound to the scanner-selected durable operation
-contexts, and active steering cannot add a second participant's identity
-authority to the turn.
+Interactive Linq and Telegram group turns are room-scoped for batching while
+participant authority remains message-scoped. The importer derives blinded
+`actorId` from the same trimmed sender value stored for per-message prompt
+attribution, but an authenticated non-direct exact-successor burst may batch
+and steer across actor and native reply-anchor changes when its room, account,
+delivery route, audience, projection readiness, reaction rules, and 50-input
+bound remain stable. Telegram supplies sender evidence only on route-authorized
+non-direct inbound whose webhook-authenticated user id already resolved to
+exactly one active linked member, so anonymous administrators, `sender_chat`
+messages, bots, and unlinked senders stay unattributed. Every admitted message
+keeps its own opaque accepted-message ref and reply context. A participant
+effect reloads that exact accepted input and derives provider sender evidence;
+the compound turn's actor is never participant authority.
+
+The accepted-message participant wire is an expand/contract rollout. Deploy
+Web first: its phone-call endpoint accepts the new `groupRequester` evidence
+and the legacy `inboundMailboxItemIds` fallback, and its group-tool parser
+accepts the new `participant` evidence and the legacy `selfOptOut` fallback.
+Both legacy fallbacks revalidate their existing server-owned evidence and exist
+only at this runner-facing compatibility boundary. Then deploy the Worker and
+runner; new runners send only exact accepted-message participant evidence.
+Roll back runner/Worker before Web. Remove the legacy fields only after all
+warm old runners have drained and deployed smoke proves the new runner bundle.
 
 Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
 existing meaning and `telegramSenderHandles` is a separate optional field, so a
@@ -1070,10 +1083,12 @@ Those watermarks live in the bounded canonical companion document
 value document. The canonical selector admits a bounded, cursor-ordered compound
 batch. Foreground begins with the oldest fresh input in the current wake and
 considers only later fresh siblings; background begins with the oldest replyable
-pending input. The batch continues only across the same canonical conversation,
-the same provider-native reply anchor, and exact-successor positive per-member
-causal sequences. A gap, missing or legacy sequence, boundary change, or the
-50-input bound ends the batch and leaves the remainder pending. During that
+pending input. The batch continues only across exact-successor positive
+per-member causal sequences and either one direct-conversation actor/provider-
+native reply anchor or one authenticated non-direct room with stable account,
+delivery route, audience, projection readiness, and reaction boundary. A gap,
+missing or legacy sequence, boundary change, or the 50-input bound ends the
+batch and leaves the remainder pending. During that
 turn, the accepted-input boundary passes the terminal provider input id to the
 private hosted style operation. The signed Web transaction binds that id to the
 member's live conversation row and derives the compound turn frontier; the
@@ -1591,6 +1606,80 @@ rebuildable best-effort state rather than a reason to take another workspace
 checkpoint or create a durable retry queue. Successful attachment projection
 may make raw paths, image evidence, or audio/video transcript evidence
 available to the same assistant turn.
+Authenticated group transcript rendering keeps the opaque assistant input
+reference and server-derived sender handle authoritative. Telegram may carry a
+bounded display name from trusted ingress. After durable Linq import, prompt
+preparation may call the Web-owned `read_participant_display_names` boundary
+with one bounded unique-handle set. Web matches each handle to exactly one
+current joined, unsuspended membership and decrypts only its
+membership-implied `profile-name.v0` snapshot; it never traverses selectable
+health grants or device state. The synthetic runtime must remain active, but a
+connected room with no hosted-group row is treated as an empty profile-
+membership set so presentation does not depend on unrelated group setup. An
+authorized profile name wins. A canonical phone with no member match, or with
+one unsuspended matched member but no profile name, may reuse the existing human
+owner address-book advisory reader; an ambiguous or suspended member match
+remains unnamed. The advisory reader rechecks owner existence, suspension,
+launch consent, projection enablement, safe uniqueness, and its KMS/storage
+boundaries. A granted profile share with a null, not-yet-materialized snapshot
+is unavailable instead of profileless. The advisory reader admits at most 16
+phones; only that exact prefix may produce contact labels or miss evidence, and
+overflow handles remain operation-local. A successful response returns labeled entries with only
+`senderHandle`, `displayName`, and `displayNameSource` (`profile-name` or
+`unverified-owner-contact`). Its optional `nameMissSenderHandles` contains only
+exact requested handles for which every applicable authorized profile/contact
+source was successfully checked and no safe label exists. Pending snapshots,
+bounded-lookup overflow, policy, ambiguity, suspension, authorization, and
+rollout omissions are excluded. The response
+never returns a hosted member id or participant id.
+
+The assistant-runtime presentation reader owns one operation-local memo and one
+bounded versioned file cache at
+`.runtime/cache/assistant-runtime/group-participant-display-names.json` for those
+results. Initial prompt preparation reads unresolved unique handles once,
+including a 20-message/four-sender burst as one four-handle request. Later live
+admissions reuse operation-local positive, negative, and fail-soft entries and
+batch only newly unresolved handles. Across ordinary turns and fresh reader or
+process instances sharing one local workspace, a validated profile or
+owner-shared contact entry has a fixed 14-day TTL and only an explicit
+`nameMissSenderHandles` entry has a fixed six-hour TTL. An omitted handle
+without that evidence remains operation-local. The
+2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
+callback-bound runtime member, exact accepted-input route conversation key,
+channel, and normalized handle; hits neither slide expiry nor reorder eviction.
+The fixed-path JSON is atomically replaced under `0700`/`0600` permissions and
+rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
+ordinary misses. Failures, policy-limited reads, and malformed or unauthorized
+responses are operation-local only and never written. There are no timers,
+resident mirror,
+single-flight, mutation invalidation, locks, or distributed cache owners.
+`.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
+same surviving local workspace can reuse the file; cold restore or replacement
+re-reads Web. Neither cache layer becomes profile or contact state. Profile names render as display-only profile text; owner-contact labels render
+explicitly as unverified display-only text. Neither label nor the raw handle
+authorizes participant selection or an effect. Only an accepted opaque message
+ref plus trusted server derivation can authorize a participant-scoped action.
+
+The Cloudflare group-tool adapter caps only this presentation action at a
+one-second soft deadline, bounded further by the configured control timeout.
+The runtime therefore stops waiting before the address-book helper's own
+two-second deadline; a later Web completion is ignored. Timeout, abort,
+ambiguity, invalid or unauthorized state, suspension,
+consent loss, KMS/storage failure, parser skew, or any other failure returns no
+label, ignores late completion, and does not block or acknowledge conversation
+work. Every other group-tool action keeps the configured timeout.
+
+`displayNameSource` is an additive response field. New parsers accept an omitted
+field from an older Web deployment as `profile-name`; old parsers reject the new
+field, after which the existing fail-soft reader leaves the transcript unnamed
+while normal conversation continues. The enclosing participant-evidence
+contract requires a Web-first rollout: deploy Web's backward-compatible reader
+before the runner and Cloudflare release. During that brief skew, an old runner
+may omit a label when Web emits contact provenance, but normal conversation and
+participant authorization remain available. Roll back the runner and Cloudflare
+before Web. After the fleet converges, verify one profile label, one owner-
+contact label, and one participant-scoped action from an opaque accepted-message
+ref. No database, workspace, mailbox, or input-event migration is required.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -1630,20 +1719,29 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only when the stored event is
-the next positive causal-sequence successor and preserves the conversation,
-delivery route, native reply anchor, account/audience, and group actor. A
+may join through the generic live-steering path only before the first completed
+assistant response, only while the turn remains below the cumulative 50-message
+initial-plus-live bound, and only when the stored event is the next positive
+causal-sequence successor and preserves the direct actor and native reply
+anchor, or for an authenticated non-direct group preserves the room, delivery
+route, account/audience, projection readiness, and reaction boundary. Every
+completed provider text or media segment remains deliverable; the group audience
+does not create a latest-response replacement rule. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. After the provider
 acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
-before any hosted tool effect or final delivery may proceed. Missing input, a
-causal gap, a boundary change, or a missed live window remains pending for a normal later
-assistant turn. Strict active-turn-targeted input still fails closed instead of
-falling through, and the assistant engine does not synthesize another provider
-request inside the same assistant turn. Final-delivery and hosted-tool effect
+before any hosted tool effect or final delivery may proceed. First-response
+closure removes the conversation registration and starts no further steer, but
+retains the existing provider-turn correlation until the one steer already
+started under that exact key settles; a rejected steer is not acknowledged and
+its input remains pending. Missing input, a causal gap, a boundary change,
+capacity overflow, or input arriving after the first completed response remains
+pending for a normal later assistant turn. Strict active-turn-targeted input
+still fails closed instead of falling through, and the assistant engine does
+not synthesize another provider request inside the same assistant turn. Final-delivery and hosted-tool effect
 keys use the newest accepted causal input as the stable replay anchor while the
 full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
