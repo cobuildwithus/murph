@@ -192,16 +192,31 @@ Required:
   cardinality, whether it runs serially or in parallel, its timeout, retry, and
   fallback behavior, and its expected or measured latency. Include before/after
   call counts and focused trace, benchmark, or deterministic call-count proof.
-- **Murph runtime system prompt impact.** Report the final assembled
-  system-prompt change for individual and group Murph separately. For a
-  prompt-affecting PR, render the PR base and head with identical representative
-  inputs that exercise the changed path; count shared prompt changes in both
-  runtimes. Record base and head character counts, the signed character delta,
-  and the signed percentage change (`delta / base * 100`) for each runtime.
-  Name the changed prompt files, builders, or layers and the base/head refs plus
-  fixture, command, or deterministic measurement method. If no system-prompt
-  surface changed, record a zero delta for both runtimes and explain why no
-  render measurement was necessary.
+- **Murph initial provider input impact.** Report the complete first
+  provider-visible input assembled by Murph and Codex for individual and group
+  Murph separately. A provider-input-affecting PR must render the PR base and
+  head with identical representative inputs that exercise the changed path and
+  the actual target model/tool mode. Measure the final request boundary, not
+  only authored prompt files: include assembled system/developer/user messages,
+  eager tool definitions and argument schemas, deferred-tool metadata visible
+  to the provider, Codex-generated code-mode or tool-search guidance, and other
+  fixed provider-visible wrappers. Exclude transport-only metadata only when
+  the measurement names those exclusions and applies them identically.
+  Record absolute base and head input-token totals using the target model's
+  named tokenizer/version, signed token delta, signed percentage change
+  (`delta / base * 100`), absolute UTF-8 byte totals over the same included
+  fields, and signed byte delta for each runtime. Attribute the change among
+  assembled instructions, tool/schema/generated guidance, and other
+  provider-visible input so a zero authored-prompt delta cannot hide tool or
+  adapter growth. Name the changed files, builders, schemas, configuration, or
+  generated layers and the base/head refs, fixtures, model/tool mode, command
+  or deterministic request-capture method, included fields, and exclusions.
+  Changes to prompt builders or text, dynamic-tool descriptions/schemas/
+  availability/deferral, skills rendered into instructions, Codex version or
+  configuration, model tool mode, or provider-request assembly all trigger
+  this measurement. If none of those surfaces changed, write `Not applicable`
+  for both runtimes and explain why; do not claim a measured zero without
+  rendering the complete provider-visible input.
 - **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
   `applicable` or `not applicable` with one short reason each. For coverage,
   name the canonical coverage-bearing command and current outcome. For
