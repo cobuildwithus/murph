@@ -1,6 +1,6 @@
 # Linq participant-change context
 
-Status: active
+Status: completed
 Started: 2026-07-29
 
 ## Outcome
@@ -46,4 +46,9 @@ consent, route, invite, or sharing authority.
   participant handle object for additions and removals.
 - [x] Implement bounded participant-change staging and rendering.
 - [x] Add regression coverage and update durable owner docs.
-- [ ] Complete verification, reviews, PR, and handoff.
+- [x] Complete focused tests, real-PostgreSQL concurrency coverage, signed
+  hosted-local scenarios, canonical diff verification, and the full acceptance
+  suite; resolve the preliminary product and ReviewGPT findings.
+- [x] Open draft PR #1100 and prepare the final exact head for ReviewGPT and CI.
+Updated: 2026-07-29
+Completed: 2026-07-29
