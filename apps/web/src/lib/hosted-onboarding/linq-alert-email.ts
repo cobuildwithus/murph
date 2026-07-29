@@ -184,6 +184,9 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
   const details = alert.detailsJson && typeof alert.detailsJson === "object"
     ? alert.detailsJson as Record<string, unknown>
     : {};
+  const independentProviderStatusPresent =
+    typeof details.providerServiceStatus === "string"
+    || typeof details.providerReputationStatus === "string";
   return [
     "Linq operational alert.",
     "",
@@ -195,11 +198,19 @@ function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {
     typeof details.service === "string" ? `Service: ${details.service}` : null,
     typeof details.failureCode === "string" ? `Failure code: ${details.failureCode}` : null,
     typeof details.failureReason === "string" ? `Failure reason: ${details.failureReason}` : null,
-    typeof details.providerStatus === "string" ? `Provider status: ${details.providerStatus}` : null,
+    typeof details.providerServiceStatus === "string"
+      ? `Line service status: ${details.providerServiceStatus}`
+      : null,
+    typeof details.providerReputationStatus === "string"
+      ? `Line reputation: ${details.providerReputationStatus}`
+      : null,
+    !independentProviderStatusPresent && typeof details.providerStatus === "string"
+      ? `Provider status: ${details.providerStatus}`
+      : null,
     typeof details.providerReason === "string" ? `Provider reason: ${details.providerReason}` : null,
     typeof details.providerCreatedAt === "string" ? `Provider created at: ${details.providerCreatedAt}` : null,
     "",
-    "Action taken: recorded provider event and updated Linq line state only. No routing failover is enabled in this patch.",
+    "Action taken: recorded the provider event and refreshed Linq delivery and health projections. Existing routes stay sticky; current egress policy is evaluated separately at send time.",
   ].filter((line): line is string => line !== null).join("\n");
 }
 
