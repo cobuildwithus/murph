@@ -1,8 +1,8 @@
 # Simplify onboarding choice-point execution
 
-Status: active
+Status: completed
 Created: 2026-07-28
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 ## Goal
 
@@ -107,3 +107,22 @@ Updated: 2026-07-28
 - Post-remediation focused proof: 234 Assistant Engine planning/runner/cron
   tests and 40 hosted Codex-config tests passed; Assistant Engine, Assistant
   Runtime, and Hosted Execution typechecks passed.
+- Final merged-head local `pnpm test:diff` passed every affected package and
+  reverse-dependent suite plus Web typecheck, 7,336 tests, lint with zero
+  errors, dev smoke, and production build. Its final Cloudflare admission wait
+  exceeded the required ten-minute cap, so the exact task-owned waiter was
+  stopped without interrupting another workspace.
+- Final merged-head `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance`
+  passed the full workspace in 5m8s of command time. The one-shot Testbox
+  stopped after success; Cloudflare passed 2,049 Node tests and two Workers
+  tests in that lane.
+- Prompt-impact measurement using the deterministic planning fixture:
+  individual scheduled-check-in system prompt 65,824 -> 66,739 characters
+  (+915, +1.390%); representative group prompt 39,076 -> 39,076 (0, 0%).
+  The immutable policy is member-only and the group route cannot acquire that
+  identity.
+- Parent final review found no remaining receipt/profile/goal-projection
+  pipeline, no second session or rollout-state owner, and no unresolved
+  correctness or proof gap. The ordinary current conversation and vault remain
+  the reasoning surface; only exact-identity read-only confinement is special.
+Completed: 2026-07-29
