@@ -36,7 +36,7 @@ these conditions hold:
 1. destination writes are active;
 2. every source-active Worker and Durable Object is drained;
 3. every OC-targeting direct PUT URL and bounded upload is expired;
-4. final create-only delta passes are complete;
+4. final source-active create-only passes are complete;
 5. the copier is permanently stopped; and
 6. two final directional convergence reads pass.
 
@@ -207,18 +207,29 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
   --phase source_active \
   --immutable-keys-audited \
   --confirm-destination "$DESTINATION_BUCKET" \
+  --copier-exclusive \
   --apply
 ```
 
-Rerun while OC remains live. A concurrent new OC object simply appears in the
-next pass. An ETag change for an approved immutable key blocks the operation
-and must be investigated.
+`--copier-exclusive` is an operator assertion, not a distributed lock. Use one
+controlled credential and one operator shell for this bucket pair. Never
+overlap apply invocations across terminals, hosts, CI, or automation. Rerun
+passes sequentially while OC remains live. A concurrent new OC object simply
+appears in the next pass. An ETag change for an approved immutable key blocks
+the operation and must be investigated.
+
+CopyObject is deliberately attempted once. A transport error, `429`, or `5xx`
+is ambiguous because the first request may still commit, so the command fails
+closed without retrying it. Keep copy admission closed, wait out the request
+bound, then run the source-active read-only check below. A destination-only
+eligible object blocks reuse of that destination.
 
 ### 5. Stop and prove the copier quiescent
 
 Stop admitting copy work and allow the command to exit normally. It awaits all
-bounded in-flight requests before returning. If the process crashes, wait out
-the request bound and rerun the source-active read-only check.
+bounded in-flight requests before returning. If the process crashes or a
+CopyObject result is ambiguous, wait out the request bound and rerun the
+source-active read-only check.
 
 Run without `--apply`:
 
@@ -234,10 +245,25 @@ The online command cannot prune it. Because ENAM is still writer-exclusive,
 abandon the destination using separately reviewed destination-only credentials
 or investigate the specific ordinary-delete race before rebooking.
 
-### 6. Fence writes and promote
+### 6. Fence writes, drain OC PUT capability, and finish copying
 
-Briefly pause new workspace writes and direct-PUT ticket issuance. Reads remain
-available. Drain current write invocations, then deploy the same bridge with:
+Pause new workspace writes and direct-PUT ticket issuance. Reads remain
+available. Drain current write invocations. Record the last instant at which
+any source-active version could issue an OC PUT ticket, then wait the enforced
+ten-minute URL lifetime and the conservative ten-minute upload bound. Require
+no in-flight write invocation and no new OC direct-PUT issuance or completion
+during the final quiet interval.
+
+While the destination is still writer-exclusive, run sequential source-active
+apply passes until no eligible OC object is source-only. Stop the copier,
+allow every request to settle, and run the source-active read-only proof from
+step 5. Revoke the copy credential before promotion.
+
+No CopyObject request may be issued after this point.
+
+### 7. Promote and validate
+
+Deploy the same bridge with:
 
 ```text
 HOSTED_R2_CUTOVER_PHASE=destination_active
@@ -255,34 +281,14 @@ While write admission remains fenced, prove:
 4. ENAM binding PUT/HEAD/GET/delete smokes pass; and
 5. source fallback occurs only for an actual ENAM miss.
 
-Before releasing writes, rollback is the source-active phase plus immediate
-redeploy. Releasing normal write admission is the forward-only commit point.
-After release, repair forward; never return to OC-only reads.
+### 8. Keep post-promotion copy disabled
 
-### 7. Drain OC direct PUT capability
-
-Record the last instant at which any source-active version could issue an OC
-PUT ticket. Wait the enforced ten-minute URL lifetime and the conservative
-ten-minute upload bound. Require no source-active protocol observation and no
-new OC direct-PUT issuance or completion during the final quiet interval.
-
-Bucket-affine completion continues to accept an OC upload issued before the
-phase switch. Destination-active reads find it through OC fallback until the
-next create-only delta pass copies it.
-
-### 8. Run destination-active deltas
-
-Run the same acknowledged apply command with:
-
-```text
---phase destination_active
-```
-
-ENAM-native objects are expected and are never pruned. Continue until no
-eligible OC object is source-only.
-
-Stop the copier permanently, wait out any uncertain process request bound, and
-revoke its credential.
+The online command rejects `--apply --phase destination_active`. An ambiguous
+CopyObject could otherwise commit after ordinary dual-bucket garbage
+collection and recreate an object that directional convergence cannot
+distinguish from a legitimate ENAM-native write. If any eligible OC object is
+still source-only after promotion, keep write admission closed and investigate
+the violated source-drain or final-pass proof. Do not resume the copier.
 
 ### 9. Prove final eligible convergence
 
@@ -301,6 +307,11 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
 
 The proof is directional: every currently eligible OC object must exist
 identically in ENAM. ENAM-only production writes are valid and are not drift.
+
+Only after both reads pass may normal write admission resume. Before that
+release, rollback is the source-active phase plus immediate redeploy. Releasing
+normal write admission is the forward-only commit point. After release, repair
+forward; never return to OC-only reads.
 
 ### 10. Re-enable account deletion
 
