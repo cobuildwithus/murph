@@ -14,17 +14,26 @@ Key decisions:
 - Correct route selection rather than catching or suppressing the downstream phone-required error.
 
 State:
-- In progress.
+- Complete.
 
 Done:
 - Traced the email-bound web accept route through Family membership activation.
 - Confirmed a verified email lookup is incorrectly treated as sufficient reason to attempt a new Linq home-line assignment.
+- Add a focused activation regression test for a verified-email-only member with no existing messaging route.
+- Corrected activation route selection so a phone-less member only enters Linq route resolution when an existing home or pending thread can be reused.
+- Preserved phone verification before new home-line assignment, existing-thread reuse, Telegram routing, atomic activation, and the canonical activation event.
+- Proved the focused regression failed before the production change and passed afterward.
+- Passed the combined Family acceptance suite and the full affected `apps/web` diff verification.
+- Completed product-experience review with no findings.
+- Accepted the preliminary coverage finding and added activation-boundary tests for established and pending email-handle Linq threads.
+- Passed the preliminary remediation proof: 77 focused tests, scoped ESLint, and `git diff --check`.
+- Completed the parent final diff review with no remaining findings.
 
 Now:
-- Add a focused activation regression test for a verified-email-only member with no existing messaging route.
+- Archive this completed plan and continue the immutable final ReviewGPT and exact-head CI gates.
 
 Next:
-- Implement the narrow routing correction, run focused proof, and complete the required product, specialist, CI, and final ReviewGPT gates.
+- None.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -33,3 +42,6 @@ Working set (files/ids/commands):
 - apps/web/src/lib/hosted-onboarding/member-activation.ts
 - apps/web/test/hosted-onboarding-member-activation.test.ts
 - pnpm test:diff <touched paths>
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
