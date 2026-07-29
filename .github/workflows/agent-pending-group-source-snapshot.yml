@@ -17,18 +17,27 @@ jobs:
       - name: Pack scoped source snapshot
         run: |
           tar -czf pending-group-source.tar.gz \
+            packages/assistant-engine/package.json \
+            packages/assistant-engine/src/index.ts \
+            packages/assistant-engine/src/assistant/group-room-model.ts \
             packages/assistant-engine/src/assistant-codex/dynamic-tools.ts \
             packages/assistant-engine/test/assistant-tool-description-contracts.test.ts \
             packages/assistant-engine/test/assistant-codex-group-tool.test.ts \
+            packages/assistant-engine/test/group-room-model.test.ts \
             packages/assistant-runtime/src/hosted-runtime/context.ts \
+            packages/assistant-runtime/test/hosted-runtime-events.test.ts \
             packages/hosted-execution/src/contracts.ts \
             packages/hosted-execution/src/builders.ts \
+            packages/hosted-execution/src/parsers.ts \
             packages/hosted-execution/src/parsers/runtime-control.ts \
+            packages/hosted-execution/test/parsers.test.ts \
             apps/web/src/lib/hosted-onboarding/webhook-service.ts \
             apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts \
             apps/web/src/lib/hosted-routing/thread-container-service.ts \
             apps/web/src/lib/hosted-privacy/account-data-service.ts \
-            apps/web/prisma/schema.prisma
+            apps/web/prisma/schema.prisma \
+            apps/web/test/hosted-onboarding-linq-thread-route.test.ts \
+            apps/web/test/hosted-account-data-service.test.ts
       - uses: actions/upload-artifact@v4
         with:
           name: pending-group-source
