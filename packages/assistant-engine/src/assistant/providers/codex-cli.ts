@@ -228,7 +228,6 @@ export async function executeCodexAssistantTurnAttempt(
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
-    hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
@@ -278,8 +277,8 @@ export async function executeCodexAssistantTurnAttempt(
       : {}),
     permissions: input.permissions ?? null,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    requireHostedGeneratedImageUploader:
-      input.requireGeneratedImageUploader ?? false,
+    requireHostedPrivateImageDelivery:
+      input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,

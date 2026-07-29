@@ -23,6 +23,9 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
+import {
+  ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+} from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
 import {
@@ -1609,8 +1612,8 @@ export async function sendAssistantMessageLocal(
                 : {}),
             })
         }
-        const precedingResponses = precedingResponseSegments.map((segment) =>
-          resolveAssistantPersistedReplyText({
+        const precedingResponses = precedingResponseSegments.map((segment) => {
+          const response = resolveAssistantPersistedReplyText({
             messageInput: applyAssistantReplyDeliveryContext({
               context: segment.deliveryContext ?? null,
               input: currentInput,
@@ -1619,7 +1622,11 @@ export async function sendAssistantMessageLocal(
             session: currentSession,
             sharedPlan,
           })
-        )
+          return resolveAssistantProviderTranscriptText({
+            media: segment.media,
+            response,
+          }) ?? response
+        })
         const providerResumeStateAction =
           resolveAssistantProviderResumeStateAction({
             codexThreadId: providerResult.codexThreadId ?? null,
@@ -2458,14 +2465,17 @@ function resolveAssistantProviderTranscriptText(input: {
   }
 
   const response = normalizeNullableString(input.response)
-  if (response !== null) {
-    return response
-  }
-
+  const imagePresence = (input.media ?? []).some(
+    (item) => item.kind === 'image',
+  )
+    ? ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER
+    : null
   const mediaTranscriptText = buildAssistantResponseMediaTranscriptText(
     input.media,
   )
-  return mediaTranscriptText ?? input.response
+  return [imagePresence, response ?? mediaTranscriptText]
+    .filter((text): text is string => text !== null)
+    .join('\n\n') || input.response
 }
 
 function buildAssistantResponseMediaTranscriptText(

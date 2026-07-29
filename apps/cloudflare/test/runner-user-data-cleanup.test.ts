@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   hostedBundleUserPrefix,
   hostedMealPhotoUserPrefix,
+  hostedPrivateMediaUserPrefix,
 } from "../src/storage-paths.js";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
@@ -72,6 +73,37 @@ describe("hosted runner user data cleanup", () => {
       supported: true,
     });
     expect(bucket.objects.has(stagedPhotoKey)).toBe(false);
+    expect(bucket.objects.has(unrelatedKey)).toBe(true);
+    expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+  });
+
+  it("deletes private avatar ingress objects before deleting runner state", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedPrivateMediaUserPrefix({ userId: USER_ID });
+    const stagedMediaKey = `${prefix}${"a".repeat(48)}.image.enc`;
+    const unrelatedKey =
+      `hosted-private-media/images/other/${"b".repeat(48)}.image.enc`;
+    await bucket.put(stagedMediaKey, "encrypted-private-media");
+    await bucket.put(unrelatedKey, "other-user-private-media");
+
+    const result = await deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    });
+
+    expect(result.r2).toMatchObject({
+      deletedObjectCount: 1,
+      skippedUserScopedPrefixes: false,
+      supported: true,
+    });
+    expect(bucket.objects.has(stagedMediaKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
     expect(stateStore.deleteStateCallCount).toBe(1);
     expect(durable.deleteAllCount).toBe(1);

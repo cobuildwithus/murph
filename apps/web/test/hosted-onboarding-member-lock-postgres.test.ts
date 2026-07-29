@@ -1084,7 +1084,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: writer,
           request: new Request("https://app.example.test/settings"),
         })).resolves.toMatchObject({
-          cleanupPending: true,
+          cleanupPending: false,
           memberId,
         });
         await expect(observer.hostedMember.findUnique({
@@ -1095,7 +1095,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(
           cleanupIdsAfter.filter((cleanup) => !cleanupIdsBefore.has(cleanup.id)),
-        ).toHaveLength(1);
+        ).toHaveLength(0);
       } finally {
         accountDeletionBoundaries.connectedAppsRevocationFails = true;
         setHostedSecureBoxStringTestCodecForTests(null);

@@ -70,6 +70,9 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import {
+  stripAssistantImageResponseTranscriptMarker,
+} from '../response-media.js'
+import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
@@ -1667,7 +1670,7 @@ function parseTrustedHostedImageCompletion(
     return null
   }
   const parsedMedia = assistantResponseMediaSchema.safeParse(parsed.media[0])
-  if (!parsedMedia.success || parsedMedia.data.kind !== 'image') {
+  if (!parsedMedia.success || parsedMedia.data.kind !== 'vault_image') {
     return null
   }
 
@@ -4229,7 +4232,7 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
       }
 
       textCandidates.push({
-        message: entry.text,
+        message: stripAssistantImageResponseTranscriptMarker(entry.text),
         messageTime: entryTime,
       })
     }

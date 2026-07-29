@@ -3,7 +3,20 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
+export const ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER =
+  '[This response included an image attachment.]'
+const ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_PREFIX =
+  `${ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER}\n\n`
 const MAX_ASSISTANT_RESPONSE_MEDIA = 40
+
+export function stripAssistantImageResponseTranscriptMarker(
+  text: string,
+): string {
+  return text.startsWith(ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_PREFIX)
+    ? text.slice(ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_PREFIX.length)
+    : text
+}
 
 export function normalizeAssistantResponseMediaList(
   values: readonly unknown[] | null | undefined,
@@ -38,6 +51,10 @@ export function normalizeAssistantResponseMediaList(
 function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string {
   if (media.kind === 'image') {
     return `image:${media.url}`
+  }
+
+  if (media.kind === 'vault_image') {
+    return `vault_image:${media.ref}:${media.sha256}`
   }
 
   if (media.kind === 'vault_file') {

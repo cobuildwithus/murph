@@ -126,7 +126,6 @@ import {
   type CodexAppServerImageInput,
 } from './assistant-codex/images.js'
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
@@ -239,7 +238,6 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   codexCommand: string
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
   publicInternetFetch: typeof fetch | null
@@ -458,7 +456,6 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -483,7 +480,7 @@ export interface CodexAppServerTurnInput {
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
-  requireHostedGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
@@ -671,7 +668,6 @@ export async function executeCodexAppServerTurn(
     codexCommand,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
-    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
     launchKey,
@@ -3927,7 +3923,6 @@ async function runCodexAppServerTurnOnProcess(
           codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
           env: input.env,
           fetchImpl: input.fetchImpl,
-          hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
@@ -3940,8 +3935,8 @@ async function runCodexAppServerTurnOnProcess(
               : null,
           publicFetchImpl: input.publicInternetFetch ?? null,
           request: dynamicToolRequest,
-          requireHostedGeneratedImageUploader:
-            input.requireHostedGeneratedImageUploader ?? false,
+          requireHostedPrivateImageDelivery:
+            input.requireHostedPrivateImageDelivery ?? false,
           vaultRoot: input.vaultRoot ?? null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||

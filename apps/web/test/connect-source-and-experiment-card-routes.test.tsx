@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
-const { imageResponseSpy, readFileMock } = vi.hoisted(() => ({
-  imageResponseSpy: vi.fn(),
-  readFileMock: vi.fn(async (path: string | URL) => {
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
+const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
+  imageResponse: vi.fn(),
+  readFile: vi.fn(async (path: string | URL) => {
     const value = String(path);
     if (value.includes("Fraunces-400.ttf")) return Buffer.from([1, 2, 3]);
     if (value.includes("Fraunces-600.ttf")) return Buffer.from([4, 5, 6]);
@@ -12,6 +15,7 @@ const { imageResponseSpy, readFileMock } = vi.hoisted(() => ({
     if (value.endsWith("public/logo.svg")) return Buffer.from("<svg />");
     throw new Error("Unexpected experiment card asset read.");
   }),
+  requireActiveHostedAppSessionFromRequest: vi.fn(),
 }));
 
 type MockImageResponseInit = {
@@ -22,7 +26,7 @@ type MockImageResponseInit = {
 };
 
 vi.mock("node:fs/promises", () => ({
-  readFile: readFileMock,
+  readFile: mocks.readFile,
 }));
 
 vi.mock("next/font/local", () => ({
@@ -36,7 +40,7 @@ vi.mock("next/font/local", () => ({
 vi.mock("next/og", () => ({
   ImageResponse: class ImageResponse extends Response {
     constructor(input: unknown, init: MockImageResponseInit) {
-      imageResponseSpy(input, init);
+      mocks.imageResponse(input, init);
       super("mock image", {
         headers: {
           "Content-Type": "image/png",
@@ -48,9 +52,22 @@ vi.mock("next/og", () => ({
   },
 }));
 
-afterEach(() => {
-  imageResponseSpy.mockClear();
-  readFileMock.mockClear();
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest:
+    mocks.requireActiveHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin:
+    mocks.assertHostedOnboardingMutationOrigin,
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
+  mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
+    member: { id: "member_example" },
+  });
 });
 
 test("listVisibleConnectSources covers every hosted-visible device source with UI metadata", async () => {
@@ -76,97 +93,88 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
   assert.deepEqual(sourceIdsWithMissingUi, []);
 });
 
-test("experiment share-card route rejects missing card data", async () => {
+test("experiment share-card GET fails closed without reading private data", async () => {
   const { GET } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
 
-  const response = await GET(new Request("https://example.test/experiments/example/card"));
+  const response = await GET();
 
-  assert.equal(response.status, 400);
-  assert.equal(await response.text(), "Invalid or missing card data.");
-  expect(imageResponseSpy).not.toHaveBeenCalled();
-  expect(readFileMock).not.toHaveBeenCalled();
-});
-
-test("experiment share-card route rejects invalid encoded card data", async () => {
-  const { EXPERIMENT_CARD_PARAM } = await import("@/src/lib/experiments/share-card");
-  const { GET } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
-
-  const response = await GET(
-    new Request(`https://example.test/experiments/example/card?${EXPERIMENT_CARD_PARAM}=not-json`),
+  assert.equal(response.status, 410);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(
+    await response.text(),
+    "URL-encoded experiment cards are no longer available.",
   );
-
-  assert.equal(response.status, 400);
-  assert.equal(await response.text(), "Invalid or missing card data.");
-  expect(imageResponseSpy).not.toHaveBeenCalled();
-  expect(readFileMock).not.toHaveBeenCalled();
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
 });
 
-test("experiment share-card route renders a valid encoded card snapshot", async () => {
-  const {
-    encodeExperimentCardData,
-    EXPERIMENT_CARD_MAX_SIGNALS,
-    EXPERIMENT_CARD_PARAM,
-  } = await import("@/src/lib/experiments/share-card");
-  const { GET } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
-
-  const encodedCardData = encodeExperimentCardData({
-    title: "Evening magnesium test",
-    protocol: "Magnesium glycinate after dinner for 14 nights.",
-    signals: [
-      {
+test("experiment share-card POST renders authenticated body data without caching", async () => {
+  const { POST } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
+  const request = new Request("https://example.test/experiments/example/card", {
+    body: JSON.stringify({
+      title: "Evening magnesium test",
+      protocol: "Magnesium glycinate after dinner for 14 nights.",
+      signals: [
+        {
+          label: "Sleep score",
+          value: "82",
+          unit: "%",
+          delta: "+7",
+          direction: "up",
+          sentiment: "positive",
+          baseline: "75%",
+        },
+        {
+          label: "Wakeups",
+          value: "1.2",
+          delta: "-0.6",
+          direction: "down",
+          sentiment: "positive",
+        },
+        {
+          label: "Resting HR",
+          value: "58",
+          unit: "bpm",
+          delta: "-2",
+          direction: "down",
+          sentiment: "neutral",
+        },
+        {
+          label: "Hidden overflow",
+          value: "not rendered",
+          delta: "0",
+          direction: "neutral",
+        },
+      ],
+      chart: {
         label: "Sleep score",
-        value: "82",
         unit: "%",
-        delta: "+7",
-        direction: "up",
-        sentiment: "positive",
-        baseline: "75%",
+        baselineCount: 3,
+        values: [72, 75, 78, 80, 82],
+        baselineAvg: 75,
       },
-      {
-        label: "Wakeups",
-        value: "1.2",
-        delta: "-0.6",
-        direction: "down",
-        sentiment: "positive",
-      },
-      {
-        label: "Resting HR",
-        value: "58",
-        unit: "bpm",
-        delta: "-2",
-        direction: "down",
-        sentiment: "neutral",
-      },
-      {
-        label: "Hidden overflow",
-        value: "not rendered",
-        delta: "0",
-        direction: "neutral",
-      },
-    ],
-    chart: {
-      label: "Sleep score",
-      unit: "%",
-      baselineCount: 3,
-      values: [72, 75, 78, 80, 82],
-      baselineAvg: 75,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "https://example.test",
     },
+    method: "POST",
   });
 
-  const response = await GET(
-    new Request(`https://example.test/experiments/example/card?${EXPERIMENT_CARD_PARAM}=${encodedCardData}`),
-  );
+  const response = await POST(request);
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "image/png");
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
-  expect(readFileMock).toHaveBeenCalledTimes(4);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+  expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+  expect(mocks.readFile).toHaveBeenCalledTimes(4);
 
-  expect(imageResponseSpy).toHaveBeenCalledTimes(1);
+  expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1200);
   assert.equal(init.height, 780);
-  assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
+  assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "private, no-store");
   assert.deepEqual(
     init.fonts?.map((font) => [font.name, font.weight]),
     [
@@ -183,84 +191,92 @@ test("experiment share-card route renders a valid encoded card snapshot", async 
   assert.match(serializedImageTree, /Wakeups/u);
   assert.match(serializedImageTree, /Resting HR/u);
   assert.doesNotMatch(serializedImageTree, /Hidden overflow/u);
-  assert.equal((serializedImageTree.match(/label/gu)?.length ?? 0) >= EXPERIMENT_CARD_MAX_SIGNALS, true);
 });
 
-test("experiment progress-card route returns a static-like PNG response for media fetchers", async () => {
-  const {
-    EXPERIMENT_PROGRESS_CARD_VERSION,
-    buildExperimentProgressCardPath,
-  } = await import("@murphai/contracts");
+test("experiment share-card POST rejects invalid body data without asset reads", async () => {
+  const { POST } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
+  const response = await POST(
+    new Request("https://example.test/experiments/example/card", {
+      body: JSON.stringify({ title: "Missing signals" }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(await response.text(), "Invalid or missing card data.");
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
+});
+
+test("experiment share-card POST rejects oversized private card data", async () => {
+  const { POST } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
+  const response = await POST(
+    new Request("https://example.test/experiments/example/card", {
+      body: JSON.stringify({
+        signals: [],
+        title: "x".repeat(65 * 1024),
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  assert.equal(response.status, 413);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
+});
+
+test("experiment share-card POST checks same-origin before authenticating", async () => {
+  mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+    throw hostedOnboardingError({
+      code: "HOSTED_ONBOARDING_ORIGIN_REQUIRED",
+      httpStatus: 403,
+      message: "Hosted browser mutation routes require an Origin header.",
+    });
+  });
+  const { POST } = await import("../app/(dashboard)/experiments/[experimentId]/card/route");
+
+  const response = await POST(
+    new Request("https://example.test/experiments/example/card", {
+      body: JSON.stringify({ title: "Private", signals: [] }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    }),
+  );
+
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
+});
+
+test("experiment progress-card GET is a no-store tombstone", async () => {
   const { GET } = await import("../app/(dashboard)/experiments/[experimentId]/progress-card/[payload]/route");
 
-  const path = buildExperimentProgressCardPath(
-    "exp_01JNV4458HYPP53JDQCBP1QJFM",
-    {
-      v: EXPERIMENT_PROGRESS_CARD_VERSION,
-      title: "Bedtime silent meditation",
-      asOf: "2026-06-16",
-      phase: { day: 19, totalDays: 21 },
-      sessions: { logged: 5, assumed: 2, target: null },
-      weeks: [
-        { start: "2026-06-05", cells: "CMAMMCP" },
-        { start: "2026-06-12", cells: "MMCCSSS" },
-      ],
-      movers: [
-        {
-          label: "HRV RMSSD",
-          changePct: "8%",
-          value: "52",
-          unit: "ms",
-          delta: "+4 ms",
-          direction: "up",
-          sentiment: "positive",
-        },
-        {
-          label: "Resting heart rate",
-          changePct: "3%",
-          value: "62",
-          unit: "bpm",
-          delta: "+2 bpm",
-          direction: "up",
-          sentiment: "negative",
-        },
-      ],
-      confounders: [],
-    },
+  const response = await GET();
+
+  assert.equal(response.status, 410);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(
+    await response.text(),
+    "URL-encoded experiment progress cards are no longer available.",
   );
-  const payload = path.split("/").at(-1);
-  assert.ok(payload);
-
-  const response = await GET(
-    new Request(`https://example.test${path}`),
-    { params: Promise.resolve({ payload }) },
-  );
-
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Content-Type"), "image/png");
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
-  assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="experiment-progress-card.png"');
-  assert.equal(response.headers.get("Content-Length"), String(Buffer.byteLength("mock image")));
-  assert.equal(await response.text(), "mock image");
-  expect(readFileMock).toHaveBeenCalledTimes(4);
-
-  expect(imageResponseSpy).toHaveBeenCalledTimes(1);
-  const [imageTree, init] = getImageResponseCall();
-  assert.equal(init.width, 1200);
-  assert.equal(init.height, 630);
-  assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
-  const renderedImageTree = renderReactTree(imageTree);
-  const serializedImageTree = JSON.stringify(renderedImageTree);
-  assert.match(serializedImageTree, /Bedtime silent meditation/u);
-  assert.match(serializedImageTree, /5 done \(2 assumed\)/u);
-  assert.doesNotMatch(serializedImageTree, /5 logged \(2 assumed\)/u);
-  assert.match(serializedImageTree, /rgba\(90,110,50,0\.18\)/u);
-  assert.equal(findRenderedTextColor(renderedImageTree, "8%"), "#4F6B2C");
-  assert.equal(findRenderedTextColor(renderedImageTree, "3%"), "#A6692F");
+  expect(mocks.imageResponse).not.toHaveBeenCalled();
+  expect(mocks.readFile).not.toHaveBeenCalled();
 });
 
 function getImageResponseCall(): [unknown, MockImageResponseInit] {
-  const call = imageResponseSpy.mock.calls[0];
+  const call = mocks.imageResponse.mock.calls[0];
   assert.ok(call, "Expected ImageResponse to be constructed.");
   const [imageTree, init] = call;
   assertImageResponseInit(init);
@@ -283,51 +299,4 @@ function headersInitToRecord(headers: HeadersInit | undefined): Record<string, s
     return Object.fromEntries(headers);
   }
   return headers;
-}
-
-function renderReactTree(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(renderReactTree);
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-
-  const type = value.type;
-  const props = isRecord(value.props) ? value.props : {};
-  if (typeof type === "function") {
-    const render = type as (props: Record<string, unknown>) => unknown;
-    return renderReactTree(render(props));
-  }
-
-  return {
-    type: typeof type === "string" ? type : String(type),
-    props,
-    children: renderReactTree(props.children),
-  };
-}
-
-function findRenderedTextColor(value: unknown, text: string): string | null {
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      const color = findRenderedTextColor(child, text);
-      if (color !== null) return color;
-    }
-    return null;
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  if (value.children === text) {
-    const props = isRecord(value.props) ? value.props : {};
-    const style = isRecord(props.style) ? props.style : {};
-    return typeof style.color === "string" ? style.color : null;
-  }
-
-  return findRenderedTextColor(value.children, text);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

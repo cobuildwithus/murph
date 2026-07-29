@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   chmod,
   link,
@@ -32,6 +33,7 @@ import {
   buildAssistantVaultFileSendApprovalRequestForTarget,
   hasActivePriorTurnGeneratedVaultFileSendForTarget,
   readVerifiedAssistantVaultFileBytes,
+  readVerifiedAssistantVaultImageBytes,
   requestAssistantVaultFileSend,
   resolveAssistantVaultFileSendTargetFingerprint,
   resolveAssistantVaultFileResponseMedia,
@@ -287,6 +289,51 @@ describe('assistant vault-file send', () => {
       vaultRoot,
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_FILE_CHANGED_AFTER_APPROVAL',
+    })
+  })
+
+  it('verifies private image bytes, metadata, and detected MIME before delivery', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-image-verify-',
+    )
+    tempRoots.push(parentRoot)
+    const bytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d,
+    ])
+    const ref = 'raw/captures/generated-image.png'
+    await mkdir(path.join(vaultRoot, 'raw', 'captures'), { recursive: true })
+    await writeFile(path.join(vaultRoot, ...ref.split('/')), bytes)
+    const image = {
+      alt: 'Generated image',
+      contentType: 'image/png' as const,
+      filename: 'generated-image.png',
+      kind: 'vault_image' as const,
+      ref,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sizeBytes: bytes.byteLength,
+      source: 'gpt-image-2',
+    }
+
+    await expect(readVerifiedAssistantVaultImageBytes({
+      image,
+      vaultRoot,
+    })).resolves.toEqual(bytes)
+    await expect(readVerifiedAssistantVaultImageBytes({
+      image: {
+        ...image,
+        contentType: 'image/webp',
+      },
+      vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_VAULT_IMAGE_CHANGED_AFTER_CAPTURE',
+    })
+    await writeFile(path.join(vaultRoot, ...ref.split('/')), Buffer.from('not an image'))
+    await expect(readVerifiedAssistantVaultImageBytes({
+      image,
+      vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_VAULT_IMAGE_CHANGED_AFTER_CAPTURE',
     })
   })
 

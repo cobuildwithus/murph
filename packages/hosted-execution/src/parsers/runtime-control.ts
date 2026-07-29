@@ -146,6 +146,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupDisclosureGrantListEntry,
@@ -1071,6 +1072,9 @@ export function parseHostedRuntimeAssistantAskControlResponse(
 
 export function parseHostedRuntimeGroupToolRequest(
   value: unknown,
+  options: {
+    privateMediaDeliveryOrigin?: string | null;
+  } = {},
 ): HostedRuntimeGroupToolRequest {
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
@@ -1352,7 +1356,10 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
-      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(
+        record.groupChatIconUrl,
+        options.privateMediaDeliveryOrigin,
+      ),
       ...(record.linqThread === undefined || record.linqThread === null
         ? {}
         : {
@@ -1461,7 +1468,10 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
   return { displayName };
 }
 
-function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+function parseHostedRuntimeGroupChatIconUrl(
+  value: unknown,
+  privateMediaDeliveryOrigin?: string | null,
+): string {
   const iconUrl = requireString(
     value,
     "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
@@ -1481,17 +1491,13 @@ function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
   }
-  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    privateMediaDeliveryOrigin ?? undefined,
+  )) {
     throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
   }
   return parsed.toString();
-}
-
-function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
-  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
-    return false;
-  }
-  return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
 function parseHostedRuntimeGroupToolLinqThreadContext(

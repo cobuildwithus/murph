@@ -1239,8 +1239,9 @@ Existing global file-type exclusions still apply regardless of directory.
 Hosted dynamic image generation is invocation-local background work. The tool
 returns after launch so the current assistant turn can continue. Provider work
 stays detached; the canonical capture save waits for an invocation boundary and
-uses the existing receipt checkpoint against the latest workspace. After upload,
-the runtime upserts one trusted system input on the original route, registers it
+uses the existing receipt checkpoint against the latest workspace. After the
+private capture is ready, the runtime upserts one trusted system input containing
+its exact `vault_image` descriptor on the original route, registers that input
 with the ordinary pending assistant-input index, and notifies the existing wake
 signal. Normal foreground selection therefore keeps fresh conversation ahead of
 the completion and owns completion retry and terminal evidence. Provider

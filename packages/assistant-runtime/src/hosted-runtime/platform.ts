@@ -106,7 +106,7 @@ import type {
 } from "../hosted-email.ts";
 import type {
   AssistantConnectedAppsPort,
-  AssistantHostedGeneratedImageUploader,
+  AssistantHostedPrivateImageUrlPublisher,
 } from "@murphai/assistant-engine";
 import type {
   RuntimeLivenessPort,
@@ -637,7 +637,6 @@ export interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
   groupToolPort?: HostedRuntimeGroupToolPort | null;
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
@@ -647,6 +646,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;

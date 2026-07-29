@@ -34,6 +34,9 @@ import {
   type AssistantInputAttachmentDescriptor,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
+import {
+  ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+} from '../src/assistant/response-media.ts'
 import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
 import type { AssistantAutoReplyPromptInput } from '../src/assistant/automation/prompt-builder.ts'
 import type { AssistantGroupParticipantDisplayName } from '../src/assistant/execution-context.ts'
@@ -7741,6 +7744,77 @@ describe('assistant auto-reply runtime', () => {
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'linq',
           text: 'same text',
+          threadId: 'thread-1',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: true,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('skips self-authored image captions whose transcript includes the image-presence marker', async () => {
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:00:01.000Z',
+        sessionId: 'session-image-echo',
+      },
+    })
+    replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      createTranscriptEntry({
+        createdAt: '2026-04-08T00:00:01.000Z',
+        text: [
+          ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+          'The image is ready.',
+        ].join('\n\n'),
+      }),
+    ])
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(
+          createCaptureDetail({
+            actorIsSelf: true,
+            occurredAt: '2026-04-08T00:00:00.000Z',
+            source: 'linq',
+            text: 'The image is ready.',
+            threadId: 'thread-1',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          actorIsSelf: true,
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'linq',
+          text: 'The image is ready.',
           threadId: 'thread-1',
         }),
       ),

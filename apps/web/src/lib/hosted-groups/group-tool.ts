@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupParticipantDisplayName,
   type HostedRuntimeGroupCreateJoinLinkRequest,
@@ -28,6 +29,9 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
 } from "@murphai/hosted-execution/vault-share";
 
+import {
+  readHostedExecutionControlOrigin,
+} from "../hosted-execution/environment";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
@@ -1304,7 +1308,10 @@ function normalizeHostedGroupChatIconUrl(value: string): string | null {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     return null;
   }
-  if (!isHostedGroupChatIconDeliveryUrl(parsed)) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    readHostedExecutionControlOrigin() ?? undefined,
+  )) {
     return null;
   }
   return parsed.toString();
@@ -1319,13 +1326,6 @@ function normalizeHostedGroupDisplayName(value: string): string | null {
     return null;
   }
   return normalized;
-}
-
-function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
-  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
-    return false;
-  }
-  return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
 function renderHostedGroupJoinOfferScopeSentence(

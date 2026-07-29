@@ -25,8 +25,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
 import type {
-  AssistantHostedGeneratedImageUploadInput,
   AssistantHostedGroupSharedReader,
+  AssistantHostedPrivateImageUrlPublisher,
 } from "../src/assistant/execution-context.ts";
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -84,6 +84,8 @@ const webpBytes = new Uint8Array([
 ]);
 const EARLIER_ASSISTANT_INPUT_ID = `ain_${"1".repeat(32)}`;
 const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
+const SIGNED_PRIVATE_IMAGE_URL =
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -2459,7 +2461,6 @@ describe("murph.group dynamic tool", () => {
     await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
-      hostedGeneratedImageUploader: null,
       hostedToolContext: createGroupHostedToolContext({
         groupRequest,
       }),
@@ -2583,13 +2584,11 @@ describe("murph.group dynamic tool", () => {
               action: "set_chat_avatar",
               result: { status: "requested" },
             });
-      const uploadGeneratedImage = vi.fn(async (
-        input: AssistantHostedGeneratedImageUploadInput,
-      ) => ({
-        alt: input.alt,
-        kind: "image" as const,
-        source: input.source,
-        url: "https://imagedelivery.net/account/avatar/public",
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
       }));
       const request = readMurphDynamicToolRequest(groupToolCall({
         action: "set_chat_avatar",
@@ -2604,8 +2603,10 @@ describe("murph.group dynamic tool", () => {
       const result = await executeMurphDynamicToolRequest({
         env: {},
         fetchImpl: fetch,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
-        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          privateImageUrlPublish,
+        }),
         nextUsageOrdinal: () => 1,
         progressDelivery: null,
         request,
@@ -2617,28 +2618,19 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         result: { status: "requested" },
       });
-      expect(result.responseMediaPatch).toBeUndefined();
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
-      });
-      expect(uploadGeneratedImage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          alt: "Our group avatar",
-          contentType: "image/png",
-          filename: "group-avatar.png",
-          metadata: expect.objectContaining({
-            imageSha256: expect.any(String),
-            schema: "murph.group-avatar.v1",
-            sourceRefSha256: expect.any(String),
-          }),
-          source: "murph.group-avatar",
-        }),
+      expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+        "murph-hosted.cobuildwithus.workers.dev",
       );
-      expect(uploadGeneratedImage.mock.calls[0]?.[0].metadata).not.toHaveProperty("sourceRef");
+      expect(result.responseMediaPatch).toBeUndefined();
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
+        bytes: expect.any(Uint8Array),
+        contentType: "image/png",
+      });
+      expect(groupRequest).toHaveBeenNthCalledWith(
+        2,
+        { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2659,14 +2651,6 @@ describe("murph.group dynamic tool", () => {
               action: "set_chat_avatar",
               result: { status: "requested" },
             });
-      const uploadGeneratedImage = vi.fn(async (
-        input: AssistantHostedGeneratedImageUploadInput,
-      ) => ({
-        alt: input.alt,
-        kind: "image" as const,
-        source: input.source,
-        url: "https://imagedelivery.net/account/generated-avatar/public",
-      }));
       const fetchImpl = vi.fn(async () =>
         jsonResponse({
           data: [{ b64_json: Buffer.from(webpBytes).toString("base64") }],
@@ -2680,6 +2664,12 @@ describe("murph.group dynamic tool", () => {
             "x-request-id": "req_group_avatar_image",
           },
         }));
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
       const request = readMurphDynamicToolRequest(groupToolCall({
         action: "set_chat_avatar",
         alt: "Our generated avatar",
@@ -2696,8 +2686,10 @@ describe("murph.group dynamic tool", () => {
           OPENAI_API_KEY: "openai-test-key",
         },
         fetchImpl,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
-        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          privateImageUrlPublish,
+        }),
         nextUsageOrdinal,
         progressDelivery: null,
         request,
@@ -2707,48 +2699,26 @@ describe("murph.group dynamic tool", () => {
       expect(nextUsageOrdinal).toHaveBeenCalledOnce();
       expect(fetchImpl).toHaveBeenCalledOnce();
       expect(result.rpcResult.success).toBe(true);
-      const payload = readGroupToolPayload(result);
-      expect(payload).toMatchObject({
+      expect(readGroupToolPayload(result)).toMatchObject({
         action: "set_chat_avatar",
         generatedImage: {
-          savedCaptureId: expect.stringMatching(/^evt_[A-Za-z0-9_-]+$/u),
-          savedImageRef: expect.stringMatching(/^raw\/captures\/.+\.webp$/u),
+          savedCaptureId: expect.any(String),
+          savedImageRef: expect.stringMatching(/^raw\/captures\//u),
         },
         result: { status: "requested" },
       });
-      const savedImageRef = generatedImageRefFromPayload(payload);
-      await expect(readFile(join(vaultRoot, savedImageRef)))
-        .resolves.toEqual(Buffer.from(webpBytes));
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/generated-avatar/public",
-      });
-      expect(uploadGeneratedImage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          alt: "Our generated avatar",
-          contentType: "image/webp",
-          metadata: expect.objectContaining({
-            model: "gpt-image-2",
-            promptHash: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/u),
-            schema: "murph.generated-image.v1",
-          }),
-          source: "gpt-image-2",
-        }),
+      expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+        "murph-hosted.cobuildwithus.workers.dev",
       );
-      expect(result.usageDraft).toMatchObject({
-        provider: "openai-images",
-        providerRequestOrdinal: 7,
-        providerRequestOutcome: "succeeded",
-        usage: {
-          inputTokens: 4,
-          outputTokens: 6,
-          providerRequestId: "req_group_avatar_image",
-          totalTokens: 10,
-        },
+      expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
+        bytes: expect.any(Uint8Array),
+        contentType: "image/webp",
       });
+      expect(groupRequest).toHaveBeenNthCalledWith(
+        2,
+        { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
+      );
+      expect(result.usageDraft).toMatchObject({ providerRequestOrdinal: 7 });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2769,16 +2739,6 @@ describe("murph.group dynamic tool", () => {
               action: "set_chat_avatar",
               result: { status: "requested" },
             });
-      const uploadGeneratedImage = vi.fn()
-        .mockRejectedValueOnce(new Error("upload failed"))
-        .mockImplementationOnce(async (
-          input: AssistantHostedGeneratedImageUploadInput,
-        ) => ({
-          alt: input.alt,
-          kind: "image" as const,
-          source: input.source,
-          url: "https://imagedelivery.net/account/generated-avatar-retry/public",
-        }));
       const fetchImpl = vi.fn(async () =>
         jsonResponse({
           data: [{ b64_json: Buffer.from(webpBytes).toString("base64") }],
@@ -2788,6 +2748,12 @@ describe("murph.group dynamic tool", () => {
             total_tokens: 10,
           },
         }));
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
       const args = {
         action: "set_chat_avatar",
         alt: "Our retried generated avatar",
@@ -2821,22 +2787,23 @@ describe("murph.group dynamic tool", () => {
           OPENAI_API_KEY: "openai-test-key",
         },
         fetchImpl,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
-        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          privateImageUrlPublish,
+        }),
         nextUsageOrdinal: () => usageOrdinal++,
         progressDelivery: null,
         request: firstRequest,
         vaultRoot,
       });
 
-      expect(first.rpcResult).toEqual({
-        success: false,
-        contentItems: [
-          {
-            type: "inputText",
-            text: "image generated but upload failed",
-          },
-        ],
+      expect(first.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(first)).toMatchObject({
+        action: "set_chat_avatar",
+        generatedImage: {
+          savedImageRef: expect.stringMatching(/^raw\/captures\//u),
+        },
+        result: { status: "requested" },
       });
       expect(fetchImpl).toHaveBeenCalledOnce();
 
@@ -2845,8 +2812,10 @@ describe("murph.group dynamic tool", () => {
           OPENAI_API_KEY: "openai-test-key",
         },
         fetchImpl,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
-        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        hostedToolContext: createGroupHostedToolContext({
+          groupRequest,
+          privateImageUrlPublish,
+        }),
         nextUsageOrdinal: () => usageOrdinal++,
         progressDelivery: null,
         request: secondRequest,
@@ -2854,26 +2823,16 @@ describe("murph.group dynamic tool", () => {
       });
 
       expect(fetchImpl).toHaveBeenCalledOnce();
-      expect(uploadGeneratedImage).toHaveBeenCalledTimes(2);
       expect(second.rpcResult.success).toBe(true);
       expect(readGroupToolPayload(second)).toMatchObject({
         action: "set_chat_avatar",
         generatedImage: {
-          savedCaptureId: expect.stringMatching(/^evt_[A-Za-z0-9_-]+$/u),
-          savedImageRef: expect.stringMatching(/^raw\/captures\/.+\.webp$/u),
+          savedImageRef: expect.stringMatching(/^raw\/captures\//u),
         },
         result: { status: "requested" },
       });
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(3, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/generated-avatar-retry/public",
-      });
+      expect(groupRequest).toHaveBeenCalledTimes(4);
+      expect(privateImageUrlPublish).toHaveBeenCalledTimes(2);
       expect(second).not.toHaveProperty("usageDraft");
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -2899,14 +2858,6 @@ describe("murph.group dynamic tool", () => {
           unavailableReason: "linq_thread_unavailable",
         },
       }));
-      const uploadGeneratedImage = vi.fn(async (
-        input: AssistantHostedGeneratedImageUploadInput,
-      ) => ({
-        alt: input.alt,
-        kind: "image" as const,
-        source: input.source,
-        url: "https://imagedelivery.net/account/avatar/public",
-      }));
       const request = readMurphDynamicToolRequest(groupToolCall({
         action: "set_chat_avatar",
         avatarSource: "image_ref",
@@ -2919,7 +2870,6 @@ describe("murph.group dynamic tool", () => {
       const result = await executeMurphDynamicToolRequest({
         env: {},
         fetchImpl: fetch,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
         hostedToolContext: createGroupHostedToolContext({ groupRequest }),
         nextUsageOrdinal: () => 1,
         progressDelivery: null,
@@ -2936,8 +2886,6 @@ describe("murph.group dynamic tool", () => {
         },
       });
       expect(groupRequest).toHaveBeenCalledOnce();
-      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
-      expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2958,14 +2906,6 @@ describe("murph.group dynamic tool", () => {
       const groupRequest = vi.fn<GroupToolRequest>(async () => {
         throw new Error("unsupported group tool action");
       });
-      const uploadGeneratedImage = vi.fn(async (
-        input: AssistantHostedGeneratedImageUploadInput,
-      ) => ({
-        alt: input.alt,
-        kind: "image" as const,
-        source: input.source,
-        url: "https://imagedelivery.net/account/avatar/public",
-      }));
       const request = readMurphDynamicToolRequest(groupToolCall({
         action: "set_chat_avatar",
         avatarSource: "image_ref",
@@ -2978,7 +2918,6 @@ describe("murph.group dynamic tool", () => {
       const result = await executeMurphDynamicToolRequest({
         env: {},
         fetchImpl: fetch,
-        hostedGeneratedImageUploader: { uploadGeneratedImage },
         hostedToolContext: createGroupHostedToolContext({ groupRequest }),
         nextUsageOrdinal: () => 1,
         progressDelivery: null,
@@ -2995,8 +2934,6 @@ describe("murph.group dynamic tool", () => {
         },
       });
       expect(groupRequest).toHaveBeenCalledOnce();
-      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
-      expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -3947,6 +3884,9 @@ function createGroupHostedToolContext(input: {
   groupSharedReadRequest?: GroupSharedReadRequest;
   groupRequest?: GroupToolRequest;
   groupToolAvailable?: boolean;
+  privateImageUrlPublish?: AssistantHostedPrivateImageUrlPublisher[
+    "publishPrivateImageUrl"
+  ];
 } = {}): AssistantHostedToolContext {
   const currentUserActionScope = input.currentUserActionScope ?? (() => null);
   const context = {
@@ -3987,6 +3927,9 @@ function createGroupHostedToolContext(input: {
         },
     newsletterTool: null,
     phoneCalls: null,
+    privateImageUrlPublisher: input.privateImageUrlPublish
+      ? { publishPrivateImageUrl: input.privateImageUrlPublish }
+      : null,
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this test.");
     },

@@ -1,5 +1,5 @@
 import type {
-  AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
@@ -62,7 +62,7 @@ export type AssistantTrustedHostedImageCompletion =
     }
   | {
       media: readonly [
-        Extract<AssistantResponseMedia, { kind: 'image' }>,
+        AssistantVaultImageResponseMedia,
       ]
       savedImageRef: string | null
       status: 'ready'

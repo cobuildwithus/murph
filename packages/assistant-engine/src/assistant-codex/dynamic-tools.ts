@@ -76,6 +76,7 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  assistantVaultImageMaxBytes,
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
@@ -92,8 +93,6 @@ import {
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
   type AssistantHostedGroupSharedRecord,
-  type AssistantGeneratedImageContentType,
-  type AssistantHostedGeneratedImageUploader,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
@@ -265,7 +264,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    'Attach image media to the current final assistant response. Replaces the current response media batch for this turn only. It does not send directly.',
+    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -276,35 +275,78 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
         description:
           'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
         items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            kind: {
-              type: 'string',
-              enum: ['image'],
-              description: 'Only image response media is supported.',
+          oneOf: [
+            {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                kind: {
+                  type: 'string',
+                  enum: ['image'],
+                },
+                url: {
+                  type: 'string',
+                  description:
+                    'Deliberately public HTTPS image-file URL for static catalog assets only. Never use this for user-sent, vault-backed, generated, health, or otherwise private media.',
+                },
+                alt: {
+                  anyOf: [
+                    { type: 'string', minLength: 1, maxLength: 500 },
+                    { type: 'null' },
+                  ],
+                },
+                source: {
+                  anyOf: [
+                    { type: 'string', minLength: 1, maxLength: 200 },
+                    { type: 'null' },
+                  ],
+                },
+              },
+              required: ['url'],
             },
-            url: {
-              type: 'string',
-              description:
-                'Public HTTPS image-file URL. URLs with credentials, query strings, fragments, localhost hosts, IP literals, or non-image extensions are rejected.',
-            },
-            alt: {
-              anyOf: [
-                { type: 'string', minLength: 1, maxLength: 500 },
-                { type: 'null' },
+            {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                kind: {
+                  type: 'string',
+                  enum: ['vault_image'],
+                },
+                ref: { type: 'string', minLength: 1, maxLength: 1024 },
+                sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+                filename: { type: 'string', minLength: 1, maxLength: 255 },
+                contentType: {
+                  type: 'string',
+                  enum: ['image/jpeg', 'image/png', 'image/webp'],
+                },
+                sizeBytes: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: assistantVaultImageMaxBytes,
+                },
+                alt: {
+                  anyOf: [
+                    { type: 'string', minLength: 1, maxLength: 500 },
+                    { type: 'null' },
+                  ],
+                },
+                source: {
+                  anyOf: [
+                    { type: 'string', minLength: 1, maxLength: 200 },
+                    { type: 'null' },
+                  ],
+                },
+              },
+              required: [
+                'kind',
+                'ref',
+                'sha256',
+                'filename',
+                'contentType',
+                'sizeBytes',
               ],
-              description: 'Optional alt text for the image.',
             },
-            source: {
-              anyOf: [
-                { type: 'string', minLength: 1, maxLength: 200 },
-                { type: 'null' },
-              ],
-              description: 'Optional catalog item id or source label.',
-            },
-          },
-          required: ['url'],
+          ],
         },
       },
     },
@@ -316,7 +358,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; if generation and upload finish while the invocation remains live, uploaded media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
+    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; when generation finishes, private media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -819,14 +861,14 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: ['generate', 'image_ref'],
         description:
-          'Required for action="set_chat_avatar". Use "generate" to create a new square avatar from prompt, or "image_ref" to reuse one user-sent JPG, PNG, or WebP image ref.',
+          'Required for action="set_chat_avatar". Generate a new square avatar or reuse a user-sent private image ref.',
       },
       prompt: {
         type: 'string',
         minLength: 1,
         maxLength: 4000,
         description:
-          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar image.',
+          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar.',
       },
       imageRef: {
         type: 'string',
@@ -839,7 +881,6 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: ['1024x1024'],
         default: '1024x1024',
-        description: 'For generated group avatars. Group avatars are square.',
       },
       quality: {
         type: 'string',
@@ -857,7 +898,6 @@ export const MURPH_GROUP_TOOL = {
           { type: 'null' },
         ],
         default: null,
-        description: 'Optional alt text for the generated or reused avatar image.',
       },
       referenceImageRefs: {
         type: 'array',
@@ -870,6 +910,7 @@ export const MURPH_GROUP_TOOL = {
           maxLength: 1024,
         },
       },
+
       kind: {
         type: 'string',
         enum: [...HOSTED_RUNTIME_GROUP_KINDS],
@@ -1524,7 +1565,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       referenceImageRefs: z
         .array(z.string().trim().min(1).max(1024))
         .max(16)
-        .describe(GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION)
         .default([]),
       size: z.literal('1024x1024').default('1024x1024'),
     })
@@ -1879,7 +1919,7 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
-  // runtime's existing issue owner (e.g. a generated-image upload failure).
+  // runtime's existing issue owner (e.g. a generated-media delivery failure).
   runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
   usageDraft?: AssistantProviderUsageDraft | null
 }
@@ -2581,10 +2621,12 @@ function currentHostedMailboxItemId(
   return null
 }
 
-function buildGeneratedImageCaptureIdempotencyKey(input: {
-  toolCallId: string | null
-  scope: 'generate-image' | 'group-avatar'
-}): string | null {
+function buildGeneratedImageCaptureIdempotencyKey(
+  input: {
+    scope: 'generate-image' | 'group-avatar'
+    toolCallId: string | null
+  },
+): string | null {
   const toolCallId = normalizeNullableString(input.toolCallId)
   return toolCallId
     ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
@@ -2611,7 +2653,6 @@ export async function executeMurphDynamicToolRequest(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   deliveryContextOrdinal?: number | null
@@ -2619,7 +2660,7 @@ export async function executeMurphDynamicToolRequest(input: {
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
-  requireHostedGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
@@ -3008,11 +3049,11 @@ export async function executeMurphDynamicToolRequest(input: {
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
-        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
-        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        materializeWorkspaceArtifacts:
+          input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
         request: input.request.request,
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'newsletter':
@@ -3089,7 +3130,6 @@ export async function executeMurphDynamicToolRequest(input: {
       if (
         imageGenerationLauncher
         && originAssistantInputId
-        && input.hostedGeneratedImageUploader
       ) {
         const launch = imageGenerationLauncher.launch({
           operationId,
@@ -3103,11 +3143,10 @@ export async function executeMurphDynamicToolRequest(input: {
               codexHome: input.codexHome ?? null,
               env: input.env,
               fetchImpl: input.fetchImpl,
-              hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
               materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
               persistGeneratedImageCapture: persistCanonicalWrite,
               providerRequestOrdinal,
-              requireHostedGeneratedImageUploader: true,
+              requireHostedPrivateImageDelivery: true,
               vaultRoot: input.vaultRoot ?? null,
             })
             if (result.usageDraft) {
@@ -3118,11 +3157,12 @@ export async function executeMurphDynamicToolRequest(input: {
                 usageDraft: result.usageDraft,
               })
             }
+            const privateMedia = result.responseMedia?.[0] ?? null
             return {
-              media: result.rpcSuccess
-                ? result.responseMedia?.[0] ?? null
+              media: result.rpcSuccess && privateMedia?.kind === 'vault_image'
+                ? privateMedia
                 : null,
-              runtimeIssue: result.runtimeIssue ?? null,
+              runtimeIssue: null,
               savedImageRef: result.savedImageRef ?? null,
             }
           },
@@ -3147,11 +3187,10 @@ export async function executeMurphDynamicToolRequest(input: {
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
-        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         providerRequestOrdinal,
-        requireHostedGeneratedImageUploader:
-          input.requireHostedGeneratedImageUploader ?? false,
+        requireHostedPrivateImageDelivery:
+          input.requireHostedPrivateImageDelivery ?? false,
         vaultRoot: input.vaultRoot ?? null,
       })
       return {
@@ -3172,9 +3211,6 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
-        ...(result.runtimeIssue
-          ? { runtimeIssueInputs: [result.runtimeIssue] }
-          : {}),
         usageDraft: result.usageDraft ?? null,
       }
     }
@@ -3834,7 +3870,6 @@ async function executeGroupTool(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
-  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   request: MurphGroupToolRequest
@@ -3879,18 +3914,27 @@ async function executeGroupTool(input: {
   let request: HostedRuntimeGroupToolRequest
   let usageDraft: AssistantProviderUsageDraft | null = null
   let generatedAvatarCapture:
-    | { savedCaptureId: string | null; savedImageRef: string | null }
+    | { savedCaptureId: string | null; savedImageRef: string }
     | null = null
   if (isPreparedGroupAvatarRequest(input.request)) {
-    let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
+    let preflight: Extract<
+      HostedRuntimeGroupToolResponse,
+      { action: 'preflight_set_chat_avatar' }
+    >
     try {
-      const preflightResult = await groupTool.request({ action: 'preflight_set_chat_avatar' })
+      const preflightResult = await groupTool.request({
+        action: 'preflight_set_chat_avatar',
+      })
       if (preflightResult.action !== 'preflight_set_chat_avatar') {
-        return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+        return groupAvatarUnavailableToolResult(
+          'group_avatar_preflight_unavailable',
+        )
       }
       preflight = preflightResult
     } catch {
-      return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+      return groupAvatarUnavailableToolResult(
+        'group_avatar_preflight_unavailable',
+      )
     }
     if (preflight.result.status !== 'ok') {
       return toolTextResult(true, safeToolPayloadText({
@@ -3901,20 +3945,20 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
-      toolCallId: input.toolCallId,
       env: input.env,
       fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
+      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
       return {
         rpcResult: {
+          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
           success: false,
-          contentItems: [{ type: 'inputText', text: prepared.rpcText }],
         },
         usageDraft: prepared.usageDraft ?? null,
       }
@@ -4172,23 +4216,32 @@ async function executeGroupPermissionOffer(input: {
 
 function isPreparedGroupAvatarRequest(
   request: MurphGroupToolRequest,
-): request is Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }> {
+): request is Extract<
+  MurphGroupToolRequest,
+  { action: 'set_chat_avatar'; avatar: unknown }
+> {
   return request.action === 'set_chat_avatar' && 'avatar' in request
 }
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
-  toolCallId: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  hostedToolContext: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
-  request: Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }>
+  request: Extract<
+    MurphGroupToolRequest,
+    { action: 'set_chat_avatar'; avatar: unknown }
+  >
+  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<
   | {
-      request: Extract<HostedRuntimeGroupToolRequest, { action: 'set_chat_avatar' }>
+      request: Extract<
+        HostedRuntimeGroupToolRequest,
+        { action: 'set_chat_avatar' }
+      >
       rpcSuccess: true
       savedCaptureId?: string | null
       savedImageRef?: string | null
@@ -4206,15 +4259,14 @@ async function prepareGroupAvatarRuntimeRequest(input: {
       abortSignal: input.abortSignal,
       args: avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        toolCallId: input.toolCallId,
         scope: 'group-avatar',
+        toolCallId: input.toolCallId,
       }),
       env: input.env,
       fetchImpl: input.fetchImpl,
-      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       providerRequestOrdinal: input.nextUsageOrdinal(),
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot: input.vaultRoot,
     })
     if (!generated.rpcSuccess) {
@@ -4225,15 +4277,30 @@ async function prepareGroupAvatarRuntimeRequest(input: {
       }
     }
     const media = generated.responseMedia?.[0] ?? null
-    if (media?.kind !== 'image') {
+    if (media?.kind !== 'vault_image') {
       return {
         rpcSuccess: false,
-        rpcText: 'generated group avatar did not produce a hosted image URL',
+        rpcText: 'generated group avatar did not produce private vault media',
+        usageDraft: generated.usageDraft ?? null,
+      }
+    }
+    const published = await publishGroupAvatarImageReference({
+      hostedToolContext: input.hostedToolContext,
+      imageRef: media.ref,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!published.rpcSuccess) {
+      return {
+        ...published,
         usageDraft: generated.usageDraft ?? null,
       }
     }
     return {
-      request: { action: 'set_chat_avatar', groupChatIconUrl: media.url },
+      request: {
+        action: 'set_chat_avatar',
+        groupChatIconUrl: published.url,
+      },
       rpcSuccess: true,
       savedCaptureId: generated.savedCaptureId ?? null,
       savedImageRef: generated.savedImageRef ?? null,
@@ -4241,25 +4308,26 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     }
   }
 
-  const uploaded = await uploadGroupAvatarImageReference({
-    alt: avatar.alt,
-    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+  const published = await publishGroupAvatarImageReference({
+    hostedToolContext: input.hostedToolContext,
     imageRef: avatar.imageRef,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
     vaultRoot: input.vaultRoot,
   })
-  if (!uploaded.rpcSuccess) {
-    return uploaded
+  if (!published.rpcSuccess) {
+    return published
   }
   return {
-    request: { action: 'set_chat_avatar', groupChatIconUrl: uploaded.url },
+    request: {
+      action: 'set_chat_avatar',
+      groupChatIconUrl: published.url,
+    },
     rpcSuccess: true,
   }
 }
 
-async function uploadGroupAvatarImageReference(input: {
-  alt: string | null
-  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+async function publishGroupAvatarImageReference(input: {
+  hostedToolContext: AssistantHostedToolContext | null
   imageRef: string
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string | null
@@ -4267,16 +4335,17 @@ async function uploadGroupAvatarImageReference(input: {
   | { rpcSuccess: true; url: string }
   | { rpcSuccess: false; rpcText: string }
 > {
-  if (!input.hostedGeneratedImageUploader) {
+  const publisher = input.hostedToolContext?.privateImageUrlPublisher ?? null
+  if (!publisher) {
     return {
       rpcSuccess: false,
-      rpcText: 'hosted image upload is not available for this turn',
+      rpcText: 'private group avatar delivery is unavailable for this turn',
     }
   }
   if (!normalizeNullableString(input.vaultRoot)) {
     return {
       rpcSuccess: false,
-      rpcText: 'image references are unavailable for this turn',
+      rpcText: 'group avatar image references are unavailable for this turn',
     }
   }
 
@@ -4306,49 +4375,16 @@ async function uploadGroupAvatarImageReference(input: {
   }
 
   try {
-    const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
-      alt: input.alt ?? 'Group chat avatar',
+    const published = await publisher.publishPrivateImageUrl({
       bytes: reference.bytes,
-      contentType: groupAvatarReferenceContentType(reference.mediaType),
-      filename: groupAvatarReferenceFilename(reference.mediaType),
-      metadata: {
-        imageSha256: reference.sha256,
-        schema: 'murph.group-avatar.v1',
-        sourceRefSha256: reference.sourceRefSha256,
-      },
-      source: 'murph.group-avatar',
+      contentType: reference.mediaType,
     })
-    if (media.kind !== 'image') {
-      return {
-        rpcSuccess: false,
-        rpcText: 'group avatar upload did not produce a hosted image URL',
-      }
-    }
-    return { rpcSuccess: true, url: media.url }
+    return { rpcSuccess: true, url: published.url }
   } catch {
     return {
       rpcSuccess: false,
-      rpcText: 'group avatar image upload failed',
+      rpcText: 'private group avatar delivery could not be prepared',
     }
-  }
-}
-
-function groupAvatarReferenceContentType(
-  mediaType: ResolvedGenerateImageReference['mediaType'],
-): AssistantGeneratedImageContentType {
-  return mediaType
-}
-
-function groupAvatarReferenceFilename(
-  mediaType: ResolvedGenerateImageReference['mediaType'],
-): string {
-  switch (mediaType) {
-    case 'image/jpeg':
-      return 'group-avatar.jpg'
-    case 'image/png':
-      return 'group-avatar.png'
-    case 'image/webp':
-      return 'group-avatar.webp'
   }
 }
 
@@ -5863,10 +5899,12 @@ function parseAttachResponseMediaArguments(
     }
 
     const media = normalizeAssistantResponseMediaList(parsed.data.media)
-    const unsupportedMedia = media.find((item) => item.kind !== 'image')
+    const unsupportedMedia = media.find(
+      (item) => item.kind !== 'image' && item.kind !== 'vault_image',
+    )
     if (unsupportedMedia) {
       throw new Error(
-        `murph.attach_response_media only supports image media, received ${unsupportedMedia.kind}.`,
+        `murph.attach_response_media only supports image or vault_image media, received ${unsupportedMedia.kind}.`,
       )
     }
 

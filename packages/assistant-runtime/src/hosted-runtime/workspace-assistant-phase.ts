@@ -1500,14 +1500,18 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.planUsageToolPort
           ? { planUsageTool: input.runtime.platform.planUsageToolPort }
           : {}),
+        ...(input.runtime.platform.privateImageUrlPublisher
+          ? {
+              privateImageUrlPublisher:
+                input.runtime.platform.privateImageUrlPublisher,
+            }
+          : {}),
         ...(input.runtime.platform.subscriptionToolPort
           ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
           : {}),
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
-        generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
-        generatedImageUploaderRequired: true,
         ...(input.imageGenerationLauncher
           ? { imageGenerationLauncher: input.imageGenerationLauncher }
           : {}),

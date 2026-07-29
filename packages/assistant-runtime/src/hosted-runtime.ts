@@ -5181,14 +5181,6 @@ function createAbortGuardedHostedRuntimePlatform(
             guard(() => platform.providerFetch!(request, init))) as typeof fetch,
         }
       : {}),
-    ...(platform.generatedImageUploader
-      ? {
-          generatedImageUploader: {
-            uploadGeneratedImage: (request) =>
-              guard(() => platform.generatedImageUploader!.uploadGeneratedImage(request)),
-          },
-        }
-      : {}),
     // usageRecordPort is inherited unguarded from platform. Deferred records
     // are captured before abort and must still reach the idempotent web ledger
     // after user-visible post-checkpoint work has happened.

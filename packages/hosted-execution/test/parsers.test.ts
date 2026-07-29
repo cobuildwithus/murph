@@ -1027,11 +1027,62 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     })).toEqual({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     });
+    const previewOrigin = "https://hosted-runner-staging.example.test";
+    const previewIconUrl =
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    }, {
+      privateMediaDeliveryOrigin: previewOrigin,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    })).toThrow(/groupChatIconUrl is invalid/u);
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+    });
+    const querylessLegacyIconUrl =
+      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: querylessLegacyIconUrl,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: querylessLegacyIconUrl,
+    });
+    for (const invalidLegacyIconUrl of [
+      "https://imagedelivery.net/account/avatar/private",
+      "https://imagedelivery.net/account/avatar/public/extra",
+      "https://imagedelivery.net/account/avatar/public/",
+      "https://imagedelivery.net/account//avatar/public",
+      "https://imagedelivery.net/account/avatar/public?tracking=1",
+      "https://imagedelivery.net/account/avatar/public?",
+      "https://imagedelivery.net/account/avatar/public#",
+      "https://imagedelivery.net/account/avatar%2Fother/public",
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl: invalidLegacyIconUrl,
+      })).toThrow(/groupChatIconUrl is invalid/u);
+    }
     expect(parseHostedRuntimeGroupToolRequest({
       action: "preflight_set_chat_avatar",
     })).toEqual({
@@ -1219,7 +1270,15 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
+      })
+    ).toThrow(/groupChatIconUrl is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000&tracking=1`,
       })
     ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>

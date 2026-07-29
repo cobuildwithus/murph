@@ -9,7 +9,7 @@ import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-on
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
-// Companion (iOS) sign-in token exchange. Auth is a bearer Privy identity token
+// Companion sign-in token exchange. Auth is a bearer Privy identity token
 // verified through the existing server-side
 // Privy verification path; there is no cookie fallback, so this route carries
 // no browser ambient authority (and therefore no CSRF surface). The Junction

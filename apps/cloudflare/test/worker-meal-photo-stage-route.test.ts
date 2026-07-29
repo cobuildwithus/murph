@@ -248,6 +248,7 @@ async function createRouteContext(input: {
           },
           deleteHostedUserData: failUnusedTestDependency,
           ensureRuntimeProcessingForUser: failUnusedTestDependency,
+          publishHostedPrivateMedia: failUnusedTestDependency,
           runnerStatus: failUnusedTestDependency,
         };
       },
@@ -289,6 +290,7 @@ async function createDeleteRouteContext(input: {
             },
             deleteHostedUserData: failUnusedTestDependency,
             ensureRuntimeProcessingForUser: failUnusedTestDependency,
+            publishHostedPrivateMedia: failUnusedTestDependency,
             runnerStatus: failUnusedTestDependency,
           };
         },
