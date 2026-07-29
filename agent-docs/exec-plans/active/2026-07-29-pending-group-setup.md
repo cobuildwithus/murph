@@ -69,7 +69,10 @@ Updated: 2026-07-29
    optional bounded Markdown seed for the fixed group room model.
 3. Before the first inbound for an unbound Linq group, Web performs one bounded
    current-chat read and resolves at most 32 active non-Murph handles to member
-   ids. Failure leaves the participant list empty.
+   ids. On roster failure, an active authenticated sender remains exact
+   participant evidence for their own setup; an unregistered first speaker is
+   rejected with a retryable response before durable acceptance so the original
+   provider webhook can be replayed after recovery.
 4. Inside the route transaction, candidate selection is:
    - one candidate: select it;
    - several candidates and sender owns one: select the sender's;
@@ -82,7 +85,10 @@ Updated: 2026-07-29
    route primitive remains the only route and owner writer.
 7. On a newly created route, style is applied through the existing hosted-member
    preference mutation owner, the activation event carries the optional initial
-   room-model Markdown, and the existing usage-referral binding runs once.
+   room-model Markdown, and the existing usage-referral binding runs once. The
+   hosted runtime treats room-model initialization as a required system-mailbox
+   action before the first conversation turn; failure requeues the action and
+   defers the reply.
 8. An existing-route convergence or recoverable admission failure restores the
    still-valid setup; a successful new route consumes it.
 
@@ -94,7 +100,9 @@ Updated: 2026-07-29
    roster, on the exact prepared Murph line, and inside the short expiry;
    ambiguity never guesses.
 3. **Stale or incomplete provider roster.** The lookup is advisory matching
-   evidence only; failure preserves sender-owner admission and leaves the setup.
+   evidence only. An active sender can still prove their own participation; an
+   unregistered first speaker receives a retryable pre-acceptance failure so
+   recovery does not silently lose their original message or prepared owner.
 4. **Existing ownership or configuration changes.** Setup application is
    conditional on a newly created route; existing-route convergence restores the
    claim.
@@ -111,6 +119,10 @@ Updated: 2026-07-29
    setup before requiring an active sender; a focused regression proves the
    parent-prepares/child-speaks-first path while the no-setup fallback remains
    unchanged.
+9. **The first reply races explicit room context.** Initialization is a required
+   pre-conversation mailbox action. A failed seed is requeued without invoking
+   the assistant, and replay initializes the fixed room-model page before the
+   original accepted message receives its first reply.
 
 ## Tasks
 
@@ -127,7 +139,8 @@ Updated: 2026-07-29
 6. [x] Complete webhook scenarios, payload/privacy/account-deletion proof, and
    production-faithful activation/replay coverage.
 7. [x] Reconcile current `main`, remove temporary source/repair scaffolding, fix
-   the unregistered first-speaker admission path, and run focused verification.
+   the unregistered first-speaker admission and roster-recovery paths, require
+   room-context initialization before first reply, and run focused verification.
 8. [ ] Complete preliminary specialist review, parent final review, exact-head
    CI, and final ReviewGPT before marking the PR ready.
 
@@ -153,8 +166,20 @@ Updated: 2026-07-29
 - The repaired planner has direct regression coverage for a uniquely prepared
   roster owner when an unregistered participant sends the first message, plus
   the unchanged no-setup non-member rejection case.
+- Provider-roster failure coverage proves an unregistered first speaker is not
+  claimed or durably appended, and that provider replay after recovery appends
+  the original message once under the prepared owner.
+- Runtime replay coverage proves failed room-context initialization invokes no
+  assistant turn and that the retry initializes the fixed page before exactly
+  one reply attempt.
 - Runner-bundle assembly was re-baselined to the exact measured feature head
   without admitting a forbidden boot subsystem, and Web source aliases include
   the new hosted-execution subpath.
-- Exact-head CI is running from the repaired branch. Preliminary specialist
+- After reconciling current `main`, hosted-execution, assistant-engine,
+  assistant-runtime, and Web typechecks pass. Conflict-focused Cloudflare,
+  Web, and assistant-engine suites pass, including 34 runner-bundle tests and
+  69 dynamic group-tool tests.
+- The required product-experience review found two blocking recovery/ordering
+  gaps; both were corrected with the focused replay proofs above.
+- Exact-head CI is running from the reconciled branch. Preliminary specialist
   review, parent final review, final ReviewGPT, and final merge proof remain.
