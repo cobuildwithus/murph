@@ -9,6 +9,9 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
+import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -81,7 +84,11 @@ import {
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
   executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttemptFromInput,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -4632,6 +4639,133 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('runs member-read check-ins through the real provider validator as fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-read-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-member-read-home-',
+    )
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_250
+      children.push(child)
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              instructionSources: [],
+              runtimeWorkspaceRoots: [workingDirectory],
+              thread: {
+                id: 'thread-member-read-checkin',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-read-checkin',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-member-read-checkin',
+                message:
+                  '{"kind":"skip","privateSummary":"No useful check-in now."}',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-read-checkin',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+      return child
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        approvalPolicy: 'never',
+        codexHome,
+        provider: 'codex-cli',
+        sandbox: 'read-only',
+      },
+      turn: {
+        conversationHistoryMessages: [
+          {
+            content: 'I want to make weekday lunches easier.',
+            role: 'user',
+          },
+          {
+            content: 'We can keep that practical and low pressure.',
+            role: 'assistant',
+          },
+        ],
+        developerInstructions: 'Immutable member-read check-in policy.',
+        dynamicTools: [],
+        permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+        processLifetime: 'one-shot',
+        prompt: 'Offer one truthful, low-pressure choice point.',
+        providerThreadEphemeral: true,
+        resume: null,
+        runtimeWorkspaceRoots: [workingDirectory],
+        workingDirectory,
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(children).toHaveLength(1)
+    const child = requireMockChildProcess(children[0] ?? null)
+    const written = readWrittenRpcMessages(child)
+    expect(written.some((message) => message.method === 'thread/resume')).toBe(
+      false,
+    )
+    expect(written.filter((message) => message.method === 'thread/start')).toHaveLength(
+      1,
+    )
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      dynamicTools: [],
+      ephemeral: true,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+    })
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'turn/start')).params,
+    )).toMatchObject({
+      input: expect.any(Array),
+    })
+    expect(child.signalCode).toBe('SIGTERM')
+    expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
+  })
+
   it('fails closed before turn start when permission attestation drifts', async () => {
     const workingDirectory = await createTempDir('assistant-codex-attest-work-')
     const workspaceRoot = await createTempDir('assistant-codex-attest-root-')
@@ -8730,6 +8864,176 @@ describe('assistant codex runtime', () => {
     })
 
     expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+  })
+
+  it('discards feedback from a disconnected stream and keeps native retry safe', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-product-feedback-retry-',
+    )
+    const acceptProductFeedbackCandidate = vi.fn()
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{
+        id: 'assistant_input_feedback_retry',
+        source: 'assistant-input',
+      }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
+      },
+    })
+    if (!productFeedbackRecorder) {
+      throw new Error('Expected product feedback collection to be available.')
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: {
+                id: 'thread-product-feedback-retry',
+              },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: first disconnected candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-disconnected',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'error',
+            params: {
+              error: {
+                message: 'Reconnecting... 1/5',
+                additionalDetails:
+                  'stream disconnected before completion',
+              },
+              threadId: 'thread-product-feedback-retry',
+              turnId: 'turn-product-feedback-retry',
+              willRetry: true,
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 82,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: recovered candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-recovered',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-product-feedback-retry',
+                message: 'Recovered response.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        productFeedbackRecorder,
+        prompt: 'retry after collecting feedback',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Recovered response.',
+      providerActionCount: 0,
+    })
+    expect(productFeedbackRecorder.readProductFeedback()).toMatchObject({
+      kind: 'feature_request',
+      summary: 'Speculative: recovered candidate.',
+    })
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })
 
   it('emits terminal Codex transport diagnostics after provider actions', async () => {

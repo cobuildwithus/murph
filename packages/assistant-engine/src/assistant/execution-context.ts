@@ -31,9 +31,10 @@ import type {
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
-  HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeGroupSharedMember,
@@ -226,10 +227,10 @@ export interface AssistantHostedActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
-export interface AssistantHostedProductFeedbackRecorder {
-  recordProductFeedback(
+export interface AssistantHostedProductFeedbackCandidateSink {
+  acceptProductFeedbackCandidate(
     feedback: HostedRuntimeProductFeedbackRecord,
-  ): Promise<HostedRuntimeProductFeedbackRecordResponse>
+  ): void
 }
 
 export interface AssistantHostedFamilyPlanTool {
@@ -240,6 +241,12 @@ export interface AssistantHostedFamilyPlanTool {
 
 export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
+}
+
+export interface AssistantHostedIMessageContactTool {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>
 }
 
 export interface AssistantHostedSubscriptionTool {
@@ -386,6 +393,7 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
@@ -400,7 +408,7 @@ export interface AssistantHostedExecutionContext {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
-  productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
+  productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
@@ -410,6 +418,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    conversationThreadId?: string | null
     target: string
     threadIsDirect: boolean
   }>
@@ -457,6 +466,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.dynamicContextPrompts,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const imessageContactTool = normalizeAssistantIMessageContactTool(
+    hosted?.imessageContactTool,
+  )
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
@@ -477,8 +489,8 @@ export function normalizeAssistantExecutionContext(
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
     hosted?.privateImageUrlPublisher,
   )
-  const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
-    hosted?.productFeedbackRecorder,
+  const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
+    hosted?.productFeedbackCandidateSink,
   )
   const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
   if (!memberId) {
@@ -506,6 +518,7 @@ export function normalizeAssistantExecutionContext(
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
@@ -541,7 +554,7 @@ export function normalizeAssistantExecutionContext(
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackRecorder ? { productFeedbackRecorder } : {}),
+      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
       ...(progressDeliveryDependencies
@@ -670,15 +683,16 @@ function normalizeAssistantPrivateImageUrlPublisher(
   }
 }
 
-function normalizeAssistantProductFeedbackRecorder(
-  input: AssistantHostedExecutionContext['productFeedbackRecorder'] | undefined,
-): AssistantHostedProductFeedbackRecorder | undefined {
-  if (!input || typeof input.recordProductFeedback !== 'function') {
+function normalizeAssistantProductFeedbackCandidateSink(
+  input: AssistantHostedExecutionContext['productFeedbackCandidateSink'] | undefined,
+): AssistantHostedProductFeedbackCandidateSink | undefined {
+  if (!input || typeof input.acceptProductFeedbackCandidate !== 'function') {
     return undefined
   }
 
   return {
-    recordProductFeedback: input.recordProductFeedback,
+    acceptProductFeedbackCandidate:
+      input.acceptProductFeedbackCandidate.bind(input),
   }
 }
 
@@ -703,6 +717,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantIMessageContactTool(
+  input: AssistantHostedExecutionContext['imessageContactTool'] | undefined,
+): AssistantHostedIMessageContactTool | undefined {
+  if (!input || typeof input.ensure !== 'function') {
+    return undefined
+  }
+
+  return {
+    ensure: input.ensure.bind(input),
   }
 }
 

@@ -1281,6 +1281,7 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "read_chat_name" }
   | { action: "read_usage" }
   | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
@@ -1367,6 +1368,17 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_chat_name";
+      result:
+        | { displayName: string; status: "ok" }
+        | { displayName: null; status: "none" }
+        | {
+            displayName: null;
+            status: "unavailable";
+            unavailableReason: string;
+          };
     }
   | {
       action: "read_usage";
@@ -1690,6 +1702,22 @@ export type HostedRuntimeFamilyPlanToolResponse =
   | {
       action: "start_checkout";
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
+    };
+
+export interface HostedRuntimeIMessageContactToolRequest {
+  assistantInputId: string;
+}
+
+export type HostedRuntimeIMessageContactToolResponse =
+  | {
+      phoneNumber: string;
+      status: "assigned" | "existing";
+      verifiedSenderPhoneHint: string;
+    }
+  | {
+      phoneNumber: null;
+      status: "identity_required" | "unavailable";
+      verifiedSenderPhoneHint: null;
     };
 
 export type HostedRuntimeAssistantConfigurationToolRequest =
@@ -2666,6 +2694,11 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
+  r2Cutover?: {
+    coexisting: boolean;
+    phase: "destination_active" | "source_active";
+    protocolVersion: string;
+  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

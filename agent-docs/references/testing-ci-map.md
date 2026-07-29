@@ -75,6 +75,30 @@ the required frontend and coverage specialist audits, the review-only Fable or
 Opus UI pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
 
+Post-onboarding choice-point coverage is owned by assistant-engine tests. The
+seed suite proves answered-onboarding eligibility, 21-day local scheduling,
+seven-day expiry, stable installed occurrences, future same-weekday catch-up
+for older members, quiet-wake route reuse from an existing immutable
+member-owned managed automation, member ownership, and idempotent
+reconciliation. Managed maintenance tests prove that malformed onboarding
+state isolates this optional seed without blocking unrelated automations.
+
+Cron and outbox suites prove that the registered dynamic identity rejects
+non-direct routes, uses the ordinary scheduled-notification turn rather than a
+feature-specific assistant profile, and revalidates canonical onboarding state
+at claim and queued provider entry. Planning, runner, and hosted Codex-config
+tests prove that the exact identity installs an immutable read-only policy,
+retains current-conversation and vault-read continuity, removes hosted dynamic
+mutation tools, denies external network access, and cannot inherit ordinary
+save/ingestion guidance. Web, transport, runtime, and cron coverage also prove
+that a live direct Linq fallback carries its privacy-blinded current
+conversation locator separately from the raw provider delivery target, while a
+changed target without that locator fails retryably before model work and
+preserves the occurrence. Prompt assertions keep unclear or unshared goals,
+evidence-grounded reflection, quiet skip, one easy question, and
+no-mutation-before-reply behavior explicit without adding a second evidence or
+session pipeline.
+
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
 included-first settlement, carryover balance, and crossing-operation behavior;
@@ -141,6 +165,22 @@ eligible live turn, and renders explicit correction semantics in both prepared
 and captureless prompts. The local Linq tunnel test locks the versioned edit
 subscription without treating local provider traffic as a routine CI
 dependency.
+
+Linq participant-change coverage follows the same provider-to-prompt boundary.
+Shared ingress tests lock the full participant object plus deprecated handle
+fallback. Hosted Web parser tests prove provider-ledger minimization still
+retains no participant identifier; webhook tests prove only unique routed adds
+and removals attempt detailed staging, additions retain their anonymous fallback
+bit, and neither event appends mailbox work, wakes, or sends. Focused context
+tests prove active-route gating, canonical handle normalization, activated
+member label suppression, optional owner-address-book overlay, handle-only
+fallback, chat-locked atomic staging, encrypted route storage, own-line
+rejection, account-bound consumption, address-book replacement/deletion buffer
+clearing, and bounded weak group-event prompt rendering. The existing signed
+hosted-local group-isolation scenario carries a unique addition through Web,
+the encrypted route sidecar, mailbox import, and the next real assistant
+provider request, where both the anonymous fallback and exact handle context
+must be present.
 
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container
@@ -285,6 +325,30 @@ not enter evidence; and attachment-only input fails closed before provider work.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
+  covers the independent PlanetScale/Linq database-health plane. The tests
+  prove strict metric normalization and required-series failure, positive
+  direct-port counter deltas with reset/new-series suppression, SQLite sample
+  persistence and 30-day pruning, concrete connection thresholds, two-failure
+  collection hysteresis, failed-scrape incident preservation, recovery reset,
+  global 30-minute wall-time provider-attempt pacing across incident recovery,
+  current actual-check-time and rotated evidence-bearing recurrence copy,
+  no stale fenced gauge page after recovery, exact body/idempotency reuse after
+  an ambiguous Linq send, transactional rollback before direct
+  counter-baseline advancement, one-sample direct errors admitted inside the
+  attempt fence and retained across clean samples, mixed inside-fence pages
+  limited to direct-error evidence, full current mixed evidence when no older
+  pending obligation owns the open boundary, and later direct-error evidence
+  retained behind an older health-suppressed page across baseline advancement,
+  recovery, provider pacing, and monitor restarts,
+  documented formatted/deprecated Linq inventory shapes with duplicate and
+  mismatch rejection, zero message POSTs for unhealthy or indeterminate
+  chat/line health, healthy auto-selected Linq delivery, discovery-only
+  PlanetScale service authorization plus bounded signed scrape parameters,
+  unsafe discovered-target rejection, and singleton cron dispatch.
+  The deploy-automation test keeps the five-minute trigger, v4 SQLite class
+  migration, Durable Object binding, required vars/secrets, checked-in scaffold,
+  and generated Wrangler config aligned.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - That matrix starts from the hosted-local harness's intentional `prisma db
   push` schema. The usage-credit PostgreSQL suite therefore applies the exact

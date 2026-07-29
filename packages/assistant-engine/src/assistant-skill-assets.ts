@@ -203,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'phone-calls',
     name: 'phone-calls',
     triggerHint:
-      'Use when Murph may place an outbound health-related phone call to a clinic, dentist, pharmacy, lab, insurer, provider office, or similar destination. Owns call choice, explicit consent, appointment readiness handoff, minimal disclosure, transfer policy, and truthful interpretation of call lifecycle results.',
+      'Use when Murph may place one authorized outbound call for a health task, or when hosted group Murph may call a public venue or service business for an ordinary shared-life logistics task. Owns call choice, explicit consent, health appointment readiness handoff, reservation bounds, minimal disclosure, group transfer policy, and truthful interpretation of call lifecycle results.',
   },
   {
     slug: 'murph-family',

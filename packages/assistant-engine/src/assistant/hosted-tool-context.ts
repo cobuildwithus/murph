@@ -9,6 +9,9 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedPhoneCallBrief,
+} from '@murphai/hosted-execution/phone-calls'
+import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
@@ -31,6 +34,7 @@ import type {
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
+  AssistantHostedIMessageContactTool,
   AssistantHostedImageGenerationLauncher,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
@@ -46,6 +50,10 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import {
+  type AssistantGroupPhoneCallPreviewAuthority,
+  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
+} from './group-phone-call-preview-authority.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -97,6 +105,7 @@ export interface AssistantHostedToolContext {
   readonly groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly imessageContactTool?: AssistantHostedIMessageContactTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
@@ -114,8 +123,13 @@ export interface AssistantHostedToolContext {
   currentHostedMailboxItemIds(): readonly string[]
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
+  claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
+  currentGroupPhoneCallPreviewAuthority?(input?: {
+    brief?: HostedPhoneCallBrief
+    confirmationInputId?: string
+  }): Promise<AssistantGroupPhoneCallPreviewAuthority | null>
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -222,6 +236,7 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   let subscriptionActionClaimed = false
+  let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
     AssistantHostedClinicalRecordsConnectLinkTool['createConnectLink']
   > | null = null
@@ -247,6 +262,7 @@ export function createAssistantHostedToolContext(input: {
       executionContext?.groupPermissionOfferTool ?? null,
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
+    imessageContactTool: executionContext?.imessageContactTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
     imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
     newsletterTool,
@@ -300,6 +316,17 @@ export function createAssistantHostedToolContext(input: {
       subscriptionActionClaimed = true
       return assistantInputId
     },
+    claimIMessageContactAssistantInputId: () => {
+      if (imessageContactActionClaimed) {
+        return null
+      }
+      const assistantInputId = readCurrentUserActionAssistantInputId()
+      if (assistantInputId === null) {
+        return null
+      }
+      imessageContactActionClaimed = true
+      return assistantInputId
+    },
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {
@@ -333,6 +360,22 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
+    },
+    currentGroupPhoneCallPreviewAuthority: async (authorityInput) => {
+      const deliveryContext = readDeliveryContext()
+      return await resolveDeliveredAssistantGroupPhoneCallPreviewAuthority({
+        acceptedInputIds:
+          input.getUserActionAcceptedInputIds?.() ?? [],
+        ...(authorityInput?.brief === undefined
+          ? {}
+          : { brief: authorityInput.brief }),
+        channel: deliveryContext.messageInput.channel,
+        ...(authorityInput?.confirmationInputId === undefined
+          ? {}
+          : { confirmationInputId: authorityInput.confirmationInputId }),
+        sessionId: deliveryContext.session.sessionId,
+        vault: deliveryContext.messageInput.vault,
+      })
     },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()

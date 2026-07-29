@@ -330,7 +330,7 @@ test('builds structured group evidence only from group-bound sessions', async ()
     'Input 2:',
     'Sender: +15550000002',
     '',
-    'Group reaction context:',
+    'Recent group event context:',
     'Participant +15550000002 added a laugh reaction on: sources confirm',
     longTail,
   ].join('\n')

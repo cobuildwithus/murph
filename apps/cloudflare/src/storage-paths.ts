@@ -157,6 +157,7 @@ export async function hostedPrivateMediaUserPrefix(input: {
 
 export async function hostedBrowserVaultReplicaObjectKey(input: {
   dataVersion: string;
+  generatedAt: string;
   storageNamespaceId?: string | null;
   userId: string;
 }): Promise<string> {
@@ -164,7 +165,7 @@ export async function hostedBrowserVaultReplicaObjectKey(input: {
   const replicaSegment = deriveHostedStoragePathId({
     length: 48,
     scope: "browser-vault-replica-path",
-    value: `replica:${userSegment}:${input.dataVersion}`,
+    value: `replica:${userSegment}:${input.dataVersion}:${input.generatedAt}`,
   });
 
   return `users/${userSegment}/browser-vault-replicas/${replicaSegment}.json`;

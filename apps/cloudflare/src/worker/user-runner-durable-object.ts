@@ -20,6 +20,9 @@ import type {
   DurableObjectStateLike,
 } from "../user-runner.ts";
 import {
+  resolveHostedR2CutoverContext,
+} from "../r2-cutover.ts";
+import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
 import type {
@@ -101,6 +104,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.rememberHostedWorkspaceSnapshotReplacedRef(input);
   }
 
+  async rememberHostedWorkspaceSnapshotPresignedPut(
+    input: Parameters<HostedUserRunner["rememberHostedWorkspaceSnapshotPresignedPut"]>[0],
+  ): ReturnType<HostedUserRunner["rememberHostedWorkspaceSnapshotPresignedPut"]> {
+    return this.runner.rememberHostedWorkspaceSnapshotPresignedPut(input);
+  }
+
   async readHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]> {
@@ -132,11 +141,13 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
+  const r2CutoverContext = resolveHostedR2CutoverContext(env);
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-    env.BUNDLES,
+    r2CutoverContext.bucket,
     env,
     env.RUNNER_CONTAINER,
+    r2CutoverContext,
   );
 }

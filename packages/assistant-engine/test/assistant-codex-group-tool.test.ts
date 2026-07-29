@@ -100,6 +100,7 @@ describe("murph.group dynamic tool", () => {
       "revoke_disclosure_grant",
       "read_shared",
       "read_current",
+      "read_chat_name",
       "read_usage",
       "read_usage_referral",
       "arm_usage_referral",
@@ -156,6 +157,8 @@ describe("murph.group dynamic tool", () => {
       .not.toContain("sleep");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
       .toContain("the name the group chose");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+      .toContain("immediately preceding read_chat_name result");
     expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
@@ -174,7 +177,9 @@ describe("murph.group dynamic tool", () => {
       .toContain('read_shared status="partial" is incomplete');
     expect(MURPH_GROUP_TOOL.description).toContain("ask is asynchronous");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("poll pending by exact replay until completed or unavailable");
+      .toContain(
+        "For scheduled ask_member, poll pending by exact replay until completed or unavailable",
+      );
     expect(MURPH_GROUP_TOOL.description)
       .toContain("a changed question conflicts");
     expect(MURPH_GROUP_TOOL.description)
@@ -279,6 +284,13 @@ describe("murph.group dynamic tool", () => {
     }))).toEqual({
       kind: "group",
       request: { action: "cancel_usage_referral" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_chat_name",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_chat_name" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
