@@ -5,6 +5,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -699,6 +700,59 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
       expect(directoryStats.mode & 0o777).toBe(0o700);
       expect(fileStats.mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("does not persist file cache entries through a symlinked cache ancestor", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const vaultRoot = await createTestVaultRoot();
+    const externalRoot = await createTestVaultRoot();
+    await mkdir(path.join(vaultRoot, ".runtime"), {
+      mode: 0o700,
+      recursive: true,
+    });
+    await symlink(externalRoot, path.join(vaultRoot, ".runtime", "cache"), "dir");
+    const externalModeBefore = (await stat(externalRoot)).mode & 0o777;
+    const senderHandle = "+15559990009";
+    const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Symlink Boundary",
+          displayNameSource: "profile-name",
+          senderHandle,
+        }],
+        status: "ok",
+      },
+    }));
+    const createReader = () => createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request },
+      routeConversationKey: "linq\0room-symlink-cache-boundary",
+      runtimeMemberId: "member-symlink-cache-boundary",
+      vaultRoot,
+    });
+
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toEqual([{
+      displayName: "Symlink Boundary",
+      displayNameSource: "profile-name",
+      senderHandle,
+    }]);
+    await expect(access(path.join(
+      externalRoot,
+      "assistant-runtime/group-participant-display-names.json",
+    ))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await stat(externalRoot)).mode & 0o777).toBe(externalModeBefore);
+
+    await expect(createReader().read({
+      channel: "linq",
+      senderHandles: [senderHandle],
+    })).resolves.toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("evicts the oldest entry after 2,048 file cache entries without reordering hits", async () => {

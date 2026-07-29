@@ -279,6 +279,7 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
           cacheFilePath,
           nowMs: filledAtMs,
           updates: cacheUpdates,
+          vaultRoot,
         }).catch(() => undefined);
         return true;
       }
@@ -315,6 +316,7 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
         const cacheRead = await readHostedGroupParticipantDisplayNameCache({
           cacheFilePath,
           nowMs,
+          vaultRoot,
         });
         const unresolvedHandles: string[] = [];
         for (const senderHandle of handlesWithoutOperationMemo) {
@@ -347,6 +349,7 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
           await writeHostedGroupParticipantDisplayNameCacheState({
             cacheFilePath,
             entries: cacheRead.entries,
+            vaultRoot,
           }).catch(() => undefined);
         }
       }
@@ -372,21 +375,28 @@ export function resolveHostedGroupParticipantDisplayNameCachePath(
 async function readHostedGroupParticipantDisplayNameCache(input: {
   cacheFilePath: string;
   nowMs: number;
+  vaultRoot: string;
 }): Promise<HostedGroupParticipantDisplayNameCacheRead> {
   try {
-    const cacheDirectory = path.dirname(input.cacheFilePath);
-    const cacheDirectoryStats = await lstat(cacheDirectory);
-    const cacheFileStats = await lstat(input.cacheFilePath);
-    if (
-      cacheDirectoryStats.isSymbolicLink()
-      || !cacheDirectoryStats.isDirectory()
-      || cacheFileStats.isSymbolicLink()
-      || !cacheFileStats.isFile()
-    ) {
+    const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
+      cacheFilePath: input.cacheFilePath,
+      vaultRoot: input.vaultRoot,
+    });
+    await assertHostedGroupParticipantDisplayNameCacheAncestor(
+      cachePath.runtimeRoot,
+    );
+    await assertHostedGroupParticipantDisplayNameCacheAncestor(
+      cachePath.cacheRoot,
+    );
+    await assertHostedGroupParticipantDisplayNameCacheAncestor(
+      cachePath.cacheDirectory,
+    );
+    const cacheFileStats = await lstat(cachePath.cacheFilePath);
+    if (cacheFileStats.isSymbolicLink() || !cacheFileStats.isFile()) {
       return invalidHostedGroupParticipantDisplayNameCacheRead();
     }
-    await chmod(cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
-    await chmod(input.cacheFilePath, ASSISTANT_STATE_FILE_MODE);
+    await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
+    await chmod(cachePath.cacheFilePath, ASSISTANT_STATE_FILE_MODE);
     if (
       cacheFileStats.size
       > HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES
@@ -395,7 +405,7 @@ async function readHostedGroupParticipantDisplayNameCache(input: {
     }
 
     const { value } = await readVersionedJsonStateFile({
-      currentPath: input.cacheFilePath,
+      currentPath: cachePath.cacheFilePath,
       label: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_LABEL,
       parseValue: parseHostedGroupParticipantDisplayNameCacheState,
       schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
@@ -427,10 +437,12 @@ async function writeHostedGroupParticipantDisplayNameCacheUpdates(input: {
   cacheFilePath: string;
   nowMs: number;
   updates: readonly HostedGroupParticipantDisplayNameCacheStoredEntry[];
+  vaultRoot: string;
 }): Promise<void> {
   const current = await readHostedGroupParticipantDisplayNameCache({
     cacheFilePath: input.cacheFilePath,
     nowMs: input.nowMs,
+    vaultRoot: input.vaultRoot,
   });
   const entries = [...current.entries];
   for (const update of input.updates) {
@@ -450,18 +462,21 @@ async function writeHostedGroupParticipantDisplayNameCacheUpdates(input: {
   await writeHostedGroupParticipantDisplayNameCacheState({
     cacheFilePath: input.cacheFilePath,
     entries: boundedEntries,
+    vaultRoot: input.vaultRoot,
   });
 }
 
 async function writeHostedGroupParticipantDisplayNameCacheState(input: {
   cacheFilePath: string;
   entries: readonly HostedGroupParticipantDisplayNameCacheStoredEntry[];
+  vaultRoot: string;
 }): Promise<void> {
-  await ensureHostedGroupParticipantDisplayNameCacheDirectory(
-    path.dirname(input.cacheFilePath),
-  );
+  const cachePath = await ensureHostedGroupParticipantDisplayNameCacheDirectory({
+    cacheFilePath: input.cacheFilePath,
+    vaultRoot: input.vaultRoot,
+  });
   await writeVersionedJsonStateFile({
-    filePath: input.cacheFilePath,
+    filePath: cachePath.cacheFilePath,
     mode: ASSISTANT_STATE_FILE_MODE,
     schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
     schemaVersion: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA_VERSION,
@@ -472,19 +487,129 @@ async function writeHostedGroupParticipantDisplayNameCacheState(input: {
 }
 
 async function ensureHostedGroupParticipantDisplayNameCacheDirectory(
-  cacheDirectory: string,
+  input: {
+    cacheFilePath: string;
+    vaultRoot: string;
+  },
+): Promise<HostedGroupParticipantDisplayNameCachePathBoundary> {
+  const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary(input);
+  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
+    cachePath.runtimeRoot,
+  );
+  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
+    cachePath.cacheRoot,
+  );
+  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
+    cachePath.cacheDirectory,
+  );
+  try {
+    const stats = await lstat(cachePath.cacheFilePath);
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      throw new Error(
+        "Hosted group participant display-name cache path is not a file.",
+      );
+    }
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error;
+    }
+  }
+  await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
+  return cachePath;
+}
+
+interface HostedGroupParticipantDisplayNameCachePathBoundary {
+  cacheDirectory: string;
+  cacheFilePath: string;
+  cacheRoot: string;
+  runtimeRoot: string;
+}
+
+function resolveHostedGroupParticipantDisplayNameCachePathBoundary(input: {
+  cacheFilePath: string;
+  vaultRoot: string;
+}): HostedGroupParticipantDisplayNameCachePathBoundary {
+  const runtimePaths = resolveRuntimePaths(input.vaultRoot);
+  const cacheDirectory = path.join(
+    runtimePaths.cacheRoot,
+    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY,
+  );
+  const cacheFilePath = path.join(
+    cacheDirectory,
+    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE,
+  );
+  if (path.resolve(input.cacheFilePath) !== path.resolve(cacheFilePath)) {
+    throw new Error(
+      "Hosted group participant display-name cache path is outside its boundary.",
+    );
+  }
+  return {
+    cacheDirectory,
+    cacheFilePath,
+    cacheRoot: runtimePaths.cacheRoot,
+    runtimeRoot: runtimePaths.runtimeRoot,
+  };
+}
+
+async function ensureHostedGroupParticipantDisplayNameCacheAncestor(
+  directoryPath: string,
 ): Promise<void> {
-  await mkdir(cacheDirectory, {
-    mode: ASSISTANT_STATE_DIRECTORY_MODE,
-    recursive: true,
-  });
-  const stats = await lstat(cacheDirectory);
+  try {
+    const stats = await lstat(directoryPath);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(
+        "Hosted group participant display-name cache path is not a directory.",
+      );
+    }
+    return;
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error;
+    }
+  }
+
+  try {
+    await mkdir(directoryPath, { mode: ASSISTANT_STATE_DIRECTORY_MODE });
+  } catch (error) {
+    if (!isPathExistsError(error)) {
+      throw error;
+    }
+  }
+  const stats = await lstat(directoryPath);
   if (stats.isSymbolicLink() || !stats.isDirectory()) {
     throw new Error(
       "Hosted group participant display-name cache path is not a directory.",
     );
   }
-  await chmod(cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
+}
+
+async function assertHostedGroupParticipantDisplayNameCacheAncestor(
+  directoryPath: string,
+): Promise<void> {
+  const stats = await lstat(directoryPath);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error(
+      "Hosted group participant display-name cache path is not a directory.",
+    );
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
+function isPathExistsError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && (error as { code?: unknown }).code === "EEXIST"
+  );
 }
 
 function parseHostedGroupParticipantDisplayNameCacheState(
