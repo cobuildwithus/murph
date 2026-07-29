@@ -2,53 +2,42 @@
 
 Last verified: 2026-07-29
 
-Status: Proposed, implementation in progress
+Status: Implemented for new group challenges
 
-## Purpose
+## Outcome
 
-Murph group challenges should support the social games groups already invent:
+Murph can run one challenge lifecycle across the social formats groups already use:
 
 - people competing individually;
 - teams competing against one another;
 - a whole group working toward one shared target;
 - one metric or a weighted scorecard composed from several behaviors.
 
-The architecture must stay conversation-first and model-flexible. The model should
-understand the room, propose or preserve the rules, interpret consented shared data,
-and explain the result. Deterministic code should own only the repetitive parts where
-small arithmetic or aggregation mistakes would make the referee untrustworthy.
+A scorecard may contain one to five additive components. The model understands the
+room, preserves or proposes the rules, interprets exact consented shared records, and
+explains the result. Deterministic code owns only bounded validation, arithmetic,
+coverage, and aggregation.
 
-This is one challenge lifecycle, not separate individual, team, collective, Steps,
-protein, run-club, or charity-challenge products.
+This is not a separate product for teams, run clubs, charity goals, protein games, or
+multi-metric challenges. Every format reuses the existing challenge knowledge page,
+one challenge automation, the hosted group shared-read boundary, and the same scoring
+primitive.
 
-## Product outcome
+## Canonical composition
 
-A group can naturally ask Murph for games such as:
+A challenge combines five concerns:
 
-- a seven-day individual Steps competition;
-- two teams competing on a weighted scorecard;
-- a run club accumulating distance toward an annual target;
-- a scorecard combining Steps, logged protein, and workouts after a fixed local time.
-
-Murph keeps setup conversational, remembers the exact rules, reads only the exact
-consented group projections required by those rules, publishes truthful partial
-scores when evidence is incomplete, and closes the challenge in the format the group
-chose.
-
-## Canonical model
-
-A challenge is the composition of five concerns:
-
-1. **Format**: individual, teams, or collective.
-2. **Objective**: ranking or a points target.
-3. **Scorecard**: one to five additive components.
-4. **Window**: the fixed scoring dates plus any explicit closeout grace period.
-5. **Social payoff**: the winner, team result, shared celebration, beneficiary,
+1. **Format** — `individual`, `teams`, or `collective`.
+2. **Objective** — a ranking or a positive integer points target.
+3. **Scorecard** — one to five ordered additive components.
+4. **Window** — fixed scoring dates, settlement mode, closeout grace, and publishing
+   cadence.
+5. **Social payoff** — a winner, team result, shared celebration, beneficiary,
    consequence, or meaningful completion the room will experience.
 
-The same participant-level scorecard feeds every format. Metrics never know about
-teams, teams never know how a quantity was extracted, and the comedy layer never
-owns arithmetic.
+The participant-level scorecard is the common seam. Components do not know about
+teams, teams do not know how a quantity was derived, and the comedy layer never owns
+arithmetic.
 
 ### Formats
 
@@ -74,49 +63,39 @@ type GroupChallengeFormat =
     };
 ```
 
-Collective challenges require a target because their core question is how far the
-group has moved toward something together. Individual and team formats may rank
-competitors or race toward a target.
+Collective games require a target because their core question is how far the group
+has moved toward something together. Individual and team games may rank competitors
+or race toward a target.
 
 ### Teams
 
 A team has a stable id, a room-facing name, participant ids, and an optional captain.
-The captain is a social role only. A captain cannot opt another person into a
-challenge, grant their data, or change their sharing choices.
+The captain is a social role only. A captain cannot opt another person in, grant their
+data, or change their sharing choices.
 
-```ts
-type GroupChallengeTeam = {
-  id: string;
-  name: string;
-  participantIds: string[];
-  captainParticipantId?: string;
-};
-```
+Every opted-in participant belongs to exactly one team. Team membership is frozen at
+kickoff. A later move is an explicit dated ruling that applies prospectively and never
+rewrites an already published result.
 
-A participant may belong to at most one team. Team membership is frozen when the
-challenge starts. A later change is an explicit dated ruling that applies
-prospectively and never rewrites an already published result.
-
-Use `sum` for equally sized teams and naturally additive games. Use `average` when
-team sizes differ and a per-person comparison is the intended game. An average is
-not final or comparison-safe while any included participant has incomplete scoring
-evidence.
+Use `sum` for equal teams and naturally additive games. Use `average` only when
+unequal team sizes make per-person scoring the intended comparison. A team sum with
+incomplete evidence is labeled a verified subtotal. A team average is withheld until
+every included participant has complete component coverage.
 
 ## Additive scorecards
 
-A scorecard contains one to five components. Five is a hard product bound, not a
-suggested setup target. Most games should stay at one to three components; the extra
-room exists for groups that genuinely want a broader game.
+A scorecard contains one to five components. Five is a hard product bound, not the
+recommended default; most games should use one to three.
 
-Each component records:
+Each component freezes:
 
-- a stable id and room-facing label;
+- a stable kebab-case id and room-facing label;
 - the exact Vault Share projection scope or scopes it needs;
-- one human-readable evaluation rule explaining how the model derives a
-  non-negative integer quantity from those records;
-- the canonical quantity unit used for arithmetic;
-- a non-negative integer points rate;
-- an optional component cap.
+- one inspectable evaluation rule for deriving a non-negative integer quantity;
+- the integer quantity unit;
+- positive integer `points` and `perQuantity`;
+- an optional non-negative component cap;
+- `window-total` or `daily-additive` settlement.
 
 ```ts
 type GroupChallengeScorecardComponent = {
@@ -128,223 +107,228 @@ type GroupChallengeScorecardComponent = {
   points: number;
   perQuantity: number;
   maxPoints?: number;
+  settlementMode: "window-total" | "daily-additive";
 };
 ```
 
-The model owns `evaluationRule`. This deliberately avoids encoding every useful
-health-data question into a brittle metric-specific tool or formula language. For
-example, the model may define a component quantity as:
+The model owns `evaluationRule`. Useful quantities include total Steps, logged protein
+grams on complete logged days, qualifying workouts after a frozen local-time
+threshold, days meeting a threshold, total distance in integer meters, or
+baseline-adjusted change normalized to integer basis points.
 
-- total Steps in the challenge window;
-- total logged protein grams on complete logged days;
-- the number of settled workouts whose local start time is after 9 PM;
-- the number of days that met an agreed threshold;
-- baseline-adjusted improvement normalized to integer basis points.
+The rule must be reproducible from the named authorized records and frozen before
+scoring begins. Murph says a rule is unsupported when the available projection cannot
+evaluate it reliably.
 
-The rule must remain inspectable, reproducible from the exact shared records, and
-frozen before scoring begins. If the rule cannot be evaluated reliably from an
-available projection, Murph says that it is unsupported instead of inventing data.
+The arithmetic contract is:
 
-The arithmetic layer receives only the normalized integer quantity and applies:
-
-```ts
-componentPoints = floor(quantity * points / perQuantity);
+```text
+component points = min(optional cap, floor(quantity × points / perQuantity))
+participant points = sum(component points)
 ```
 
-Then it applies `maxPoints` when configured. Internally this calculation uses exact
-integer arithmetic so repeated runs cannot drift due to floating point behavior.
-All components are additive and non-negative in v1.
+The implementation uses exact `BigInt` arithmetic internally, applies caps before
+converting back to numbers, rejects unsafe integer results, and never uses floating
+point scoring. Decimal source values are normalized to an explicit integer base unit
+before crossing the arithmetic boundary.
 
-### Why the model owns interpretation
+V1 intentionally has no arbitrary code, general expression language, negative
+points, multipliers, nested formulas, or cross-component bonuses.
 
-Models will continue improving at understanding natural rules and structured data.
-Murph should benefit from that rather than forcing every future challenge idea
-through a growing enum of metric adapters.
+## Model and code ownership
 
-The model therefore owns:
+The model owns:
 
-- inferring or proposing the game from the conversation;
+- inferring or proposing the game from conversation;
+- preserving explicit human rules;
 - choosing the narrowest exact projection scopes;
-- explaining and freezing each evaluation rule;
-- converting the authorized records into a normalized component quantity;
-- judging whether a proposed scorecard is socially coherent and fairly balanced;
-- composing the update in the room's register.
+- writing and freezing evaluation rules;
+- converting authorized records into normalized component quantities;
+- previewing whether one proposed weight will dominate;
+- adjudicating ambiguities and composing the room-facing update.
 
 Deterministic code owns:
 
-- validating ids, bounds, team membership, and integer inputs;
-- applying point rates and caps;
-- adding component points;
-- team and collective aggregation;
-- coverage summaries;
+- strict input schemas and one-to-five component bounds;
+- stable ids, team membership, and explicit observation validation;
+- exact point rates, caps, and participant totals;
+- individual, team, and collective aggregation;
+- complete, partial, and unscored coverage summaries;
 - target progress and remaining points;
-- stable, testable output shapes.
+- stable output shapes.
 
-It does not read health data, choose metrics, define rules, schedule messages, store
+It does not read health data, choose a metric, infer a rule, schedule a message, write
 challenge state, or decide what to say.
-
-## Point-balance preview
-
-Before kickoff, Murph should preview the practical effect of proposed weights using
-one ordinary reference day or week. It need not optimize the weights or present a
-spreadsheet. It should simply expose when one component is likely to dominate.
-
-For example, when a representative day makes one component worth materially more
-than all other components combined, Murph says so and asks whether the room wants
-that intentionally. The group can keep an intentionally lopsided game.
-
-Optional caps are encouraged when an uncapped "more is always better" rule could
-create a bad exercise, nutrition, sleep, or recovery incentive. Caps are game
-mechanics, not health prescriptions.
 
 ## Evidence contract
 
-These states remain distinct for every participant and component:
+Every participant-component observation is exactly one of:
 
-- **available**: an authorized quantity can be computed from current eligible data;
-- **pending**: relevant data exists but its producer-owned completion rule has not
-  settled it yet;
-- **missing**: the exact share is granted but no usable current record is available;
-- **not_granted**: the participant has not shared the exact required scope;
-- **observed zero**: available evidence proves a real zero quantity.
+- `available` with a non-negative integer quantity;
+- `pending` because producer-owned completion has not settled it;
+- `missing` because the exact share is granted but current usable data is absent;
+- `not_granted` because the exact required group share is absent.
 
-A missing or pending component never becomes a measured zero. Because point rates
-are non-negative, the sum of available components is a verified lower-bound score,
-not necessarily the participant's final score.
+Observed zero is `available` with quantity `0`. Missing, pending, and not-granted
+components never become measured zeroes. Because every rate is non-negative, the sum
+of available components is a verified lower-bound score when coverage is incomplete.
 
-Every update reports aggregate coverage alongside the scoreboard. Team and
-collective coverage derives from participant-component coverage; aggregation never
-hides a missing person or component.
+Nutrient components use labels such as “logged protein” because those projections
+represent complete logged meal totals, not verified consumption.
 
-Nutrient components use labels such as "logged protein" because the current
-projection represents complete logged meal totals, not verified consumption.
+## Bounded shared reads
 
-## Sharing and reads
+The hosted shared-read limit remains deliberately small. A challenge deduplicates its
+exact scoring scopes in component order and splits them into stable batches of at
+most `ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES` scopes, currently
+three.
 
-The challenge uses the existing `murph.group action="read_shared"` authority. It
-requests the deduplicated exact scoring scopes needed by the scorecard, never a broad
-health-data bundle.
+Five components therefore do not require a wider hosted transport. Components may
+reuse a scope, and several bounded reads may feed one scorecard.
 
-The target contract supports up to five distinct scoring scopes in one coherent
-read. The initial implementation may land in stages while the existing hosted read
-limit is raised from three to five. Until the runtime and parser limits move
-together, a five-component scorecard must fit within the currently supported number
-of distinct scopes; multiple components may legitimately reuse one scope.
+The required sequence is:
 
-The permission order remains unchanged:
+1. Start the model turn and read the first scoring batch only.
+2. When that read proves any exact scoring scope `not_granted`, immediately handle
+   the eligible permission offer from that evidence and stop before another shared
+   read. The latest read remains the only permission evidence.
+3. Otherwise retain only normalized component evidence and read the next batch.
+4. Require every successful batch to return the same ordered current
+   `participantId` set. A changed membership snapshot cannot be combined; the run is
+   unverified and publishes no standings.
+5. Only after all scoring batches are granted may a separate diagnostic-only
+   `device-sync-status.v0` read investigate genuinely missing data.
 
-1. Read all scoring scopes first.
-2. If a scoring scope is `not_granted`, preserve that read as the current permission
-   evidence and offer only exact eligible scoring scopes.
-3. Only when scoring grants exist but usable data is genuinely missing may Murph run
-   a separate diagnostic-only read for `device-sync-status.v0`.
-4. A diagnostic read never explains the missing health quantity; it exposes only
-   its literal bounded connection-status facts.
+This preserves the existing privacy, authority, and result-size boundary. Raw
+vault-share files and private 1:1 data are never alternate scoring paths.
+
+## Deterministic CLI seam
+
+After all scoring batches agree on the roster, the model creates one explicit
+observation per opted-in participant and component. Only normalized statuses and
+integer quantities cross the arithmetic boundary—never raw shared records, provider
+payloads, handles, names, or unnecessary dates.
+
+The command is:
+
+```sh
+vault-cli knowledge score-challenge --input @<temporary-json-path> --format json
+```
+
+Its JSON input contains exactly `format`, `scorecard`, and `participants`. The command
+validates and returns a `GroupChallengeScoreResult`; it does not read the vault or
+write the challenge page. The assistant removes the temporary input and persists the
+result on the existing challenge page in the same turn.
+
+A command failure is an invalid normalized input or ruling. Murph fixes that input
+instead of silently falling back to model arithmetic.
 
 ## Durable ownership
 
-The existing group challenge knowledge page remains the sole durable challenge
-owner. Do not add a Prisma challenge table, Web scoring service, or second state
-system.
+The existing group challenge knowledge page is the sole durable owner. There is no
+Prisma challenge entity, Web scoring service, parallel score file, or second
+scheduler.
 
 The page keeps:
 
 - **Format & objective**
-- **Scorecard & exact rules**
+- **Scorecard & exact rules**, including scopes, units, rates, caps, settlement modes,
+  rounding, and `rulesRevision`
 - **Window & publishing cadence**
 - **Roster & teams**
 - **Sharing choices**
-- **Baselines**, only for components that use them
+- **Baselines**, only where a component needs one
+- **Cumulative settlement**, only for long-running daily-additive components
 - **Stakes or shared payoff**
-- **Canon and comedy bank**
-- **Sent log**
-- **Scoreboard snapshots**
-- **Confounders and protected notes**
+- **Canon, comedy bank, sent log, and protected notes**
+- **Scoreboard snapshots**, including coverage and the deterministic result
 
-Rules are frozen at kickoff. An amendment is a dated revision that applies
-prospectively. Murph never silently changes weights, thresholds, team membership, or
-rounding after seeing the standings.
+Managed state changes use `knowledge upsert`; append-only social facts may use
+`append-section`. Rules, weights, caps, thresholds, teams, settlement mode, and
+`rulesRevision` never change silently after results are visible.
 
-## Scheduling
+## Long-running cumulative settlement
 
-Use one automation per challenge. It may settle data daily while publishing less
-often:
+A short `window-total` component may be recomputed from the current shared window. A
+challenge that can outlive that window is production-safe only when every
+long-running component is `daily-additive`, or its source exposes the entire challenge
+history.
 
-- short friend challenges usually publish daily;
-- long-running club or charity targets usually publish weekly and on meaningful
-  milestones;
-- an ordinary settlement run may finish without a group reply.
+For each participant and daily-additive component, the page stores compact state:
 
-Do not create separate capture and publishing schedulers. The existing challenge
-page stores the durable cumulative result required when the Vault Share source window
-rolls forward.
+```json
+{
+  "rulesRevision": 1,
+  "settledThroughDate": "2026-07-28",
+  "cumulativeQuantity": 12345,
+  "skippedDates": []
+}
+```
 
-## Social behavior
+Every daily automation run:
 
-The social payoff varies by format:
+1. Reads the page before shared data.
+2. Considers only producer-settled dates after the watermark and inside the frozen
+   challenge window.
+3. Adds each date at most once and in order. An observed zero advances the watermark.
+4. Does not advance across absent or pending dates. A permanently unavailable date
+   enters `skippedDates` only through an explicit dated ruling; skip never means zero.
+5. Upserts the cumulative quantities and watermark before publishing or finishing
+   without reply.
+6. Feeds cumulative quantities—not the rolling source subtotal—to
+   `score-challenge`.
 
-- **Individual**: winner, loser, placement, or participant target.
-- **Teams**: team result, captaincy, rivalries, and team-owned stakes.
-- **Collective**: shared progress, milestones, celebration, beneficiary, or the
-  meaning of completing the goal.
+The first settled value for a date owns the published challenge ruling. Later imports
+may be noted as context but do not silently rewrite history. A missed run whose source
+dates have already rolled out is unverified rather than reconstructed from memory.
 
-A cooperative challenge never manufactures an individual loser. Murph does not
-blame the least-active participant when a collective target is missed. Team comedy
-starts with team identity, claims, captains, and swings in the aggregate before
-singling out a participant.
+This bounded watermark state supports annual automatic goals without retaining an
+unbounded daily ledger or creating another persistence system.
 
-## V1 boundaries
+## Scheduling and presentation
 
-V1 intentionally does not include:
+Each challenge uses one automation. A long-running challenge may settle daily while
+publishing weekly and at meaningful milestones. An ordinary settlement run may finish
+without a group reply. Capture and publishing never become separate schedulers.
 
-- arbitrary code or a general expression language;
-- multiplicative or negative components;
-- cross-component bonuses;
-- more than five components;
-- model-hidden scoring rules;
-- a new challenge database or Web scoring endpoint;
-- a separate implementation per format;
-- automatic migration of an active legacy challenge;
-- self-reported contribution events.
+Presentation follows format:
 
-Self-reported contributions are a later evidence adapter. They must be attributable,
-append-only, correctable through superseding entries, and never silently added on
-top of automatic data.
+- **Individual** — placement, participant targets, and agreed individual stakes.
+- **Teams** — the team result first; captains, names, rivalries, and aggregate swings
+  supply the social material.
+- **Collective** — verified progress, completeness, remaining points, pace or next
+  milestone, and the shared celebration or beneficiary.
 
-## Migration
+A cooperative challenge never invents an individual loser or turns the least-active
+member into the price of missing the target.
 
-1. Land this product contract and the pure scorecard arithmetic/aggregation helper.
-2. Teach the group-challenge skill to persist format, objective, and one-to-five
-   component scorecards while preserving room-native formation.
-3. Raise the operation-local shared-read scope limit from three to five across the
-   contract, parser, runtime adapter, tool schema, and focused tests.
-4. Use the helper from a small local scoring seam after the model has normalized
-   component quantities; do not move metric interpretation into that seam.
-5. Generalize diagnostics from participant-by-one-metric to
-   participant-by-component coverage.
-6. Generalize the comedy and closeout rules for team and collective formats.
-7. Prove long-running cumulative settlement before marketing annual targets.
-8. Leave existing active challenge pages on their current one-metric rules. New
-   challenges use the new format; legacy behavior can be deleted after no live page
-   depends on it.
+## Compatibility and rollout
+
+Existing active one-metric challenge pages continue under their frozen rules. New
+challenges may use the format and scorecard contract. A legacy page is migrated only
+through an explicit prospective rules revision; past published snapshots are never
+rewritten.
+
+The static root system prompt is unchanged. `group-challenge-scorecards` is an
+on-demand companion skill loaded for teams, targets, multiple metrics, weighted
+points, or long-running cumulative games.
 
 ## Acceptance cases
 
-- A scorecard accepts one through five unique additive components and rejects six.
-- The same scorecard can produce individual, team, and collective scoreboards.
-- A Steps, logged-protein, and after-9-PM-workout scorecard computes exact repeatable
-  integer points without metric-specific arithmetic code.
-- A missing protein component leaves the participant's verified lower-bound points
-  intact and labels coverage partial.
-- An observed zero earns zero points and remains available evidence.
-- Team sum remains a verified subtotal when evidence is partial.
-- Team average is not presented as comparison-safe until every included participant
-  has complete component coverage.
-- Collective target progress reports verified points, remaining points, and coverage.
+- One through five unique additive components are accepted; six are rejected.
+- The same participant scorecard produces individual, team, and collective outputs.
+- Steps, logged protein, and workouts after a local-time threshold score without
+  metric-specific arithmetic code.
+- Missing protein preserves verified lower-bound points and partial coverage.
+- Observed zero earns zero points while remaining available evidence.
+- Team sum exposes a verified subtotal; team average waits for complete coverage.
+- Collective progress reports verified points, remaining points, target status, and
+  coverage.
 - A captain cannot opt in teammates or authorize their data.
-- A rules amendment is explicit, revisioned, and prospective.
-- One component may reuse another component's exact scope without requesting the
-  permission twice.
-- A sixth distinct scoring scope is impossible because the component bound is five.
-- A scoring-grant miss is handled before any diagnostic read replaces its evidence.
-- Cooperative closeout never invents an individual loser.
+- Five distinct scopes compose through bounded reads without widening the transport.
+- A `not_granted` batch stops before a later read can replace its offer evidence.
+- Batches with different ordered participant sets are never combined.
+- Only normalized quantities and statuses reach deterministic scoring.
+- Daily-additive settlement cannot count a settled date twice.
+- Missing or pending dates do not advance the cumulative watermark.
+- Cooperative closeout never manufactures an individual loser.
