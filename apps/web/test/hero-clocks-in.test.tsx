@@ -500,13 +500,16 @@ test("an explicit member selection immediately owns the group audience", async (
   );
   const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
     .find((element) => element.textContent?.includes("4 People"));
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
   assert.ok(groupConversation);
   assert.ok(groupComposer);
   assert.ok(groupHeader);
+  assert.ok(audienceStatus);
   assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
   assert.equal(groupConversation.getAttribute("role"), "log");
   assert.equal(view.window.document.activeElement, groupConversation);
-  assert.match(view.container.textContent ?? "", /Group conversation selected/);
+  assert.equal(audienceStatus.textContent, "Group conversation selected.");
   assert.doesNotMatch(
     groupConversation.textContent ?? "",
     /How are my steps this week\?|Average 8\.4k a day/,
@@ -559,8 +562,11 @@ test("composer focus restores and announces the private audience from the automa
   const composer = view.container.querySelector<HTMLInputElement>(
     'input[aria-label="Message Murph"]',
   );
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
   assert.ok(groupHeader);
   assert.ok(composer);
+  assert.ok(audienceStatus);
   assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
 
   await act(async () => {
@@ -571,7 +577,7 @@ test("composer focus restores and announces the private audience from the automa
   });
 
   assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
-  assert.match(view.container.textContent ?? "", /Private conversation selected/);
+  assert.equal(audienceStatus.textContent, "Private conversation selected.");
   assert.match(
     view.container.textContent ?? "",
     /Did the magnesium actually do anything\?.*Two weeks in, deep sleep up 18%/s,
@@ -702,12 +708,15 @@ test("group start clears the private 1:1 thread and topic clicks return to a fre
   });
 
   const privateThread = view.container.textContent ?? "";
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
+  assert.ok(audienceStatus);
   assert.match(privateThread, /Did the sauna actually help my HRV\?/);
   assert.match(
     privateThread,
     /Sauna nights show \+9 ms HRV vs non-sauna nights/,
   );
-  assert.match(privateThread, /Private conversation selected/);
+  assert.equal(audienceStatus.textContent, "Private conversation selected.");
   assert.doesNotMatch(privateThread, /Walk challenge · Day 5 of 7/);
   assert.doesNotMatch(privateThread, /Standings, day 5 of 7/);
   const activeGroupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
