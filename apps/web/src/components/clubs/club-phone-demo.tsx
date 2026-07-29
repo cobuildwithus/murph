@@ -104,7 +104,7 @@ export function ClubPhoneDemo({
         murphHeadshotSrc={murphHeadshotSrc}
         result={stage.showResult ? CHALLENGE_RESULT : undefined}
       />
-      <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.15em] text-[#f5f0e8]/40">
+      <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.15em] text-[#f5f0e8]/60">
         Illustrative early-access flow
       </p>
     </div>

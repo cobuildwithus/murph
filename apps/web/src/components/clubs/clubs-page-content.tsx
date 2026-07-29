@@ -79,7 +79,7 @@ function HeroSection({
               {MURPH_CLUBS_EMAIL}
             </a>
           </div>
-          <p className="mt-8 font-mono text-[9px] uppercase tracking-[0.16em] text-[#f5f0e8]/38 sm:text-[10px]">
+          <p className="mt-8 font-mono text-[9px] uppercase tracking-[0.16em] text-[#f5f0e8]/60 sm:text-[10px]">
             Run clubs · gyms · studios · fitness communities
           </p>
         </div>
@@ -488,7 +488,7 @@ function SectionEyebrow({
       />
       <p
         className={`font-mono text-[9px] font-semibold uppercase tracking-[0.18em] sm:text-[10px] ${
-          dark ? "text-[#c4a882]" : "text-[#5a6e32]"
+          dark ? "text-[#c4a882]" : "text-[#3d5028]"
         }`}
       >
         {children}

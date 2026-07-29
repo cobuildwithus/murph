@@ -1,6 +1,6 @@
 # Clubs marketing page
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -56,4 +56,10 @@ Updated: 2026-07-29
 
 ## Verification
 
-- Pending.
+- Focused Vitest: 4 files and 8 tests passed, including client mode switching and reduced-motion stability.
+- Focused Playwright: `/clubs` passed five overflow widths and the global navigation remained complete at 768, 900, 1023, and 1024px.
+- Product-experience review: no findings.
+- Preliminary ReviewGPT: responsive navigation, client-behavior coverage, and small-text contrast findings resolved.
+- Visual proof: current desktop/mobile default, entry-point, footer, navigation, team, and head-to-head states captured from the real design study.
+- Canonical `pnpm test:diff <task paths>`: passed through the documented Crabbox/Testbox lane; 562 test files and 7,341 tests passed, with typecheck, lint, dev smoke, and production build also passing.
+Completed: 2026-07-29

@@ -18,10 +18,9 @@ const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const NAV_LINKS: ReadonlyArray<{
   href: string;
   label: string;
-  wideOnly?: boolean;
 }> = [
   { href: "/#how", label: "How it works" },
-  { href: "/clubs", label: "Clubs", wideOnly: true },
+  { href: "/clubs", label: "Clubs" },
   { href: "/#faq", label: "FAQ" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
@@ -111,11 +110,11 @@ export function StickyNav({
         />
       </Link>
       <div className="flex items-center gap-4 sm:gap-6">
-        {NAV_LINKS.map(({ href, label, wideOnly }) => (
+        {NAV_LINKS.map(({ href, label }) => (
           <a
             key={href}
             href={href}
-            className={`${wideOnly ? "hidden lg:block" : "hidden md:block"} text-sm transition-colors ${
+            className={`hidden text-sm transition-colors lg:block ${
               onDark
                 ? "text-white/75 hover:text-white"
                 : "text-[#2d3436]/80 hover:text-[#2d3436]"
@@ -133,7 +132,7 @@ export function StickyNav({
               ? `Star Murph on GitHub (${githubStarCount} stars)`
               : "Star Murph on GitHub"
           }
-          className={`hidden items-center gap-1.5 text-sm transition-colors md:inline-flex ${
+          className={`hidden items-center gap-1.5 text-sm transition-colors lg:inline-flex ${
             onDark
               ? "text-white/75 hover:text-white"
               : "text-[#2d3436]/80 hover:text-[#2d3436]"
@@ -161,7 +160,7 @@ export function StickyNav({
         <Drawer open={menuOpen} onOpenChange={setMenuOpen}>
           <DrawerTrigger
             aria-label="Open menu"
-            className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors md:hidden ${
+            className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors lg:hidden ${
               onDark
                 ? "text-white/85 hover:bg-white/10"
                 : "text-[#2d3436]/85 hover:bg-[#2d3436]/[0.06]"

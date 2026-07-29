@@ -51,7 +51,7 @@ export function ClubChallengeModes() {
             >
               <span
                 className={`font-mono text-[9px] font-semibold uppercase tracking-[0.18em] ${
-                  selected ? "text-[#5a6e32]" : "text-[#736a58]"
+                  selected ? "text-[#3d5028]" : "text-[#635a48]"
                 }`}
               >
                 {mode.label}
