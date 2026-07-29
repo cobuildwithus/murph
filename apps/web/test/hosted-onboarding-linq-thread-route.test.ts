@@ -1161,6 +1161,9 @@ function createStatefulThreadRoutePrisma() {
   const hostedMemberEmailAuthorization = {
     findMany: vi.fn().mockResolvedValue([]),
   };
+  const hostedMemberIdentity = {
+    findMany: vi.fn().mockResolvedValue([]),
+  };
   // Unified access read (readActiveHostedMemberAccess). Members are active by
   // default; thread-container members derive access from their (active) owner.
   // Tests for inactive members override this mock.
@@ -1199,6 +1202,7 @@ function createStatefulThreadRoutePrisma() {
     },
     hostedMember,
     hostedMemberEmailAuthorization,
+    hostedMemberIdentity,
     hostedMemberRouting,
     hostedThreadContainer,
     hostedThreadContainerParticipant,
@@ -5000,6 +5004,19 @@ describe("Linq group chat auto-provision", () => {
         }
         return null;
       });
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async ({ where }: {
+      where: { phoneLookupKey: { in: string[] } };
+    }) => {
+      const lookupKeys = where.phoneLookupKey.in;
+      return [
+        lookupKeys.includes(createHostedPhoneLookupKey("+15551112222") ?? "")
+          ? { memberId: "member_owner_123" }
+          : null,
+        lookupKeys.includes(createHostedPhoneLookupKey("+15552223333") ?? "")
+          ? { memberId: "member_participant_123" }
+          : null,
+      ].filter((record): record is { memberId: string } => record !== null);
+    });
     mockSuccessfulGroupProvision({ prisma, senderCore });
     usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
