@@ -54,6 +54,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: false,
       },
       groupToolPort: { request },
+      linqService: "imessage",
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000001",
@@ -121,13 +122,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         threadIsDirect: true,
       },
       groupToolPort: { request },
-      linqDeliveryContexts: [
-        buildLinqDeliveryContext({
-          service: "SMS",
-          target: "raw-direct-thread",
-          threadIsDirect: true,
-        }),
-      ],
+      linqDeliveryContexts: [],
+      linqService: "sms",
     });
 
     await groupTool.request({ action: "read_usage_referral" });
