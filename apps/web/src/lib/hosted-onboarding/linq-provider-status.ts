@@ -52,7 +52,14 @@ function parseHostedLinqProviderStatus<TStatus extends string>(
   const normalized = normalizeNullableString(
     typeof value === "string" ? value : null,
   )?.toUpperCase();
-  return normalized && (allowed as readonly string[]).includes(normalized)
-    ? normalized as TStatus
-    : null;
+  if (!normalized) {
+    return null;
+  }
+
+  for (const status of allowed) {
+    if (status === normalized) {
+      return status;
+    }
+  }
+  return null;
 }
