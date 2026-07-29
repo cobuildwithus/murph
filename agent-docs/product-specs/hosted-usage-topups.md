@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group sponsorship
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 ## Decision
 
@@ -9,7 +9,9 @@ Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
 to decide who receives the usage and how it is consumed. Current-policy
 personal, Family, and group funding first reuse one canonical card attached to
 the authenticated payer's Stripe Customer and fall back to Checkout for card
-collection or authentication.
+collection or authentication. Checkout lets the payer explicitly save the
+selected method for later top-ups; only that broadly reusable card state gets
+priority over a subscription-only default on a future purchase.
 
 The personal and Family offer catalog is:
 
@@ -681,9 +683,10 @@ funding route share this sequence:
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
 11. For current-policy personal, Family, and group purchases, resolve one
-    canonical reusable card attached to the payer Customer. Conflicting
-    Customer/Subscription defaults or multiple cards without one canonical
-    choice skip this path.
+    canonical reusable card attached to the payer Customer. One explicitly
+    reusable card takes priority over a subscription-only default. Conflicting
+    reusable defaults, multiple reusable cards without one reusable default, or
+    multiple legacy cards without one canonical choice skip this path.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase, bind only an active payer's still-`created` purchase to
@@ -714,6 +717,12 @@ The Stripe Session uses:
 - `setup_future_usage=off_session` for current-policy personal, Family, and
   group Checkout, so the collected card can be reused for a later explicit
   top-up;
+- `saved_payment_method_options.payment_method_save=enabled` for current-policy
+  Checkout, so Stripe collects the payer's explicit choice before marking a
+  method reusable across later top-ups;
+- `saved_payment_method_options.allow_redisplay_filters=["always"]`, so
+  historical subscription-limited methods are not silently exposed in a
+  separate top-up context;
 - a frozen `expires_at` 90 minutes after purchase creation;
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
@@ -744,9 +753,13 @@ Request policy `hosted-usage-credit-checkout-v1` remains reconstructible
 without card saving so an in-flight idempotent Checkout request never changes
 shape. Version two remains reconstructible with future-use saving and direct
 saved-card payment for group purchases only. New purchases freeze
-`hosted-usage-credit-checkout-v3`, which enables both behaviors for personal,
-Family, and group targets. Every retry and Stripe proof check uses the
-purchase's frozen policy version rather than the latest global version.
+version three with both behaviors for personal, Family, and group targets.
+New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
+targets, adds Stripe's explicit payment-method save choice to Checkout, and
+prefers one `allow_redisplay=always` card over a subscription-only default.
+Versions one through three retain their original request and selection shapes.
+Every retry and Stripe proof check uses the purchase's frozen policy version
+rather than the latest global version.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -880,10 +893,12 @@ expose debt in a group chat, or charge another participant.
 - Checkout creation is bounded per authenticated payer and request key; Stripe
   Radar and a reviewed operational velocity ceiling must be configured before
   production launch.
-- Saved-card group funding never accepts a browser-supplied PaymentMethod.
+- Saved-card funding never accepts a browser-supplied PaymentMethod.
   Murph selects only one canonical card attached to the authenticated payer's
-  verified Customer, persists the resulting PaymentIntent before confirmation,
-  and never stores raw card details.
+  verified Customer. Current policy treats `allow_redisplay=always` as the
+  explicit reusable-card signal and otherwise preserves the conservative
+  default-card rules. Murph persists the resulting PaymentIntent before
+  confirmation and never stores raw card details.
 - Payment records and health-sharing permissions remain separate. Buying usage
   never grants access to another person's data.
 

@@ -26,6 +26,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import {
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   isHostedUsageCreditSavedCardPolicyVersion,
   type HostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
@@ -303,6 +304,7 @@ async function resolveHostedUsageCreditSavedCard(input: {
   }
 
   const attachedPaymentMethodIds = new Set<string>();
+  const reusablePaymentMethodIds = new Set<string>();
   for (const paymentMethod of paymentMethods.data) {
     if (
       paymentMethod.type !== "card" ||
@@ -314,6 +316,9 @@ async function resolveHostedUsageCreditSavedCard(input: {
       );
     }
     attachedPaymentMethodIds.add(paymentMethod.id);
+    if (paymentMethod.allow_redisplay === "always") {
+      reusablePaymentMethodIds.add(paymentMethod.id);
+    }
   }
 
   const preferredPaymentMethodIds = new Set<string>();
@@ -349,6 +354,24 @@ async function resolveHostedUsageCreditSavedCard(input: {
       attachedPaymentMethodIds.has(subscriptionPaymentMethodId)
     ) {
       preferredPaymentMethodIds.add(subscriptionPaymentMethodId);
+    }
+  }
+  if (
+    input.purchase.checkoutRequestPolicyVersion ===
+      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+  ) {
+    if (reusablePaymentMethodIds.size === 1) {
+      return [...reusablePaymentMethodIds][0] ?? null;
+    }
+    if (reusablePaymentMethodIds.size > 1) {
+      const preferredReusablePaymentMethodIds = new Set(
+        [...preferredPaymentMethodIds].filter((paymentMethodId) =>
+          reusablePaymentMethodIds.has(paymentMethodId)
+        ),
+      );
+      return preferredReusablePaymentMethodIds.size === 1
+        ? [...preferredReusablePaymentMethodIds][0] ?? null
+        : null;
     }
   }
   if (preferredPaymentMethodIds.size === 1) {

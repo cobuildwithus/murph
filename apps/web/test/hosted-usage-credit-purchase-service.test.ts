@@ -351,6 +351,9 @@ describe("usage-credit saved-card policy", () => {
     ["hosted-usage-credit-checkout-v3", "personal", true],
     ["hosted-usage-credit-checkout-v3", "family", true],
     ["hosted-usage-credit-checkout-v3", "group", true],
+    ["hosted-usage-credit-checkout-v4", "personal", true],
+    ["hosted-usage-credit-checkout-v4", "family", true],
+    ["hosted-usage-credit-checkout-v4", "group", true],
   ] as const)(
     "maps %s and %s to saved-card support=%s",
     (policyVersion, targetKind, supported) => {
@@ -364,6 +367,7 @@ describe("usage-credit saved-card policy", () => {
   it.each([
     "hosted-usage-credit-checkout-v2",
     "hosted-usage-credit-checkout-v3",
+    "hosted-usage-credit-checkout-v4",
   ] as const)("freezes %s in saved-card metadata", (policyVersion) => {
     expect(buildHostedUsageCreditSavedCardMetadata(
       "hucp_abcdefghijklmnop",
@@ -504,7 +508,7 @@ describe("createHostedUsageCreditCheckout", () => {
     ["personal", "cus_123"],
     ["family", "cus_family_owner"],
   ] as const)(
-    "charges the canonical saved card for a v3 %s top-up",
+    "charges the canonical saved card for a v4 %s top-up",
     async (targetKind, customerId) => {
       const fake = createFakePrisma();
       mockCanonicalSavedCard(customerId);
@@ -559,7 +563,7 @@ describe("createHostedUsageCreditCheckout", () => {
         expect.objectContaining({
           customer: customerId,
           metadata: expect.objectContaining({
-            policyVersion: "hosted-usage-credit-checkout-v3",
+            policyVersion: "hosted-usage-credit-checkout-v4",
           }),
           payment_method: "pm_saved_card_123",
         }),
@@ -1428,7 +1432,7 @@ describe("createHostedUsageCreditCheckout", () => {
           latest_charge: "ch_saved_card_123",
           livemode: false,
           metadata: {
-            policyVersion: "hosted-usage-credit-checkout-v3",
+            policyVersion: "hosted-usage-credit-checkout-v4",
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit_saved_card",
           },
@@ -1483,6 +1487,134 @@ describe("createHostedUsageCreditCheckout", () => {
       stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
       stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
     });
+  });
+
+  it("prefers one explicitly reusable card over a subscription-only default", async () => {
+    const fake = createFakePrisma();
+    mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+      data: [
+        {
+          allow_redisplay: "limited",
+          customer: "cus_group_payer",
+          id: "pm_subscription_default",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        },
+        {
+          allow_redisplay: "always",
+          customer: "cus_group_payer",
+          id: "pm_reusable_topup",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        },
+      ],
+      has_more: false,
+      object: "list",
+      url: "/v1/payment_methods",
+    });
+    mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+      data: [{
+        customer: "cus_group_payer",
+        default_payment_method: "pm_subscription_default",
+        livemode: false,
+        object: "subscription",
+        status: "active",
+      }],
+      has_more: false,
+      object: "list",
+      url: "/v1/subscriptions",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async (request: Record<string, unknown>) => ({
+        amount: request.amount,
+        amount_received: 0,
+        currency: request.currency,
+        customer: request.customer,
+        id: "pi_saved_card_123",
+        latest_charge: null,
+        livemode: false,
+        metadata: request.metadata,
+        object: "payment_intent",
+        status: "requires_confirmation",
+      }),
+    );
+    mocks.stripePaymentIntentConfirm.mockImplementationOnce(
+      async () => buildSavedCardPaymentIntent({
+        amountReceived: 1_000,
+        latestCharge: "ch_saved_card_123",
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "succeeded",
+      }),
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "payment_pending" });
+
+    expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_method: "pm_reusable_topup",
+      }),
+      expect.any(Object),
+    );
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("uses Checkout instead of guessing among reusable cards", async () => {
+    const fake = createFakePrisma();
+    mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+      data: [
+        {
+          allow_redisplay: "always",
+          customer: "cus_group_payer",
+          id: "pm_reusable_one",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        },
+        {
+          allow_redisplay: "always",
+          customer: "cus_group_payer",
+          id: "pm_reusable_two",
+          livemode: false,
+          object: "payment_method",
+          type: "card",
+        },
+      ],
+      has_more: false,
+      object: "list",
+      url: "/v1/payment_methods",
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "checkout_open" });
+
+    expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        saved_payment_method_options: {
+          allow_redisplay_filters: ["always"],
+          payment_method_save: "enabled",
+        },
+      }),
+      expect.any(Object),
+    );
   });
 
   it("falls back to Checkout when saved-card defaults disagree", async () => {
@@ -1589,7 +1721,47 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(request.payment_intent_data).not.toHaveProperty(
       "setup_future_usage",
     );
+    expect(request).not.toHaveProperty("saved_payment_method_options");
   });
+
+  it.each([
+    "hosted-usage-credit-checkout-v2",
+    "hosted-usage-credit-checkout-v3",
+  ] as const)(
+    "reconstructs a frozen %s group Checkout without adding the v4 save control",
+    async (policyVersion) => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+      const purchase = onlyPurchase(fake.purchases);
+      purchase.checkoutRequestPolicyVersion = policyVersion;
+
+      const request = await reconstructHostedUsageCreditStripeCheckoutRequest({
+        prisma: fake.prisma as never,
+        purchase: purchase as never,
+      });
+
+      expect(request.metadata).toEqual({
+        policyVersion,
+        purchaseId: purchase.id,
+        purpose: "hosted_usage_credit",
+      });
+      expect(request.payment_intent_data).toEqual({
+        metadata: request.metadata,
+        setup_future_usage: "off_session",
+      });
+      expect(request).not.toHaveProperty("saved_payment_method_options");
+    },
+  );
 
   it("cancels an authentication-required saved-card intent before opening Checkout", async () => {
     const fake = createFakePrisma();
@@ -2253,18 +2425,22 @@ describe("createHostedUsageCreditCheckout", () => {
         expires_at: Math.floor((NOW.getTime() + 90 * 60 * 1_000) / 1_000),
         line_items: [{ price: "price_usage_10", quantity: 1 }],
         metadata: {
-          policyVersion: "hosted-usage-credit-checkout-v3",
+          policyVersion: "hosted-usage-credit-checkout-v4",
           purchaseId: purchase.id,
           purpose: "hosted_usage_credit",
         },
         mode: "payment",
         payment_intent_data: {
           metadata: {
-            policyVersion: "hosted-usage-credit-checkout-v3",
+            policyVersion: "hosted-usage-credit-checkout-v4",
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit",
           },
           setup_future_usage: "off_session",
+        },
+        saved_payment_method_options: {
+          allow_redisplay_filters: ["always"],
+          payment_method_save: "enabled",
         },
       });
       expect(request).not.toHaveProperty("price_data");
@@ -2292,7 +2468,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(purchase).toMatchObject({
       cashAmountMinor: 1_000,
       cashCurrency: "usd",
-      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v3",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
       grantUsdMicros: 10_000_000n,
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
@@ -3999,7 +4175,7 @@ function buildSavedCardPaymentIntent(input: {
     latest_charge: input.latestCharge,
     livemode: false,
     metadata: {
-      policyVersion: "hosted-usage-credit-checkout-v3",
+      policyVersion: "hosted-usage-credit-checkout-v4",
       purchaseId: input.purchaseId,
       purpose: "hosted_usage_credit_saved_card",
     },
