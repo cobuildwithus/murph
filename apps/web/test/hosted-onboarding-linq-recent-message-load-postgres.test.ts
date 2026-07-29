@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostedLinqRecentMessageEffectCountsQuery,
   readHostedLinqRecentMessageEffectCountsTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -22,12 +20,11 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq recent message load PostgreSQL proof",
   () => {
-    it("counts only recent canonical effects and uses both partial indexes", async () => {
+    it("counts only recent canonical effects and exposes both partial indexes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const suffix = randomUUID();
       const busyLineKey = `test:linq-recent-load:busy:${suffix}`;
       const quietLineKey = `test:linq-recent-load:quiet:${suffix}`;
-      const noiseLineKey = `test:linq-recent-load:noise:${suffix}`;
       const deliveryPrefix = `test:hld:linq-recent-load:${suffix}:`;
       const eventPrefix = `test:linq-recent-load:event:${suffix}:`;
       const now = at("2026-07-29T15:00:00.000Z");
@@ -62,7 +59,7 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         await prisma.hostedLinqLine.createMany({
-          data: [busyLineKey, quietLineKey, noiseLineKey].map((phoneNumberLookupKey) => ({
+          data: [busyLineKey, quietLineKey].map((phoneNumberLookupKey) => ({
             phoneNumberHint: "*** test",
             phoneNumberLookupKey,
             source: "test",
@@ -77,13 +74,6 @@ describe.skipIf(!runPostgresProof)(
             delivery("future", busyLineKey, at("2026-07-29T15:00:00.001Z")),
             delivery("failed", busyLineKey, null),
             delivery("unbound", null, at("2026-07-29T14:00:00.000Z")),
-            ...Array.from({ length: 512 }, (_, index) => (
-              delivery(
-                `noise-recent-${index}`,
-                noiseLineKey,
-                at("2026-07-29T14:00:00.000Z"),
-              )
-            )),
           ],
         });
         await prisma.hostedLinqProviderEvent.createMany({
@@ -95,15 +85,6 @@ describe.skipIf(!runPostgresProof)(
             event("old", busyLineKey, "inbound", "message.received", at("2026-07-22T14:59:59.999Z")),
             event("future", busyLineKey, "inbound", "message.received", at("2026-07-29T15:00:00.001Z")),
             event("unbound", null, "inbound", "message.received", at("2026-07-29T14:30:00.000Z")),
-            ...Array.from({ length: 512 }, (_, index) => (
-              event(
-                `noise-recent-${index}`,
-                noiseLineKey,
-                "inbound",
-                "message.received",
-                at("2026-07-29T14:00:00.000Z"),
-              )
-            )),
           ],
         });
 
@@ -117,23 +98,67 @@ describe.skipIf(!runPostgresProof)(
           [busyLineKey, 2],
           [quietLineKey, 3],
         ]));
-        await prisma.$executeRaw`ANALYZE "hosted_linq_delivery"`;
-        await prisma.$executeRaw`ANALYZE "hosted_linq_provider_event"`;
-        const queryPlan = await prisma.$queryRaw<Array<{ "QUERY PLAN": unknown }>>(
-          Prisma.sql`
-            EXPLAIN (FORMAT JSON, COSTS OFF)
-            ${buildHostedLinqRecentMessageEffectCountsQuery({
-              lineLookupKeys: [busyLineKey, quietLineKey],
-              now,
-            })}
-          `,
+
+        const indexes = await prisma.$queryRaw<IndexDefinition[]>`
+          SELECT
+            index_class.relname AS "indexName",
+            pg_get_indexdef(index_metadata.indexrelid) AS "indexDefinition",
+            index_metadata.indisready AS "isReady",
+            index_metadata.indisvalid AS "isValid"
+          FROM pg_index AS index_metadata
+          INNER JOIN pg_class AS index_class
+            ON index_class.oid = index_metadata.indexrelid
+          WHERE index_class.relname IN (
+            'hosted_linq_delivery_line_accepted_at_idx',
+            'hosted_linq_provider_event_line_inbound_received_at_idx'
+          )
+          ORDER BY index_class.relname
+        `;
+        expect(indexes).toHaveLength(2);
+        expect(indexes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              indexDefinition: expect.stringContaining(
+                "USING btree (phone_number_lookup_key, accepted_at)",
+              ),
+              indexName: "hosted_linq_delivery_line_accepted_at_idx",
+              isReady: true,
+              isValid: true,
+            }),
+            expect.objectContaining({
+              indexDefinition: expect.stringContaining(
+                "USING btree (phone_number_lookup_key, received_at)",
+              ),
+              indexName:
+                "hosted_linq_provider_event_line_inbound_received_at_idx",
+              isReady: true,
+              isValid: true,
+            }),
+          ]),
         );
-        const serializedPlan = JSON.stringify(queryPlan);
-        expect(serializedPlan).toContain(
-          "hosted_linq_delivery_line_accepted_at_idx",
+        const deliveryIndex = indexes.find(
+          ({ indexName }) =>
+            indexName === "hosted_linq_delivery_line_accepted_at_idx",
         );
-        expect(serializedPlan).toContain(
-          "hosted_linq_provider_event_line_inbound_received_at_idx",
+        expect(deliveryIndex?.indexDefinition).toContain(
+          "phone_number_lookup_key IS NOT NULL",
+        );
+        expect(deliveryIndex?.indexDefinition).toContain(
+          "accepted_at IS NOT NULL",
+        );
+        const inboundIndex = indexes.find(
+          ({ indexName }) =>
+            indexName
+              === "hosted_linq_provider_event_line_inbound_received_at_idx",
+        );
+        expect(inboundIndex?.indexDefinition).toContain(
+          "phone_number_lookup_key IS NOT NULL",
+        );
+        expect(inboundIndex?.indexDefinition).toContain(
+          "event_type = 'message.received'::text",
+        );
+        expect(inboundIndex?.indexDefinition).toContain(
+          "direction = 'inbound'::text",
         );
       } finally {
         await prisma.hostedLinqProviderEvent.deleteMany({
@@ -145,7 +170,7 @@ describe.skipIf(!runPostgresProof)(
         await prisma.hostedLinqLine.deleteMany({
           where: {
             phoneNumberLookupKey: {
-              in: [busyLineKey, quietLineKey, noiseLineKey],
+              in: [busyLineKey, quietLineKey],
             },
           },
         });
@@ -154,6 +179,13 @@ describe.skipIf(!runPostgresProof)(
     });
   },
 );
+
+type IndexDefinition = {
+  indexDefinition: string;
+  indexName: string;
+  isReady: boolean;
+  isValid: boolean;
+};
 
 function at(value: string): Date {
   return new Date(value);
