@@ -227,7 +227,7 @@ test("EnvironmentPage renders private habitat facts from Browser Vault", async (
   assert.doesNotMatch(markup, /Target score/);
 });
 
-test("EnvironmentPage keeps the report visible at zero data and starts in the member's available channel", async () => {
+test("EnvironmentPage gives zero-data members one clear start and previews the report", async () => {
   const emptyClient = await createFixtureClient({ includeHabitat: false });
   mocks.useBrowserVault.mockReturnValue({
     client: emptyClient,
@@ -241,17 +241,25 @@ test("EnvironmentPage keeps the report visible at zero data and starts in the me
 
   const markup = renderToStaticMarkup(await EnvironmentPage());
 
-  assert.match(markup, /Environment grade/);
-  assert.match(markup, /A few facts unlock your first fair grade/);
-  assert.match(markup, /Start with five short topics/);
-  assert.match(markup, /Build your environment report in one take/);
-  assert.match(markup, /Tell Murph by voice/);
-  assert.match(markup, /Chat instead/);
+  assert.match(markup, /See how your home supports your sleep, air and focus/);
+  assert.match(markup, /Start the 2-minute walkthrough/);
+  assert.match(markup, /Prefer typing\? Use chat/);
+  assert.match(markup, /send it to Murph/);
+  assert.match(markup, /Your report will cover/);
+  assert.match(
+    markup,
+    /Missing answers and optional equipment never lower your grade/,
+  );
   assert.match(markup, />Sleep</);
   assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Recovery &amp; devices/);
   assert.match(markup, />Workspace</);
   assert.match(markup, /href="sms:\+15555550100\?body=/);
+  assert.doesNotMatch(markup, /Environment grade/);
+  assert.doesNotMatch(markup, /Coverage/);
+  assert.doesNotMatch(markup, /What to check next/);
+  assert.doesNotMatch(markup, /Not known/);
+  assert.doesNotMatch(markup, />Share</);
   assert.doesNotMatch(markup, /t\.me|telegram/i);
 });
 

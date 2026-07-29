@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HABITAT_DECLINED_VALUE } from "@murphai/contracts";
-import { ArrowRight, Lightbulb } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, Lightbulb, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -31,11 +32,14 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
 const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
-const EMPTY_HABITAT_NOTES = EMPTY_HABITAT_SCENE.categories.map((category) =>
-  deriveCategoryNote(category, EMPTY_HABITAT_VALUES),
-);
-const EMPTY_HABITAT_GRADE = overallGrade(EMPTY_HABITAT_NOTES);
-const EMPTY_HABITAT_COVERAGE = resolveEnvironmentCoverage(EMPTY_HABITAT_SCENE);
+
+const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
+  sleep: "Temperature, darkness, noise and bedroom air.",
+  air: "Ventilation, damp, smoke and drinking water.",
+  light: "Morning daylight and evening lighting.",
+  recovery: "The recovery tools and devices you already use.",
+  workspace: "Sitting, screen setup, breaks and discomfort.",
+};
 
 export default function EnvironmentPageClient({
   contactAction,
@@ -57,6 +61,7 @@ export default function EnvironmentPageClient({
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
   const location = readableLocation(values);
   const conditions = useEnvironmentConditions(location);
+  const hasEnvironmentData = hasKnownHabitatValue(values);
 
   if (status === "loading") {
     return (
@@ -99,16 +104,22 @@ export default function EnvironmentPageClient({
   }
 
   return (
-    <EnvironmentShell actions={<ShareEnvironmentButton />}>
-      <EnvironmentReport
-        values={values}
-        scene={scene}
-        notes={notes}
-        grade={grade}
-        coverage={coverage}
-        contactAction={contactAction}
-        conditions={conditions}
-      />
+    <EnvironmentShell
+      actions={hasEnvironmentData ? <ShareEnvironmentButton /> : undefined}
+    >
+      {hasEnvironmentData ? (
+        <EnvironmentReport
+          values={values}
+          scene={scene}
+          notes={notes}
+          grade={grade}
+          coverage={coverage}
+          contactAction={contactAction}
+          conditions={conditions}
+        />
+      ) : (
+        <EnvironmentEmptyState contactAction={contactAction} />
+      )}
     </EnvironmentShell>
   );
 }
@@ -143,15 +154,85 @@ export function EnvironmentEmptyState({
   contactAction: MurphContactOption | null;
 }) {
   return (
-    <EnvironmentReport
-      values={EMPTY_HABITAT_VALUES}
-      scene={EMPTY_HABITAT_SCENE}
-      notes={EMPTY_HABITAT_NOTES}
-      grade={EMPTY_HABITAT_GRADE}
-      coverage={EMPTY_HABITAT_COVERAGE}
-      contactAction={contactAction}
-      conditions={{ outdoorAir: "Not known", weather: "Not known" }}
-    />
+    <section
+      aria-labelledby="environment-empty-title"
+      className="overflow-hidden rounded-xl border border-border bg-card"
+    >
+      <div className="grid lg:grid-cols-[6fr_5fr]">
+        <div className="flex flex-col px-6 py-8 sm:px-8 sm:py-10 lg:px-10 lg:py-12">
+          <p className="flex items-center gap-2 text-base font-medium text-primary sm:text-sm">
+            <ShieldCheck
+              className="size-5 shrink-0 sm:size-4"
+              aria-hidden="true"
+            />
+            Private to you
+          </p>
+          <h2
+            id="environment-empty-title"
+            className="mt-7 max-w-[18ch] text-balance font-serif text-4xl font-semibold tracking-[-0.03em] text-foreground sm:text-5xl"
+          >
+            See how your home supports your sleep, air and focus.
+          </h2>
+          <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
+            Record a two-minute tour of your home and send it to Murph. The
+            clear details will build your personal grade and a short list of
+            things worth checking.
+          </p>
+
+          <div className="mt-8 flex flex-col items-start gap-4">
+            <EnvironmentVoiceCapture
+              contactAction={contactAction}
+              triggerLabel="Start the 2-minute walkthrough"
+            />
+            {contactAction ? (
+              <a
+                href={contactAction.href}
+                target={contactAction.target}
+                rel={contactAction.rel}
+                className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
+              >
+                Prefer typing? Use chat
+                <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+              </a>
+            ) : null}
+          </div>
+
+          <p className="mt-7 max-w-[58ch] text-pretty text-base text-muted-foreground sm:text-sm">
+            Missing answers and optional equipment never lower your grade.
+          </p>
+        </div>
+
+        <div className="border-t border-border bg-muted/20 px-6 py-7 sm:px-8 sm:py-9 lg:border-l lg:border-t-0 lg:px-8 lg:py-10">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Your report will cover
+          </p>
+          <div className="mt-4 divide-y divide-border">
+            {EMPTY_HABITAT_SCENE.categories.map((category) => (
+              <div
+                key={category.id}
+                className="flex items-start gap-4 py-4 first:pt-0 last:pb-0"
+              >
+                <Image
+                  src={category.thumbnail.src}
+                  alt=""
+                  width={category.thumbnail.w}
+                  height={category.thumbnail.h}
+                  className="size-12 shrink-0 object-contain"
+                />
+                <div className="min-w-0 pt-0.5">
+                  <h3 className="font-serif text-lg font-semibold tracking-[-0.02em] text-foreground">
+                    {category.title}
+                  </h3>
+                  <p className="mt-0.5 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm">
+                    {EMPTY_CATEGORY_SUMMARIES[category.id]}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -361,6 +442,17 @@ function readableLocation(values: HabitatValues): string | null {
     value.trim().length > 0
     ? value.trim()
     : null;
+}
+
+function hasKnownHabitatValue(values: HabitatValues): boolean {
+  return Object.values(values).some((aspect) =>
+    Object.values(aspect).some(
+      (value) =>
+        value !== null &&
+        value !== undefined &&
+        value !== HABITAT_DECLINED_VALUE,
+    ),
+  );
 }
 
 function useEnvironmentConditions(location: string | null): {

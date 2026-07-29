@@ -60,9 +60,11 @@ type RecordingState = "idle" | "recording" | "ready" | "sending";
 export function EnvironmentVoiceCapture({
   contactAction,
   compact = false,
+  triggerLabel = "Tell Murph by voice",
 }: {
   contactAction: MurphContactOption | null;
   compact?: boolean;
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<RecordingState>("idle");
@@ -140,11 +142,29 @@ export function EnvironmentVoiceCapture({
       });
       recorder.start();
       startedAtRef.current = Date.now();
+      setTopicIndex(0);
       setElapsedMs(0);
       setState("recording");
     } catch (error) {
       setNotice(microphoneAccessNotice(error));
     }
+  };
+
+  const cancelRecording = () => {
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    streamRef.current = null;
+    chunksRef.current = [];
+    setState("idle");
+    setTopicIndex(0);
+    setElapsedMs(0);
+    setRecordingFile(null);
+    setNotice(null);
+    setOpen(false);
   };
 
   const stopRecording = async (): Promise<File | null> => {
@@ -189,8 +209,10 @@ export function EnvironmentVoiceCapture({
           title: "My home environment for Murph",
           text: "Please extract the clear facts from this voice memo and save them to my Habitat record. Skip anything uncertain.",
         });
-        setOpen(false);
-        reset();
+        setState("ready");
+        setNotice(
+          "The share sheet closed. If you did not choose Murph, open it again or download the recording.",
+        );
         return;
       }
 
@@ -244,12 +266,15 @@ export function EnvironmentVoiceCapture({
         size={compact ? "sm" : "lg"}
         onClick={() => setOpen(true)}
       >
-        <Mic className="size-4" aria-hidden="true" />
-        Tell Murph by voice
+        <Mic data-icon="inline-start" aria-hidden="true" />
+        {triggerLabel}
       </Button>
 
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex min-h-[min(680px,calc(100dvh-2rem))] max-w-2xl flex-col overflow-hidden p-0">
+        <DialogContent
+          className="flex max-h-[calc(100dvh-1rem)] min-h-[min(700px,calc(100dvh-1rem))] flex-col overflow-y-auto p-0 sm:max-h-[calc(100dvh-3rem)] sm:min-h-[min(620px,calc(100dvh-3rem))] sm:max-w-4xl sm:overflow-hidden"
+          showCloseButton={state !== "recording"}
+        >
           <DialogHeader className="border-b border-border px-6 py-5 pr-12">
             <DialogTitle>Walk Murph through your home</DialogTitle>
             <DialogDescription>
@@ -258,30 +283,39 @@ export function EnvironmentVoiceCapture({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-1 flex-col px-6 py-6 sm:px-8 sm:py-8">
-            {state === "idle" ? (
-              <div className="m-auto flex max-w-md flex-col items-center text-center">
-                <span className="flex size-20 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Mic className="size-8" aria-hidden="true" />
-                </span>
-                <h2 className="mt-6 font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-                  About two minutes is enough
-                </h2>
-                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                  The cards only remind you what to mention. Murph will
-                  transcribe the voice memo, save clear facts, and leave
-                  uncertain details alone.
-                </p>
-                <Button className="mt-7" size="lg" onClick={startRecording}>
-                  <Mic className="size-4" aria-hidden="true" />
-                  Start recording
-                </Button>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between">
+          <div className="grid flex-1 lg:grid-cols-[17rem_minmax(0,1fr)]">
+            <div className="flex flex-col border-b border-border bg-muted/20 px-6 py-5 lg:border-b-0 lg:border-r lg:py-7">
+              {state === "idle" ? (
+                <>
+                  <Mic
+                    className="hidden size-6 shrink-0 text-primary lg:block"
+                    aria-hidden="true"
+                  />
+                  <h2 className="text-balance font-serif text-xl font-semibold tracking-[-0.02em] text-foreground lg:mt-5 lg:text-2xl">
+                    About two minutes is enough
+                  </h2>
+                  <p className="mt-2 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm lg:mt-3">
+                    <span className="lg:hidden">
+                      Preview the topics, then start when you are ready.
+                    </span>
+                    <span className="hidden lg:inline">
+                      Use the arrows to preview each topic. Murph will save
+                      clear facts and leave uncertain details alone.
+                    </span>
+                  </p>
+                  <Button
+                    className="mt-4 self-start lg:mt-6"
+                    size="lg"
+                    onClick={startRecording}
+                  >
+                    <Mic data-icon="inline-start" aria-hidden="true" />
+                    Start recording
+                  </Button>
+                </>
+              ) : (
+                <>
                   <div
-                    className="inline-flex items-center gap-2 text-sm font-medium text-destructive"
+                    className="inline-flex items-center gap-2 text-base font-medium text-destructive sm:text-sm"
                     role="status"
                   >
                     <span
@@ -292,134 +326,178 @@ export function EnvironmentVoiceCapture({
                     />
                     {state === "recording" ? "Recording" : "Recording ready"}
                   </div>
-                  <span className="font-mono text-sm tabular-nums text-muted-foreground">
-                    {elapsedLabel} / 3:00
-                  </span>
-                </div>
-
-                <div className="my-auto py-8 text-center">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
-                    {topic.eyebrow}
+                  <p className="mt-3 font-mono text-lg tabular-nums text-foreground">
+                    {elapsedLabel}
+                    <span className="text-sm text-muted-foreground">
+                      {" "}
+                      / 3:00
+                    </span>
                   </p>
-                  <h2 className="mt-3 font-serif text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
-                    {topic.title}
-                  </h2>
-                  <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-                    {topic.prompt}
+                  <p className="mt-5 text-pretty text-base leading-relaxed text-muted-foreground sm:text-sm">
+                    Speak naturally. Move between topics whenever you have said
+                    enough.
                   </p>
-                </div>
 
-                <div className="flex items-center justify-between border-t border-border pt-5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={topicIndex === 0}
-                    onClick={() => setTopicIndex((index) => index - 1)}
-                  >
-                    <ChevronLeft className="size-4" aria-hidden="true" />
-                    Back
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    {topicIndex + 1} of {VOICE_TOPICS.length}
-                  </span>
-                  {topicIndex < VOICE_TOPICS.length - 1 ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setTopicIndex((index) => index + 1)}
-                    >
-                      Next
-                      <ChevronRight className="size-4" aria-hidden="true" />
-                    </Button>
-                  ) : (
-                    <span className="w-20" aria-hidden="true" />
-                  )}
-                </div>
-
-                <div className="mt-4 flex justify-center">
-                  {state === "recording" ? (
-                    <Button
-                      type="button"
-                      size="lg"
-                      onClick={() => void finishRecording(true)}
-                    >
-                      <CircleStop className="size-4" aria-hidden="true" />
-                      Finish and send
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="lg"
-                      disabled={!recordingFile || state === "sending"}
-                      onClick={() =>
-                        recordingFile
-                          ? void shareRecording(recordingFile)
-                          : undefined
-                      }
-                    >
-                      <Send className="size-4" aria-hidden="true" />
-                      {state === "sending"
-                        ? "Opening share sheet…"
-                        : "Send to Murph"}
-                    </Button>
-                  )}
-                </div>
-              </>
-            )}
-
-            {notice ? (
-              <div
-                className="mt-5 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground"
-                role="status"
-              >
-                <p>{notice}</p>
-                {recordingFile ? (
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => downloadRecording(recordingFile)}
-                    >
-                      <Download className="size-4" aria-hidden="true" />
-                      Download
-                    </Button>
-                    {contactAction ? (
+                  <div className="mt-6 lg:mt-auto">
+                    {state === "recording" ? (
+                      <div className="flex flex-col items-start gap-2">
+                        <Button
+                          type="button"
+                          size="lg"
+                          onClick={() => void finishRecording(true)}
+                        >
+                          <CircleStop
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          Finish and choose Murph
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={cancelRecording}
+                        >
+                          Cancel recording
+                        </Button>
+                      </div>
+                    ) : (
                       <Button
+                        type="button"
+                        size="lg"
+                        disabled={!recordingFile || state === "sending"}
+                        onClick={() =>
+                          recordingFile
+                            ? void shareRecording(recordingFile)
+                            : undefined
+                        }
+                      >
+                        <Send data-icon="inline-start" aria-hidden="true" />
+                        {state === "sending"
+                          ? "Opening share sheet…"
+                          : "Choose Murph"}
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {notice ? (
+                <div
+                  className="mt-5 border-t border-border pt-5 text-base text-muted-foreground sm:text-sm"
+                  role="status"
+                >
+                  <p>{notice}</p>
+                  {recordingFile ? (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Button
+                        type="button"
                         size="sm"
                         variant="outline"
-                        render={
-                          <a
-                            href={contactAction.href}
-                            target={contactAction.target}
-                            rel={contactAction.rel}
-                          />
-                        }
-                        nativeButton={false}
+                        onClick={() => downloadRecording(recordingFile)}
                       >
-                        Open Murph
+                        <Download data-icon="inline-start" aria-hidden="true" />
+                        Download
                       </Button>
-                    ) : null}
-                  </div>
-                ) : contactAction ? (
+                      {contactAction ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          render={
+                            <a
+                              href={contactAction.href}
+                              target={contactAction.target}
+                              rel={contactAction.rel}
+                            />
+                          }
+                          nativeButton={false}
+                        >
+                          Open Murph
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : contactAction ? (
+                    <Button
+                      className="mt-3"
+                      size="sm"
+                      variant="outline"
+                      render={
+                        <a
+                          href={contactAction.href}
+                          target={contactAction.target}
+                          rel={contactAction.rel}
+                        />
+                      }
+                      nativeButton={false}
+                    >
+                      Open Murph
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <section
+              aria-labelledby="environment-voice-topic-title"
+              className="flex min-h-[25rem] flex-col px-6 py-6 sm:px-8 sm:py-8 lg:px-10"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+                  Topic {topicIndex + 1} of {VOICE_TOPICS.length}
+                </p>
+                <div className="flex items-center gap-2">
                   <Button
-                    className="mt-3"
-                    size="sm"
+                    type="button"
+                    size="icon-lg"
                     variant="outline"
-                    render={
-                      <a
-                        href={contactAction.href}
-                        target={contactAction.target}
-                        rel={contactAction.rel}
-                      />
-                    }
-                    nativeButton={false}
+                    disabled={topicIndex === 0}
+                    aria-label="Previous topic"
+                    onClick={() => setTopicIndex((index) => index - 1)}
                   >
-                    Open Murph
+                    <ChevronLeft aria-hidden="true" />
                   </Button>
-                ) : null}
+                  <Button
+                    type="button"
+                    size="icon-lg"
+                    variant="outline"
+                    disabled={topicIndex === VOICE_TOPICS.length - 1}
+                    aria-label="Next topic"
+                    onClick={() => setTopicIndex((index) => index + 1)}
+                  >
+                    <ChevronRight aria-hidden="true" />
+                  </Button>
+                </div>
               </div>
-            ) : null}
+
+              <div className="my-auto py-8">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary">
+                  {topic.eyebrow}
+                </p>
+                <h2
+                  id="environment-voice-topic-title"
+                  className="mt-3 max-w-[18ch] text-balance font-serif text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-5xl"
+                >
+                  {topic.title}
+                </h2>
+                <p className="mt-5 max-w-[48ch] text-pretty text-lg leading-relaxed text-foreground sm:mt-6 sm:text-xl">
+                  {topic.prompt}
+                </p>
+              </div>
+
+              <div
+                className="flex gap-2"
+                aria-label={`Topic ${topicIndex + 1} of ${VOICE_TOPICS.length}`}
+              >
+                {VOICE_TOPICS.map((voiceTopic, index) => (
+                  <span
+                    key={voiceTopic.title}
+                    className={`h-1 flex-1 rounded-full ${
+                      index === topicIndex ? "bg-primary" : "bg-secondary"
+                    }`}
+                    aria-hidden="true"
+                  />
+                ))}
+              </div>
+            </section>
           </div>
         </DialogContent>
       </Dialog>

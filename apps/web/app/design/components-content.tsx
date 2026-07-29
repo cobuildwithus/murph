@@ -829,9 +829,9 @@ export function ComponentsContent() {
         >
           <Section title="Environment empty state">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production zero-data report. It preserves the grade, coverage,
-              next checks and illustrated categories from the populated page,
-              then places the guided voice walkthrough in context.
+              Production zero-data state. One voice-first action leads to the
+              walkthrough, while the real report categories preview what Murph
+              will build without showing empty scores or missing facts.
             </p>
             <EnvironmentEmptyState
               contactAction={{
