@@ -39,6 +39,16 @@ Last verified: 2026-07-28
 ## Runtime Security Posture
 
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
+- `murph.group action="read_chat_name"` is a read-only, Web-owned provider
+  metadata boundary. The signed callback member selects the synthetic group
+  runtime; Web resolves its single encrypted Linq or Telegram thread route and
+  never accepts a provider chat id from the model. Provider titles are bounded
+  untrusted display text and confer no identity, membership, consent, routing,
+  or mutation authority. They are returned only as `displayName` with an
+  `ok`, `none`, or `unavailable` status and must not be logged or cached.
+  Suppress Linq's default comma-joined participant-handle label so phone
+  numbers and email addresses cannot become a group name. Group email and
+  direct or personal runtimes cannot authorize this provider-title lookup.
 - An accepted-message `Message ref` is an opaque selector, not authority. Render only the existing `AssistantInputEvent.inputId` when at least one targeting action is eligible and the accepted input is either positively identified Linq iMessage or Telegram with a valid numeric message target; conversation source and reply-target channel must also agree. Linq SMS, RCS, and unknown service types expose no ref and are ineligible for both tools. Both `murph.select_reply_target` and `murph.react_to_message` must require an exact active root invocation, use the same resolver, bind the ref to the current delivery-context ordinal, reload the stored event, and recheck route, conversation, direct/group audience, account, group actor, provider target, and action-specific capability before execution. The dispatcher must reject descendant, stale-turn, or foreign-thread tool requests before consulting accepted-message authority, and descendant shell env carries no targeting authority. Invented, stale, cross-turn, cross-thread, descendant, or unsupported refs fail closed. Provider message ids must stay out of prompts, tool arguments/results, model history, diagnostics, and model-visible errors; only the local delivery owner may resolve one immediately before the effect.
 - A signed Linq edit webhook authenticates provider delivery, not the edited
   text or its claimed authority. Web may correlate it only to an already

@@ -582,8 +582,8 @@ async function executeAssistantCodexAttempt(input: {
                     .currentProductFeedbackAcceptedInputIds,
               }
             : {}),
-          productFeedbackRecorder:
-            executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
+          productFeedbackCandidateSink:
+            executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
         }),
         providerThreadEphemeral: groupRoomModelMaintenanceTurn
           ? true
