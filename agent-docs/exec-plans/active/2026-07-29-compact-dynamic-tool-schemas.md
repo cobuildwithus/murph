@@ -60,5 +60,13 @@ The change is runner-only and needs no Web or persisted-state migration.
   unchanged Murph request callback and that the representative provider request
   is 5,748 bytes / 1,328 tokenizer tokens smaller than the prior direct
   namespace configuration.
+- A second pinned App Server protocol test proves the direct-model fallback:
+  Codex advertises native `tool_search`, returns the deferred automation schema
+  in `tool_search_output`, then routes the namespaced typed call through the
+  unchanged callback.
+- The existing opt-in live-model automation probe and a new production-prompt
+  group-status probe cover ordinary natural-language discovery. The local
+  environment has no configured provider key, so that credentialed lane remains
+  an explicitly reported verification blocker rather than default-on proof.
 - The earlier Murph-owned `schema | execute` candidate was rejected and removed
   before the final review baseline.

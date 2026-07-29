@@ -58,6 +58,13 @@ type ScriptedResponse =
   }
   | {
     delayMs?: number
+    toolSearchCall: {
+      limit?: number
+      query: string
+    }
+  }
+  | {
+    delayMs?: number
     functionCall: {
       arguments: Record<string, unknown>
       name: string
@@ -84,8 +91,10 @@ interface ScriptedProviderRequestSummary {
     includesAutomation: boolean
     includesGroup: boolean
     includesSaveNewsletter: boolean
+    includesToolSearch: boolean
   }
   serviceTier: string | null
+  toolSearchOutputTools?: unknown[]
 }
 
 const codexCommand = path.resolve(
@@ -272,6 +281,87 @@ if (!tool) {
       (directSummary?.providerRequestDiagnostics?.bytes ?? 0)
         - deferredRequestBytes,
     ).toBeGreaterThan(4_000)
+  })
+
+  it('discovers deferred Murph schemas through native Codex tool_search', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.captureProviderRequestDiagnostics()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'create a durable Murph automation reminder',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'save',
+            instructions: 'Send a short reminder.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00' },
+            title: 'Morning reminder',
+          },
+          name: 'automation',
+          namespace: 'murph',
+        },
+      },
+      { text: 'NATIVE_TOOL_SEARCH_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-native-search',
+              created: true,
+              lookupId: 'morning-reminder',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: 'gpt-5.4',
+      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      model: 'gpt-5.4',
+      providerRequestDiagnostics: {
+        includesAllTools: false,
+        includesAutomation: false,
+        includesGroup: false,
+        includesSaveNewsletter: false,
+        includesToolSearch: true,
+      },
+    })
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"automation"',
+    )
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send a short reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      title: 'Morning reminder',
+    }])
+    expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {
@@ -1209,7 +1299,21 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'customToolCall' in scripted
+    const outputItem = 'toolSearchCall' in scripted
+      ? {
+          arguments: {
+            query: scripted.toolSearchCall.query,
+            ...(scripted.toolSearchCall.limit === undefined
+              ? {}
+              : { limit: scripted.toolSearchCall.limit }),
+          },
+          call_id: `call_${responseId}`,
+          execution: 'client',
+          id: `tsearch_${responseId}`,
+          status: 'completed',
+          type: 'tool_search_call',
+        }
+      : 'customToolCall' in scripted
       ? {
           call_id: `call_${responseId}`,
           id: `ctcall_${responseId}`,
@@ -1295,6 +1399,15 @@ function readScriptedProviderRequestSummary(
       .map((item) => readString(item?.output))
       .filter((output): output is string => output !== null)
     : []
+  const toolSearchOutputTools = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'tool_search_output')
+      .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
+    : []
+  const tools = Array.isArray(body?.tools)
+    ? body.tools.map(readRecord)
+    : []
   return {
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
@@ -1306,10 +1419,12 @@ function readScriptedProviderRequestSummary(
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
             includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
         }
       : {}),
     serviceTier: readString(body?.service_tier),
+    ...(toolSearchOutputTools.length > 0 ? { toolSearchOutputTools } : {}),
   }
 }
 

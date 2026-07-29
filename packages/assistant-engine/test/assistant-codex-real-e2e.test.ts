@@ -14,6 +14,7 @@ import {
   MURPH_AUTOMATION_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
@@ -191,6 +192,90 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'groupchat-comedy skill read',
         ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'discovers the deferred group tool from a natural group-status request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-status-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'read_current',
+                  result: {
+                    group: null,
+                    status: 'none',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Please check whether this chat already has a Murph hosted group',
+            'set up. Use the current group configuration rather than guessing,',
+            'then tell me whether one exists.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const groupCall = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(groupCall).toBeDefined()
+        expect(groupRequests).toEqual([{ action: 'read_current' }])
+        expect(result.finalMessage).toMatch(
+          /no (?:hosted )?group|not (?:yet )?set up|doesn'?t exist/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -916,6 +1001,28 @@ function buildGroupPointOfViewDeveloperInstructions(): string {
     conversationScope: 'group',
     currentLocalDate: '2026-07-27',
     currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildHostedGroupStatusDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
