@@ -1,6 +1,6 @@
 # Group Chat Speaker Name File Cache
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -60,3 +60,4 @@ Updated: 2026-07-29
 - `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm test:diff packages/assistant-runtime/src/hosted-runtime/group-shared-reader.ts packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts packages/assistant-runtime/test/hosted-runtime-group-shared-reader.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.test.ts ARCHITECTURE.md agent-docs/RELIABILITY.md agent-docs/SECURITY.md agent-docs/index.md agent-docs/references/hosted-runtime-protocol.md agent-docs/references/testing-ci-map.md`
 - `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm test:scenario-integrity`
 - `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm docs:drift`
+Completed: 2026-07-29
