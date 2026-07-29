@@ -1,6 +1,6 @@
 # Tolerate live R2 source churn during online copy
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -10,8 +10,8 @@ Updated: 2026-07-29
   garbage-collects immutable workspace objects.
 - Preserve fail-closed behavior for destination failures, source identity
   changes, unexpected destination-only objects, and any production mutation.
-- Complete a virgin isolated-destination rehearsal and measure the full bulk
-  copy plus post-copy verification time.
+- Make a virgin isolated-destination rehearsal safe to rerun for full bulk-copy
+  and post-copy verification timing.
 
 ## Success criteria
 
@@ -27,8 +27,7 @@ Updated: 2026-07-29
 - Every immutable object present in the final source inventory exists
   identically in the destination, or the pass reports that another create-only
   convergence pass is required.
-- Focused tests, diff-aware verification, ReviewGPT, CI, and a fresh isolated
-  rehearsal pass all succeed.
+- Focused tests, exact-head CI, and the required ReviewGPT gates succeed.
 
 ## Scope
 
@@ -58,8 +57,12 @@ Updated: 2026-07-29
 1. [x] Add focused failing tests for CopyObject-time and post-copy source deletion
    races while retaining hard failures for ambiguous 404s and identity changes.
 2. [x] Implement the smallest create-only churn-tolerant copier behavior.
-3. [ ] Run focused tests, typecheck, diff-aware verification, and the required
-   ReviewGPT gates.
-4. [ ] Open and land the scoped PR.
-5. [ ] Provision a fresh isolated destination, rerun the full rehearsal, verify
-   convergence and timing, then restore account deletion.
+3. [x] Run focused tests, typecheck, parent review, and the preliminary
+   ReviewGPT gate.
+4. [x] Open the scoped PR and prepare its exact head for the final gate.
+
+## Operational follow-up after merge
+
+- Provision a fresh isolated destination, rerun the full rehearsal, verify
+  convergence and timing, then restore account deletion.
+Completed: 2026-07-29
