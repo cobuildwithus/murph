@@ -4249,7 +4249,7 @@ describe('assistant codex runtime', () => {
       .toHaveLength(2)
   })
 
-  it('keeps restricted ephemeral threads on the resident Codex app-server', async () => {
+  it('keeps an output-only continuation on the resident Codex app-server', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-local-warm-thread-config-work-',
     )
@@ -4296,13 +4296,18 @@ describe('assistant codex runtime', () => {
       ...baseInput,
       dynamicTools: [],
       ephemeral: true,
-      prompt: 'restricted notification turn',
+      prompt: 'assistant ask private continuation',
       threadConfig: restrictedThreadConfig,
     })).resolves.toMatchObject({
       sessionId: 'thread-warm-identity-1-2',
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const launchArgs = codexMocks.spawn.mock.calls[0]?.[1] ?? []
+    expect(launchArgs).not.toEqual(expect.arrayContaining([
+      'features.shell_tool=false',
+      'web_search="disabled"',
+    ]))
     const child = requireMockChildProcess(spawnedChildren[0] ?? null)
     const threadStarts = readWrittenRpcMessages(child).filter(
       (message) => message.method === 'thread/start',
