@@ -91,6 +91,10 @@ describe('onboarding goal check-in automation', () => {
     expect(seed).toMatchObject({
       // March 22 and 29 are EDT, so 13:30 local resolves to 17:30 UTC.
       activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       continuityPolicy: 'preserve',
       ownerScope: 'member',
@@ -177,6 +181,10 @@ describe('onboarding goal check-in automation', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
       route: defaultRoute,
       schedule: {
         at: '2026-03-22T17:30:00.000Z',
@@ -198,6 +206,71 @@ describe('onboarding goal check-in automation', () => {
       created: 0,
       skipped: 6,
       updated: 0,
+    })
+  })
+
+  it('upgrades an installed check-in target without moving or rerouting it', async () => {
+    const vaultRoot = await createVaultRoot('America/New_York')
+    const completedAt = '2026-03-01T05:30:00.000Z'
+    const installNow = new Date('2026-03-02T12:00:00.000Z')
+    const legacyRoute = {
+      ...defaultRoute,
+      deliveryTarget: 'legacy-telegram-thread',
+    }
+    await completeAssistantOnboarding({
+      completedAt,
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const currentSeed = buildOnboardingGoalCheckinSeed({
+      now: installNow,
+      onboardingState: completedOnboardingState({ completedAt }),
+      timeZone: 'America/New_York',
+    })
+    if (!currentSeed) {
+      throw new Error('Expected answered onboarding to produce a goal check-in seed.')
+    }
+    const { assistantTargetOverride, ...legacySeed } = currentSeed
+    expect(assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: legacyRoute,
+      now: installNow,
+      seeds: [legacySeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-03-02T12:01:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
+      route: legacyRoute,
+      schedule: {
+        at: '2026-03-22T17:30:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
     })
   })
 
