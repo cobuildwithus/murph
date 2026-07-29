@@ -122,6 +122,9 @@ import {
 import { registerResearchCommands } from './commands/research.js'
 import { researchScoutResultSchema } from './research-scout.js'
 import { registerRouteCommands } from './commands/route.js'
+import {
+  knowledgeChallengeScoreCommandDescription,
+} from './commands/knowledge-challenge-score.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import {
@@ -136,6 +139,9 @@ import {
   supplementLabelBatchSearchResultSchema,
   supplementLabelSearchResultSchema,
 } from './supplement-labels.js'
+import {
+  groupChallengeScoreResultSchema,
+} from '@murphai/assistant-engine'
 import {
   knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
@@ -1719,6 +1725,13 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'none',
     rootCommandNames: ['knowledge'],
     leafCommands: [
+      {
+        path: ['knowledge', 'score-challenge'],
+        description: knowledgeChallengeScoreCommandDescription,
+        hint:
+          'Pass --input @file.json or -. The body contains only the frozen format, additive scorecard, and explicit normalized participant-component observations.',
+        output: groupChallengeScoreResultSchema,
+      },
       {
         path: ['knowledge', 'upsert'],
         description:
