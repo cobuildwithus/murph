@@ -397,7 +397,12 @@ describe("getHostedLinqReactionTargetMessage", () => {
 });
 
 describe("createHostedLinqChat", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     if (originalFetch) {
       vi.stubGlobal("fetch", originalFetch);
       return;
@@ -481,6 +486,87 @@ describe("createHostedLinqChat", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("refuses multiple new-chat URLs before provider entry", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqChat({
+      from: "+15550000000",
+      message:
+        "Use https://first.example.test or https://pay.example.test/checkout/session_123",
+      to: ["+15550000001"],
+    })).rejects.toThrow(
+      "A new Linq chat cannot include URL text in its first message.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("makes a missing created-chat id retryable without a link send", async () => {
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      chat: {
+        message: { id: "msg_text" },
+      },
+    }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqChat({
+      from: "+15550000000",
+      message: "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
+      to: ["+15550000001"],
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: expect.stringContaining("missing a chat id"),
+      retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 2])(
+    "bounds stalled create-chat request %i to five seconds",
+    async (stalledRequest) => {
+      let requestCount = 0;
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestCount += 1;
+        if (requestCount === stalledRequest) {
+          return new Promise<Response>((_resolve, reject) => {
+            const signal = readRequestSignal(init);
+            signal?.addEventListener(
+              "abort",
+              () => reject(signal.reason ?? new Error("aborted")),
+              { once: true },
+            );
+          });
+        }
+        return createJsonResponse({
+          chat: {
+            id: "chat_created",
+            message: { id: "msg_text" },
+          },
+        }, 200);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = createHostedLinqChat({
+        from: "+15550000000",
+        message: "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
+        to: ["+15550000001"],
+      });
+      const expectation = expect(result).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        message: stalledRequest === 1
+          ? "Linq chat create timed out."
+          : "Linq outbound reply timed out.",
+        retryable: true,
+      });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expectation;
+      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest);
+    },
+  );
 });
 
 describe("sendHostedLinqChatMessage", () => {
@@ -737,43 +823,47 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
-  it("bounds each half of a two-request rich-link send to five seconds", async () => {
-    let requestCount = 0;
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      requestCount += 1;
-      if (requestCount === 1) {
+  it.each([1, 2])(
+    "bounds stalled existing-chat request %i to five seconds",
+    async (stalledRequest) => {
+      let requestCount = 0;
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestCount += 1;
+        if (requestCount === stalledRequest) {
+          return new Promise<Response>((_resolve, reject) => {
+            const signal = readRequestSignal(init);
+            signal?.addEventListener(
+              "abort",
+              () => reject(signal.reason ?? new Error("aborted")),
+              { once: true },
+            );
+          });
+        }
         return createJsonResponse({
           chat_id: "chat_123",
           message: { id: "msg_text" },
         }, 200);
-      }
-      return new Promise<Response>((_resolve, reject) => {
-        const signal = readRequestSignal(init);
-        signal?.addEventListener(
-          "abort",
-          () => reject(signal.reason ?? new Error("aborted")),
-          { once: true },
-        );
       });
-    });
-    vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("fetch", fetchMock);
 
-    const result = sendHostedLinqChatMessage({
-      chatId: "chat_123",
-      idempotencyKey: "payment-message:evt_123",
-      message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
-    });
-    const expectation = expect(result).rejects.toMatchObject({
-      code: "LINQ_SEND_FAILED",
-      message: "Linq outbound reply timed out.",
-      retryable: true,
-    });
+      const result = sendHostedLinqChatMessage({
+        chatId: "chat_123",
+        idempotencyKey: "payment-message:evt_123",
+        message:
+          "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+      });
+      const expectation = expect(result).rejects.toMatchObject({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq outbound reply timed out.",
+        retryable: true,
+      });
 
-    await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(5_000);
 
-    await expectation;
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
+      await expectation;
+      expect(fetchMock).toHaveBeenCalledTimes(stalledRequest);
+    },
+  );
 
   it("sends a link-only payment URL without adding text", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

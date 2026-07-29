@@ -1,6 +1,9 @@
 import { isIP } from 'node:net'
 
-import { splitTrailingHttpsLink } from '@murphai/contracts'
+import {
+  containsHttpUrlText,
+  splitTrailingHttpsLink,
+} from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -864,6 +867,12 @@ export async function createLinqChat(
     sanitizeUserFacingMessageLinks(input.message),
   )
   if (!split.linkUrl) {
+    if (containsHttpUrlText(input.message)) {
+      throw new VaultCliError(
+        'LINQ_INVALID_INPUT',
+        'A new Linq chat cannot include URL text in its first message.',
+      )
+    }
     return createLinqChatWithPrimaryMessage(input, dependencies)
   }
 
@@ -871,6 +880,12 @@ export async function createLinqChat(
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
       'A new Linq chat with a rich link must include caller-supplied text or media.',
+    )
+  }
+  if (containsHttpUrlText(split.message)) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'A new Linq chat cannot include URL text in its first message.',
     )
   }
 

@@ -1,6 +1,9 @@
 import "server-only";
 
-import { splitTrailingHttpsLink } from "@murphai/contracts";
+import {
+  containsHttpUrlText,
+  splitTrailingHttpsLink,
+} from "@murphai/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -45,11 +48,21 @@ export async function createHostedLinqChat(input: {
 }): Promise<HostedLinqSendResult> {
   const split = splitTrailingHttpsLink(input.message);
   if (!split.linkUrl) {
+    if (containsHttpUrlText(input.message)) {
+      throw new TypeError(
+        "A new Linq chat cannot include URL text in its first message.",
+      );
+    }
     return createHostedLinqChatWithPrimaryMessage(input);
   }
   if (!split.message.trim()) {
     throw new TypeError(
       "A new Linq chat with a rich link must include caller-supplied text.",
+    );
+  }
+  if (containsHttpUrlText(split.message)) {
+    throw new TypeError(
+      "A new Linq chat cannot include URL text in its first message.",
     );
   }
 

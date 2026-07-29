@@ -7,6 +7,7 @@ export type TrailingHttpsLinkSplit = {
 
 const TRAILING_TOKEN_PATTERN = /\S+$/u;
 const TRAILING_SENTENCE_PUNCTUATION_PATTERN = /[.,;!]+$/u;
+const HTTP_URL_START_PATTERN = /https?:\/\//iu;
 const TRAILING_LINK_WRAPPERS = [
   ["<", ">"],
   ["(", ")"],
@@ -33,6 +34,10 @@ export function splitTrailingHttpsLink(message: string): TrailingHttpsLinkSplit 
     linkUrl,
     message: message.slice(0, tokenMatch.index).trimEnd(),
   };
+}
+
+export function containsHttpUrlText(message: string): boolean {
+  return HTTP_URL_START_PATTERN.test(message);
 }
 
 function normalizeTrailingHttpsLinkToken(token: string): string | null {

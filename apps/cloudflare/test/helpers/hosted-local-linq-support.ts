@@ -129,6 +129,7 @@ export interface HostedLocalLinqStub {
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
   listObservedMessageIds(chatId: string): string[];
   observedRequests: ObservedLinqRequest[];
+  readObservedMessageLink(request: ObservedLinqRequest): string | null;
   readObservedMessageText(request: ObservedLinqRequest): string | null;
   requireObservedChatId(userId: string): string;
   requireLatestObservedMessageId(chatId: string): string;
@@ -623,6 +624,7 @@ export async function startHostedLocalLinqStub(input: {
     },
     listObservedMessageIds: (chatId) => [...(observedMessageIdsByChat.get(chatId) ?? [])],
     observedRequests,
+    readObservedMessageLink: readObservedLinqMessageLink,
     readObservedMessageText: readObservedLinqMessageText,
     requireObservedChatId: (userId) => {
       const recipientPhoneNumber = buildLinqRecipientPhoneNumber(userId);
@@ -1012,6 +1014,12 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
         && typeof part.value === "string"
         && part.value.trim().length > 0;
     }
+    if (part.type === "link") {
+      return parts.length === 1
+        && "value" in part
+        && typeof part.value === "string"
+        && part.value.startsWith("https://");
+    }
     if (part.type !== "media") {
       return false;
     }
@@ -1025,6 +1033,30 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
       && part.url.trim().length > 0
     );
   });
+}
+
+function readObservedLinqMessageLink(request: ObservedLinqRequest): string | null {
+  const parsed = parseObservedLinqJson(request.body);
+  const message = parsed?.message;
+
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const parts = "parts" in message ? message.parts : null;
+  if (!Array.isArray(parts) || parts.length !== 1) {
+    return null;
+  }
+
+  const part = parts[0];
+  return part
+      && typeof part === "object"
+      && "type" in part
+      && part.type === "link"
+      && "value" in part
+      && typeof part.value === "string"
+    ? part.value
+    : null;
 }
 
 function readObservedLinqMessageText(request: ObservedLinqRequest): string | null {

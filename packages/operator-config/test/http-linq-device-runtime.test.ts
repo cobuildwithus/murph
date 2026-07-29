@@ -599,6 +599,58 @@ test('linq runtime never fabricates text for a link-only new chat', async () => 
   expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
+test('linq runtime refuses multiple new-chat URLs before provider entry', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message:
+          'Use https://first.example.test or https://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_INVALID_INPUT'
+      && error.message.includes('cannot include URL text'),
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
+})
+
+test('linq runtime makes a missing created-chat id retryable without a link send', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () =>
+    createJsonResponse({
+      chat: {
+        message: { id: 'message-text' },
+      },
+    }),
+  )
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.retryable === true
+      && error.message.includes('missing a chat id'),
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('linq runtime omits the text part for media-only messages and rejects empty text-only sends', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',

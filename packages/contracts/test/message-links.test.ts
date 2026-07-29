@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  containsHttpUrlText,
   RICH_LINK_URL_MAX_LENGTH,
   splitTrailingHttpsLink,
 } from "../src/message-links.ts";
@@ -35,6 +36,16 @@ test("supports a link-only message", () => {
       message: "",
     },
   );
+});
+
+test("detects remaining HTTP URL text without treating malformed schemes as URLs", () => {
+  assert.equal(
+    containsHttpUrlText("https://first.example.test https://second.example.test"),
+    true,
+  );
+  assert.equal(containsHttpUrlText("Open HTTP://example.test when ready"), true);
+  assert.equal(containsHttpUrlText("Open https:example.test when ready"), false);
+  assert.equal(containsHttpUrlText("No link here"), false);
 });
 
 test("keeps payment URL paths, queries, and fragments intact", () => {
