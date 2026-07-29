@@ -88,6 +88,18 @@ describe('assistant reminder density policy', () => {
       'return `skip`. Do not send a separate pause warning.',
     )
     expect(compactSkill).toContain(
+      'Only a confirmed delivery failure that proves the message was not accepted or sent preserves the grace occurrence.',
+    )
+    expect(compactSkill).toContain(
+      'Provider acceptance or `sent` dispatch consumes it even when the channel provides no handset receipt',
+    )
+    expect(compactSkill).toContain(
+      'an ambiguous post-dispatch failure also consumes it to avoid duplicate nags.',
+    )
+    expect(compactSkill).toContain(
+      'Silence still is not evidence of a miss, ignore, or refusal.',
+    )
+    expect(compactSkill).toContain(
       'only the immediately preceding occurrence needs a closed action window',
     )
     expect(compactSkill).toContain(
@@ -107,6 +119,15 @@ describe('assistant reminder density policy', () => {
     )
     expect(compactSkill).toContain(
       'unrelated conversation does not keep it alive',
+    )
+    expect(compactSkill).toContain(
+      'An exhausted dense carry-forward grace takes precedence over the generic repair rule',
+    )
+    expect(compactSkill).toContain(
+      'Only an independently authorized bounded `supportKind: "review"` automation may ask the one review question described above',
+    )
+    expect(compactSkill).toContain(
+      'the `check_in` must not turn its own silence into a repair message.',
     )
     expect(compactSkill).not.toContain(
       'a short status such as done, skip, later, or stop',

@@ -451,7 +451,11 @@ may not reload this skill:
 - If the preceding scheduled message already combined an unresolved prior
   occurrence with the then-current action and no related reply followed,
   return `skip`. Do not send a separate pause warning.
-- Failed or uncertain delivery does not consume the grace occurrence.
+- Only a confirmed delivery failure that proves the message was not accepted
+  or sent preserves the grace occurrence. Provider acceptance or `sent`
+  dispatch consumes it even when the channel provides no handset receipt; an
+  ambiguous post-dispatch failure also consumes it to avoid duplicate nags.
+  Silence still is not evidence of a miss, ignore, or refusal.
 - Carry forward at most the immediately preceding occurrence. Never mention
   older unresolved occurrences, count them as debt, or send a separate
   catch-up message.
@@ -555,7 +559,14 @@ opening and is a cue. The first unresolved prior occurrence may be folded into
 the current message, while an unanswered carry-forward grace makes the current
 occurrence `skip`.
 
-For a consented `check_in` or `review`, send a repair question/proposal when:
+An exhausted dense carry-forward grace takes precedence over the generic repair
+rule: later occurrences of that `check_in` return `skip`. Only an independently
+authorized bounded `supportKind: "review"` automation may ask the one review
+question described above; the `check_in` must not turn its own silence into a
+repair message.
+
+Outside that exhausted dense case, for a consented `check_in` or `review`, send
+a repair question/proposal when:
 - the same support has been ignored twice
 - multiple planned sessions were missed
 - recent context shows a recurring conflict

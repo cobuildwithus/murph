@@ -49,7 +49,16 @@ Updated: 2026-07-29
 - Use the existing private-direct prompt assembly and behavior-followthrough skill as the sole policy owners.
 - Do not add runtime state or delivery mechanics; the existing canonical automation and `skip` behavior already provide the required execution primitives.
 - Skip the separate final ReviewGPT gate unless integration broadens beyond prompt-primary behavior.
+- Accept the product-experience delivery finding: provider acceptance, `sent`, and ambiguous post-dispatch outcomes consume the one grace occurrence because SMS/MMS normally has no handset receipt; only confirmed non-delivery preserves it.
+- Accept all preliminary specialist findings: make exhausted dense grace override generic repair, delete the stale keyword-confirmation example, and add a gated real-Codex setup/save/quiet-stop scenario at the existing model boundary.
+- Keep the independently authorized bounded `review` automation as the only post-grace question; the dense `check_in` cannot turn its own silence into repair.
 
 ## Verification
 
-- Pending.
+- Passed: focused Assistant Engine policy/behavior/skill suite (3 files, 99 tests).
+- Passed: Assistant Engine package typecheck.
+- Passed: real-Codex E2E file compiles and its ordinary non-live cases run (4 passed, 8 skipped).
+- Blocked before model invocation: the focused real-Codex dense-reminder scenario requires the harness's external API credential, which is not present in this checkout.
+- Completed: product-experience review; one material delivery-semantics finding accepted and corrected.
+- Completed: preliminary ReviewGPT prompt/coverage review of pushed head `81d9225`; all three findings accepted and corrected without rerunning the one substantive pass.
+- Superseded diagnostic: the first canonical diff run passed the touched Assistant Engine, assistant-runtime, and assistantd owners, then existing CLI tests hit repeated 60-second timeouts and the exact owned session was stopped after producing no new output; rerun on the corrected head remains pending.
