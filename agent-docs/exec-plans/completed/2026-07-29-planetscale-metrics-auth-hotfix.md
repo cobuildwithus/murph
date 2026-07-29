@@ -1,6 +1,6 @@
 # PlanetScale metrics service-token auth hotfix
 
-Status: Active
+Status: completed
 
 ## Goal
 
@@ -45,3 +45,19 @@ database conditions.
   scheme-less service-token header.
 - Production acceptance requires a natural scheduled check with no collection
   failure, proving the successful sample path and consecutive-failure reset.
+
+## Review evidence
+
+- The preliminary completion-specialists pass returned `PASS` with no findings
+  and no patch artifact. The configured Pro model completed in 298 seconds;
+  manual specialist attestation is accepted under the documented four-minute
+  floor because the exact PR head, attachment, turn, model selection, completion
+  marker, and substantive coverage analysis were all captured.
+- Parent final review found no remaining gap: the credential reaches only the
+  fixed discovery origin, the signed scrape remains credential-free, and the
+  existing successful-sample transaction resets the failure counter before it
+  persists the sample.
+- Canonical diff verification passed the exact unchanged candidate after the
+  preliminary pass requested no remediation.
+Updated: 2026-07-29
+Completed: 2026-07-29
