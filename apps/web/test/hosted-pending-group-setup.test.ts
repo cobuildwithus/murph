@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES,
-  normalizeHostedPendingGroupSetupPayload,
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES,
+  parseHostedRuntimePendingGroupSetupInput,
+} from "@murphai/hosted-execution/pending-group-setup";
+import {
   selectHostedPendingGroupSetupCandidate,
   type HostedPendingGroupSetupCandidate,
 } from "@/src/lib/hosted-groups/pending-group-setup";
@@ -72,11 +74,10 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
   });
 });
 
-describe("normalizeHostedPendingGroupSetupPayload", () => {
+describe("parseHostedRuntimePendingGroupSetupInput", () => {
   it("accepts sparse existing style settings plus compact room context", () => {
-    expect(normalizeHostedPendingGroupSetupPayload({
-      roomContextMarkdown: "  ## Explicit setup\n\n- Let the family lead.  ",
-      schemaVersion: 1,
+    expect(parseHostedRuntimePendingGroupSetupInput({
+      roomContextMarkdown: "  Let the family lead.  ",
       style: {
         personality: {
           detail: 2,
@@ -86,8 +87,7 @@ describe("normalizeHostedPendingGroupSetupPayload", () => {
         tone: "casual",
       },
     })).toEqual({
-      roomContextMarkdown: "## Explicit setup\n\n- Let the family lead.",
-      schemaVersion: 1,
+      roomContextMarkdown: "Let the family lead.",
       style: {
         personality: {
           detail: 2,
@@ -100,31 +100,27 @@ describe("normalizeHostedPendingGroupSetupPayload", () => {
   });
 
   it("allows a context-only setup without copying the owner's private style", () => {
-    expect(normalizeHostedPendingGroupSetupPayload({
+    expect(parseHostedRuntimePendingGroupSetupInput({
       roomContextMarkdown: "This is a low-key family introduction.",
-      schemaVersion: 1,
     })).toEqual({
       roomContextMarkdown: "This is a low-key family introduction.",
-      schemaVersion: 1,
     });
   });
 
   it("rejects an empty setup", () => {
-    expect(() => normalizeHostedPendingGroupSetupPayload({
-      schemaVersion: 1,
-    })).toThrow("requires style or room context");
+    expect(() => parseHostedRuntimePendingGroupSetupInput({})).toThrow(
+      "setup requires style or room context",
+    );
   });
 
   it("rejects unknown fields instead of persisting accidental parallel state", () => {
-    expect(() => normalizeHostedPendingGroupSetupPayload({
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
       instructions: "hidden alternate prompt",
-      schemaVersion: 1,
     })).toThrow();
   });
 
   it("rejects invalid personality values through the existing score contract", () => {
-    expect(() => normalizeHostedPendingGroupSetupPayload({
-      schemaVersion: 1,
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
       style: {
         personality: {
           humor: 99,
@@ -133,12 +129,11 @@ describe("normalizeHostedPendingGroupSetupPayload", () => {
     })).toThrow();
   });
 
-  it("bounds the encrypted context before it can reach a future room-model write", () => {
-    expect(() => normalizeHostedPendingGroupSetupPayload({
+  it("bounds encrypted context before it can reach the room-model write", () => {
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
       roomContextMarkdown: "x".repeat(
-        HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES + 1,
+        HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES + 1,
       ),
-      schemaVersion: 1,
-    })).toThrow("room context is too large");
+    })).toThrow("room context exceeds the UTF-8 byte limit");
   });
 });
