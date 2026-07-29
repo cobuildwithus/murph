@@ -257,6 +257,12 @@ describe('assistant group-chat comedy skill', () => {
       'one short `murph.generate_voice_memo` even when nobody explicitly requested audio',
     )
     expect(normalized).toContain(
+      'The unprompted lane never overrides Humor 0.',
+    )
+    expect(normalized).toContain(
+      'unless someone explicitly asks in the current turn for the sarcastic or audio treatment',
+    )
+    expect(normalized).toContain(
       'The move is sarcastic self-dramatization, not retaliation.',
     )
     expect(normalized).toContain(
