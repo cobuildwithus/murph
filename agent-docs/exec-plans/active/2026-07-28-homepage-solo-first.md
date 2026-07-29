@@ -87,17 +87,47 @@ Updated: 2026-07-28
 - Keep group chat as the second act because the requested change is solo-first,
   not group-feature removal.
 - Do not recreate the deleted coordination ledger from current `main`.
+- Keep the animated topic/member controls, but place them behind and after the
+  primary hero controls so they cannot cover the phone or create a keyboard tab
+  wall. Pause their motion on focus and keep one answer in flight at a time.
+
+## Review dispositions
+
+- Product-experience review: the initial two privacy findings were accepted and
+  fixed by starting each group as a fresh conversation and returning every
+  health-topic action to a private thread. A later remediation review found
+  pointer-hit and group-reply gating gaps; both were accepted and fixed at the
+  existing hero owner. The final follow-up returned no findings.
+- Preliminary specialist review:
+  - Accepted the moving-control occlusion, keyboard-order, focus-motion, and
+    contrast finding. Fixed it without replacing the existing interaction model.
+  - Accepted the interrupted-exchange finding. Topic/member controls now remain
+    disabled until Murph finishes the current answer.
+  - Accepted both coverage findings. Tests now assert active/inactive copy
+    semantics and exercise the order and bloodwork branches.
+- Claude Fable visual review: attempted once after the first browser proof, but
+  the configured account reported exhausted credits. Per the verification
+  policy, no fallback model was substituted.
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest for hero, page, health-claims, and design-catalog coverage.
-  - `pnpm test:diff apps/web/src/components/homepage/hero-clocks-in.tsx`
-  - `pnpm test:frontend-design-proof`
-  - Desktop and mobile render checks on `/design?tab=sections`.
-  - `git diff --check` and stale-string/readback checks.
-- Expected outcomes:
-  - All focused and canonical checks pass.
-  - The catalog proof visibly opens on the solo 1:1 question at desktop and
-    mobile widths.
-  - No unresolved accepted review finding remains.
+- Focused Vitest: 3 files, 14 tests passed after specialist remediation and
+  product follow-up.
+- Frontend design-proof guard: 10 tests passed.
+- Canonical diff verification passed on the initial exact pushed head; rerun on
+  the final remediation head before handoff.
+- Browser proof:
+  - Solo-first and group-second states verified at desktop and mobile widths.
+  - Private topic return from the group, order-card, and bloodwork-card states
+    verified.
+  - Remediation checked at 1024px, 1280px, and 1440px with zero horizontal
+    overflow; the composer remains the top hit target.
+  - Real pointer clicks on one health topic and one group member succeeded at
+    both 1024px and 1280px, producing the expected private reply and group
+    transition.
+  - At the 1280px member/phone overlap, the phone remains the top hit layer and
+    its composer receives focus; the background member control cannot cover or
+    intercept it.
+  - Keyboard order reaches the CTA and message field before topic controls;
+    focused topic motion pauses and shows a visible focus ring.
+- Final ReviewGPT, exact-head CI, and mergeability proof remain before closure.

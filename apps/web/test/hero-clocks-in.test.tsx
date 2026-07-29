@@ -77,6 +77,16 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
     .find((element) => element.textContent?.includes("4 People"));
   assert.ok(groupHeader);
   assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  const topic = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(composer);
+  assert.ok(topic);
+  const controls = [...view.container.querySelectorAll("input, button")];
+  assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
 
   await view.cleanup();
 });
@@ -89,6 +99,17 @@ test("automatic demo switches to the group after one private Murph exchange", as
     reducedMotion: false,
     flushInitialTimers: false,
   });
+
+  const copyLayerFor = (needle: string) =>
+    [...view.container.querySelectorAll(".hero-copy-layer")].find((element) =>
+      element.textContent?.includes(needle),
+    );
+  const soloCopyLayer = copyLayerFor("Wearables, bloodwork");
+  const groupCopyLayer = copyLayerFor("Start a health challenge");
+  assert.ok(soloCopyLayer);
+  assert.ok(groupCopyLayer);
+  assert.equal(soloCopyLayer.getAttribute("aria-hidden"), "false");
+  assert.equal(groupCopyLayer.getAttribute("aria-hidden"), "true");
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(5_500);
@@ -108,6 +129,145 @@ test("automatic demo switches to the group after one private Murph exchange", as
   assert.match(groupThread, /referees the week/);
   assert.doesNotMatch(groupThread, /DEXA|BodySpec/);
   assert.doesNotMatch(groupThread, /Did the magnesium actually do anything\?/);
+  assert.equal(soloCopyLayer.getAttribute("aria-hidden"), "true");
+  assert.equal(groupCopyLayer.getAttribute("aria-hidden"), "false");
+
+  await view.cleanup();
+});
+
+test("topic controls wait for Murph to finish the current reply", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_500);
+  });
+
+  assert.equal(stepsButton.disabled, true);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(1_900);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /Did the magnesium actually do anything\?/);
+  assert.match(thread, /Two weeks in, deep sleep up 18%/);
+  assert.doesNotMatch(thread, /How are my steps this week\?/);
+  assert.equal(stepsButton.disabled, false);
+
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /How are my steps this week\?/);
+  assert.match(thread, /Average 8\.4k a day, up 600 from last week/);
+
+  await view.cleanup();
+});
+
+test("topic controls render order and bloodwork artifacts in the private thread", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const boneDensityButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Bone density"]',
+  );
+  assert.ok(boneDensityButton);
+  await act(async () => {
+    boneDensityButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /Book me a DEXA scan nearby\./);
+  assert.match(thread, /Appointment booked · today/);
+  assert.match(thread, /BodySpec DEXA scan/);
+  assert.match(thread, /Added to your calendar/);
+  assert.match(thread, /Booked BodySpec on Mission for Thursday at 2pm/);
+
+  const ldlButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about LDL cholesterol"]',
+  );
+  assert.ok(ldlButton);
+  await act(async () => {
+    ldlButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /Did my LDL get worse\?/);
+  assert.match(thread, /Latest panel · vs March/);
+  assert.match(thread, /2 flagged/);
+  assert.match(thread, /108.*122.*mg\/dL/s);
+  assert.match(thread, /LDL up 14 since March/);
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+
+  await view.cleanup();
+});
+
+test("topic controls wait for Murph to finish the group kickoff reply", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
+  const saunaButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sauna"]',
+  );
+  assert.ok(theoButton);
+  assert.ok(saunaButton);
+
+  await act(async () => {
+    theoButton.click();
+    await vi.advanceTimersByTimeAsync(7_000);
+  });
+
+  assert.equal(saunaButton.disabled, true);
+  await act(async () => {
+    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(1_200);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /walk challenge starts tomorrow/);
+  assert.match(thread, /Baselines are set from everyone's wearables/);
+  assert.doesNotMatch(thread, /Did the sauna actually help my HRV\?/);
+  assert.equal(saunaButton.disabled, false);
+
+  await act(async () => {
+    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /Did the sauna actually help my HRV\?/);
+  assert.doesNotMatch(thread, /walk challenge starts tomorrow/);
 
   await view.cleanup();
 });
@@ -207,10 +367,21 @@ test("group start clears the private 1:1 thread and topic clicks return to a fre
     await vi.advanceTimersByTimeAsync(1_300);
   });
 
-  // Sheet revealed: topic floaters remain useful, but a health topic leaves
-  // the group rather than sharing private readings into that conversation.
+  // Sheet revealed: wait for Murph to finish the visible kickoff answer before
+  // allowing another topic to replace the group.
   assert.equal(view.container.querySelector(".hero-compose-sheet"), null);
+  assert.equal(saunaButton.disabled, true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_700);
+  });
+  assert.match(
+    view.container.textContent ?? "",
+    /Baselines are set from everyone's wearables/,
+  );
   assert.equal(saunaButton.disabled, false);
+
+  // Topic floaters remain useful, but a health topic leaves the group rather
+  // than sharing private readings into that conversation.
   await act(async () => {
     saunaButton.click();
     await vi.advanceTimersByTimeAsync(3_200);

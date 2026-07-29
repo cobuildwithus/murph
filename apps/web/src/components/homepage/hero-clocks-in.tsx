@@ -518,6 +518,7 @@ export function HeroClocksIn({
     ReadonlySet<number>
   >(() => new Set());
   const [typing, setTyping] = useState(false);
+  const [responseInFlight, setResponseInFlightState] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [groupMode, setGroupModeState] = useState(false);
   const [composeSheet, setComposeSheet] =
@@ -534,9 +535,15 @@ export function HeroClocksIn({
   const groupSequenceStartedRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isAtBottomRef = useRef(true);
+  const responseInFlightRef = useRef(false);
 
   const setGroupMode = (next: boolean) => {
     setGroupModeState(next);
+  };
+
+  const setResponseInFlight = (next: boolean) => {
+    responseInFlightRef.current = next;
+    setResponseInFlightState(next);
   };
 
   const nextId = () => ++idRef.current;
@@ -583,6 +590,7 @@ export function HeroClocksIn({
     if (resetVisualState) {
       setTyping(false);
       setActiveFloaterIdxs(new Set());
+      setResponseInFlight(false);
     }
   };
 
@@ -732,6 +740,7 @@ export function HeroClocksIn({
 
     queue(
       () => {
+        setResponseInFlight(true);
         appendItems([
           {
             kind: "text",
@@ -762,6 +771,7 @@ export function HeroClocksIn({
             text: GROUP_MESSAGES.murphKickoff,
           },
         ]);
+        setResponseInFlight(false);
       },
       GROUP_KICKOFF_REPLY_AT,
       { allowAfterEngaged },
@@ -969,6 +979,7 @@ export function HeroClocksIn({
       }
 
       const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
+      setResponseInFlight(true);
       activateFloater(idx);
 
       queue(() => {
@@ -989,6 +1000,7 @@ export function HeroClocksIn({
       queue(() => {
         setTyping(false);
         appendItems(buildExchangeReplyItems(ex));
+        setResponseInFlight(false);
         if (cycleRef.current >= AUTO_RUN_EXCHANGES.length) {
           queue(
             () => startGroupSequence({ allowAfterEngaged: false }),
@@ -1015,10 +1027,11 @@ export function HeroClocksIn({
 
   const handleSend = async () => {
     const text = composerValue.trim();
-    if (!text) return;
+    if (!text || responseInFlightRef.current) return;
 
     engagedRef.current = true;
     cancelDemoRef.current?.();
+    setResponseInFlight(true);
     if (!groupMode) {
       groupSequenceStartedRef.current = false;
     }
@@ -1047,12 +1060,16 @@ export function HeroClocksIn({
         text: "Hey mate, shoot me a message and we can get started.",
       },
     ]);
+    setResponseInFlight(false);
   };
 
   const runExchangeOnce = (ex: Exchange) => {
+    if (responseInFlightRef.current) return;
+
     engagedRef.current = true;
     cancelDemoRef.current?.();
     prepareScheduledDemo();
+    setResponseInFlight(true);
 
     if (groupMode) {
       groupSequenceStartedRef.current = false;
@@ -1091,6 +1108,7 @@ export function HeroClocksIn({
       () => {
         setTyping(false);
         appendItems(buildExchangeReplyItems(ex));
+        setResponseInFlight(false);
       },
       USER_BUBBLE_AT + 1650,
       { allowAfterEngaged: true },
@@ -1098,7 +1116,7 @@ export function HeroClocksIn({
   };
 
   const handleFloaterClick = (f: Floater) => {
-    if (composeSheet !== "hidden") return;
+    if (composeSheet !== "hidden" || responseInFlightRef.current) return;
     if (f.member) {
       if (groupSequenceStartedRef.current) return;
       engagedRef.current = true;
@@ -1160,7 +1178,8 @@ export function HeroClocksIn({
           animation: hero-float var(--dur, 12s) ease-in-out infinite;
           animation-delay: var(--delay, 0s);
         }
-        .hero-floater:hover {
+        .hero-floater:hover,
+        .hero-floater:focus-within {
           animation-play-state: paused;
         }
         .hero-floater--active {
@@ -1195,75 +1214,8 @@ export function HeroClocksIn({
         }
       `}</style>
 
-      <div className="pointer-events-none absolute inset-0 z-20 hidden lg:block">
-        {FLOATERS.map((f, i) => {
-          if (usedFloaters.has(f.text)) return null;
-          const isActive = activeFloaterIdxs.has(i);
-          const isPerson = Boolean(f.member);
-          // Every floater is inert while the compose sheet covers the thread:
-          // a topic exchange injected under the sheet would break the
-          // fresh-empty-conversation reveal.
-          const isDisabled =
-            isActive ||
-            composeSheet !== "hidden" ||
-            (isPerson && groupMode);
-          const floaterStyle: FloaterStyle = {
-            top: f.top,
-            bottom: f.bottom,
-            left: f.left,
-            right: f.right,
-            "--dur": `${f.duration}s`,
-            "--delay": `${f.delay}s`,
-            "--fly-x": f.flyX,
-            "--fly-y": f.flyY,
-          };
-          return (
-            <div
-              key={f.text}
-              className={cn(
-                "hero-floater absolute",
-                isActive && "hero-floater--active",
-              )}
-              style={floaterStyle}
-            >
-              <button
-                type="button"
-                onClick={() => handleFloaterClick(f)}
-                disabled={isDisabled}
-                aria-label={
-                  f.member
-                    ? `Start a group chat with ${f.text}`
-                    : `Ask Murph about ${f.text}`
-                }
-                className={cn(
-                  "hero-floater-btn pointer-events-auto cursor-pointer select-none whitespace-nowrap bg-transparent font-mono text-[10px] tracking-[0.18em] text-[#c4a882]/60 transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32]/40 disabled:cursor-default",
-                  f.member
-                    ? "inline-flex items-center gap-1.5 rounded-full border border-[#c4a882]/25 bg-[#f5f0e8]/75 py-1 pl-1 pr-2.5 backdrop-blur-sm"
-                    : "inline-block px-1 py-0.5 uppercase",
-                )}
-              >
-                {f.member ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      className="size-[22px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
-                      style={{
-                        backgroundImage: `url('${f.member.avatarSrc}')`,
-                      }}
-                    />
-                    <span>{f.text}</span>
-                  </>
-                ) : (
-                  f.text
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
-        <div className="relative z-10 lg:col-span-7">
+      <div className="pointer-events-none relative mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
+        <div className="pointer-events-auto relative z-10 lg:col-span-7">
           <h1 className="sr-only">{MURPH_TAGLINE}</h1>
           <div
             aria-hidden="true"
@@ -1300,7 +1252,7 @@ export function HeroClocksIn({
           </div>
         </div>
 
-        <div className="relative lg:col-span-5">
+        <div className="pointer-events-auto relative z-10 lg:col-span-5">
           <div className="relative mx-auto w-full max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
             <div className="lg:absolute lg:left-1/2 lg:top-1/2 lg:w-[340px] lg:-translate-x-1/2 lg:-translate-y-1/2">
               <PhoneShell>
@@ -1472,7 +1424,7 @@ export function HeroClocksIn({
           </div>
         </div>
 
-        <div className="relative mx-auto mt-2 w-full max-w-[320px] lg:hidden [&_a]:w-full [&_button]:w-full">
+        <div className="pointer-events-auto relative z-10 mx-auto mt-2 w-full max-w-[320px] lg:hidden [&_a]:w-full [&_button]:w-full">
           <LandingAuthActions
             authLabel="Meet Murph"
             authenticated={authenticated}
@@ -1480,6 +1432,74 @@ export function HeroClocksIn({
             leadingIcon={channelIcon}
           />
         </div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-0 z-0 hidden lg:block">
+        {FLOATERS.map((f, i) => {
+          if (usedFloaters.has(f.text)) return null;
+          const isActive = activeFloaterIdxs.has(i);
+          const isPerson = Boolean(f.member);
+          // Every floater is inert while Murph is answering or the compose
+          // sheet covers the thread, preserving one complete conversation at
+          // a time.
+          const isDisabled =
+            isActive ||
+            responseInFlight ||
+            composeSheet !== "hidden" ||
+            (isPerson && groupMode);
+          const floaterStyle: FloaterStyle = {
+            top: f.top,
+            bottom: f.bottom,
+            left: f.left,
+            right: f.right,
+            "--dur": `${f.duration}s`,
+            "--delay": `${f.delay}s`,
+            "--fly-x": f.flyX,
+            "--fly-y": f.flyY,
+          };
+          return (
+            <div
+              key={f.text}
+              className={cn(
+                "hero-floater absolute",
+                isActive && "hero-floater--active",
+              )}
+              style={floaterStyle}
+            >
+              <button
+                type="button"
+                onClick={() => handleFloaterClick(f)}
+                disabled={isDisabled}
+                aria-label={
+                  f.member
+                    ? `Start a group chat with ${f.text}`
+                    : `Ask Murph about ${f.text}`
+                }
+                className={cn(
+                  "hero-floater-btn pointer-events-auto cursor-pointer select-none whitespace-nowrap bg-transparent font-mono text-[10px] tracking-[0.18em] text-[#736a58] transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] disabled:cursor-default disabled:opacity-40",
+                  f.member
+                    ? "inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[#c4a882]/40 bg-[#f5f0e8]/90 py-1 pl-1 pr-2.5 backdrop-blur-sm"
+                    : "inline-flex min-h-8 items-center rounded-md px-2 py-1 uppercase",
+                )}
+              >
+                {f.member ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="size-[22px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+                      style={{
+                        backgroundImage: `url('${f.member.avatarSrc}')`,
+                      }}
+                    />
+                    <span>{f.text}</span>
+                  </>
+                ) : (
+                  f.text
+                )}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
