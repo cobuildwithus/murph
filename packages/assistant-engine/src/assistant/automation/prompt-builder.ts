@@ -156,7 +156,7 @@ export function buildAssistantAutoReplyPrompt(
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputSenderLabel(entry),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: inputs.length,
         trustedHostedImageCompletion:
@@ -230,7 +230,7 @@ export async function prepareAssistantAutoReplyInput(
         projectionStatus: entry.projection?.status ?? null,
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputSenderLabel(entry),
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: preparedInputs.length,
         trustedHostedImageCompletion:
@@ -347,23 +347,6 @@ function readAssistantInputGroupSenderHandle(
 ): string | null {
   return metadata?.kind === 'linq' || metadata?.kind === 'telegram'
     ? normalizeNullableString(metadata.senderHandle)
-    : null
-}
-
-function readAssistantInputSenderLabel(input: {
-  conversation: AssistantInputConversationRef
-  sourceMetadata: AssistantInputSourceMetadata | null
-}): string | null {
-  const senderHandle = readAssistantInputGroupSenderHandle(input.sourceMetadata)
-  if (senderHandle) {
-    return senderHandle
-  }
-
-  return input.conversation.threadIsDirect === false &&
-      (input.sourceMetadata?.kind === 'linq' ||
-        input.sourceMetadata?.kind === 'telegram') &&
-      input.sourceMetadata.externalThreadRouteAuthorityPresent === true
-    ? 'unavailable'
     : null
 }
 

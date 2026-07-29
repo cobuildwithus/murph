@@ -727,7 +727,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
   })
 
-  it('marks an authenticated group sender unavailable without treating a display name as authority', () => {
+  it('omits sender authority when an authenticated group message has no sender handle', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: { text: 'morning crew', threadIsDirect: false },
@@ -747,7 +747,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Sender: unavailable')
+    expect(result.prompt).not.toMatch(/^Sender:/mu)
+    expect(result.prompt).not.toContain('unavailable')
     expect(result.prompt).not.toContain('Sender name:')
     expect(result.prompt).not.toContain('alice_example')
   })

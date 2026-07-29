@@ -9535,6 +9535,125 @@ describe('assistant auto-reply runtime', () => {
     expect(JSON.stringify(preparedInputs[0])).not.toContain('participantId')
   })
 
+  it('rechecks speaker labels in each ordinary Linq group turn', async () => {
+    const handles = ['+15551110001', '+15552220002'] as const
+    const createTurnInputs = (turn: number) => handles.map((
+      senderHandle,
+      index,
+    ) => createCapturelessAssistantInputCandidate({
+      accountId: `safe_acct_group_turn_${turn}`,
+      actorId: `safe_actor_group_turn_${index}`,
+      conversationThreadId: 'hidden_group_turn_memo_thread',
+      inputId: `ain_${(turn * 2 + index + 1).toString(16).padStart(32, '0')}`,
+      occurredAt: `2026-04-08T00:0${turn}:0${index}.000Z`,
+      receivedAt: `2026-04-08T00:0${turn}:1${index}.000Z`,
+      replyTarget: {
+        channel: 'linq',
+        messageId: `real_group_turn_${turn}_message_${index}`,
+        threadId: 'real_group_turn_memo_thread',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        senderHandle,
+        service: 'iMessage',
+      },
+      text: `turn ${turn} message ${index}`,
+      threadIsDirect: false,
+    }))
+    const preparedInputs: Array<readonly AssistantAutoReplyPromptInput[]> = []
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(async (
+      promptInputs: readonly AssistantAutoReplyPromptInput[],
+    ) => {
+      preparedInputs.push(promptInputs)
+      return {
+        kind: 'ready' as const,
+        prompt: 'ordinary group turn prompt',
+        userMessageContent: null,
+      }
+    })
+    let lookupRound = 0
+    const groupParticipantDisplayNameReader = {
+      read: vi.fn(async (input: {
+        channel: 'linq'
+        senderHandles: readonly string[]
+      }) => {
+        lookupRound += 1
+        const resolvedIndex = lookupRound === 1 ? 0 : 1
+        const senderHandle = input.senderHandles[resolvedIndex]
+        return senderHandle
+          ? [{
+              displayName: lookupRound === 1
+                ? 'First-turn profile'
+                : 'Second-turn contact',
+              displayNameSource: lookupRound === 1
+                ? 'profile-name' as const
+                : 'unverified-owner-contact' as const,
+              senderHandle,
+            }]
+          : []
+      }),
+    }
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const executionContext = {
+      hosted: {
+        groupParticipantDisplayNameReader,
+        memberId: 'member-group-turn-memo',
+        userEnvKeys: [],
+      },
+    }
+
+    for (const turn of [1, 2]) {
+      const turnInputs = createTurnInputs(turn)
+      const context = reply.createAssistantAutoReplyGroupContext(
+        turnInputs.map(createCapturelessReplyGroupItem),
+      )
+      if (!context) {
+        throw new Error(`expected group context for turn ${turn}`)
+      }
+      const result = await reply.processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context,
+        enabledChannels: ['linq'],
+        executionContext,
+        inboxServices: createInboxServices({ show: vi.fn() }),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(result.replied).toBe(1)
+    }
+
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledTimes(2)
+    for (const call of groupParticipantDisplayNameReader.read.mock.calls) {
+      expect(call[0]).toEqual({
+        channel: 'linq',
+        senderHandles: handles,
+      })
+    }
+    expect(preparedInputs).toHaveLength(2)
+    expect(preparedInputs[0]?.[0]).toMatchObject({
+      linqSpeakerLabel: {
+        displayName: 'First-turn profile',
+        source: 'profile-name',
+      },
+    })
+    expect(preparedInputs[0]?.[1]).not.toHaveProperty('linqSpeakerLabel')
+    expect(preparedInputs[1]?.[0]).not.toHaveProperty('linqSpeakerLabel')
+    expect(preparedInputs[1]?.[1]).toMatchObject({
+      linqSpeakerLabel: {
+        displayName: 'Second-turn contact',
+        source: 'unverified-owner-contact',
+      },
+    })
+  })
+
   it('does not look up speaker names for direct Linq or Telegram inputs', async () => {
     const directLinq = createCapturelessAssistantInputCandidate({
       accountId: 'safe_acct_direct_linq',
