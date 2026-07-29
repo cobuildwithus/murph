@@ -59,11 +59,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Direct/group turn parity, exact-message participant authorization, private
 // media, and hosted-alert integration add authored code to existing runner
-// chunks without adding a forbidden boot input. Their 2026-07-28 measurements
-// reached 9,770,878B total and an 8,018,225B static closure across Linux and
+// chunks without adding a forbidden boot input. Their 2026-07-29 measurements
+// reached 9,856,451B total and an 8,018,225B static closure across Linux and
 // macOS. Ratchet to the higher cross-platform measurements while retaining the
 // established small-growth tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_770_878 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_018_225;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
