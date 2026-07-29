@@ -1714,7 +1714,9 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Canonical metric key reduced into a deterministic derived outcome.'),
+        .describe(
+          'Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.',
+        ),
       comparisonStatistic: experimentOutcomeStatisticSchema
         .optional()
         .describe(
@@ -1984,7 +1986,9 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Canonical metric key reduced into a deterministic derived outcome.'),
+        .describe(
+          'Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.',
+        ),
       comparisonStatistic: experimentOutcomeStatisticSchema
         .optional()
         .describe('Reducer for a metric outcome: count, latest, mean, median, min, max, or sum.'),

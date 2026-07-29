@@ -68,13 +68,18 @@ export function ResultsTab({
   const isStopped = experiment.status === "stopped";
   const isRunnable = isActive || isPaused;
   const hasPrivateRun = Boolean(experiment.privateRun);
+  const isStructuredReview =
+    experiment.privateRun?.outcomeKind === "structured_review" &&
+    experiment.privateRun.outcomeStatus === "available";
+  const isStructuredReviewReady =
+    isStructuredReview &&
+    experiment.privateRun?.structuredReviewStatus === "ready_for_review";
+  const hasIncompleteStructuredReview =
+    isStructuredReview && !isStructuredReviewReady;
   const hasRenderableOutcome =
     experiment.signals.length > 0 ||
     experiment.trends.length > 0 ||
-    (
-      experiment.privateRun?.outcomeKind === "structured_review" &&
-      experiment.privateRun.outcomeStatus === "available"
-    );
+    isStructuredReviewReady;
   const savedOutcomeStatus = experiment.privateRun?.outcomeStatus;
 
   return (
@@ -152,22 +157,27 @@ export function ResultsTab({
       {hasPrivateRun && !hasRenderableOutcome && !isStopped && (
         <ResultsEmptyState
           title={isFinished
-            ? savedOutcomeStatus === "pending"
-              ? "Your saved analysis is still pending"
-              : savedOutcomeStatus === "unavailable"
-                ? "Your saved analysis isn't available in this snapshot"
-                : "Run complete, but there isn't enough data for a clear comparison"
+            ? hasIncompleteStructuredReview
+              ? experiment.summary ?? "Your review evidence is incomplete"
+              : savedOutcomeStatus === "pending"
+                ? "Your saved analysis is still pending"
+                : savedOutcomeStatus === "unavailable"
+                  ? "Your saved analysis isn't available in this snapshot"
+                  : "Run complete, but there isn't enough data for a clear comparison"
             : isPaused
               ? "Your experiment is paused"
               : "You're running this experiment"}
           body={isFinished
-            ? savedOutcomeStatus === "pending"
-              ? "Your completed run is safely recorded in your vault. Its canonical outcome analysis has not been saved yet."
-              : savedOutcomeStatus === "unavailable"
-                ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
-                : savedOutcomeStatus === "available"
-                  ? "Your run is saved privately in your vault, but it does not include comparable metric windows to chart."
-                  : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
+            ? hasIncompleteStructuredReview
+              ? experiment.summaryDetail ??
+                "Add the missing baseline or follow-up evidence to make this review ready."
+              : savedOutcomeStatus === "pending"
+                ? "Your completed run is safely recorded in your vault. Its canonical outcome analysis has not been saved yet."
+                : savedOutcomeStatus === "unavailable"
+                  ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
+                  : savedOutcomeStatus === "available"
+                    ? "Your run is saved privately in your vault, but it does not include comparable metric windows to chart."
+                    : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
             : isPaused
               ? "Your run is saved privately in your vault. Resume it to keep following the protocol and see outcomes here later."
               : "Outcome cards will appear here once there's enough measured data to compare."}
@@ -183,16 +193,19 @@ export function ResultsTab({
         />
       )}
 
-      {showFinishedOutcomeSummary && isFinished && experiment.summary && (
-        <FinishedOutcomeSummary
-          confidence={experiment.outcomeConfidence}
-          detail={experiment.summaryDetail}
-          eyebrow={experiment.privateRun?.outcomeKind === "structured_review"
-            ? "Evidence ready for review"
-            : "Saved result"}
-          summary={experiment.summary}
-        />
-      )}
+      {showFinishedOutcomeSummary &&
+        isFinished &&
+        experiment.summary &&
+        !hasIncompleteStructuredReview && (
+          <FinishedOutcomeSummary
+            confidence={experiment.outcomeConfidence}
+            detail={experiment.summaryDetail}
+            eyebrow={isStructuredReviewReady
+              ? "Evidence ready for review"
+              : "Saved result"}
+            summary={experiment.summary}
+          />
+        )}
 
       {hasPrivateRun && isRunnable ? (
         <ExperimentSummaryTiles experiment={experiment} />

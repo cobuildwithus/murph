@@ -10866,7 +10866,7 @@
                           "minLength": 1
                         },
                         "primaryOutcomeSourceMetricKey": {
-                          "description": "Canonical metric key reduced into a deterministic derived outcome.",
+                          "description": "Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -11312,7 +11312,7 @@
                           "minLength": 1
                         },
                         "primaryOutcomeSourceMetricKey": {
-                          "description": "Canonical metric key reduced into a deterministic derived outcome.",
+                          "description": "Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.",
                           "type": "string",
                           "minLength": 1
                         },

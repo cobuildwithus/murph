@@ -101,11 +101,12 @@ Updated: 2026-07-29
 
 ## Verification
 
-- Commands to run: focused package tests while iterating;
-  `pnpm test:diff` over every touched owner; `pnpm test:scenario-integrity`;
-  direct CLI/query/browser parity scenarios; `git diff --check`;
-  `git merge-tree --write-tree HEAD origin/main`; exact-head preliminary and
-  final ReviewGPT; final PR CI and deployment checks.
+- Commands to run: focused package tests and typechecks over every touched
+  owner; direct CLI/query/browser parity scenarios; rendered desktop/mobile
+  catalog proof; `git diff --check`; `git merge-tree --write-tree HEAD
+  origin/main`; exact-head preliminary and final ReviewGPT; final PR CI and
+  deployment checks. Exact-head GitHub Actions owns the broad suite under the
+  current verification policy.
 - Expected outcomes: all checks pass on the exact pushed head, no accepted
   review findings remain, and existing canonical/legacy experiments plus custom
   scalar and structured-review cases behave consistently.
@@ -116,6 +117,18 @@ Updated: 2026-07-29
   metric points. The separate future capability is a persisted interpreted
   qualitative assessment; this PR now documents only the truthful
   review-ready receipt it implements.
+- Preliminary specialist review: the first pass was invalidated by incomplete
+  rendered evidence and also found three material product gaps plus one
+  coverage gap. Remediation preserves incomplete structured-review status
+  through the UI, labels both metric windows with the declared reducer,
+  describes derived sources consistently in assistant and CLI guidance, and
+  proves activation from an observed unregistered metric. The expanded design
+  study covers ready, missing, partial, maximum, and count states on desktop
+  and mobile.
+- CI regression review: the first exact-head platform shard exposed three
+  legacy compatibility regressions. The legacy adapter again rejects unknown
+  biomarker identifiers, canonical-unit filtering rejects incomparable
+  anchored values, and a one-sided metric window retains the known unit.
 - Claude UI double-check: attempted with the required Fable model and stopped
   after the CLI reported exhausted usage credits. Desktop and mobile catalog
   studies were inspected locally through the repository Playwright fallback.

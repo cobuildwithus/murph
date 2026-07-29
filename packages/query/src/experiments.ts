@@ -35,6 +35,7 @@ import {
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
 import {
+  isRegisteredExperimentMetricSource,
   matchesExperimentMetricIdentity,
   resolveExperimentMetricIdentity,
 } from "./experiment-metrics.ts";
@@ -53,6 +54,7 @@ import {
 } from "./protocols.ts";
 import {
   assessExperimentPrimaryMetricCapture,
+  resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   validateExperimentSessionMetricValue,
   selectMetricSeries,
@@ -642,12 +644,9 @@ function buildMetricResults(
       windowsSummarizable &&
       (
         outcome.statistic === "count" ||
-        (baselineWindow.unit === null && interventionWindow.unit === null) ||
-        (
-          baselineWindow.unit !== null &&
-          interventionWindow.unit !== null &&
-          unitsEquivalent(baselineWindow.unit, interventionWindow.unit)
-        )
+        baselineWindow.unit === null ||
+        interventionWindow.unit === null ||
+        unitsEquivalent(baselineWindow.unit, interventionWindow.unit)
       );
     const deltaAbs =
       unitsCompatible && baselineMean !== null && interventionMean !== null
@@ -1262,6 +1261,12 @@ function buildAnalysisReadiness(
       sessionFields.filter((fieldId) => fieldId === capture.fieldId).length !== 1
     ) {
       blockingReasons.push("uncapturable_primary_biomarker");
+    } else if (
+      capture.kind === "measurement" &&
+      frontmatter.analysisPlan?.primaryOutcome === undefined &&
+      !isRegisteredExperimentMetricSource(primaryOutcome.key)
+    ) {
+      blockingReasons.push("unsupported_primary_biomarker");
     } else if (capture.kind === "measurement") {
       const captureAssessment = assessExperimentPrimaryMetricCapture({
         primaryBiomarkerKey: primaryOutcome.key,
@@ -2154,11 +2159,11 @@ function collectRunMetricWindows(
     context.frontmatter,
     outcome,
   );
-  const seriesPoints = selectMetricSeries({
+  const seriesPoints = selectExperimentOutcomeSeries({
     ...(aggregation !== undefined ? { aggregation } : {}),
-    metricKey: outcome.metricKey,
+    outcome,
     points: context.metricPoints,
-  }).rows;
+  });
 
   return {
     baseline: collectSeriesMetricWindow(
@@ -2222,11 +2227,11 @@ function collectAnchoredMetricWindow(
     context.frontmatter,
     outcome,
   );
-  const points = selectMetricSeries({
+  const points = selectExperimentOutcomeSeries({
     ...(aggregation !== undefined ? { aggregation } : {}),
-    metricKey: outcome.metricKey,
+    outcome,
     points: anchoredPoints,
-  }).rows.flatMap((point) =>
+  }).flatMap((point) =>
     typeof point.value === "number" && Number.isFinite(point.value)
       ? [{
           date: point.date,
@@ -2238,6 +2243,29 @@ function collectAnchoredMetricWindow(
   );
 
   return metricWindowSelectionFromValues(points, anchors.length, outcome.statistic);
+}
+
+function selectExperimentOutcomeSeries(input: {
+  aggregation?: ExperimentOutcomeStatistic;
+  outcome: ResolvedExperimentMetricOutcome;
+  points: readonly MetricPoint[];
+}): MetricSeriesPoint[] {
+  const rows = selectMetricSeries({
+    ...(input.aggregation !== undefined ? { aggregation: input.aggregation } : {}),
+    metricKey: input.outcome.metricKey,
+    points: input.points,
+  }).rows;
+  if (input.aggregation === "count") {
+    return rows;
+  }
+  const canonicalUnit = resolveMetricDefinition(input.outcome.metricKey)?.canonicalUnit ?? null;
+  if (canonicalUnit === null) {
+    return rows;
+  }
+
+  return rows.filter(
+    (row) => row.unit !== null && unitsEquivalent(row.unit, canonicalUnit),
+  );
 }
 
 function resolveOutcomeSameDayAggregation(

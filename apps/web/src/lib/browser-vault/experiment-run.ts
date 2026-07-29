@@ -188,6 +188,7 @@ function mapExperimentResultsProjection(
       : results.biomarkers.length > 0
         ? "metric"
         : null,
+    structuredReviewStatus: results.persistedOutcome?.structuredReview?.status,
     outcomeConfidence: results.persistedOutcome?.confidence.level,
     summary,
     summaryDetail,
@@ -355,7 +356,7 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
       }
 
       const currentValue = readCurrentBiomarkerValue(biomarker);
-      const unit = biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit ?? undefined;
+      const unit = resolveOutcomeDisplayUnit(biomarker);
       // A day-one reading against a multi-day baseline is noise, not a change.
       // Only present the delta once the replica classifies both windows as
       // having enough days (`completeness === "good"`).
@@ -395,7 +396,7 @@ function buildTrends(
     .filter(isRenderableBiomarker)
     .flatMap((biomarker) => {
       const currentValue = readCurrentBiomarkerValue(biomarker);
-      const unit = biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit ?? "";
+      const unit = resolveOutcomeDisplayUnit(biomarker) ?? "";
 
       if (currentValue === null || biomarker.baseline.mean === null) {
         return [];
@@ -447,9 +448,7 @@ function buildTrends(
           : undefined,
         baselineAvg: roundMetric(biomarker.baseline.mean),
         currentValue: roundMetric(currentValue),
-        currentValueLabel: biomarker.intervention.mean !== null
-          ? formatOutcomeStatisticLabel(biomarker.statistic)
-          : "latest",
+        statistic: biomarker.statistic,
         delta: biomarker.deltaAbs === null || biomarker.completeness !== "good"
           ? ""
           : formatDelta(biomarker.deltaAbs, unit),
@@ -458,25 +457,13 @@ function buildTrends(
     });
 }
 
-function formatOutcomeStatisticLabel(
-  statistic: BrowserVaultExperimentBiomarkerResult["statistic"],
-): NonNullable<TrendData["currentValueLabel"]> {
-  switch (statistic) {
-    case "count":
-      return "count";
-    case "latest":
-      return "latest";
-    case "max":
-      return "maximum";
-    case "mean":
-      return "experiment average";
-    case "median":
-      return "median";
-    case "min":
-      return "minimum";
-    case "sum":
-      return "total";
+function resolveOutcomeDisplayUnit(
+  biomarker: BrowserVaultExperimentBiomarkerResult,
+): string | undefined {
+  if (biomarker.statistic === "count") {
+    return undefined;
   }
+  return biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit ?? undefined;
 }
 
 function buildHistoryPoints(

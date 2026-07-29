@@ -10,6 +10,7 @@ import {
   registerExperimentCommands,
 } from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
+import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -46,6 +47,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
   registerVaultCommands(cli, services, createIntegratedInboxServices())
   registerExperimentCommands(cli, services)
   registerJournalCommands(cli, services)
+  registerMeasurementCommands(cli)
   registerProtocolCommands(cli, services)
   registerReadCommands(cli, services)
 
@@ -241,6 +243,10 @@ test('experiment start schema exposes typed fields while protocol import-json ke
   assert.match(
     experimentStartSchema.options.properties.primaryOutcomeKey.description ?? '',
     /Required for new custom runs.*biomarker:<outcome-slug>/u,
+  )
+  assert.match(
+    experimentStartSchema.options.properties.primaryOutcomeSourceMetricKey.description ?? '',
+    /Registered metric source or already observed metric source/u,
   )
   assert.equal('setupAnswer' in experimentStartSchema.options.properties, true)
   assert.equal('onboardingCompletedAt' in experimentStartSchema.options.properties, true)
@@ -716,6 +722,53 @@ test.sequential('derived outcomes require an existing deterministic metric sourc
     assert.match(
       unknownSource.error.message ?? '',
       /has no registered metric producer or existing metric points/u,
+    )
+
+    const measurement = await runSliceCli([
+      'measurement',
+      'add',
+      '--metric',
+      'custom-daily-score',
+      '--value',
+      '7',
+      '--unit',
+      'points',
+      '--occurred-at',
+      '2026-04-30T08:00:00.000Z',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      measurement.ok,
+      true,
+      measurement.ok ? undefined : measurement.error.message,
+    )
+
+    const observedCustomSource = await runSliceCli([
+      'experiment',
+      'start',
+      'derived-outcome-observed-source',
+      '--custom',
+      '--no-public-protocol',
+      '--title',
+      'Derived Outcome',
+      '--intervention-start',
+      '2026-05-01',
+      '--primary-outcome-key',
+      'biomarker:derived-outcome',
+      '--primary-outcome-kind',
+      'metric',
+      '--primary-outcome-source-metric-key',
+      'custom-daily-score',
+      '--comparison-statistic',
+      'mean',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(
+      observedCustomSource.ok,
+      true,
+      observedCustomSource.ok ? undefined : observedCustomSource.error.message,
     )
 
     const registeredSource = await runSliceCli([
