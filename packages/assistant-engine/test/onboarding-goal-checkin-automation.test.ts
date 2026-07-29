@@ -91,6 +91,10 @@ describe('onboarding goal check-in automation', () => {
     expect(seed).toMatchObject({
       // March 22 and 29 are EDT, so 13:30 local resolves to 17:30 UTC.
       activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       continuityPolicy: 'preserve',
       ownerScope: 'member',
@@ -177,6 +181,10 @@ describe('onboarding goal check-in automation', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       activeUntil: '2026-03-29T17:30:00.000Z',
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
       route: defaultRoute,
       schedule: {
         at: '2026-03-22T17:30:00.000Z',

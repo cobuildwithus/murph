@@ -18,6 +18,15 @@
 
 <!-- Name each non-obvious production surface and its regression proof, or write "None". -->
 
+## Architecture and reuse
+
+<!-- Keep this concrete and specific to the final diff. If an item is "none," explain why the existing design is sufficient. -->
+
+- Existing systems reused: <!-- Frameworks, owners, stores, workflows, or primitives this change builds on -->
+- New logic: <!-- New product, business, scheduling, validation, or failure-handling behavior -->
+- New abstractions: <!-- New shared types, helpers, services, state owners, or "None; ..." with a reason -->
+- Complexity intentionally avoided: <!-- Tables, queues, services, compatibility layers, or other machinery deliberately not added -->
+
 ## Hot reply path impact
 
 <!-- The hot reply path runs from durable acceptance of a current conversation message through provider start and durable reply handoff. If this PR does not change that path, write "Not applicable" and say why. If it does, list every database call, network/provider call, or other awaited operation added or moved onto the path. Include call counts, serial/parallel ordering, timeout/retry/fallback behavior, expected or measured latency, and the proof used to compare before and after. -->

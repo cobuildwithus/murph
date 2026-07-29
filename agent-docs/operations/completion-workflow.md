@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -182,6 +182,12 @@ Required:
   why the change is necessary and name the regression proof. If none exist,
   write `None`. Do not hide a cross-cutting behavior change inside the ordinary
   file summary.
+- **Architecture and reuse.** Use four concrete bullets labeled `Existing
+  systems reused`, `New logic`, `New abstractions`, and `Complexity
+  intentionally avoided`. Describe the final diff rather than the work process.
+  If no abstraction was added, say so and explain which existing contract was
+  sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
+  body workflow checks the rendered section on every PR.
 - **Hot reply path impact.** State whether the PR changes the
   `Foreground Reply Critical Path` defined in
   `docs/contracts/00-invariants.md`: durable acceptance of a current
