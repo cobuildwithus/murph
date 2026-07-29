@@ -1198,10 +1198,31 @@ describe("handleHostedRuntimeGroupTool", () => {
       displayName: "+15550000002",
       variant: "active non-self handles",
     },
-  ])("does not expose Linq's synthesized $variant title", async ({ displayName }) => {
+    {
+      displayName: "+15550000002, +15550000001",
+      handles: [
+        { handle: "stale-self@example.test", isMe: true, status: "inactive" },
+        { handle: "+15550000001", isMe: true, status: " ACTIVE " },
+        { handle: "+15550000002", isMe: false, status: "active" },
+      ],
+      variant: "active handles with an inactive stale self handle",
+    },
+    {
+      displayName: "+15550000002",
+      handles: [
+        { handle: "+15550000001", isMe: true, status: "active" },
+        { handle: "+15550000002", isMe: false, status: "active" },
+        { handle: "stale-member@example.test", isMe: false, status: "inactive" },
+      ],
+      variant: "active non-self handles with an inactive stale participant",
+    },
+  ])("does not expose Linq's synthesized $variant title", async ({
+    displayName,
+    handles,
+  }) => {
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       displayName,
-      handles: [
+      handles: handles ?? [
         { handle: "+15550000001", isMe: true, status: "active" },
         { handle: "+15550000002", isMe: false, status: "active" },
         { handle: "departed@example.test", isMe: false, status: "left" },

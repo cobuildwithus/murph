@@ -1409,9 +1409,7 @@ async function readHostedLinqExplicitGroupDisplayName(
       .sort()
       .join("\0");
   const displayNameKey = normalizeHandles(displayName.split(","));
-  const activeHandles = chat.handles.filter(
-    ({ status }) => status !== "left" && status !== "removed",
-  );
+  const activeHandles = chat.handles.filter(isActiveHostedLinqChatHandle);
   const candidateHandleSets = [
     chat.handles,
     activeHandles,
@@ -1772,9 +1770,12 @@ async function resolveHostedThreadContainerParticipants(input: {
   return resolvedParticipants;
 }
 
+function isActiveHostedLinqChatHandle(handle: HostedLinqChatHandleSummary): boolean {
+  return !handle.status || handle.status.trim().toLowerCase() === "active";
+}
+
 function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
-  return !handle.isMe
-    && (!handle.status || handle.status.trim().toLowerCase() === "active");
+  return !handle.isMe && isActiveHostedLinqChatHandle(handle);
 }
 
 function selectHostedThreadContainerParticipantHandles(input: {
