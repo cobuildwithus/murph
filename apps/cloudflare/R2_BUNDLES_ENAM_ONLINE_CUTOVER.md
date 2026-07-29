@@ -36,7 +36,8 @@ these conditions hold:
 1. destination writes are active;
 2. every source-active Worker and Durable Object is drained;
 3. every OC-targeting direct PUT URL and bounded upload is expired;
-4. final source-active create-only passes are complete;
+4. the final source-active create-only invocation completed every internal
+   convergence cycle;
 5. the copier is permanently stopped; and
 6. two final directional convergence reads pass.
 
@@ -213,10 +214,20 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
 
 `--copier-exclusive` is an operator assertion, not a distributed lock. Use one
 controlled credential and one operator shell for this bucket pair. Never
-overlap apply invocations across terminals, hosts, CI, or automation. Rerun
-passes sequentially while OC remains live. A concurrent new OC object simply
-appears in the next pass. An ETag change for an approved immutable key blocks
-the operation and must be investigated.
+overlap apply invocations across terminals, hosts, CI, or automation. The one
+acknowledged process retains the source keys it observes, re-inventories after
+each copy cycle, and continues internally when concurrent OC writes appear.
+An ETag change for an approved immutable key blocks the operation and must be
+investigated.
+
+That provenance exists only in the live process. A later process must reject
+every source-active destination-only eligible object because it cannot
+distinguish clean prior churn from an ambiguous late commit. For the production
+cutover, start the write fence and source-PUT drain before this invocation can
+reach its first zero-source-only cycle. Use the rehearsal duration with a
+conservative margin to schedule that overlap. If a clean rehearsal invocation
+exits with destination-only churn, keep that destination as rehearsal evidence
+only; do not restart copying into it.
 
 CopyObject is deliberately attempted once. A transport error, `429`, or `5xx`
 is ambiguous because the first request may still commit, so the command fails
@@ -224,12 +235,16 @@ closed without retrying it. Keep copy admission closed, wait out the request
 bound, then run the source-active read-only check below. A destination-only
 eligible object blocks reuse of that destination.
 
-### 5. Stop and prove the copier quiescent
+### 5. Complete normally or audit an abnormal stop
 
-Stop admitting copy work and allow the command to exit normally. It awaits all
-bounded in-flight requests before returning. If the process crashes or a
-CopyObject result is ambiguous, wait out the request bound and rerun the
-source-active read-only check.
+On normal exit, the command has awaited every bounded worker request, completed
+all internally required cycles, and performed the final source/destination
+inventory validation. That is the source-active copy proof; do not launch a
+separate read-only process afterward because its intentionally fresh provenance
+must distrust clean destination-only churn from the completed process.
+
+Only if the process crashes or a CopyObject result is ambiguous, wait out the
+request bound and run the strict source-active read-only audit:
 
 Run without `--apply`:
 
@@ -243,7 +258,8 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
 In `source_active`, an eligible ENAM object absent from OC blocks promotion.
 The online command cannot prune it. Because ENAM is still writer-exclusive,
 abandon the destination using separately reviewed destination-only credentials
-or investigate the specific ordinary-delete race before rebooking.
+or investigate the specific ordinary-delete race before rebooking. Never use
+this abnormal-stop audit to bless a destination-only object.
 
 ### 6. Fence writes, drain OC PUT capability, and finish copying
 
@@ -254,10 +270,11 @@ ten-minute URL lifetime and the conservative ten-minute upload bound. Require
 no in-flight write invocation and no new OC direct-PUT issuance or completion
 during the final quiet interval.
 
-While the destination is still writer-exclusive, run sequential source-active
-apply passes until no eligible OC object is source-only. Stop the copier,
-allow every request to settle, and run the source-active read-only proof from
-step 5. Revoke the copy credential before promotion.
+The source-active apply invocation from step 4 must remain the sole copier
+through this drain. It automatically copies each new source delta in another
+internal cycle. After the drain is proven, allow that same invocation to reach
+zero source-only objects and exit cleanly. Revoke the copy credential before
+promotion.
 
 No CopyObject request may be issued after this point.
 

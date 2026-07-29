@@ -320,7 +320,7 @@ export async function runR2BundlesOnlineCopy(
     source: options.source,
   });
 
-  const activeOwners = await inspectActiveOwners();
+  let activeOwners = await inspectActiveOwners();
 
   if (options.finalConvergence) {
     await proveFinalDirectionalConvergence({
@@ -357,78 +357,94 @@ export async function runR2BundlesOnlineCopy(
   }
   assertExpectedMarker(destinationInventory, markerKey);
 
-  const before = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
-  const initialSourceEligibleKeys = new Set(
+  const initialComparison = compareR2OnlineEligibleObjects(
+    sourceInventory,
+    destinationInventory,
+  );
+  const observedSourceEligibleKeys = new Set(
     sourceInventory
       .filter((entry) => classifyR2OnlineCopyKey(entry.key) === "eligible_immutable")
       .map((entry) => entry.key),
   );
-  assertNoMismatches(before);
-  if (options.phase === "source_active" && before.destinationOnlyEligibleCount > 0) {
+  assertNoMismatches(initialComparison);
+  if (
+    options.phase === "source_active"
+    && initialComparison.destinationOnlyEligibleCount > 0
+  ) {
     throw new Error(
-      `The source-active destination contains ${before.destinationOnlyEligibleCount.toLocaleString("en-US")} `
+      `The source-active destination contains ${initialComparison.destinationOnlyEligibleCount.toLocaleString("en-US")} `
       + "eligible object(s) absent from OC; this command never prunes them.",
     );
   }
 
-  log(
-    `Online copy plan: ${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} `
-    + "missing immutable object(s); lifecycle-managed objects remain in OC.",
-  );
-  if (!options.apply) {
-    if (before.sourceOnlyEligibleKeys.length > 0) {
-      throw new Error(
-        `${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
-        + "are not present in ENAM.",
-      );
-    }
-    log("Verified directional eligible-object convergence without changing either bucket.");
-    return;
-  }
-
-  const sourceByKey = new Map(sourceInventory.map((entry) => [entry.key, entry] as const));
-  const copyEntries = before.sourceOnlyEligibleKeys.map((key) => {
-    const entry = sourceByKey.get(key);
-    if (!entry) throw new Error("Online copy plan lost a source inventory entry.");
-    return entry;
-  });
-  const copyResult = await copyEntriesConcurrently({
-    client,
-    destination: options.destination,
-    entries: copyEntries,
-    source: options.source,
-  });
-
-  sourceInventory = await readInventory(options.source);
-  destinationInventory = await readInventory(options.destination);
-  assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
-  assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
-  assertCanonicalSnapshotsReachable(
-    sourceInventory,
-    destinationInventory,
-    activeOwners,
-    options.phase,
-  );
-  assertExpectedMarker(destinationInventory, markerKey);
-  const after = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
-  assertNoMismatches(after);
-  const skippedKeysNowPresent = destinationInventory.filter((entry) =>
-    copyResult.sourceMissingKeys.has(entry.key)
-  );
-  if (skippedKeysNowPresent.length > 0) {
-    throw new Error(formatFingerprintFailure(
-      `${skippedKeysNowPresent.length.toLocaleString("en-US")} immutable object(s) skipped `
-      + "after confirmed source deletion later appeared in the destination",
-      skippedKeysNowPresent.map((entry) => entry.key),
-    ));
-  }
-  if (after.sourceOnlyEligibleKeys.length > 0) {
-    throw new Error(
-      `${after.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
-      + "remain after the online pass; rerun the create-only pass.",
+  let copyCycle = 0;
+  let destinationConfirmedCount = 0;
+  const sourceMissingKeys = new Set<string>();
+  while (true) {
+    copyCycle += 1;
+    const before = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
+    assertNoMismatches(before);
+    log(
+      `Online copy plan: ${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} `
+      + "missing immutable object(s); lifecycle-managed objects remain in OC.",
     );
-  }
-  if (options.phase === "source_active" && after.destinationOnlyEligibleCount > 0) {
+    if (!options.apply) {
+      if (before.sourceOnlyEligibleKeys.length > 0) {
+        throw new Error(
+          `${before.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} eligible source object(s) `
+          + "are not present in ENAM.",
+        );
+      }
+      log("Verified directional eligible-object convergence without changing either bucket.");
+      return;
+    }
+
+    const sourceByKey = new Map(sourceInventory.map((entry) => [entry.key, entry] as const));
+    const copyEntries = before.sourceOnlyEligibleKeys.map((key) => {
+      const entry = sourceByKey.get(key);
+      if (!entry) throw new Error("Online copy plan lost a source inventory entry.");
+      return entry;
+    });
+    const copyResult = await copyEntriesConcurrently({
+      client,
+      destination: options.destination,
+      entries: copyEntries,
+      source: options.source,
+    });
+    destinationConfirmedCount += copyResult.destinationConfirmedCount;
+    for (const key of copyResult.sourceMissingKeys) {
+      sourceMissingKeys.add(key);
+    }
+
+    sourceInventory = await readInventory(options.source);
+    destinationInventory = await readInventory(options.destination);
+    activeOwners = await inspectActiveOwners();
+    assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
+    assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
+    assertCanonicalSnapshotsReachable(
+      sourceInventory,
+      destinationInventory,
+      activeOwners,
+      options.phase,
+    );
+    assertExpectedMarker(destinationInventory, markerKey);
+    for (const entry of sourceInventory) {
+      if (classifyR2OnlineCopyKey(entry.key) === "eligible_immutable") {
+        observedSourceEligibleKeys.add(entry.key);
+      }
+    }
+    const after = compareR2OnlineEligibleObjects(sourceInventory, destinationInventory);
+    assertNoMismatches(after);
+    const skippedKeysNowPresent = destinationInventory.filter((entry) =>
+      sourceMissingKeys.has(entry.key)
+    );
+    if (skippedKeysNowPresent.length > 0) {
+      throw new Error(formatFingerprintFailure(
+        `${skippedKeysNowPresent.length.toLocaleString("en-US")} immutable object(s) skipped `
+        + "after confirmed source deletion later appeared in the destination",
+        skippedKeysNowPresent.map((entry) => entry.key),
+      ));
+    }
     const finalSourceEligibleKeys = new Set(
       sourceInventory
         .filter((entry) => classifyR2OnlineCopyKey(entry.key) === "eligible_immutable")
@@ -437,25 +453,34 @@ export async function runR2BundlesOnlineCopy(
     const unexpectedDestinationOnly = destinationInventory.filter((entry) =>
       classifyR2OnlineCopyKey(entry.key) === "eligible_immutable"
       && !finalSourceEligibleKeys.has(entry.key)
-      && !initialSourceEligibleKeys.has(entry.key)
+      && !observedSourceEligibleKeys.has(entry.key)
     );
     if (unexpectedDestinationOnly.length > 0) {
       throw new Error(formatFingerprintFailure(
         `The source-active destination contains ${unexpectedDestinationOnly.length.toLocaleString("en-US")} `
-        + "eligible object(s) absent from both the initial and final OC inventories",
+        + "eligible object(s) never observed in OC by this invocation",
         unexpectedDestinationOnly.map((entry) => entry.key),
       ));
     }
+    if (after.sourceOnlyEligibleKeys.length > 0) {
+      log(
+        `Online copy cycle ${copyCycle.toLocaleString("en-US")} observed `
+        + `${after.sourceOnlyEligibleKeys.length.toLocaleString("en-US")} new immutable source `
+        + "object(s); continuing in the same acknowledged invocation.",
+      );
+      continue;
+    }
+    log(
+      `Copied or confirmed ${destinationConfirmedCount.toLocaleString("en-US")} `
+      + "destination immutable object(s); "
+      + `observed ${sourceMissingKeys.size.toLocaleString("en-US")} planned source object(s) `
+      + "missing during per-object checks and "
+      + `${after.destinationOnlyEligibleCount.toLocaleString("en-US")} observed source object(s) `
+      + "absent from the final source inventory; "
+      + "no destination object was overwritten or deleted.",
+    );
+    return;
   }
-  log(
-    `Copied or confirmed ${copyResult.destinationConfirmedCount.toLocaleString("en-US")} `
-    + "destination immutable object(s); "
-    + `observed ${copyResult.sourceMissingKeys.size.toLocaleString("en-US")} planned source object(s) `
-    + "missing during per-object checks and "
-    + `${after.destinationOnlyEligibleCount.toLocaleString("en-US")} initially listed object(s) `
-    + "absent from the final source inventory; "
-    + "no destination object was overwritten or deleted.",
-  );
 }
 
 export function createSignedR2Request(input: {

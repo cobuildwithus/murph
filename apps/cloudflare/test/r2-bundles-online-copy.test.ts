@@ -334,7 +334,7 @@ describe("R2 online immutable copy", () => {
     expect(harness.calls.filter((call) =>
       call.command === "pnpm" && call.args.includes("lifecycle")
     )).toHaveLength(2);
-    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(1);
+    expect(harness.calls.filter((call) => call.command === "murph-prod-psql-ro")).toHaveLength(2);
   });
 
   it.each([
@@ -619,9 +619,102 @@ describe("R2 online immutable copy", () => {
 
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^Copied or confirmed 1 destination immutable object\(s\); observed 0 planned source object\(s\) .* 1 initially listed object\(s\) absent/u,
+        /^Copied or confirmed 1 destination immutable object\(s\); observed 0 planned source object\(s\) .* 1 observed source object\(s\) absent/u,
       ),
     );
+  });
+
+  it("converges live source churn within one acknowledged invocation", async () => {
+    const first = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/first-cycle.snapshot.enc",
+      { etag: '"11111111111111111111111111111111"', size: 11 },
+    );
+    const second = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/second-cycle.snapshot.enc",
+      { etag: '"22222222222222222222222222222222"', size: 12 },
+    );
+    let destinationInventory = [marker()];
+    let sourceInventoryReads = 0;
+    const inspectActiveOwners = vi.fn(async () => activeOwners);
+    const copyObject = vi.fn(async ({ entry: planned }: CopyObjectInput) => {
+      destinationInventory = [...destinationInventory, planned];
+      return "copied" as const;
+    });
+    const log = vi.fn();
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(async (_bucket: string, key: string) => {
+            const found = [first, second].find((candidate) => candidate.key === key);
+            return found ? { etag: found.etag, size: found.size } : null;
+          }),
+          putMarker: vi.fn(async () => "created" as const),
+        },
+        inspectActiveOwners,
+        inspectInfrastructure: async () => undefined,
+        log,
+        readInventory: async (bucket) => {
+          if (bucket === destinationBucket) return destinationInventory;
+          sourceInventoryReads += 1;
+          return sourceInventoryReads === 1 ? [first] : [second];
+        },
+      },
+    );
+
+    expect(copyObject.mock.calls.map(([input]) => input.entry.key)).toEqual([
+      first.key,
+      second.key,
+    ]);
+    expect(inspectActiveOwners).toHaveBeenCalledTimes(3);
+    expect(log).toHaveBeenCalledWith(
+      "Online copy cycle 1 observed 1 new immutable source object(s); "
+      + "continuing in the same acknowledged invocation.",
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Copied or confirmed 2 destination immutable object\(s\); .* 1 observed source object\(s\) absent/u,
+      ),
+    );
+  });
+
+  it("rejects reuse when destination-only provenance was lost with the prior process", async () => {
+    const destinationOnly = entry(
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/prior-process.snapshot.enc",
+      { etag: '"33333333333333333333333333333333"', size: 13 },
+    );
+    const copyObject = vi.fn();
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      {
+        client: {
+          copyObject,
+          headObject: vi.fn(),
+          putMarker: vi.fn(),
+        },
+        inspectActiveOwners: async () => activeOwners,
+        inspectInfrastructure: async () => undefined,
+        log: vi.fn(),
+        readInventory: async (bucket) => bucket === sourceBucket
+          ? []
+          : [marker(), destinationOnly],
+      },
+    )).rejects.toThrow("destination contains 1 eligible object(s) absent from OC");
+
+    expect(copyObject).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -740,7 +833,7 @@ describe("R2 online immutable copy", () => {
           ? [eligible]
           : destinationInventory,
       },
-    )).rejects.toThrow("absent from both the initial and final OC inventories");
+    )).rejects.toThrow("never observed in OC by this invocation");
   });
 
   it("fails closed when an immutable source identity changes after CopyObject", async () => {
