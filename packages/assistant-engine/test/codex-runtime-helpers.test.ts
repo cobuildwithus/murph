@@ -526,9 +526,9 @@ describe('Codex assistant registry helpers', () => {
       requestsTruncated: false,
       schema: 'murph.assistant-turn-profile.v1',
       tools: [
+        { calls: 1, durationMs: 900, label: 'images.generate', outputChars: 40 },
         { calls: 1, durationMs: 420, label: 'vault-cli samples query', outputChars: 2048 },
         { calls: 1, durationMs: 35, label: 'grep', outputChars: 512 },
-        { calls: 1, durationMs: 900, label: 'images.generate', outputChars: 40 },
       ],
       toolsTruncated: false,
     })
@@ -550,6 +550,141 @@ describe('Codex assistant registry helpers', () => {
       usageId: 'turn_profile.attempt-1',
     })
     expect(parsed.turnProfileJson).toEqual(usage.turnProfileJson)
+  })
+
+  it('attributes a compound command duration to its ordered safe executable heads', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_compound_command' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_compound',
+              command: 'bash -lc "cat private-record && node private-script.js"',
+              commandActions: [
+                {
+                  type: 'read',
+                  command: 'cat private-record',
+                  path: 'private-record',
+                },
+                {
+                  type: 'unknown',
+                  command: 'node private-script.js',
+                },
+              ],
+              aggregatedOutput: 'private output',
+              durationMs: 19_194,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_compound_command',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 19_194,
+        label: 'cat node',
+        outputChars: 14,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-record')
+    expect(JSON.stringify(profile)).not.toContain('private-script')
+    expect(JSON.stringify(profile)).not.toContain('private output')
+  })
+
+  it('uses the full safe structured chain when raw shell quoting fails closed', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_compound_fallback' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_compound_fallback',
+              command: "bash -lc 'cat '\\''private-record'\\'' && node private-script.js'",
+              commandActions: [
+                {
+                  type: 'read',
+                  command: "cat 'private-record'",
+                  path: 'private-record',
+                },
+                {
+                  type: 'unknown',
+                  command: 'node private-script.js',
+                },
+              ],
+              aggregatedOutput: '',
+              durationMs: 19_194,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_compound_fallback',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 19_194,
+        label: 'cat node',
+        outputChars: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-record')
+    expect(JSON.stringify(profile)).not.toContain('private-script')
+  })
+
+  it('does not build a partial structured chain across a later unsafe action', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_compound_unsafe' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              id: 'item_compound_unsafe',
+              command:
+                'bash -lc "cat private-record && /tmp/private-tool && node private-script.js"',
+              commandActions: [
+                {
+                  type: 'read',
+                  command: 'cat private-record',
+                  path: 'private-record',
+                },
+                {
+                  type: 'unknown',
+                  command: '/tmp/private-tool',
+                },
+                {
+                  type: 'unknown',
+                  command: 'node private-script.js',
+                },
+              ],
+              aggregatedOutput: '',
+              durationMs: 19_194,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_compound_unsafe',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationMs: 19_194,
+        label: 'cat',
+        outputChars: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-tool')
+    expect(JSON.stringify(profile)).not.toContain('private-script')
   })
 
   it('caps the per-turn profile request series and tool list under the callback payload limit', () => {
@@ -735,10 +870,10 @@ describe('Codex assistant registry helpers', () => {
       toolsTruncated: false,
     })
     expect(profile?.tools).toEqual([
+      { calls: 6, durationMs: 60, label: 'command', outputChars: 16 },
       { calls: 2, durationMs: 20, label: 'murph reminders list', outputChars: 55 },
       { calls: 2, durationMs: 20, label: 'vault-cli', outputChars: 46 },
       { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 20 },
-      { calls: 6, durationMs: 60, label: 'command', outputChars: 16 },
       { calls: 1, durationMs: 10, label: 'grep', outputChars: 15 },
       { calls: 1, durationMs: 10, label: 'a'.repeat(64), outputChars: 10 },
       { calls: 1, durationMs: 10, label: 'rg', outputChars: 8 },
@@ -797,8 +932,8 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(profile?.tools).toEqual([
-      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 30 },
       { calls: 6, durationMs: 60, label: 'command', outputChars: 21 },
+      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 30 },
       { calls: 1, durationMs: 10, label: 'ls', outputChars: 9 },
     ])
   })
