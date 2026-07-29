@@ -251,6 +251,23 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
+  it("forwards the managed Venice credential for per-member provider overrides", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "openai-worker-secret",
+      VENICE_API_KEY: "venice-worker-secret",
+    })).toEqual({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      VENICE_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+    });
+  });
+
   it("forwards explicit hosted checkpoint debug env into runner containers", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
@@ -1208,9 +1225,13 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
+        "HOSTED_VENICE_LUNA_MODEL",
+        "HOSTED_VENICE_SOL_MODEL",
+        "HOSTED_VENICE_TERRA_MODEL",
         "WHOOP_SCOPES",
       ]),
     );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toContain("VENICE_API_KEY");
     for (const retiredWhatsAppVar of [
       "WHATSAPP_API_BASE_URL",
       "WHATSAPP_GRAPH_VERSION",
@@ -1225,7 +1246,6 @@ describe("hosted deploy automation device-sync surface", () => {
       "LITELLM_PROXY_API_KEY",
       "OLLAMA_API_KEY",
       "OPENROUTER_API_KEY",
-      "VENICE_API_KEY",
     ]) {
       expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
         removedProviderSecret,

@@ -116,6 +116,7 @@ const RUNNER_PROVIDER_EGRESS_CREDENTIAL_PROVIDER_KINDS = new Set<string>([
   "mapbox",
   "murph_data_api",
   "openai",
+  "venice",
   "workers_ai_transcribe",
 ]);
 

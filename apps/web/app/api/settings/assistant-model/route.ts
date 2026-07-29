@@ -1,12 +1,17 @@
 import {
+  HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
   isHostedAssistantProductModel,
+  isHostedAssistantProvider,
   type HostedAssistantProductModel,
+  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
 
 import { getPrisma } from "@/src/lib/prisma";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  updateHostedMemberAssistantModelPreferenceTx,
+  isHostedVeniceAssistantEnabled,
+  updateHostedMemberAssistantConfigurationTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -27,20 +32,43 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "ASSISTANT_MODEL_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Assistant model request body is too large.",
   });
-  const model = parseAssistantModelRequestBody(body);
+  const configuration = parseAssistantModelRequestBody(body);
+  if (
+    configuration.provider === HOSTED_ASSISTANT_VENICE_PROVIDER
+    && !isHostedVeniceAssistantEnabled()
+  ) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      httpStatus: 403,
+      message: "Venice is not available for this Murph deployment.",
+    });
+  }
   const prisma = getPrisma();
-  const result = await prisma.$transaction(async (tx) => (
-    updateHostedMemberAssistantModelPreferenceTx({
+  const result = await prisma.$transaction(
+    async (tx) => updateHostedMemberAssistantConfigurationTx({
       memberId: auth.member.id,
-      model,
       prisma: tx,
-    })
-  ), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      ...(configuration.model === undefined
+        ? {}
+        : { model: configuration.model }),
+      ...(configuration.provider === undefined
+        ? {}
+        : { provider: configuration.provider }),
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
 
   return jsonOk({
     dormantSolPreference: result.dormantSolPreference,
     model: result.model,
     ok: true,
+    ...(configuration.provider === undefined
+      ? {}
+      : {
+          provider:
+            result.hostedAssistantProviderOverride
+            ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER,
+        }),
     solAvailable: result.solAvailable,
     updated: result.updated,
   });
@@ -48,23 +76,42 @@ export const POST = withJsonError(async (request: Request) => {
 
 function parseAssistantModelRequestBody(
   body: Record<string, unknown>,
-): HostedAssistantProductModel {
+): {
+  model?: HostedAssistantProductModel;
+  provider?: HostedAssistantProvider;
+} {
   const keys = Object.keys(body);
-  if (keys.length !== 1 || keys[0] !== "model") {
+  if (
+    keys.length === 0
+    || keys.some((key) => key !== "model" && key !== "provider")
+  ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_INVALID_REQUEST",
       httpStatus: 400,
-      message: "Assistant model request must contain only a model.",
+      message: "Assistant model request must contain a model, a provider, or both.",
     });
   }
 
-  if (!isHostedAssistantProductModel(body.model)) {
+  if (
+    body.model !== undefined
+    && !isHostedAssistantProductModel(body.model)
+  ) {
     throw hostedOnboardingError({
       code: "ASSISTANT_MODEL_INVALID_MODEL",
       httpStatus: 400,
       message: "Choose a valid assistant model.",
     });
   }
+  if (body.provider !== undefined && !isHostedAssistantProvider(body.provider)) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_INVALID_PROVIDER",
+      httpStatus: 400,
+      message: "Choose a valid assistant provider.",
+    });
+  }
 
-  return body.model;
+  return {
+    ...(body.model === undefined ? {} : { model: body.model }),
+    ...(body.provider === undefined ? {} : { provider: body.provider }),
+  };
 }

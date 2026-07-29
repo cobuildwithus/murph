@@ -32,6 +32,7 @@ import {
   type AssistantCodexModelProviderConfig,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
@@ -139,8 +140,12 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   // dev subscription mode it is persisted to CODEX_HOME/auth.json instead.
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
 ] as const;
+const HOSTED_CODEX_SUPPORTED_PROVIDER_IDS = new Set<string>([
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id,
+  VENICE_CODEX_MODEL_PROVIDER_ID,
+]);
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
+  [...HOSTED_CODEX_SUPPORTED_PROVIDER_IDS].join(" or ");
 const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
 const HOSTED_CODEX_BOUND_USER_ID_ENV = "MURPH_HOSTED_CODEX_BOUND_USER_ID";
 const HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID";
@@ -183,14 +188,22 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  const seededChatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
+  const openAiProvider = providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID;
+  const seededChatGptAuthJson = openAiProvider
+    ? readHostedCodexChatGptAuthJson(input.runtimeEnv)
+    : null;
 
   await mkdir(codexHome, {
     mode: 0o700,
     recursive: true,
   });
   await chmod(codexHome, 0o700);
-  let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
+  if (!openAiProvider) {
+    await rm(codexAuthPath, { force: true });
+  }
+  let chatGptAuthKind = openAiProvider
+    ? await readHostedCodexAuthKind(codexAuthPath)
+    : null;
   if (
     chatGptAuthKind === "invalid"
     || (chatGptAuthKind === "managed" && seededChatGptAuthJson !== null)
@@ -210,7 +223,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
-  const chatGptAuth = chatGptAuthKind !== null;
+  const chatGptAuth = openAiProvider && chatGptAuthKind !== null;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
   if (!chatGptAuth && !apiKeyValue) {
     throw new HostedAssistantConfigurationError(
@@ -408,7 +421,8 @@ function resolveHostedCodexModelProviderConfig(input: {
   provider: string | null;
   runtimeEnv: Readonly<Record<string, string | undefined>>;
 }): AssistantCodexModelProviderConfig {
-  const resolvedProviderConfig = input.provider === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+  const resolvedProviderConfig = input.provider
+    && HOSTED_CODEX_SUPPORTED_PROVIDER_IDS.has(input.provider)
     ? resolveAssistantCodexModelProviderConfig(input.provider)
     : null;
   if (!resolvedProviderConfig) {
@@ -417,10 +431,12 @@ function resolveHostedCodexModelProviderConfig(input: {
       `Hosted Codex runtime only supports HOSTED_ASSISTANT_PROVIDER=${HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL}.`,
     );
   }
-  const providerConfig = {
-    ...resolvedProviderConfig,
-    id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
-  };
+  const providerConfig = resolvedProviderConfig.id === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+    ? {
+        ...resolvedProviderConfig,
+        id: HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID,
+      }
+    : resolvedProviderConfig;
 
   const override = normalizeHostedCodexEnvString(
     input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],

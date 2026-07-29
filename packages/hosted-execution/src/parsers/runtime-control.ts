@@ -13,6 +13,7 @@ import {
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
+  parseHostedAssistantProviderOverride,
   parseHostedAssistantReasoningEffortOverride,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -5329,6 +5330,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
   const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
+  const hostedAssistantProviderOverride = parseHostedAssistantProviderOverride(
+    record.hostedAssistantProviderOverride,
+  );
   const hostedAssistantReasoningEffortOverride =
     parseHostedAssistantReasoningEffortOverride(
       record.hostedAssistantReasoningEffortOverride,
@@ -5338,6 +5342,9 @@ export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspac
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
     ...(hostedAssistantModelOverride
       ? { hostedAssistantModelOverride }
+      : {}),
+    ...(hostedAssistantProviderOverride
+      ? { hostedAssistantProviderOverride }
       : {}),
     ...(hostedAssistantReasoningEffortOverride
       ? { hostedAssistantReasoningEffortOverride }

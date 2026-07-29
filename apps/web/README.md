@@ -238,8 +238,11 @@ retention/deletion, and security practices.
 The hosted Prisma schema keeps ownership sharp and nested:
 
 - `HostedMember` is the core member row plus activation/billing status. Its
-  nullable assistant tone, voice, Humor, Push, and Detail columns are only the
-  authenticated Settings display/write projection; canonical assistant
+  nullable assistant provider/model/reasoning fields are the Web-owned
+  execution preference; OpenAI is the default, and the nullable Venice override
+  is projected only while `HOSTED_VENICE_ENABLED` is enabled. Its nullable
+  assistant tone, voice, Humor, Push, and Detail columns are only the
+  authenticated Settings display/write projection; canonical personality
   preferences remain in `bank/preferences.json`. Settings writes strict sparse
   deltas through the hosted mailbox instead of treating these columns as a
   canonical snapshot. Hosted conversation set/reset uses the signed,

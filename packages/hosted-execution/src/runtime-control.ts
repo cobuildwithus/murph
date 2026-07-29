@@ -16,6 +16,7 @@ import type {
 import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
@@ -2433,6 +2434,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Guardrails
 
@@ -8,6 +8,14 @@ Last verified: 2026-07-28
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Venice core inference is an all-or-none operator configuration: one Worker
+  secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
+  configuration, and Web keeps Venice hidden and projects OpenAI until the
+  Worker/runner deployment has been verified. Missing or invalid mappings,
+  unsupported paths/models, malformed JSON, and request bodies above 20 MiB
+  fail closed before provider egress. Rollback removes Web exposure first; it
+  does not add a queue, repair pass, provider fallback, or second preference
+  owner.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
   another executor or runs local and remote copies together; an operator may
   retry the same head only after recording a concrete infrastructure failure.

@@ -6,13 +6,17 @@ import {
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import type { HostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
+import type {
+  HostedAssistantProductModel,
+  HostedAssistantProvider,
+} from "@murphai/hosted-execution/assistant-model";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "../prisma";
 import {
   HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
+  resolveAvailableHostedAssistantProvider,
   resolveHostedMemberAssistantModel,
 } from "./assistant-model-preference";
 import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
@@ -36,6 +40,7 @@ export interface HostedAccountSettingsSnapshot {
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
     personality: Record<AssistantWebPersonalitySettingId, number | null>;
+    provider?: HostedAssistantProvider;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
     voice: AssistantVoiceOptionId | null;
@@ -220,6 +225,9 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
         configurationAvailable: assistantModel.configurationAvailable,
         dormantSolPreference: assistantModel.dormantSolPreference,
         model: assistantModel.model,
+        provider: resolveAvailableHostedAssistantProvider(
+          assistantModel.hostedAssistantProviderOverride,
+        ),
         solAvailable: assistantModel.solAvailable,
         ...assistantPreferences,
       },

@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Repo Checks
 
@@ -54,6 +54,17 @@ Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or
 failure; a later run recovers only old marked roots whose owner is gone and
 which no current-user process uses as its working directory.
+
+Hosted assistant-provider choice coverage is split across existing owners.
+Hosted-execution locks the closed OpenAI/Venice contract and additive workspace
+field; operator-config and assistant-runtime prove Venice Codex configuration
+without forwarding raw Worker credentials. Hosted Web tests cover the nullable
+preference, rollout flag, Settings route/component, workspace projection, and
+expand-only migration. Cloudflare tests cover signed credential minting,
+all-or-none deploy preflight, exact Responses path/method allowlisting, bounded
+body parsing, canonical product-model validation, fixed model rewriting, and
+real-key injection only at Worker egress. Routine tests use synthetic keys and
+do not call Venice.
 
 Clinical-record execution coverage is split at its owners: hosted-execution
 tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove

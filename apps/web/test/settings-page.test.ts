@@ -55,7 +55,9 @@ const mocks = vi.hoisted(() => ({
     configurationAvailable: boolean;
     initialDormantSolPreference: boolean;
     initialModel: string;
+    initialProvider: string;
     solAvailable: boolean;
+    veniceAvailable: boolean;
   }) =>
     React.createElement(
       "div",
@@ -706,7 +708,9 @@ test("SettingsPage reads the app session and persisted account settings into the
       configurationAvailable: true,
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
+      initialProvider: "openai",
       solAvailable: true,
+      veniceAvailable: false,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",

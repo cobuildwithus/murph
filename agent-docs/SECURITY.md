@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Non-Negotiable Rules
 
@@ -63,6 +63,16 @@ Last verified: 2026-07-28
   preflight can fail over; no model, runner, request, or stored state can select
   another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
+- A hosted member's OpenAI or Venice choice controls only core assistant
+  inference. The selected provider receives the information required to produce
+  that reply; specialized tools may still use separate managed providers.
+  Web owns the nullable preference and exposes Venice only behind its rollout
+  flag. The Cloudflare Worker owns both real API keys and gives the runner only
+  provider-, user-, and runner-bound signed credentials. Venice egress accepts
+  only the two Responses POST paths, canonical product model ids, a bounded
+  20 MiB request body, and fixed operator model mappings; it disables Venice's
+  added system prompt, web search, and web scraping at the final egress rewrite.
+  Provider choice never grants delivery, vault, billing, or identity authority.
 - `murph.group action="read_chat_name"` is a read-only, Web-owned provider
   metadata boundary. The signed callback member selects the synthetic group
   runtime; Web resolves its single encrypted Linq or Telegram thread route and

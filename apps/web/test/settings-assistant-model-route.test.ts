@@ -1,11 +1,11 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   transaction: vi.fn(),
-  updateHostedMemberAssistantModelPreferenceTx: vi.fn(),
+  updateHostedMemberAssistantConfigurationTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -14,8 +14,10 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
-  updateHostedMemberAssistantModelPreferenceTx:
-    mocks.updateHostedMemberAssistantModelPreferenceTx,
+  isHostedVeniceAssistantEnabled: () =>
+    process.env.HOSTED_VENICE_ENABLED === "1",
+  updateHostedMemberAssistantConfigurationTx:
+    mocks.updateHostedMemberAssistantConfigurationTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -40,6 +42,7 @@ describe("assistant model settings route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.HOSTED_VENICE_ENABLED;
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: {
@@ -52,16 +55,27 @@ describe("assistant model settings route", () => {
     mocks.getPrisma.mockReturnValue({
       $transaction: mocks.transaction,
     });
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
+      dormantSolPreference: false,
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      solAvailable: true,
+      updated: true,
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.HOSTED_VENICE_ENABLED;
+  });
+
+  it("persists a validated model choice without a mailbox wake", async () => {
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       solAvailable: true,
       updated: true,
     });
-  });
-
-  it("persists a validated model choice without a mailbox wake", async () => {
     const response = await route.POST(jsonRequest({
       model: "gpt-5.6-sol",
     }));
@@ -80,15 +94,84 @@ describe("assistant model settings route", () => {
     expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(
       expect.any(Request),
     );
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).toHaveBeenCalledWith({
+    expect(mocks.updateHostedMemberAssistantConfigurationTx).toHaveBeenCalledWith({
       memberId: "member_edge",
       model: "gpt-5.6-sol",
       prisma: { tx: true },
     });
   });
 
+  it("persists Venice alongside the same Terra product model", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    const response = await route.POST(jsonRequest({
+      model: "gpt-5.6-terra",
+      provider: "venice",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      dormantSolPreference: false,
+      model: "gpt-5.6-terra",
+      ok: true,
+      provider: "venice",
+      solAvailable: true,
+      updated: true,
+    });
+    expect(mocks.updateHostedMemberAssistantConfigurationTx).toHaveBeenCalledWith({
+      memberId: "member_edge",
+      model: "gpt-5.6-terra",
+      prisma: { tx: true },
+      provider: "venice",
+    });
+  });
+
+  it("persists a provider-only change without rewriting model intent", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
+      dormantSolPreference: true,
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+      updated: true,
+    });
+
+    const response = await route.POST(jsonRequest({
+      provider: "venice",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      dormantSolPreference: true,
+      model: "gpt-5.6-terra",
+      ok: true,
+      provider: "venice",
+      solAvailable: false,
+      updated: true,
+    });
+    expect(mocks.updateHostedMemberAssistantConfigurationTx).toHaveBeenCalledWith({
+      memberId: "member_edge",
+      prisma: { tx: true },
+      provider: "venice",
+    });
+  });
+
+  it("rejects Venice before the rollout gate opens", async () => {
+    const response = await route.POST(jsonRequest({
+      model: "gpt-5.6-terra",
+      provider: "venice",
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      },
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("returns the canonical idempotent result", async () => {
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockResolvedValue({
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
       model: "gpt-5.6-terra",
       solAvailable: true,
@@ -110,7 +193,7 @@ describe("assistant model settings route", () => {
   });
 
   it("returns the stable Edge entitlement error", async () => {
-    mocks.updateHostedMemberAssistantModelPreferenceTx.mockRejectedValue(
+    mocks.updateHostedMemberAssistantConfigurationTx.mockRejectedValue(
       hostedOnboardingError({
         code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
         httpStatus: 403,
@@ -161,8 +244,19 @@ describe("assistant model settings route", () => {
         code: "ASSISTANT_MODEL_INVALID_REQUEST",
       },
     });
+
+    const invalidProviderResponse = await route.POST(jsonRequest({
+      model: "gpt-5.6-terra",
+      provider: "unknown",
+    }));
+    expect(invalidProviderResponse.status).toBe(400);
+    await expect(invalidProviderResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "ASSISTANT_MODEL_INVALID_PROVIDER",
+      },
+    });
     expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberAssistantConfigurationTx).not.toHaveBeenCalled();
   });
 
   it("rejects oversized bodies before persistence", async () => {
@@ -218,7 +312,7 @@ describe("assistant model settings route", () => {
       },
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.updateHostedMemberAssistantModelPreferenceTx)
+    expect(mocks.updateHostedMemberAssistantConfigurationTx)
       .not.toHaveBeenCalled();
   });
 });

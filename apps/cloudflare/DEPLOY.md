@@ -421,6 +421,29 @@ The Worker also enforces that fingerprint contract on the normal user path. Befo
 
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
+## Venice Provider Activation
+
+Venice is an optional core-inference provider, not a replacement for the fleet
+default or specialized tool providers. Configure the selected GitHub
+Environment with these four values as one group:
+
+- secret `VENICE_API_KEY`
+- vars `HOSTED_VENICE_LUNA_MODEL`, `HOSTED_VENICE_TERRA_MODEL`, and
+  `HOSTED_VENICE_SOL_MODEL`
+
+Deploy preflight rejects a partial group. Keep the hosted Web
+`HOSTED_VENICE_ENABLED` flag off while applying the nullable member migration
+and deploying the compatible Web reader. Then deploy Cloudflare and the runner
+with `container_rollout=immediate`, require the exact runner fingerprint, and
+exercise a controlled core turn that reaches Venice through the Worker
+intercept without exposing the key to the container. Only after that proof
+should Web enable the flag and redeploy so Settings can offer Venice.
+
+Rollback in the opposite exposure order: disable the Web flag and redeploy Web
+first, verify new workspace reads omit the Venice override, and only then
+remove the Venice secret/mappings or roll Cloudflare back. The nullable stored
+preference may remain; while the flag is off it resolves to OpenAI.
+
 ## Required GitHub Environment Secrets
 
 Set these in the selected GitHub environment as secrets:
@@ -535,11 +558,16 @@ Hosted crypto authority metadata:
 
 Hosted assistant config:
 
-- `HOSTED_ASSISTANT_PROVIDER`
+- `HOSTED_ASSISTANT_PROVIDER`; keep the fleet default `openai`. A per-member
+  Venice selection arrives through the signed workspace projection rather than
+  this deploy default.
 - `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+- Optional all-or-none Venice model mappings: `HOSTED_VENICE_LUNA_MODEL`,
+  `HOSTED_VENICE_TERRA_MODEL`, and `HOSTED_VENICE_SOL_MODEL`, paired with the
+  `VENICE_API_KEY` GitHub Environment secret.
 
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
