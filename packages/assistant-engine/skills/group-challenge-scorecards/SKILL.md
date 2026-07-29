@@ -5,8 +5,9 @@ description: |
   whenever a challenge uses teams, a shared target, multiple metrics, weighted
   points, or a long-running cumulative group goal, and on every scheduled dispatch
   for such a challenge. Owns only format, component rules, point balance, aggregate
-  scoring, and format-specific presentation. Group-challenge still owns formation,
-  buy-in, consent, the durable page, scheduling, diagnostics, and close-out.
+  scoring, bounded multi-scope reads, and format-specific presentation.
+  Group-challenge still owns formation, buy-in, consent, the durable page,
+  scheduling, diagnostics, and close-out.
 ---
 
 # Group Challenge Formats & Scorecards
@@ -39,7 +40,8 @@ say the rule is unsupported instead of guessing.
 
 The reusable scorecard helper owns only exact point arithmetic, caps, coverage, and
 individual/team/collective aggregation after quantities are normalized. It must not
-become a health-metric query language.
+become a health-metric query language, read health records, infer a rule, or own
+challenge state.
 
 ## Canonical challenge format
 
@@ -92,14 +94,15 @@ one to three unless each additional component materially improves the game.
 
 For each component, freeze and record:
 
-1. **id and label** — stable id plus the words the room will see;
+1. **id and label** — stable kebab-case id plus the words the room will see;
 2. **exact projection scopes** — deduplicated with the other components;
 3. **evaluation rule** — how current eligible records become a non-negative integer
    quantity;
 4. **quantity unit** — steps, grams, meters, qualifying days, workouts, basis points,
    or another explicit integer unit;
 5. **point rate** — `points` per `perQuantity`;
-6. **optional cap** — maximum points for the component over the stated period.
+6. **optional cap** — maximum points for the component over the stated period;
+7. **settlement mode** — `window-total` or `daily-additive`.
 
 Scoring is additive and non-negative:
 
@@ -124,61 +127,95 @@ Before the final roll call, test the weights against one ordinary reference day 
 week and say when one component is likely to decide the challenge by itself. Keep it
 brief and concrete.
 
-Example semantic shape:
-
 > At these rates, the protein component is worth about twice Steps plus a late
 > workout on a normal day. Keep it intentionally protein-heavy?
 
 The group may choose a lopsided game. Your job is to make the consequence visible,
-not optimize the scorecard for them.
+not optimize the scorecard for them. When unlimited volume could create a bad
+exercise, nutrition, sleep, or recovery incentive, propose a daily or whole-window
+cap. A cap is a game mechanic, not a health prescription.
 
-When unlimited volume could create a bad exercise, nutrition, sleep, or recovery
-incentive, propose a daily or whole-window cap. A cap is a game mechanic, not a health
-prescription.
+## Exact scopes: compose bounded reads instead of widening the transport
 
-## Exact scopes and current transport bound
+The hosted shared-read boundary intentionally stays small. Deduplicate the exact
+scoring scopes in scorecard order, then split them into stable batches of at most
+`ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES` scopes — currently three.
+Five components remain supported because one scope may support several components and
+because several bounded reads may feed one scorecard.
 
-Request the deduplicated exact scopes required by every component in the scoring
-read. One scope may legitimately support several components; never request it twice.
-Do not request unrelated diagnostic data in that read.
+Run scoring batches sequentially after the model turn begins:
 
-The product contract supports five components and targets five distinct scoring
-scopes. Until the hosted `read_shared` contract, parser, runtime, and tool schema all
-move together from three to five, do not configure a live scorecard that exceeds the
-current runtime's accepted number of distinct scopes. Five components may still run
-when some reuse the same scope.
+1. Read the next scoring batch only; never mix diagnostics into it.
+2. If any scope is `not_granted`, immediately handle the exact eligible permission
+   offer from that read and stop before making another shared read. The latest read is
+   the only permission evidence.
+3. Otherwise retain only the normalized component evidence needed for scoring and
+   continue to the next batch.
+4. Every successful batch must return the same ordered set of current
+   `participantId` values. If membership differs, do not combine snapshots or publish
+   standings; record the run as unverified and try again on a later turn.
+5. Only after every scoring batch is granted may a separate diagnostic-only
+   `device-sync-status.v0` read investigate genuinely missing data.
 
-Permission evidence remains latest-read-only:
+This keeps the privacy/result-size bound intact and avoids a new multi-metric hosted
+RPC. Never work around it with raw vault-share files or private 1:1 data.
 
-1. Read all scoring scopes first.
-2. If any scoring scope is `not_granted`, handle the exact eligible scoring offer
-   from that read before doing diagnostics.
-3. Only when every scoring scope is granted but usable data is genuinely missing may
-   you make the second diagnostic-only `device-sync-status.v0` read.
-4. Never let a later diagnostic read erase the evidence needed for a scoring-scope
-   offer.
+## Normalize once, then call deterministic scoring
 
-## Interpreting common component shapes
+After all scoring batches are consistent, build one explicit observation for every
+`in` participant crossed with every component:
 
-Use the exact projection semantics from `group-challenge`; these are examples of
-normalization, not a closed catalog:
+- `available` with a non-negative integer `quantity`;
+- `pending`;
+- `missing`;
+- `not_granted`.
 
-- Steps: total eligible `steps-days.v0` values.
-- Logged protein: total eligible grams from `protein-days.v0`; always say **logged
-  protein**, never verified consumption.
-- Workout after a fixed local time: count settled `workouts.v0` entries whose
-  `startLocalMs` satisfies the frozen strict or inclusive threshold.
-- Activity distance: total meters from the exact selector-scoped activity-distance
-  projection.
-- Successful days: count eligible days whose observed value satisfies the frozen
-  threshold.
-- Baseline improvement: compute the frozen absolute or percent delta, normalize it to
-  explicit integer units, and keep the baseline dates on the page.
+Observed zero is `{ status: "available", quantity: 0 }`; it is never `missing`.
+Only normalized quantities and statuses cross the arithmetic boundary. Never copy
+raw shared records, provider payloads, dates that the score does not need, handles,
+or display names into the scoring input.
 
-For a phrase such as "after 9 PM," normalize the threshold once to milliseconds after
-local midnight. Record both the human wording and integer threshold. Do not move it
-later because a participant changes time zone or because the standings become
-inconvenient.
+Write the bounded JSON input to a temporary file, call:
+
+```sh
+vault-cli knowledge score-challenge --input @<temporary-json-path> --format json
+```
+
+Then remove the temporary file. The input shape is:
+
+```json
+{
+  "format": { "kind": "individual", "objective": { "kind": "ranking" } },
+  "scorecard": {
+    "components": [
+      {
+        "id": "steps",
+        "label": "Steps",
+        "quantityUnit": "steps",
+        "points": 30,
+        "perQuantity": 1000
+      }
+    ]
+  },
+  "participants": [
+    {
+      "participantId": "opaque-group-participant-id",
+      "components": [
+        { "componentId": "steps", "status": "available", "quantity": 10000 }
+      ]
+    }
+  ]
+}
+```
+
+For teams, include frozen `teams`, `aggregation`, and optional captain ids under
+`format`. For a target, use `{ "kind": "target", "targetPoints": N }`. The command
+validates one-to-five components, explicit observations, team membership, safe integer
+arithmetic, caps, coverage, and aggregation. A command failure means the normalized
+input is invalid; fix the input or ruling rather than doing fallback arithmetic.
+
+Persist the command result on the existing challenge page in the same turn before
+composing the standings. The command does not write the page for you.
 
 ## Component evidence and coverage
 
@@ -200,56 +237,91 @@ scored results from named component/data statuses. Do not make the group decode 
 single opaque "partial" label when one concise component label explains what is
 pending.
 
-## Durable challenge-page shape
+## Durable challenge-page state
 
-Keep the base challenge page as the sole owner. Add or replace these mechanical
-sections; do not create another state system:
+The existing challenge knowledge page remains the sole durable owner. Do not add a
+challenge database, Web score service, parallel score file, or second scheduler.
+Keep these sections current:
 
 - **Format & objective** — individual, teams, or collective; ranking or target.
-- **Scorecard & exact rules** — ordered components, projection scopes, evaluation
-  rules, quantity units, rates, caps, rounding, and a rules revision.
+- **Scorecard & exact rules** — ordered components, exact scopes, evaluation rules,
+  units, rates, caps, settlement mode, rounding, and `rulesRevision`.
 - **Window & publishing** — scoring dates, grace period, dispatch cadence, milestones.
-- **Roster & teams** — normal participation state plus frozen team membership.
+- **Roster & teams** — participation state and frozen team membership.
 - **Baselines** — only for components that need them.
-- **Scoreboard snapshots** — participant component quantities and points, aggregate
-  scores, coverage, and the published ruling.
+- **Cumulative settlement** — bounded participant/component totals for long-running
+  games.
+- **Scoreboard snapshots** — the latest command input summary, command result,
+  coverage, and published ruling.
 
-The human-readable page is the authority until a dedicated managed scorecard block is
-wired. Recalculate from the frozen rule, never from remembered totals. In the same
-turn as any rule change, append a dated amendment and state that it applies
-prospectively. Never silently change weights, thresholds, caps, rounding, or teams
-after seeing results.
+Use `vault-cli knowledge upsert` when changing the managed state in an existing page;
+append-only social facts may still use `append-section`. Write state in the same turn
+as the evidence or ruling. Never silently change weights, thresholds, caps, rounding,
+teams, settlement mode, or `rulesRevision` after seeing results.
 
-## Scheduling and long-running games
+## Long-running cumulative settlement
 
-Use the one challenge automation owned by `group-challenge`. It may run daily to
-settle the rolling shared window while publishing less often:
+A short `window-total` component may be recomputed from the current shared window. A
+challenge that can outlive that window is production-safe only when every long-running
+component has an explicit `daily-additive` rule (or another source that exposes the
+whole challenge history).
+
+For each participant and daily-additive component, store this compact state on the
+page:
+
+```json
+{
+  "rulesRevision": 1,
+  "settledThroughDate": "2026-07-28",
+  "cumulativeQuantity": 12345,
+  "skippedDates": []
+}
+```
+
+On each daily automation run:
+
+1. Read the page before shared data.
+2. Consider only producer-settled dates after `settledThroughDate` and inside the
+   frozen challenge window.
+3. Add each date at most once, in order. An observed zero advances the watermark.
+4. Do not advance across an absent or pending date. A permanently unavailable date
+   moves to `skippedDates` only after an explicit dated ruling; skipping never implies
+   zero.
+5. Upsert the new cumulative quantities and watermark before publishing or finishing
+   without reply.
+6. Feed cumulative quantities — not the rolling source subtotal — into
+   `score-challenge`.
+
+The first settled value for a date owns the challenge ruling, matching the base
+skill's immutable published-snapshot rule. Later imports may be noted as context but
+do not silently rewrite cumulative competition history. A missed automation whose
+source dates have already rolled out is unverified; never reconstruct it from memory.
+
+This bounded watermark state supports annual automatic goals without retaining an
+unbounded daily ledger or creating another persistence system.
+
+## Scheduling and close-out
+
+Use the one challenge automation owned by `group-challenge`. Run it daily when a
+long-running component needs settlement, while publishing at the cadence the room
+chose:
 
 - daily for a short friend challenge;
 - weekly plus meaningful milestones for a long collective target;
 - no reply on an ordinary settlement day with nothing worth publishing.
 
-Do not create separate capture and publishing automations. For a challenge longer
-than the available projection window, persist dated settled snapshots or compact
-cumulative quantities before old source records roll out. Never add the same settled
-date twice.
+Do not create separate capture and publishing automations.
 
-Until idempotent long-running accumulation is fully wired and verified, do not claim
-that an annual automatic challenge is production-safe. A short challenge using the
-current rolling records is in-bounds.
+At close-out, complete the final eligible settlement, run the same deterministic
+score command, persist its result, and then apply the format:
 
-## Format-specific close-out
+- **Individual ranking:** declare the winner and agreed safe placement-based stakes.
+- **Team ranking:** declare the team result first; individual detail is secondary.
+- **Individual or team target:** say who reached the target and settle the payoff.
+- **Collective:** say whether the group reached the target, what it accomplished, and
+  trigger the shared celebration, beneficiary callback, or honest near-miss recap.
+  There is no loser by default.
 
-- **Individual ranking:** declare the winner and any agreed safe placement-based
-  stakes.
-- **Team ranking:** declare the team result first; individual contribution detail is
-  secondary unless the room asks.
-- **Individual or team target:** say who reached the target and settle only the
-  agreed payoff.
-- **Collective:** say whether the group reached the target, what it accomplished,
-  and trigger the shared celebration, beneficiary callback, or honest near-miss
-  recap. There is no loser by default.
-
-Every close-out uses fresh shared evidence plus the page's settled snapshots, carries
-coverage truthfully, and preserves the base skill's privacy and protected-register
-rules.
+Every close-out uses fresh authorized evidence plus the page's cumulative settlement,
+carries coverage truthfully, and preserves the base skill's privacy and
+protected-register rules.

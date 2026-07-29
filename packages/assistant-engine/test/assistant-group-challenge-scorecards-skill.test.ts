@@ -45,7 +45,7 @@ describe('assistant group challenge scorecard guidance', () => {
       'The reusable scorecard helper owns only exact point arithmetic, caps, coverage, and individual/team/collective aggregation',
     )
     expect(skill).toContain(
-      'It must not become a health-metric query language.',
+      'It must not become a health-metric query language',
     )
     expect(skill).toContain(
       'V1 has no arbitrary code, negative points, multipliers, nested expressions, cross-component bonuses, or hidden formulas.',
@@ -72,6 +72,64 @@ describe('assistant group challenge scorecard guidance', () => {
     )
   })
 
+  it('composes five components through bounded reads without widening consent transport', async () => {
+    const skill = (await readSkill('group-challenge-scorecards')).replace(/\s+/gu, ' ')
+
+    expect(skill).toContain(
+      'split them into stable batches of at most `ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES` scopes — currently three',
+    )
+    expect(skill).toContain(
+      'If any scope is `not_granted`, immediately handle the exact eligible permission offer from that read and stop before making another shared read.',
+    )
+    expect(skill).toContain(
+      'Every successful batch must return the same ordered set of current `participantId` values.',
+    )
+    expect(skill).toContain(
+      'Five components remain supported because one scope may support several components and because several bounded reads may feed one scorecard.',
+    )
+    expect(skill).not.toContain('move together from three to five')
+  })
+
+  it('uses one deterministic CLI boundary and excludes raw shared records', async () => {
+    const skill = (await readSkill('group-challenge-scorecards')).replace(/\s+/gu, ' ')
+
+    expect(skill).toContain(
+      'vault-cli knowledge score-challenge --input @<temporary-json-path> --format json',
+    )
+    expect(skill).toContain(
+      'Only normalized quantities and statuses cross the arithmetic boundary.',
+    )
+    expect(skill).toContain(
+      'Never copy raw shared records, provider payloads, dates that the score does not need, handles, or display names into the scoring input.',
+    )
+    expect(skill).toContain(
+      'The command does not write the page for you.',
+    )
+  })
+
+  it('keeps long-running settlement bounded, idempotent, and page-owned', async () => {
+    const skill = (await readSkill('group-challenge-scorecards')).replace(/\s+/gu, ' ')
+
+    expect(skill).toContain(
+      'The existing challenge knowledge page remains the sole durable owner.',
+    )
+    expect(skill).toContain(
+      'Do not add a challenge database, Web score service, parallel score file, or second scheduler.',
+    )
+    expect(skill).toContain(
+      'Add each date at most once, in order. An observed zero advances the watermark.',
+    )
+    expect(skill).toContain(
+      'Do not advance across an absent or pending date.',
+    )
+    expect(skill).toContain(
+      'Feed cumulative quantities — not the rolling source subtotal — into `score-challenge`.',
+    )
+    expect(skill).toContain(
+      'supports annual automatic goals without retaining an unbounded daily ledger or creating another persistence system',
+    )
+  })
+
   it('generalizes the referee voice without inventing a loser in cooperative games', async () => {
     const comedy = (await readSkill('groupchat-comedy')).replace(/\s+/gu, ' ')
 
@@ -86,19 +144,5 @@ describe('assistant group challenge scorecard guidance', () => {
       'In collective games, never turn the least-active member into the price of missing the target.',
     )
     expect(comedy).toContain('collective mission control and milestone countdowns')
-  })
-
-  it('acknowledges the staged five-scope transport migration rather than overclaiming support', async () => {
-    const skill = (await readSkill('group-challenge-scorecards')).replace(/\s+/gu, ' ')
-
-    expect(skill).toContain(
-      'Until the hosted `read_shared` contract, parser, runtime, and tool schema all move together from three to five',
-    )
-    expect(skill).toContain(
-      'do not configure a live scorecard that exceeds the current runtime\'s accepted number of distinct scopes',
-    )
-    expect(skill).toContain(
-      'Five components may still run when some reuse the same scope.',
-    )
   })
 })
