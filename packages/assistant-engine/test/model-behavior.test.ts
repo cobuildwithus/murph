@@ -103,7 +103,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('extra nudges')
   })
 
-  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+  it('keeps one response lifecycle while preserving group floor etiquette', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         conversationScope: 'group',
@@ -112,16 +112,31 @@ describe('assistant execution prompt contract', () => {
     const directPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput(),
     )
+    const sharedIdentity =
+      'You are Murph, a durable personal health assistant.'
+    const sharedStyleOwner =
+      'Current-conversation style settings override these defaults.'
 
+    expect(groupPrompt).toContain(sharedIdentity)
+    expect(directPrompt).toContain(sharedIdentity)
+    expect(groupPrompt).toContain(sharedStyleOwner)
+    expect(directPrompt).toContain(sharedStyleOwner)
     expect(groupPrompt).toContain(
       'It does not withdraw an answer already completed in that turn; that answer still sends.',
     )
     expect(groupPrompt).toContain(
-      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+      'Messages accepted before the first completed assistant response may join this turn.',
     )
     expect(groupPrompt).toContain(
-      'Make it stand alone and carry forward anything still worth saying.',
+      'never replace, retract, or suppress completed text or media',
     )
+    expect(groupPrompt).toContain(
+      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
+    )
+    expect(groupPrompt).not.toContain('replaces the earlier answer')
+    expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('Use light humor when it fits')
+    expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
       'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
     )
@@ -134,18 +149,31 @@ describe('assistant execution prompt contract', () => {
       'Answer immediately when someone needs you or the beat is yours.',
     )
     expect(groupPrompt).toContain(
-      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+      'Messages that arrive during the sleep appear as normal messages; rule 7 governs whether they join this turn or remain pending.',
     )
-    expect(directPrompt).not.toContain(
-      'that answer still sends',
-    )
-    expect(directPrompt).not.toContain(
-      'that response replaces the earlier answer',
-    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and a brief shell `sleep` when the room is mid-volley',
     )
-    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
+  it('keeps completed group reads and participant message-ref ownership unambiguous', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(groupPrompt).toContain('`status="ok"` is complete')
+    expect(groupPrompt).toContain(
+      'select the exact server-issued message_ref printed beside the request-bearing message',
+    )
+    expect(groupPrompt).toContain(
+      'the host reloads that message and derives its sender',
+    )
+    expect(groupPrompt).not.toContain(
+      'only the server-selected message reference can authorize participant-scoped effects',
+    )
   })
 
   it('keeps the group social role active, low-ego, and human-first', () => {
@@ -1921,7 +1949,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'fef595584a80dda63b0cdef16eea64c40278e884a5d2ca260b5e683798921405',
+      'b549d87c520c878ea8a049d8f02969011c7c7f775c77b8e8749daad2fbf4bd11',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2126,7 +2154,7 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'You are Murph, the user\'s durable, long-term personal health assistant.',
+      'You are Murph, a durable personal health assistant.',
     )
     expect(prompt).toContain(
       'Returning between messages is a core edge over stateless chatbots.',
@@ -2136,7 +2164,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('Delight is care.')
     expect(prompt).toContain(
-      'use an image, voice memo, or song only when requested, preferred, or required by a skill',
+      'use media only when requested, preferred, or skill-required',
     )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
@@ -2475,7 +2503,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
-    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain('Group audience and scope:')
     expect(prompt).toContain(
       'make shared decisions, plan ordinary life and leisure',
     )

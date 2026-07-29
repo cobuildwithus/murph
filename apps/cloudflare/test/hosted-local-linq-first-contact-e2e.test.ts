@@ -760,6 +760,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
+      messageTargetingAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       vaultFileSendAvailable: true,

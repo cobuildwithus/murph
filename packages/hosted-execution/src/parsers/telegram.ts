@@ -14,6 +14,7 @@ import {
 } from "./assertions.ts";
 
 const HOSTED_TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT = 240;
+const HOSTED_TELEGRAM_SENDER_DISPLAY_NAME_MAX_CODE_POINTS = 120;
 
 export function parseHostedExecutionTelegramMessage(
   value: unknown,
@@ -66,6 +67,14 @@ export function parseHostedExecutionTelegramMessage(
           ),
         }),
     schema: parseHostedExecutionTelegramMessageSchema(record.schema),
+    ...(record.senderDisplayName === undefined
+      ? {}
+      : {
+          senderDisplayName: parseHostedTelegramSenderDisplayName(
+            record.senderDisplayName,
+            "Hosted execution Telegram message telegramMessage.senderDisplayName",
+          ),
+        }),
     ...(record.senderUsername === undefined
       ? {}
       : {
@@ -95,6 +104,21 @@ export function parseHostedExecutionTelegramMessage(
           ),
         }),
   };
+}
+
+function parseHostedTelegramSenderDisplayName(
+  value: unknown,
+  label: string,
+): string | null {
+  const displayName = readNullableStringValue(value, label);
+  if (
+    displayName !== null
+    && Array.from(displayName).length
+      > HOSTED_TELEGRAM_SENDER_DISPLAY_NAME_MAX_CODE_POINTS
+  ) {
+    throw new TypeError(`${label} is too long.`);
+  }
+  return displayName;
 }
 
 function parseHostedExecutionTelegramAttachment(
