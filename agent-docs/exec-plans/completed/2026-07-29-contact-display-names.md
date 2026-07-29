@@ -1,6 +1,6 @@
 # Use address-book labels as natural participant names
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -90,6 +90,10 @@ Updated: 2026-07-29
   authority exclusions this presentation-only change must preserve.
 - Do not volunteer provenance disclaimers during ordinary name use, but answer
   a direct provenance question plainly and truthfully.
+- Trust an event-carried address-book name only in the parenthetical field of
+  the exact server-generated participant-change form. Text after a reaction
+  event's `reaction on:` marker remains user-authored weak context even when it
+  imitates that form.
 
 ## Verification
 
@@ -110,7 +114,8 @@ Updated: 2026-07-29
 
 ## Verification results
 
-- Assistant Engine focused prompt/tool/real-app-server tests: 99 passed.
+- Assistant Engine focused prompt/tool/real-app-server tests: 146 passed after
+  specialist remediation; the final consolidated prompt subset passed 64.
 - Web participant-context tests: 96 passed; the 7 opt-in database concurrency
   cases remained skipped under their normal local gate.
 - Assistant Engine and Web owner typechecks: passed.
@@ -119,7 +124,20 @@ Updated: 2026-07-29
   to preserve truthful answers to direct questions.
 - Paired exact-base/head provider-input capture with pinned Codex
   `gpt-5.6-terra` code mode and `gpt-tokenizer` 3.4.0 `o200k_base`:
-  - individual: 23,594 -> 23,594 tokens and 108,568 -> 108,568 bytes
-  - group: 18,196 -> 18,327 tokens and 83,009 -> 83,666 bytes
-- Preliminary ReviewGPT and exact-head CI remain pending until the review
-  candidate is committed, pushed, and attached to the PR.
+  - individual: 23,627 -> 23,627 tokens and 108,747 -> 108,747 bytes
+  - group: 18,196 -> 18,410 tokens and 83,009 -> 84,071 bytes
+- Preliminary ReviewGPT returned one medium prompt finding: reaction-target
+  text could imitate the address-book marker, and provenance guidance was too
+  broad. The finding was accepted and fixed with exact event-form scoping,
+  explicit `reaction on:` exclusion, scoped provenance, and an assembled
+  mixed-event regression. No patch artifact was supplied or applied.
+- Parent final review found no remaining product, trust-boundary, architecture,
+  or proof gap after the remediation and test consolidation.
+- Final cross-cutting ReviewGPT is not applicable because this is a
+  prompt-primary change covered by the substantive preliminary specialist pass.
+- Required GitHub Actions passed on exact pushed source candidate
+  `7803a6bffc55e494f2987d738cd4784acdf9763c`: 28 checks passed and the
+  optional CodeSmith check skipped. One unrelated hosted Web sweeper test
+  failed transiently, passed 9/9 under its exact local Vitest project, and
+  passed on the unchanged-head failed-job rerun.
+Completed: 2026-07-29
