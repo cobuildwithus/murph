@@ -1168,8 +1168,17 @@ export type HostedRuntimeGroupSharedReadResult =
       unavailableReason: string;
     };
 
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES = [
+  "profile-name",
+  "unverified-owner-contact",
+] as const;
+
+export type HostedRuntimeGroupParticipantDisplayNameSource =
+  (typeof HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES)[number];
+
 export interface HostedRuntimeGroupParticipantDisplayName {
   displayName: string;
+  displayNameSource: HostedRuntimeGroupParticipantDisplayNameSource;
   senderHandle: string;
 }
 
@@ -1216,9 +1225,11 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "read_participant_display_names";
       /**
-       * Exact current-turn Linq sender evidence supplied by the hosted
-       * runtime. Web resolves it against current membership and returns only
-       * presentation labels, never participant or member identifiers.
+       * Exact route-admitted current-turn Linq sender evidence supplied by the
+       * hosted runtime. Web preserves exact-member profile precedence and may
+       * apply an unverified owner-contact label to an otherwise-unregistered
+       * canonical phone. It returns presentation labels only, never
+       * participant or member identifiers.
        */
       linqSenderHandles: readonly string[];
     }

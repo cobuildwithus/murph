@@ -9,6 +9,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
+  type HostedRuntimeGroupParticipantDisplayName,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
@@ -95,7 +96,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
-  readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
+  readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -310,24 +311,10 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "read_participant_display_names") {
-    try {
-      return {
-        action: "read_participant_display_names",
-        result:
-          await readHostedGroupParticipantDisplayNamesByRuntimeMemberId({
-            linqSenderHandles: input.request.linqSenderHandles,
-            runtimeMemberId: input.memberId,
-          }),
-      };
-    } catch {
-      return {
-        action: "read_participant_display_names",
-        result: {
-          status: "unavailable",
-          unavailableReason: "participant_names_unavailable",
-        },
-      };
-    }
+    return handleHostedRuntimeGroupReadParticipantDisplayNames({
+      linqSenderHandles: input.request.linqSenderHandles,
+      memberId: input.memberId,
+    });
   }
 
   if (input.request.action === "read_shared") {
@@ -1495,6 +1482,74 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
+}
+
+async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
+  linqSenderHandles: readonly string[];
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (): HostedRuntimeGroupToolResponse => ({
+    action: "read_participant_display_names",
+    result: {
+      status: "unavailable",
+      unavailableReason: "participant_names_unavailable",
+    },
+  });
+
+  try {
+    const candidates =
+      await readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: input.linqSenderHandles,
+        runtimeMemberId: input.memberId,
+      });
+    if (candidates.status !== "ok") {
+      return {
+        action: "read_participant_display_names",
+        result: candidates,
+      };
+    }
+
+    const participants: HostedRuntimeGroupParticipantDisplayName[] = [];
+    const unresolvedPhoneHandles: string[] = [];
+    for (const candidate of candidates.candidates) {
+      if (candidate.profileDisplayName) {
+        participants.push({
+          displayName: candidate.profileDisplayName,
+          displayNameSource: "profile-name",
+          senderHandle: candidate.senderHandle,
+        });
+      } else if (
+        normalizePhoneNumber(candidate.senderHandle) === candidate.senderHandle
+      ) {
+        unresolvedPhoneHandles.push(candidate.senderHandle);
+      }
+    }
+
+    const ownerContactLabels = unresolvedPhoneHandles.length === 0
+      ? new Map<string, string>()
+      : await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+          containerMemberId: input.memberId,
+          phoneHandles: unresolvedPhoneHandles,
+          prisma: getPrisma(),
+        });
+    for (const senderHandle of unresolvedPhoneHandles) {
+      const displayName = ownerContactLabels.get(senderHandle);
+      if (displayName) {
+        participants.push({
+          displayName,
+          displayNameSource: "unverified-owner-contact",
+          senderHandle,
+        });
+      }
+    }
+
+    return {
+      action: "read_participant_display_names",
+      result: { participants, status: "ok" },
+    };
+  } catch {
+    return unavailable();
+  }
 }
 
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(

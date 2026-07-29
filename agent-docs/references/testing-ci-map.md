@@ -347,6 +347,20 @@ not enter evidence; and attachment-only input fails closed before provider work.
   one attachment delivery with no duplicate or mailbox lag. The phase-one
   reader-compatible release remains the rollback floor after producer activation.
 
+Authenticated Linq group speaker-label coverage is split across the existing
+owners. Hosted-execution parser tests lock the additive provenance enum, legacy
+profile default, exact response keys, and rejection of private participant ids.
+Hosted Web tests prove exact current-membership/profile candidates, pre-group
+and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
+profile-over-contact precedence, fail-soft advisory outcomes, and one set-based
+profile/contact lookup. Assistant-runtime tests preserve
+provenance and reject ambiguous duplicate handle results. Assistant-engine tests
+prove one four-handle reader call for a 20-message initial burst, positive and
+negative turn-memo reuse across separate live admissions, direct-Linq exclusion,
+Telegram ingress-name preservation, explicit prompt semantics, and absence of
+hosted member or participant ids. Cloudflare group-tool-port tests keep the
+one-second presentation-only deadline and late-result rejection.
+
 ## Current Gaps
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,

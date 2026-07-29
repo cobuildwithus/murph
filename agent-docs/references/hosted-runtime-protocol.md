@@ -1589,18 +1589,54 @@ may make raw paths, image evidence, or audio/video transcript evidence
 available to the same assistant turn.
 Authenticated group transcript rendering keeps the opaque assistant input
 reference and server-derived sender handle authoritative. Telegram may carry a
-bounded display name from trusted ingress. Linq may resolve a bounded profile
-name only after durable import through the Web-owned
-`read_participant_display_names` boundary. The Cloudflare group-tool adapter
-caps only that presentation action at a one-second soft deadline, bounded
-further by the configured control timeout; timeout, abort, ambiguity, or failure
-returns no name, late completion is ignored, and every other group-tool action
-keeps the configured timeout. The boundary matches the current handle to exactly
-one current joined, unsuspended membership and decrypts only its
+bounded display name from trusted ingress. After durable Linq import, prompt
+preparation may call the Web-owned `read_participant_display_names` boundary
+with one bounded unique-handle set. Web matches each handle to exactly one
+current joined, unsuspended membership and decrypts only its
 membership-implied `profile-name.v0` snapshot; it never traverses selectable
-health grants or device state. These names are safely quoted presentation data
-and never participate in identity, routing, membership, or participant-scoped
-effect authorization.
+health grants or device state. The synthetic runtime must remain active, but a
+connected room with no hosted-group row is treated as an empty profile-
+membership set so presentation does not depend on unrelated group setup. An
+authorized profile name wins. A canonical phone with no member match, or with
+one unsuspended matched member but no profile name, may reuse the existing human
+owner address-book advisory reader; an ambiguous or suspended member match
+remains unnamed. The advisory reader rechecks owner existence, suspension,
+launch consent, projection enablement, safe uniqueness, and its KMS/storage
+boundaries. A successful response returns only `senderHandle`, `displayName`,
+and `displayNameSource` (`profile-name` or `unverified-owner-contact`); it never
+returns a hosted member id or participant id.
+
+The assistant compound operation owns one in-memory memo for those results.
+Initial prompt preparation reads unresolved unique handles once, including a
+20-message/four-sender burst as one four-handle request. Later live admissions
+reuse positive and negative/fail-soft entries and batch only newly unresolved
+handles. The memo ends with the compound turn, is not checkpointed, and never
+becomes profile or contact state. Profile names render as display-only profile
+text; owner-contact labels render explicitly as unverified display-only text.
+Neither label nor the raw handle authorizes participant selection or an effect.
+Only an accepted opaque message ref plus trusted server derivation can authorize
+a participant-scoped action.
+
+The Cloudflare group-tool adapter caps only this presentation action at a
+one-second soft deadline, bounded further by the configured control timeout.
+The runtime therefore stops waiting before the address-book helper's own
+two-second deadline; a later Web completion is ignored. Timeout, abort,
+ambiguity, invalid or unauthorized state, suspension,
+consent loss, KMS/storage failure, parser skew, or any other failure returns no
+label, ignores late completion, and does not block or acknowledge conversation
+work. Every other group-tool action keeps the configured timeout.
+
+`displayNameSource` is an additive response field. New parsers accept an omitted
+field from an older Web deployment as `profile-name`; old parsers reject the new
+field, after which the existing fail-soft reader leaves the transcript unnamed
+while normal conversation continues. The enclosing participant-evidence
+contract requires a Web-first rollout: deploy Web's backward-compatible reader
+before the runner and Cloudflare release. During that brief skew, an old runner
+may omit a label when Web emits contact provenance, but normal conversation and
+participant authorization remain available. Roll back the runner and Cloudflare
+before Web. After the fleet converges, verify one profile label, one owner-
+contact label, and one participant-scoped action from an opaque accepted-message
+ref. No database, workspace, mailbox, or input-event migration is required.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is

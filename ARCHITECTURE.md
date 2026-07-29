@@ -775,21 +775,34 @@ the tokens and encrypted labels. Full replacement, explicit deletion,
 permission-loss deletion after the companion next reconciles in the foreground,
 and account deletion use that one lifecycle. Replacement remains gated by
 active access and current launch consent. An enabled projection remains active
-until one of those deletion paths runs. The only consumer is the existing
-route-authorized group participant read. It consults the human group owner's
-projection only while the owner still exists, remains unsuspended, and holds
-current launch consent, for at most 16 canonical phone participant handles. The
-enclosing route authorization owns admission to that live read; the optional
-overlay does not separately reinterpret the owner's current personal or
-sponsored billing after the projection was validly enabled. Participant
-selection remains independent of each participant's durable `hasOwnMurph`
-activation result, and a match is exposed only as current-turn
-`unverifiedOwnerContactLabel` presentation text. It is never identity,
-membership, consent, routing, profile, invite, or signup authority, and it
-cannot override a registered participant's Murph identity. Failures omit the
-optional overlay without changing the truthful live roster.
-The full boundary and rollout contract is
-`agent-docs/product-specs/ios-address-book-advisory-names.md`.
+until one of those deletion paths runs. The projection has two Web-owned,
+route-authorized presentation consumers: the model-triggered live participant
+roster and the automatic authenticated Linq group speaker-label read. Both
+consult only the human group owner's projection while the owner still exists,
+remains unsuspended, and holds current launch consent, for at most 16 canonical
+phone handles. After proving the synthetic runtime is active, the automatic read
+resolves any exact unique current room membership and the member's authorized
+`profile-name.v0` snapshot. A connected room with no hosted-group row is an
+empty profile-membership set, not a reason to skip owner-contact presentation.
+An exact canonical phone with no member match, or with one matched member but
+no profile name, may reach the owner-contact lookup; ambiguous or suspended
+member matches remain unnamed. A profile name therefore always wins over a
+conflicting contact label.
+The enclosing group route owns admission to each live read; the optional overlay
+does not separately reinterpret the owner's current personal or sponsored
+billing after the projection was validly enabled.
+
+Participant selection remains independent of each participant's durable
+`hasOwnMurph` activation result. Roster matches remain current-turn
+`unverifiedOwnerContactLabel` text, while automatic transcript matches carry
+explicit `unverified-owner-contact` provenance and render as an unverified
+owner-contact label. Neither form is identity, membership, consent, routing,
+profile, invite, signup, delivery, or effect authority, and neither can override
+a registered participant's Murph identity. Failures omit the optional text
+without changing the truthful roster or blocking an accepted conversation.
+Security, deadline, and rollout details are also recorded in
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 ### Automatic meal-photo capture
 
@@ -1211,12 +1224,24 @@ Direct and authenticated group conversations share the same provider-response
 lifecycle. Every completed text or media segment is retained and delivered;
 the audience does not create a replacement-response owner. Group transcript
 rendering uses one canonical message shape with an opaque message reference,
-server-derived sender handle, and an optional bounded quoted speaker name.
-Telegram carries that name from authenticated ingress. Linq resolves it lazily
-after durable ingress from exact current membership and the existing shared
-profile-name projection, failing soft to an unnamed speaker. The name is
-presentation only and never supplies identity, routing, membership, or effect
-authority.
+server-derived sender handle, and an optional bounded quoted speaker label.
+Telegram carries its label from authenticated ingress. Linq resolves labels
+lazily during prompt preparation against current Web authority: an exact unique
+current member's authorized `profile-name.v0` display name wins, otherwise the
+human group owner's explicitly enabled address-book projection may provide one
+safe unique canonical-phone label marked as unverified. Failure leaves the
+speaker unnamed.
+
+The assistant operation that owns one compound turn also owns one in-memory
+positive-and-negative Linq label memo. The initial prompt reads all unresolved
+unique handles in one bounded batch; later live admissions reuse resolved and
+fail-soft misses and read only newly unresolved handles. The memo ends with the
+compound turn and is never checkpointed, copied into profile truth, or promoted
+to another cache owner. Profile and owner-contact labels are presentation
+only. The name read returns no member or participant identifier. For
+participant-scoped effects, the opaque `Message ref` plus trusted server
+derivation remains the sole path; display
+labels and handles are never selectors.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not runtime work. A unique participant addition may set one nullable

@@ -397,8 +397,9 @@ const assistantInputLinqSourceMetadataSchema = z
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',
     ),
-    // Presentation-only speaker label resolved from exact current membership.
-    // It never supplies participant authority.
+    // Legacy presentation-only speaker-label compatibility. Automatic profile
+    // and owner-contact resolution stays turn-local and is never persisted in
+    // source metadata. This value never supplies participant authority.
     senderDisplayName: safeAssistantInputMetadataTextSchema(
       'sourceMetadata.senderDisplayName',
     ).nullable().optional(),

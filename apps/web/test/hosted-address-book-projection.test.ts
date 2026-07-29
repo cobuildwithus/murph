@@ -21,6 +21,7 @@ vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
 
 import {
   deleteHostedAddressBookProjection,
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
   HOSTED_ADDRESS_BOOK_REPLACEMENT_BODY_MAX_BYTES,
   parseHostedAddressBookDeleteRequest,
@@ -309,6 +310,54 @@ describe("hosted address-book projection lifecycle", () => {
       outcome: "matched",
       requestedHandleCount: 3,
     });
+  });
+
+  it("uses one bounded DB and KMS batch at advisory lookup cardinality", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    store.projection = {
+      disabledAt: null,
+      enabled: true,
+      lastMutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      lastMutationOperation: "replace",
+      lastReplacedAt: new Date("2026-07-26T12:00:00.000Z"),
+      memberId: "owner-member",
+      revision: 1,
+    };
+    const crypto = makeAddressBookCrypto();
+    const findContainer = vi.spyOn(store.hostedThreadContainer, "findUnique");
+    const findProjection = vi.spyOn(
+      store.hostedAddressBookProjection,
+      "findUnique",
+    );
+    const findContacts = vi.spyOn(store.hostedAddressBookContact, "findMany");
+    const phoneHandles = Array.from(
+      { length: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES },
+      (_, index) => `+1202555${String(index).padStart(4, "0")}`,
+    );
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles,
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      canonicalHandleCount: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      contactMatchCount: 0,
+      names: new Map(),
+      outcome: "no_contact_match",
+      requestedHandleCount: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    });
+
+    expect(findContainer).toHaveBeenCalledTimes(1);
+    expect(findProjection).toHaveBeenCalledTimes(1);
+    expect(findContacts).toHaveBeenCalledTimes(1);
+    expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
+    expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "owner-member",
+        prisma: store,
+      });
   });
 
   it("keeps an enabled projection active until an explicit lifecycle deletion", async () => {

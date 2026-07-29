@@ -23,7 +23,7 @@ import {
 } from "@/src/lib/hosted-crypto/secure-box";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
+  readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -178,9 +178,66 @@ function createPrisma(input: {
   };
 }
 
-describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
-  it("decrypts only exact current-member profile names and omits ambiguous handles", async () => {
+describe("readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId", () => {
+  it("keeps canonical senders contact-eligible before a hosted group exists", async () => {
+    const canonicalPhone = "+15556660006";
+    const noncanonicalHandle = "member@example.test";
+    const {
+      hostedGroupFindUnique,
+      hostedVaultShareFindMany,
+      prisma,
+    } = createPrisma({ group: null });
+
+    await expect(
+      readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: [canonicalPhone, noncanonicalHandle],
+        prisma,
+        runtimeMemberId: RUNTIME_MEMBER_ID,
+      }),
+    ).resolves.toEqual({
+      candidates: [
+        {
+          profileDisplayName: null,
+          senderHandle: canonicalPhone,
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: noncanonicalHandle,
+        },
+      ],
+      status: "ok",
+    });
+
+    expect(hostedGroupFindUnique).toHaveBeenCalledTimes(1);
+    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a pre-group room unnamed when the synthetic runtime is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    const {
+      hostedVaultShareFindMany,
+      prisma,
+    } = createPrisma({ group: null });
+
+    await expect(
+      readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: ["+15556660006"],
+        prisma,
+        runtimeMemberId: RUNTIME_MEMBER_ID,
+      }),
+    ).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "runtime_inactive",
+    });
+    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
+  });
+
+  it("decrypts exact active-member profiles and omits ambiguous or suspended handles", async () => {
     const uniqueHandle = "+15551110001";
+    const noProfileHandle = "+15553330003";
+    const noMemberHandle = "+15554440004";
+    const suspendedHandle = "+15555550005";
     const ambiguousHandle = "+15552220002";
     const verifiedAt = new Date("2026-07-27T12:00:00.000Z");
     const profileA = snapshot({
@@ -198,6 +255,7 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
       id: string,
       memberId: string,
       phoneNumber: string,
+      suspendedAt: Date | null = null,
     ) => ({
       id,
       member: {
@@ -207,6 +265,7 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
           phoneNumberVerifiedAt: verifiedAt,
         },
         routing: null,
+        suspendedAt,
       },
       memberId,
     });
@@ -221,6 +280,13 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
           member("participant_a", "member_a", uniqueHandle),
           member("participant_b", "member_b", ambiguousHandle),
           member("participant_c", "member_c", ambiguousHandle),
+          member("participant_d", "member_d", noProfileHandle),
+          member(
+            "participant_e",
+            "member_e",
+            suspendedHandle,
+            new Date("2026-07-27T13:00:00.000Z"),
+          ),
         ],
       },
       shares: [
@@ -234,19 +300,37 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
     });
 
     await expect(
-      readHostedGroupParticipantDisplayNamesByRuntimeMemberId({
-        linqSenderHandles: [uniqueHandle, ambiguousHandle],
+      readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId({
+        linqSenderHandles: [
+          uniqueHandle,
+          ambiguousHandle,
+          noProfileHandle,
+          noMemberHandle,
+          suspendedHandle,
+        ],
         prisma,
         runtimeMemberId: RUNTIME_MEMBER_ID,
       }),
     ).resolves.toEqual({
-      participants: [{
-        displayName: "Alice Example",
-        senderHandle: uniqueHandle,
-      }],
+      candidates: [
+        {
+          profileDisplayName: "Alice Example",
+          senderHandle: uniqueHandle,
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: noProfileHandle,
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: noMemberHandle,
+        },
+      ],
       status: "ok",
     });
 
+    expect(hostedGroupFindUnique).toHaveBeenCalledTimes(1);
+    expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
     expect(hostedGroupFindUnique).toHaveBeenCalledWith(expect.objectContaining({
       select: {
         members: expect.objectContaining({
@@ -266,13 +350,13 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
                     phoneNumberVerifiedAt: true,
                   },
                 },
+                suspendedAt: true,
               },
             },
             memberId: true,
           },
           where: {
             joinedAt: { not: null },
-            member: { is: { suspendedAt: null } },
           },
         }),
       },
@@ -282,7 +366,7 @@ describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
       expect.objectContaining({
         where: {
           destinationMemberId: RUNTIME_MEMBER_ID,
-          grantorMemberId: { in: ["member_a"] },
+          grantorMemberId: { in: ["member_a", "member_d"] },
           projectionScopeKey:
             buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE),
           status: "granted",

@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
-  readHostedGroupParticipantDisplayNamesByRuntimeMemberId: vi.fn(),
+  readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
@@ -126,8 +126,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId: mocks.readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
-  readHostedGroupParticipantDisplayNamesByRuntimeMemberId:
-    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
+  readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId:
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId:
     mocks.readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
@@ -220,6 +220,7 @@ import {
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+  type HostedAddressBookAdvisoryLookupOutcome,
 } from "@/src/lib/hosted-address-book/projection";
 import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
@@ -288,7 +289,8 @@ const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
 
 function addressBookLookupResult(
   names: ReadonlyMap<string, string> = new Map(),
-  outcome = names.size === 0 ? "no_contact_match" : "matched",
+  outcome: HostedAddressBookAdvisoryLookupOutcome =
+    names.size === 0 ? "no_contact_match" : "matched",
 ) {
   return {
     canonicalHandleCount: 2,
@@ -337,8 +339,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
-    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId.mockResolvedValue({
-      participants: [],
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [],
       status: "ok",
     });
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
@@ -858,9 +860,9 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("reads only current participant display names through the narrow store boundary", async () => {
-    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId.mockResolvedValue({
-      participants: [{
-        displayName: "Alice Example",
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [{
+        profileDisplayName: "Alice Example",
         senderHandle: "+15551110001",
       }],
       status: "ok",
@@ -877,6 +879,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       result: {
         participants: [{
           displayName: "Alice Example",
+          displayNameSource: "profile-name",
           senderHandle: "+15551110001",
         }],
         status: "ok",
@@ -884,12 +887,248 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(
-      mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
+      mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
     ).toHaveBeenCalledWith({
       linqSenderHandles: ["+15551110001"],
       runtimeMemberId: "member_group_runtime",
     });
     expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).not.toHaveBeenCalled();
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames).not.toHaveBeenCalled();
+  });
+
+  it("prefers profile names and uses owner contacts for exact unresolved phones", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [
+        {
+          profileDisplayName: "Alice Profile",
+          senderHandle: "+15551110001",
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: "+15552220002",
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: "member@example.test",
+        },
+      ],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map([
+        ["+15551110001", "Conflicting Contact"],
+        ["+15552220002", "Bob Contact"],
+      ])),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: [
+          "+15551110001",
+          "+15552220002",
+          "member@example.test",
+        ],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [
+          {
+            displayName: "Alice Profile",
+            displayNameSource: "profile-name",
+            senderHandle: "+15551110001",
+          },
+          {
+            displayName: "Bob Contact",
+            displayNameSource: "unverified-owner-contact",
+            senderHandle: "+15552220002",
+          },
+        ],
+        status: "ok",
+      },
+    });
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames).toHaveBeenCalledWith({
+      containerMemberId: "member_group_runtime",
+      phoneHandles: ["+15552220002"],
+      prisma: expect.anything(),
+    });
+  });
+
+  it("uses an owner contact label when the exact phone has no Murph member match", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [{
+        profileDisplayName: null,
+        senderHandle: "+15554440004",
+      }],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map([
+        ["+15554440004", "Casey Contact"],
+      ])),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15554440004"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Casey Contact",
+          displayNameSource: "unverified-owner-contact",
+          senderHandle: "+15554440004",
+        }],
+        status: "ok",
+      },
+    });
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames)
+      .toHaveBeenCalledExactlyOnceWith({
+        containerMemberId: "member_group_runtime",
+        phoneHandles: ["+15554440004"],
+        prisma: expect.anything(),
+      });
+  });
+
+  it.each([
+    "owner_suspended",
+    "consent_unavailable",
+    "projection_disabled",
+    "no_safe_unique_label",
+    "no_contact_match",
+  ] as const satisfies readonly HostedAddressBookAdvisoryLookupOutcome[])(
+    "omits unresolved speaker labels when the advisory source is %s",
+    async (outcome) => {
+      mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+        candidates: [{
+          profileDisplayName: null,
+          senderHandle: "+15552220002",
+        }],
+        status: "ok",
+      });
+      mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+        addressBookLookupResult(new Map(), outcome),
+      );
+
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_group_runtime",
+        request: {
+          action: "read_participant_display_names",
+          linqSenderHandles: ["+15552220002"],
+        },
+      })).resolves.toEqual({
+        action: "read_participant_display_names",
+        result: { participants: [], status: "ok" },
+      });
+    },
+  );
+
+  it("does not consult owner contacts when current profile membership is unavailable", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      status: "unavailable",
+      unavailableReason: "participant_names_authority_invalid",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15552220002"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        status: "unavailable",
+        unavailableReason: "participant_names_authority_invalid",
+      },
+    });
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames).not.toHaveBeenCalled();
+  });
+
+  it("omits automatic owner-contact labels when the advisory lookup times out", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      let resolveLookup:
+        ((value: ReturnType<typeof addressBookLookupResult>) => void) | undefined;
+      mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+        candidates: [{
+          profileDisplayName: null,
+          senderHandle: "+15552220002",
+        }],
+        status: "ok",
+      });
+      mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+      );
+
+      const response = handleHostedRuntimeGroupTool({
+        memberId: "member_group_runtime",
+        request: {
+          action: "read_participant_display_names",
+          linqSenderHandles: ["+15552220002"],
+        },
+      });
+      await vi.advanceTimersByTimeAsync(HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
+
+      await expect(response).resolves.toEqual({
+        action: "read_participant_display_names",
+        result: { participants: [], status: "ok" },
+      });
+      expect(info).toHaveBeenCalledExactlyOnceWith(
+        "Hosted address-book advisory lookup unavailable.",
+        { outcome: "deadline_exceeded" },
+      );
+
+      resolveLookup?.(addressBookLookupResult(new Map([
+        ["+15552220002", "Late Contact"],
+      ])));
+      await Promise.resolve();
+      expect(info).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("fails soft when the automatic owner-contact overlay fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [{
+        profileDisplayName: null,
+        senderHandle: "+15552220002",
+      }],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
+      new Error("sensitive storage failure"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15552220002"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: { participants: [], status: "ok" },
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "sensitive storage failure",
+    );
+    warn.mockRestore();
   });
 
   it("does not read group state when runtime access is inactive", async () => {

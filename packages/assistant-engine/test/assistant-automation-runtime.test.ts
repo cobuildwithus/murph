@@ -35,6 +35,8 @@ import {
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
 import type { AssistantAutomationOperationScope } from '../src/assistant/automation/operation-scope.ts'
+import type { AssistantAutoReplyPromptInput } from '../src/assistant/automation/prompt-builder.ts'
+import type { AssistantGroupParticipantDisplayName } from '../src/assistant/execution-context.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
@@ -9350,6 +9352,201 @@ describe('assistant auto-reply runtime', () => {
       .not.toHaveProperty('turnContext')
   })
 
+  it('batches twenty initial Linq messages into one four-handle speaker lookup', async () => {
+    const handles = [
+      '+15551110001',
+      '+15552220002',
+      '+15553330003',
+      '+15554440004',
+    ] as const
+    const inputs = Array.from({ length: 20 }, (_, index) => {
+      const senderHandle = handles[index % handles.length]!
+      const second = String(index).padStart(2, '0')
+      return createCapturelessAssistantInputCandidate({
+        accountId: 'safe_acct_group_batch',
+        actorId: `safe_actor_${index % handles.length}`,
+        conversationThreadId: 'hidden_group_batch_thread',
+        inputId: `ain_${(index + 1).toString(16).padStart(32, '0')}`,
+        occurredAt: `2026-04-08T00:03:${second}.000Z`,
+        receivedAt: `2026-04-08T00:04:${second}.000Z`,
+        replyTarget: {
+          channel: 'linq',
+          messageId: `real_group_batch_message_${index}`,
+          threadId: 'real_group_batch_thread',
+        },
+        source: 'linq',
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle,
+          service: 'iMessage',
+        },
+        text: `message ${index}`,
+        threadIsDirect: false,
+      })
+    })
+    const preparedInputs: Array<readonly {
+      inputId: string
+      linqSpeakerLabel?: { displayName: string; source: string }
+    }[]> = []
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(async (
+      promptInputs: readonly AssistantAutoReplyPromptInput[],
+    ) => {
+      preparedInputs.push(promptInputs)
+      return {
+        kind: 'ready' as const,
+        prompt: 'twenty-message compound prompt',
+        userMessageContent: null,
+      }
+    })
+    const groupParticipantDisplayNameReader = {
+      read: vi.fn(async (input: {
+        channel: 'linq'
+        senderHandles: readonly string[]
+      }) => input.senderHandles.map((senderHandle) => ({
+        displayName: `Name ${senderHandle.slice(-2)}`,
+        displayNameSource: 'profile-name' as const,
+        senderHandle,
+      }))),
+    }
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext(
+      inputs.map(createCapturelessReplyGroupItem),
+    )
+    if (!context) {
+      throw new Error('expected twenty-message group context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          groupParticipantDisplayNameReader,
+          memberId: 'member-group-batch-names',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledExactlyOnceWith({
+      channel: 'linq',
+      senderHandles: handles,
+    })
+    expect(preparedInputs).toHaveLength(1)
+    expect(preparedInputs[0]).toHaveLength(20)
+    expect(preparedInputs[0]).toEqual(inputs.map((candidate, index) =>
+      expect.objectContaining({
+        inputId: candidate.event.inputId,
+        linqSpeakerLabel: {
+          displayName: `Name ${handles[index % handles.length]!.slice(-2)}`,
+          source: 'profile-name',
+        },
+      })
+    ))
+    expect(JSON.stringify(preparedInputs[0])).not.toContain(
+      'member-group-batch-names',
+    )
+    expect(JSON.stringify(preparedInputs[0])).not.toContain('participantId')
+  })
+
+  it('does not look up speaker names for direct Linq or Telegram inputs', async () => {
+    const directLinq = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_direct_linq',
+      actorId: 'safe_actor_direct_linq',
+      conversationThreadId: 'hidden_direct_linq_thread',
+      inputId: 'ain_71717171717171717171717171717171',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'direct_linq_message',
+        threadId: 'real_direct_linq_thread',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        senderHandle: '+15551110001',
+        service: 'iMessage',
+      },
+      text: 'direct Linq message',
+      threadIsDirect: true,
+    })
+    const telegramGroup = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_group_telegram',
+      actorId: 'safe_actor_group_telegram',
+      conversationThreadId: 'hidden_group_telegram_thread',
+      inputId: 'ain_72727272727272727272727272727272',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'group_telegram_message',
+        threadId: 'real_group_telegram_thread',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+        senderDisplayName: 'Telegram Ingress Name',
+        senderHandle: 'tg:12345',
+        senderUsername: 'telegram_user',
+      },
+      text: 'Telegram group message',
+      threadIsDirect: false,
+    })
+    const groupParticipantDisplayNameReader = {
+      read: vi.fn(async () => []),
+    }
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+
+    for (const candidate of [directLinq, telegramGroup]) {
+      const context = reply.createAssistantAutoReplyGroupContext([
+        createCapturelessReplyGroupItem(candidate),
+      ])
+      if (!context) {
+        throw new Error('expected direct or Telegram context')
+      }
+      await reply.processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context,
+        enabledChannels: [candidate.event.source],
+        executionContext: {
+          hosted: {
+            groupParticipantDisplayNameReader,
+            memberId: 'member-no-linq-group-lookup',
+            userEnvKeys: [],
+          },
+        },
+        inboxServices: createInboxServices({ show: vi.fn() }),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault: '/tmp/assistant-automation-vault',
+      })
+    }
+
+    expect(groupParticipantDisplayNameReader.read).not.toHaveBeenCalled()
+  })
+
   it('admits authenticated mixed group actors into one turn and checkpoints every input', async () => {
     const promptBuilder = await vi.importActual<
       typeof import('../src/assistant/automation/prompt-builder.ts')
@@ -9474,6 +9671,56 @@ describe('assistant auto-reply runtime', () => {
       text: 'later message from actor A',
       threadIsDirect: false,
     })
+    const unresolvedActorC = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_group_a',
+      actorId: 'safe_actor_c',
+      conversationThreadId: 'hidden_group_order_thread',
+      inputId: 'ain_60606060606060606060606060606060',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_group_order_message_c1',
+        threadId: 'real_group_order_thread',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        senderHandle: '+15553330000',
+        service: 'iMessage',
+      },
+      text: 'message from unresolved actor C',
+      threadIsDirect: false,
+    })
+    const laterUnresolvedActorC = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_group_a',
+      actorId: 'safe_actor_c',
+      conversationThreadId: 'hidden_group_order_thread',
+      inputId: 'ain_70707070707070707070707070707070',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      receivedAt: '2026-04-08T00:07:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_group_order_message_c2',
+        threadId: 'real_group_order_thread',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        senderHandle: '+15553330000',
+        service: 'iMessage',
+      },
+      text: 'later message from unresolved actor C',
+      threadIsDirect: false,
+    })
     const listInputCandidatesByIds = vi.fn(async (input: {
       afterCursor?: AssistantInputCandidate['event']['cursor'] | null
       inputIds: readonly string[]
@@ -9484,6 +9731,18 @@ describe('assistant auto-reply runtime', () => {
         return {
           inputs: [unauthenticatedActorA],
           nextCursor: unauthenticatedActorA.event.cursor,
+        }
+      }
+      if (input.inputIds.includes(unresolvedActorC.event.inputId)) {
+        return {
+          inputs: [unresolvedActorC],
+          nextCursor: unresolvedActorC.event.cursor,
+        }
+      }
+      if (input.inputIds.includes(laterUnresolvedActorC.event.inputId)) {
+        return {
+          inputs: [laterUnresolvedActorC],
+          nextCursor: laterUnresolvedActorC.event.cursor,
         }
       }
       if (input.afterCursor?.inputId === initialInput.event.inputId) {
@@ -9516,12 +9775,22 @@ describe('assistant auto-reply runtime', () => {
       read: vi.fn(async (input: {
         channel: 'linq'
         senderHandles: readonly string[]
-      }) => input.senderHandles.flatMap((senderHandle) => {
+      }) => input.senderHandles.flatMap<AssistantGroupParticipantDisplayName>((
+        senderHandle,
+      ) => {
         if (senderHandle === '+15551110000') {
-          return [{ displayName: 'Actor A', senderHandle }]
+          return [{
+            displayName: 'Actor A',
+            displayNameSource: 'profile-name' as const,
+            senderHandle,
+          }]
         }
         if (senderHandle === '+15552220000') {
-          return [{ displayName: 'Actor B', senderHandle }]
+          return [{
+            displayName: 'Actor B',
+            displayNameSource: 'unverified-owner-contact' as const,
+            senderHandle,
+          }]
         }
         return []
       })),
@@ -9562,7 +9831,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedB).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15552220000\n\nSpeaker name: \"Actor B\"',
+          'Sender: +15552220000\n\nUnverified owner contact label (display only): \"Actor B\"',
         ),
       })
       expect(acceptedB).toMatchObject({
@@ -9583,7 +9852,7 @@ describe('assistant auto-reply runtime', () => {
       })
       expect(acceptedA).toMatchObject({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nSpeaker name: \"Actor A\"',
+          'Sender: +15551110000\n\nProfile name (display only): \"Actor A\"',
         ),
       })
       expect(acceptedA).toMatchObject({
@@ -9592,11 +9861,48 @@ describe('assistant auto-reply runtime', () => {
         ),
       })
 
+      const acceptedC = await input.activeTurnInput?.({
+        availableInputIds: [unresolvedActorC.event.inputId],
+        sessionId: 'session-group-order-a',
+        turnId: 'turn-group-order-a',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(acceptedC).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: unresolvedActorC.event.inputId }),
+        ],
+        kind: 'accepted',
+        prompt: expect.stringContaining('Sender: +15553330000'),
+      })
+      expect(JSON.stringify(acceptedC)).not.toContain('Profile name (display only)')
+      expect(JSON.stringify(acceptedC)).not.toContain(
+        'Unverified owner contact label (display only)',
+      )
+
+      const acceptedCLater = await input.activeTurnInput?.({
+        availableInputIds: [laterUnresolvedActorC.event.inputId],
+        sessionId: 'session-group-order-a',
+        turnId: 'turn-group-order-a',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(acceptedCLater).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: laterUnresolvedActorC.event.inputId }),
+        ],
+        kind: 'accepted',
+        prompt: expect.stringContaining('Sender: +15553330000'),
+      })
+      expect(JSON.stringify(acceptedCLater)).not.toContain(
+        'Profile name (display only)',
+      )
+
       await input.activeTurnCheckpoint?.({
         acceptedInputIds: [
           initialInput.event.inputId,
           actorB.event.inputId,
           laterActorA.event.inputId,
+          unresolvedActorC.event.inputId,
+          laterUnresolvedActorC.event.inputId,
         ],
         providerRequestOrdinal: 0,
         sessionId: 'session-group-order-a',
@@ -9677,7 +9983,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining(
-          'Sender: +15551110000\n\nSpeaker name: "Actor A"',
+          'Sender: +15551110000\n\nProfile name (display only): "Actor A"',
         ),
       }),
     )
@@ -9690,7 +9996,11 @@ describe('assistant auto-reply runtime', () => {
       channel: 'linq',
       senderHandles: ['+15552220000'],
     })
-    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(3)
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
+      channel: 'linq',
+      senderHandles: ['+15553330000'],
+    })
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(5)
     expect(listNewConversationInputs).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
@@ -9699,6 +10009,8 @@ describe('assistant auto-reply runtime', () => {
           initialInput.event.inputId,
           actorB.event.inputId,
           laterActorA.event.inputId,
+          unresolvedActorC.event.inputId,
+          laterUnresolvedActorC.event.inputId,
         ],
       }),
     )
@@ -9708,6 +10020,8 @@ describe('assistant auto-reply runtime', () => {
           initialInput.event.inputId,
           actorB.event.inputId,
           laterActorA.event.inputId,
+          unresolvedActorC.event.inputId,
+          laterUnresolvedActorC.event.inputId,
         ],
       }))
   })

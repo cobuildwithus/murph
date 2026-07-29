@@ -155,6 +155,7 @@ import {
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
+  type HostedRuntimeGroupParticipantDisplayNameSource,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1849,7 +1850,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
     const participant = requireObject(entry, participantLabel);
     assertAllowedObjectKeys(
       participant,
-      new Set(["displayName", "senderHandle"]),
+      new Set(["displayName", "displayNameSource", "senderHandle"]),
       participantLabel,
     );
     const displayName = parseHostedRuntimeGroupDisplayName(
@@ -1868,9 +1869,25 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
       throw new TypeError(`${label} senderHandles must be unique.`);
     }
     senderHandles.add(senderHandle);
-    return { displayName, senderHandle };
+    const displayNameSource = participant.displayNameSource === undefined
+      ? "profile-name"
+      : parseHostedRuntimeGroupParticipantDisplayNameSource(
+        participant.displayNameSource,
+        `${participantLabel} displayNameSource`,
+      );
+    return { displayName, displayNameSource, senderHandle };
   });
   return { participants, status };
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNameSource(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupParticipantDisplayNameSource {
+  if (value === "profile-name" || value === "unverified-owner-contact") {
+    return value;
+  }
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {

@@ -5,7 +5,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
-  type HostedRuntimeGroupParticipantDisplayNamesResult,
   type HostedRuntimeGroupSharedReadResult,
   type HostedRuntimeGroupSharedRecord,
 } from "@murphai/hosted-execution/runtime-control";
@@ -417,21 +416,35 @@ type HostedGroupParticipantDisplayNamesCapture =
       }>;
       shares: HostedVaultShareProjectionSnapshotEntry[];
       status: "ok";
+      unmatchedSenderHandles: string[];
+    }
+  | { status: "unavailable"; unavailableReason: string };
+
+export type HostedGroupParticipantDisplayNameCandidatesResult =
+  | {
+      candidates: Array<{
+        profileDisplayName: string | null;
+        senderHandle: string;
+      }>;
+      status: "ok";
     }
   | { status: "unavailable"; unavailableReason: string };
 
 /**
- * Resolves exact current-turn Linq handles to current, unsuspended group
- * members and decrypts only their membership-implied profile-name snapshots.
- * It intentionally does not traverse selectable health grants or device state.
+ * Resolves exact current-turn Linq handles against current, unsuspended group
+ * members and decrypts only membership-implied profile-name snapshots. A
+ * uniquely matched member without a profile name and a handle with no member
+ * match remain explicit candidates for the existing owner-address-book
+ * advisory boundary. Ambiguous member matches remain excluded. This
+ * intentionally does not traverse selectable health grants or device state.
  */
-export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
+export async function readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId(
   input: {
     linqSenderHandles: readonly string[];
     prisma?: PrismaClient;
     runtimeMemberId: string;
   },
-): Promise<HostedRuntimeGroupParticipantDisplayNamesResult> {
+): Promise<HostedGroupParticipantDisplayNameCandidatesResult> {
   const prisma = input.prisma ?? getPrisma();
   const capture =
     await prisma.$transaction<HostedGroupParticipantDisplayNamesCapture>(
@@ -442,7 +455,6 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
             members: {
               where: {
                 joinedAt: { not: null },
-                member: { is: { suspendedAt: null } },
               },
               orderBy: [{ createdAt: "asc" }, { id: "asc" }],
               take: HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
@@ -462,6 +474,7 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
                         phoneNumberVerifiedAt: true,
                       },
                     },
+                    suspendedAt: true,
                   },
                 },
                 memberId: true,
@@ -469,12 +482,6 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
             },
           },
         });
-        if (!group) {
-          return {
-            status: "unavailable",
-            unavailableReason: "group_unavailable",
-          };
-        }
         if (
           !await hasHostedRuntimeActiveAccess(input.runtimeMemberId, {
             prisma: tx,
@@ -485,8 +492,9 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
             unavailableReason: "runtime_inactive",
           };
         }
+        const groupMembers = group?.members ?? [];
         if (
-          group.members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
+          groupMembers.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
         ) {
           return {
             status: "unavailable",
@@ -494,12 +502,17 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
           };
         }
 
-        const handlesByParticipantId =
-          matchHostedGroupCurrentTurnSenderHandles(group.members, {
-            linqSenderHandles: input.linqSenderHandles,
-            telegramSenderHandles: [],
-          });
-        const matchedMembers = group.members.flatMap((member) => {
+        const {
+          handlesByParticipantId,
+          unmatchedSenderHandles,
+        } = matchHostedGroupCurrentTurnLinqSenderHandles(
+          groupMembers,
+          input.linqSenderHandles,
+        );
+        const matchedMembers = groupMembers.flatMap((member) => {
+          if (member.member.suspendedAt !== null) {
+            return [];
+          }
           const senderHandles = handlesByParticipantId.get(member.id);
           return senderHandles
             ? [{ memberId: member.memberId, senderHandles }]
@@ -565,7 +578,12 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
             projectionScopeKey: row.projectionScopeKey,
           });
         }
-        return { matchedMembers, shares, status: "ok" };
+        return {
+          matchedMembers,
+          shares,
+          status: "ok",
+          unmatchedSenderHandles,
+        };
       },
       {
         ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -593,15 +611,19 @@ export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
       }
     }
     return {
-      participants: capture.matchedMembers.flatMap((member) => {
-        const displayName = displayNamesByMemberId.get(member.memberId);
-        return displayName
-          ? member.senderHandles.map((senderHandle) => ({
-              displayName,
-              senderHandle,
-            }))
-          : [];
-      }),
+      candidates: [
+        ...capture.matchedMembers.flatMap((member) =>
+          member.senderHandles.map((senderHandle) => ({
+            profileDisplayName:
+              displayNamesByMemberId.get(member.memberId) ?? null,
+            senderHandle,
+          }))
+        ),
+        ...capture.unmatchedSenderHandles.map((senderHandle) => ({
+          profileDisplayName: null,
+          senderHandle,
+        })),
+      ],
       status: "ok",
     };
   } catch {
@@ -2397,13 +2419,15 @@ function matchHostedGroupCurrentTurnSenderHandles(
   if (linqPresent && telegramPresent) {
     return matchedHandlesByParticipantId;
   }
-  const channelHandles = telegramPresent
-    ? senderHandles.telegramSenderHandles
-    : senderHandles.linqSenderHandles;
-  for (const senderHandle of new Set(channelHandles)) {
-    const matchedMembers = telegramPresent
-      ? matchHostedGroupTelegramSenderHandle(members, senderHandle)
-      : matchHostedGroupLinqSenderHandle(members, senderHandle);
+  if (linqPresent) {
+    return matchHostedGroupCurrentTurnLinqSenderHandles(
+      members,
+      senderHandles.linqSenderHandles,
+    ).handlesByParticipantId;
+  }
+  for (const senderHandle of new Set(senderHandles.telegramSenderHandles)) {
+    const matchedMembers =
+      matchHostedGroupTelegramSenderHandle(members, senderHandle);
     if (matchedMembers.length !== 1) {
       continue;
     }
@@ -2418,6 +2442,36 @@ function matchHostedGroupCurrentTurnSenderHandles(
   }
 
   return matchedHandlesByParticipantId;
+}
+
+function matchHostedGroupCurrentTurnLinqSenderHandles(
+  members: readonly HostedGroupSharedMemberSource[],
+  senderHandles: readonly string[],
+): {
+  handlesByParticipantId: Map<string, string[]>;
+  unmatchedSenderHandles: string[];
+} {
+  const handlesByParticipantId = new Map<string, string[]>();
+  const unmatchedSenderHandles: string[] = [];
+  for (const senderHandle of new Set(senderHandles)) {
+    const matchedMembers =
+      matchHostedGroupLinqSenderHandle(members, senderHandle);
+    if (matchedMembers.length === 0) {
+      unmatchedSenderHandles.push(senderHandle);
+      continue;
+    }
+    if (matchedMembers.length !== 1) {
+      continue;
+    }
+    const participantId = matchedMembers[0]?.id;
+    if (!participantId) {
+      continue;
+    }
+    const matchedHandles = handlesByParticipantId.get(participantId) ?? [];
+    matchedHandles.push(senderHandle);
+    handlesByParticipantId.set(participantId, matchedHandles);
+  }
+  return { handlesByParticipantId, unmatchedSenderHandles };
 }
 
 function matchHostedGroupLinqSenderHandle(

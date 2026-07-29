@@ -97,9 +97,10 @@ function unavailable(unavailableReason: string) {
 }
 
 /**
- * Presentation-only current-turn name lookup. Web remains the membership and
- * profile authority; this adapter supplies exact Linq handles and discards all
- * shared projection data. Failure leaves the transcript safely unnamed.
+ * Presentation-only current-turn label lookup. Web remains the exact current
+ * membership/profile policy and owner-contact authority; this adapter supplies
+ * only route-admitted Linq handles and preserves Web's display provenance.
+ * Failure leaves the transcript safely unnamed.
  */
 export function createHostedGroupParticipantDisplayNameReader(input: {
   groupToolPort: HostedRuntimeGroupToolPort | null;
@@ -136,11 +137,19 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
           if (participants.length !== 1) {
             return [];
           }
+          const participant = participants[0];
+          if (!participant) {
+            return [];
+          }
           const displayName = normalizeHostedGroupParticipantDisplayName(
-            participants[0]?.displayName,
+            participant.displayName,
           );
           return displayName
-            ? [{ displayName, senderHandle }]
+            ? [{
+                displayName,
+                displayNameSource: participant.displayNameSource,
+                senderHandle,
+              }]
             : [];
         });
       } catch {

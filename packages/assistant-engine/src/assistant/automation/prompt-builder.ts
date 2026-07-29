@@ -3,6 +3,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
+  AssistantGroupParticipantDisplayNameSource,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
@@ -75,6 +76,12 @@ export interface AssistantAutoReplyPromptInput {
   groupParticipantAdded?: true
   groupReactionContext?: string
   inputId: string
+  // Prompt-only Linq group presentation. Never persist this label or treat it
+  // as identity, membership, routing, consent, or participant-action authority.
+  linqSpeakerLabel?: {
+    displayName: string
+    source: AssistantGroupParticipantDisplayNameSource
+  }
   occurredAt: string
   projection: AssistantAutoReplyPromptProjection | null
   receivedAt: string | null
@@ -150,7 +157,7 @@ export function buildAssistantAutoReplyPrompt(
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
         senderHandle: readAssistantInputSenderLabel(entry),
-        senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
+        speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: inputs.length,
         trustedHostedImageCompletion:
           entry.trustedHostedImageCompletion ?? null,
@@ -224,7 +231,7 @@ export async function prepareAssistantAutoReplyInput(
         replyContext:
           entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
         senderHandle: readAssistantInputSenderLabel(entry),
-        senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
+        speakerLabel: readAssistantInputGroupSpeakerLabel(entry),
         totalInputs: preparedInputs.length,
         trustedHostedImageCompletion:
           entry.trustedHostedImageCompletion ?? null,
@@ -360,29 +367,65 @@ function readAssistantInputSenderLabel(input: {
     : null
 }
 
+type AssistantInputGroupSpeakerLabel = {
+  displayName: string
+  source:
+    | AssistantGroupParticipantDisplayNameSource
+    | 'legacy-linq-speaker'
+    | 'telegram-ingress'
+}
+
 /**
- * Display-only sender name. Returned only alongside an authoritative handle so
- * it can never stand in for attribution.
+ * Display-only speaker text. Returned only alongside an authoritative handle
+ * so it can never stand in for attribution or action authority.
  */
-function readAssistantInputGroupSenderName(
-  metadata: AssistantInputSourceMetadata | null,
-): string | null {
+function readAssistantInputGroupSpeakerLabel(
+  input: Pick<
+    AssistantAutoReplyPromptInput,
+    'conversation' | 'linqSpeakerLabel' | 'sourceMetadata'
+  >,
+): AssistantInputGroupSpeakerLabel | null {
+  const metadata = input.sourceMetadata
   if (!readAssistantInputGroupSenderHandle(metadata)) {
     return null
   }
-  const displayName = normalizeAssistantInputSpeakerName(
-    metadata?.kind === 'linq' || metadata?.kind === 'telegram'
-      ? metadata.senderDisplayName
-      : null,
-  )
-  if (displayName) {
+  if (
+    input.conversation.threadIsDirect === false &&
+    metadata?.kind === 'linq' &&
+    metadata.externalThreadRouteAuthorityPresent === true &&
+    input.linqSpeakerLabel
+  ) {
+    const displayName = normalizeAssistantInputSpeakerName(
+      input.linqSpeakerLabel.displayName,
+    )
     return displayName
+      ? {
+          displayName,
+          source: input.linqSpeakerLabel.source,
+        }
+      : null
+  }
+  const storedDisplayName =
+    metadata?.kind === 'telegram' ||
+      (metadata?.kind === 'linq' && input.conversation.threadIsDirect !== false)
+      ? metadata.senderDisplayName
+      : null
+  const displayName = normalizeAssistantInputSpeakerName(storedDisplayName)
+  if (displayName) {
+    return {
+      displayName,
+      source: metadata?.kind === 'linq'
+        ? 'legacy-linq-speaker'
+        : 'telegram-ingress',
+    }
   }
   if (metadata?.kind !== 'telegram') {
     return null
   }
   const username = normalizeAssistantInputSpeakerName(metadata.senderUsername)
-  return username ? `@${username}` : null
+  return username
+    ? { displayName: `@${username}`, source: 'telegram-ingress' }
+    : null
 }
 
 function normalizeAssistantInputSpeakerName(
@@ -457,7 +500,7 @@ function renderAssistantAutoReplyInputSection(input: {
   projectionStatus?: AssistantInputProjectionStatus | null
   replyContext: string | null
   senderHandle?: string | null
-  senderName?: string | null
+  speakerLabel?: AssistantInputGroupSpeakerLabel | null
   totalInputs: number
   trustedHostedImageCompletion: AssistantTrustedHostedImageCompletion | null
 }): string | null {
@@ -465,8 +508,13 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.senderHandle) {
     sections.push(`Sender: ${input.senderHandle}`)
   }
-  if (input.senderHandle && input.senderName) {
-    sections.push(`Speaker name: ${JSON.stringify(input.senderName)}`)
+  if (input.senderHandle && input.speakerLabel) {
+    const label = input.speakerLabel.source === 'profile-name'
+      ? 'Profile name (display only)'
+      : input.speakerLabel.source === 'unverified-owner-contact'
+        ? 'Unverified owner contact label (display only)'
+        : 'Speaker name'
+    sections.push(`${label}: ${JSON.stringify(input.speakerLabel.displayName)}`)
   }
   if (input.groupContext) {
     sections.push(input.groupContext)

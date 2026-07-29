@@ -36,6 +36,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupParticipantDisplayName,
+  HostedRuntimeGroupParticipantDisplayNameSource,
   HostedRuntimeGroupSharedMember,
   HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadRequest,
@@ -292,10 +294,10 @@ export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
 export type AssistantHostedGroupSharedReadResponse =
   HostedRuntimeGroupSharedReadResult
 
-export interface AssistantGroupParticipantDisplayName {
-  displayName: string
-  senderHandle: string
-}
+export type AssistantGroupParticipantDisplayNameSource =
+  HostedRuntimeGroupParticipantDisplayNameSource
+export type AssistantGroupParticipantDisplayName =
+  HostedRuntimeGroupParticipantDisplayName
 
 export interface AssistantHostedGroupParticipantDisplayNameReader {
   read(input: {

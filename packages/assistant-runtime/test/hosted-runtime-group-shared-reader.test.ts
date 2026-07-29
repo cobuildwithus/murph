@@ -130,14 +130,17 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
         participants: [
           {
             displayName: " Alice Example ",
+            displayNameSource: "profile-name" as const,
             senderHandle: "+15551110000",
           },
           {
             displayName: "Ambiguous One",
+            displayNameSource: "unverified-owner-contact" as const,
             senderHandle: "+15552220000",
           },
           {
             displayName: "Ambiguous Two",
+            displayNameSource: "profile-name" as const,
             senderHandle: "+15552220000",
           },
         ],
@@ -154,6 +157,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     })).resolves.toEqual([
       {
         displayName: "Alice Example",
+        displayNameSource: "profile-name",
         senderHandle: "+15551110000",
       },
     ]);

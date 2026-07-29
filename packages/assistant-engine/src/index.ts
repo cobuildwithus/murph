@@ -26,6 +26,7 @@ export {
 export * from './assistant/group-newsletter-automation.js'
 export type {
   AssistantGroupParticipantDisplayName,
+  AssistantGroupParticipantDisplayNameSource,
   AssistantHostedGroupParticipantDisplayNameReader,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,

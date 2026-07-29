@@ -155,6 +155,7 @@ function createPromptInput(input: {
   groupParticipantAdded?: true
   groupReactionContext?: string
   inputId?: string
+  linqSpeakerLabel?: AssistantAutoReplyPromptInput['linqSpeakerLabel']
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
   replyContext?: string | null
@@ -224,6 +225,9 @@ function createPromptInput(input: {
       ? { groupReactionContext: input.groupReactionContext }
       : {}),
     inputId: input.inputId ?? parsedCapture.eventId,
+    ...(input.linqSpeakerLabel
+      ? { linqSpeakerLabel: input.linqSpeakerLabel }
+      : {}),
     occurredAt: parsedCapture.occurredAt,
     projection: hasProjection
       ? {
@@ -637,6 +641,41 @@ describe('buildAssistantAutoReplyPrompt', () => {
       JSON.stringify(groupReactionContext),
     ].join('\n'))
     expect(result.prompt).toContain('Message text:\nmorning crew')
+  })
+
+  it('preserves legacy direct Linq speaker presentation and ignores group-only labels', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'direct hello', threadIsDirect: true },
+        linqSpeakerLabel: {
+          displayName: 'Must Not Render',
+          source: 'unverified-owner-contact',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderDisplayName: 'Legacy Direct Name',
+          senderHandle: '+15551110000',
+          service: 'iMessage',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      'Sender: +15551110000\n\nSpeaker name: \"Legacy Direct Name\"',
+    )
+    expect(result.prompt).not.toContain('Must Not Render')
+    expect(result.prompt).not.toContain('Profile name (display only)')
+    expect(result.prompt).not.toContain(
+      'Unverified owner contact label (display only)',
+    )
   })
 
   it('rejects copied short sender attribution from telegram group inbound', async () => {
@@ -1248,6 +1287,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     const linqInputId = `ain_${'7'.repeat(32)}`
     const telegramInputId = `ain_${'8'.repeat(32)}`
     const missingHandleInputId = `ain_${'9'.repeat(32)}`
+    const contactFallbackInputId = `ain_${'a'.repeat(32)}`
+    const unnamedLinqInputId = `ain_${'b'.repeat(32)}`
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: {
@@ -1258,6 +1299,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
           threadIsDirect: false,
         },
         inputId: linqInputId,
+        linqSpeakerLabel: {
+          displayName: '  Alice\n"A"  ',
+          source: 'profile-name',
+        },
         replyTarget: {
           channel: 'linq',
           messageId: 'linq-message-1',
@@ -1269,8 +1314,60 @@ describe('buildAssistantAutoReplyPrompt', () => {
           partCount: 1,
           reactionEligible: true,
           replyToMessageId: null,
-          senderDisplayName: '  Alice\n\"A\"  ',
           senderHandle: '+15551110000',
+          service: 'iMessage',
+        },
+      }),
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-contact-actor',
+          eventId: 'contact-event',
+          source: 'linq',
+          text: 'hello from a contact fallback',
+          threadIsDirect: false,
+        },
+        inputId: contactFallbackInputId,
+        linqSpeakerLabel: {
+          displayName: 'Mara P.',
+          source: 'unverified-owner-contact',
+        },
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-message-2',
+          threadId: 'thread-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle: '+15552220000',
+          service: 'iMessage',
+        },
+      }),
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-unnamed-linq-actor',
+          eventId: 'unnamed-linq-event',
+          source: 'linq',
+          text: 'hello without a current safe name',
+          threadIsDirect: false,
+        },
+        inputId: unnamedLinqInputId,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-message-3',
+          threadId: 'thread-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderDisplayName: 'Legacy Group Must Not Render',
+          senderHandle: '+15553330000',
           service: 'iMessage',
         },
       }),
@@ -1327,13 +1424,21 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain(
-      `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nSpeaker name: \"Alice \\\"A\\\"\"`,
+      `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nProfile name (display only): \"Alice \\\"A\\\"\"`,
+    )
+    expect(result.prompt).toContain(
+      `Message ref: ${contactFallbackInputId}\n\nSender: +15552220000\n\nUnverified owner contact label (display only): \"Mara P.\"`,
     )
     expect(result.prompt).toContain(
       `Message ref: ${telegramInputId}\n\nSender: 1234567890\n\nSpeaker name: \"Bob Example\"`,
     )
+    expect(result.prompt).toContain(
+      `Message ref: ${unnamedLinqInputId}\n\nSender: +15553330000`,
+    )
     expect(result.prompt).toContain(`Message ref: ${missingHandleInputId}`)
     expect(result.prompt).not.toContain('Must Not Render')
+    expect(result.prompt).not.toContain('participantId')
+    expect(result.prompt).not.toContain('memberId')
   })
 
   it('builds grouped prompt text with reply context and attachment excerpts', () => {

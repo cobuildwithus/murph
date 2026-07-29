@@ -818,7 +818,12 @@ and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and
 runner that send only the new fields. Roll back Worker/runner first. After
 managed-container smoke proves the new runner fingerprint and all warm old
 runners have drained, the legacy Web-only fields may be removed in a separate
-contracting release.
+contracting release. This order also covers optional group-speaker provenance:
+old runners may leave owner-contact labels unnamed when new Web emits the
+additive source field, but conversation and exact participant authorization
+remain available. After convergence, smoke one profile-name label, one
+unverified owner-contact label, and one participant-scoped action selected by
+an opaque accepted-message ref.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare

@@ -1772,11 +1772,33 @@ describe("parseHostedRuntimeGroupTool", () => {
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     })).toThrow(/not allowed/u);
 
-    const response = {
+    const legacyResponse = {
       action: "read_participant_display_names",
       result: {
         participants: [{
           displayName: "Alice Example",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(legacyResponse)).toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "profile-name",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    });
+    const response = {
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Mara P.",
+          displayNameSource: "unverified-owner-contact",
           senderHandle: "+15551110001",
         }],
         status: "ok",
@@ -1812,10 +1834,34 @@ describe("parseHostedRuntimeGroupTool", () => {
         ...response.result,
         participants: [{
           displayName: null,
+          displayNameSource: "profile-name",
           senderHandle: "+15551110001",
         }],
       },
     })).toThrow(/must not be null/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "unsafe-source",
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/displayNameSource is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: "Alice Example",
+          displayNameSource: "profile-name",
+          participantId: "private_participant_id",
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/not allowed/u);
   });
 
   it("parses bounded read_shared requests in requested order", () => {
