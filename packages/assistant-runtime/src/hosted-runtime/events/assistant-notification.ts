@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
   buildHostedAssistantContextFingerprintDetails,
+  initializeAssistantGroupRoomModel,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   sendAssistantNotification,
   upsertAssistantCronAutomation,
@@ -43,21 +44,52 @@ export async function executeHostedMemberActivatedWake(input: {
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const initialGroupRoomModelMarkdown =
+    input.wake.initialGroupRoomModelMarkdown;
+  if (initialGroupRoomModelMarkdown) {
+    try {
+      const result = await initializeAssistantGroupRoomModel({
+        body: initialGroupRoomModelMarkdown,
+        vaultRoot: input.vaultRoot,
+      });
+      redactedLogEntries.push(
+        emitHostedGroupRoomModelSeedLifecycleLog({
+          message: "Hosted group room model activation seed applied.",
+          outcome: result.kind,
+          wake: input.wake,
+        }),
+      );
+    } catch (error) {
+      // Optional group context must never block the accepted first message.
+      redactedLogEntries.push(
+        emitHostedGroupRoomModelSeedLifecycleLog({
+          error,
+          level: "warn",
+          message: "Hosted group room model activation seed skipped.",
+          outcome: "unavailable",
+          wake: input.wake,
+        }),
+      );
+    }
+  }
+
   const signupWelcome = input.wake.signupWelcome;
   if (!signupWelcome) {
     return createNoopMailboxEffect({
       conversationMetrics: null,
       mailboxLane: "member-activated",
+      redactedLogEntries,
     });
   }
 
-  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
+  redactedLogEntries.push(
     emitHostedMemberActivationSignupWelcomeLifecycleLog({
       message: "Hosted member activation signup welcome started.",
       phase: "wake.running",
       wake: input.wake,
     }),
-  ];
+  );
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
 
@@ -441,6 +473,26 @@ function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
       ...buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
       ...(input.extraDetails ?? {}),
     },
+  });
+}
+
+function emitHostedGroupRoomModelSeedLifecycleLog(input: {
+  error?: unknown;
+  level?: HostedExecutionLogLevel;
+  message: string;
+  outcome: "already_initialized" | "initialized" | "unavailable";
+  wake: HostedExecutionMemberActivatedWake;
+}): HostedExecutionRedactedLogEntry {
+  return emitHostedNotificationLifecycleLog({
+    details: {
+      eventCode: "assistant.group_room_model_activation_seed",
+      outcome: input.outcome,
+    },
+    ...(input.error === undefined ? {} : { error: input.error }),
+    ...(input.level === undefined ? {} : { level: input.level }),
+    message: input.message,
+    phase: "wake.running",
+    wake: input.wake,
   });
 }
 

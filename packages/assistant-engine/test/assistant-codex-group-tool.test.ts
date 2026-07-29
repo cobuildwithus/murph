@@ -418,8 +418,16 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("allows next-group preparation only from fresh private text input", async () => {
+    const setup = {
+      roomContextMarkdown: "Keep this room low-key.",
+      style: {
+        personality: { humor: 2 },
+        tone: "casual",
+      },
+    } as const;
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "prepare_next_group",
+      setup,
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -428,6 +436,7 @@ describe("murph.group dynamic tool", () => {
       action: "prepare_next_group",
       result: {
         expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: {},
         status: "prepared",
       },
     }));
@@ -465,6 +474,7 @@ describe("murph.group dynamic tool", () => {
     expect((await run({})).rpcResult.success).toBe(true);
     expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
       action: "prepare_next_group",
+      setup,
     });
     expect((await run({ conversationScope: "group" })).rpcResult.success)
       .toBe(false);

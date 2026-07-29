@@ -282,8 +282,8 @@ export async function handleHostedRuntimeGroupTool(input: {
     || input.request.action === "cancel_next_group"
   ) {
     return handleHostedRuntimePendingGroupSetup({
-      action: input.request.action,
       memberId: input.memberId,
+      request: input.request,
     });
   }
 
@@ -418,11 +418,19 @@ export async function handleHostedRuntimeGroupTool(input: {
 }
 
 async function handleHostedRuntimePendingGroupSetup(input: {
-  action: "cancel_next_group" | "prepare_next_group" | "read_next_group";
   memberId: string;
+  request: Extract<
+    HostedRuntimeGroupToolRequest,
+    {
+      action:
+        | "cancel_next_group"
+        | "prepare_next_group"
+        | "read_next_group";
+    }
+  >;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
-    action: input.action,
+    action: input.request.action,
     result: { status: "unavailable", unavailableReason },
   });
 
@@ -433,20 +441,24 @@ async function handleHostedRuntimePendingGroupSetup(input: {
     }
     const prisma = access.prisma;
 
-    if (input.action === "read_next_group") {
+    if (input.request.action === "read_next_group") {
       const setup = await readHostedPendingGroupSetup({
         ownerMemberId: input.memberId,
         prisma,
       });
       return {
-        action: input.action,
+        action: input.request.action,
         result: setup
-          ? { expiresAt: setup.expiresAt.toISOString(), status: "prepared" }
+          ? {
+              expiresAt: setup.expiresAt.toISOString(),
+              setup: setup.setup,
+              status: "prepared",
+            }
           : { status: "none" },
       };
     }
 
-    if (input.action === "cancel_next_group") {
+    if (input.request.action === "cancel_next_group") {
       const canceled = await prisma.$transaction(
         (tx) => cancelHostedPendingGroupSetupTx({
           ownerMemberId: input.memberId,
@@ -455,22 +467,28 @@ async function handleHostedRuntimePendingGroupSetup(input: {
         HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
       );
       return {
-        action: input.action,
+        action: input.request.action,
         result: { status: canceled ? "canceled" : "none" },
       };
     }
 
+    if (input.request.action !== "prepare_next_group") {
+      throw new TypeError("Unsupported pending group setup action.");
+    }
+    const prepareRequest = input.request;
     const setup = await prisma.$transaction(
       (tx) => armHostedPendingGroupSetupTx({
         ownerMemberId: input.memberId,
+        setup: prepareRequest.setup ?? {},
         tx,
       }),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
     return {
-      action: input.action,
+      action: input.request.action,
       result: {
         expiresAt: setup.expiresAt.toISOString(),
+        setup: setup.setup,
         status: "prepared",
       },
     };

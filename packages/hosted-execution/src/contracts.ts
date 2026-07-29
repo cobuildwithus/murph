@@ -150,6 +150,7 @@ export interface HostedExecutionMemberActivationSignupWelcome {
 }
 
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
+  initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
@@ -668,6 +669,7 @@ export interface HostedExecutionConversationMessageWake extends HostedExecutionB
 }
 
 export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
+  initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;

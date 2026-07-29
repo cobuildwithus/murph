@@ -54,6 +54,16 @@ export type AssistantGroupRoomModelReadState =
     }
   | { kind: 'unavailable' }
 
+export type AssistantGroupRoomModelInitializeResult =
+  | {
+      kind: 'already_initialized'
+      state: Extract<AssistantGroupRoomModelReadState, { kind: 'present' }>
+    }
+  | {
+      kind: 'initialized'
+      state: Extract<AssistantGroupRoomModelReadState, { kind: 'present' }>
+    }
+
 interface AssistantGroupRoomModelReadDependencies {
   readTextFile?: (filePath: string) => Promise<string>
   statPath?: (filePath: string) => Promise<{
@@ -213,6 +223,64 @@ export async function replaceAssistantGroupRoomModel(input: {
       }
     },
   })
+}
+
+/**
+ * Initializes the fixed page once for a newly activated group runtime. Exact
+ * activation replay is idempotent; a different existing page is never
+ * overwritten.
+ */
+export async function initializeAssistantGroupRoomModel(input: {
+  body: string
+  vaultRoot: string
+}): Promise<AssistantGroupRoomModelInitializeResult> {
+  const body = normalizeKnowledgeBody(input.body)
+  assertAssistantGroupRoomModelBodyValid(body)
+
+  const initialState = await readAssistantGroupRoomModelState({
+    vaultRoot: input.vaultRoot,
+  })
+  if (initialState.kind === 'unavailable') {
+    throw new VaultCliError(
+      'group_room_model_unavailable',
+      'Group room-model state is unreadable or incompatible.',
+    )
+  }
+  if (initialState.kind === 'present') {
+    if (initialState.status === 'active' && initialState.body === body) {
+      return { kind: 'already_initialized', state: initialState }
+    }
+    throw new VaultCliError(
+      'group_room_model_initialization_conflict',
+      'Group room-model initialization must not overwrite existing state.',
+    )
+  }
+
+  try {
+    return {
+      kind: 'initialized',
+      state: await replaceAssistantGroupRoomModel({
+        body,
+        expectedDigest: initialState.digest,
+        vaultRoot: input.vaultRoot,
+      }),
+    }
+  } catch (error) {
+    // A simultaneous exact replay can win the canonical resource lock between
+    // the optimistic read and replacement. Treat only the exact resulting page
+    // as an idempotent success.
+    const current = await readAssistantGroupRoomModelState({
+      vaultRoot: input.vaultRoot,
+    })
+    if (
+      current.kind === 'present'
+      && current.status === 'active'
+      && current.body === body
+    ) {
+      return { kind: 'already_initialized', state: current }
+    }
+    throw error
+  }
 }
 
 export async function deleteAssistantGroupRoomModel(input: {

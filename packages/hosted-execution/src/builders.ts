@@ -52,6 +52,9 @@ import {
   type HostedVaultShareDeliveryPayload,
   type HostedVaultShareRevokePayload,
 } from "./vault-share.ts";
+import {
+  parseHostedExecutionInitialGroupRoomModelMarkdown,
+} from "./pending-group-setup.ts";
 
 function cloneLinqMessagePart(
   value: HostedExecutionLinqConversationMessagePart,
@@ -473,12 +476,20 @@ export function buildHostedExecutionEmailConversationMessageWake(input: {
 
 export function buildHostedExecutionMemberActivatedWake(input: {
   eventId: string;
+  initialGroupRoomModelMarkdown?: string | null;
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }): HostedExecutionMemberActivatedWake {
+  const initialGroupRoomModelMarkdown =
+    input.initialGroupRoomModelMarkdown === undefined
+      || input.initialGroupRoomModelMarkdown === null
+      ? input.initialGroupRoomModelMarkdown
+      : parseHostedExecutionInitialGroupRoomModelMarkdown(
+          input.initialGroupRoomModelMarkdown,
+        );
   return {
     ...buildHostedExecutionMemberOwnedWakeBase({
       eventId: input.eventId,
@@ -486,6 +497,9 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       memberId: input.memberId,
       occurredAt: input.occurredAt,
     }),
+    ...(initialGroupRoomModelMarkdown === undefined
+      ? {}
+      : { initialGroupRoomModelMarkdown }),
     memberChannels: { ...input.memberChannels },
     ...(input.signupWelcome === undefined
       ? {}

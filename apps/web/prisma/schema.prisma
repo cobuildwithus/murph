@@ -1723,6 +1723,7 @@ model HostedPendingGroupSetup {
   ownerMemberId           String       @unique @map("owner_member_id")
   channel                 String
   recipientPhoneLookupKey String       @map("recipient_phone_lookup_key")
+  payloadEncrypted        String       @map("payload_encrypted")
   armedAt                 DateTime     @map("armed_at")
   expiresAt               DateTime     @map("expires_at")
   createdAt               DateTime     @default(now()) @map("created_at")

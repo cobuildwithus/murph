@@ -98,6 +98,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'ownerMemberId String @unique @map("owner_member_id")',
     "channel String",
     'recipientPhoneLookupKey String @map("recipient_phone_lookup_key")',
+    'payloadEncrypted String @map("payload_encrypted")',
     'armedAt DateTime @map("armed_at")',
     'expiresAt DateTime @map("expires_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -1033,8 +1034,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedPendingGroupSetupMigrationSql).toContain(
       'ON DELETE CASCADE ON UPDATE CASCADE',
     );
+    expect(hostedPendingGroupSetupMigrationSql).toContain(
+      '"payload_encrypted" TEXT NOT NULL',
+    );
     expect(hostedPendingGroupSetupMigrationSql).not.toMatch(
-      /payload|handle|chat_id|participant/iu,
+      /payload_(?:json|plaintext)|handle|chat_id|participant/iu,
     );
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
       'ADD COLUMN "source_provider_slug" TEXT',

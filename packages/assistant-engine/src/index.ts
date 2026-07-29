@@ -36,6 +36,12 @@ export type {
   AssistantGroupPhoneCallPreviewAuthority,
 } from './assistant/group-phone-call-preview-authority.js'
 export * from './assistant/group-newsletter-automation.js'
+export {
+  initializeAssistantGroupRoomModel,
+} from './assistant/group-room-model.js'
+export type {
+  AssistantGroupRoomModelInitializeResult,
+} from './assistant/group-room-model.js'
 export type {
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,

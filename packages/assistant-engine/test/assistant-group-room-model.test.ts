@@ -21,6 +21,7 @@ import {
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
   ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES,
   ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+  initializeAssistantGroupRoomModel,
   readAssistantGroupRoomModelState,
   readAssistantGroupRoomModelBody,
   readAssistantGroupRoomModelPrompt,
@@ -72,6 +73,38 @@ test('returns a bounded, explicitly advisory group room model prompt', async () 
   expect(assistantConversationHistoryUtf8Bytes(prompt ?? '')).toBeLessThanOrEqual(
     ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES,
   )
+})
+
+test('initializes explicit room setup once and never overwrites conflicting state', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-group-room-model-initialize-',
+  )
+  cleanupPaths.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const body = '## Explicit setup\n\nKeep this room low-key.'
+  await expect(initializeAssistantGroupRoomModel({
+    body,
+    vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'initialized',
+    state: { body },
+  })
+  await expect(initializeAssistantGroupRoomModel({
+    body,
+    vaultRoot,
+  })).resolves.toMatchObject({
+    kind: 'already_initialized',
+    state: { body },
+  })
+  await expect(initializeAssistantGroupRoomModel({
+    body: '## Explicit setup\n\nUse a formal tone.',
+    vaultRoot,
+  })).rejects.toMatchObject({
+    code: 'group_room_model_initialization_conflict',
+  })
+  await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+    .resolves.toBe(body)
 })
 
 test('rejects an oversized multibyte room model without replacing the prior page', async () => {

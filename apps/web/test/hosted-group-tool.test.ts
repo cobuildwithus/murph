@@ -506,6 +506,13 @@ describe("handleHostedRuntimeGroupTool", () => {
       id: "hpgs_test",
       ownerMemberId: "member_group_runtime",
       recipientPhoneLookupKey: "hplk_current_line",
+      setup: {
+        roomContextMarkdown: "Keep this room low-key.",
+        style: {
+          personality: { humor: 2 },
+          tone: "casual" as const,
+        },
+      },
     };
     mocks.armHostedPendingGroupSetupTx.mockResolvedValue(setup);
     mocks.readHostedPendingGroupSetup.mockResolvedValue(setup);
@@ -513,16 +520,21 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "prepare_next_group" },
+      request: {
+        action: "prepare_next_group",
+        setup: setup.setup,
+      },
     })).resolves.toEqual({
       action: "prepare_next_group",
       result: {
         expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: setup.setup,
         status: "prepared",
       },
     });
     expect(mocks.armHostedPendingGroupSetupTx).toHaveBeenCalledWith({
       ownerMemberId: "member_group_runtime",
+      setup: setup.setup,
       tx: fakeTx,
     });
 
@@ -533,6 +545,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "read_next_group",
       result: {
         expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: setup.setup,
         status: "prepared",
       },
     });

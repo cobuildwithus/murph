@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   claimPendingSetup: vi.fn(),
   ensureThreadContainer: vi.fn(),
   restorePendingSetup: vi.fn(),
+  upsertPreferences: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
@@ -14,6 +15,10 @@ vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
 vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
   claimHostedPendingGroupSetupForParticipantsTx: mocks.claimPendingSetup,
   restoreHostedPendingGroupSetupClaimTx: mocks.restorePendingSetup,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
+  upsertHostedMemberAssistantPreferencesTx: mocks.upsertPreferences,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-container-service", () => ({
@@ -32,12 +37,20 @@ const pendingSetup = {
   id: "hpgs_owner",
   ownerMemberId: "member_prepared_owner",
   recipientPhoneLookupKey: "hplk_line",
+  setup: {
+    roomContextMarkdown: "Keep this room low-key.",
+    style: {
+      personality: { humor: 2 },
+      tone: "casual" as const,
+    },
+  },
 };
 const claimToken = {
   armedAt: pendingSetup.armedAt,
   expiresAt: pendingSetup.expiresAt,
   id: pendingSetup.id,
   ownerMemberId: pendingSetup.ownerMemberId,
+  payloadEncrypted: "encrypted-pending-setup",
   recipientPhoneLookupKey: pendingSetup.recipientPhoneLookupKey,
 };
 
@@ -78,8 +91,18 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     });
 
     expect(mocks.ensureThreadContainer).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerMemberId: "member_prepared_owner" }),
+      expect.objectContaining({
+        initialGroupRoomModelMarkdown:
+          "## Explicit setup\n\nKeep this room low-key.",
+        ownerMemberId: "member_prepared_owner",
+      }),
     );
+    expect(mocks.upsertPreferences).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_group_container",
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      preferences: pendingSetup.setup.style,
+      prisma: tx,
+    });
     expect(mocks.bindUsageReferral).toHaveBeenCalledWith({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       ownerMemberId: "member_prepared_owner",
@@ -115,6 +138,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       claimToken,
       tx,
     });
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
   });
 
@@ -138,6 +162,41 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       claimToken,
       tx,
     });
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
+  });
+
+  it("keeps ownership-only preparation free of style or room-model side effects", async () => {
+    mocks.claimPendingSetup.mockResolvedValue({
+      claimToken,
+      kind: "claimed",
+      reason: "only_candidate",
+      setup: {
+        ...pendingSetup,
+        setup: {},
+      },
+    });
+
+    await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey: "hplk_line",
+      fallbackOwnerMemberId: "member_first_sender",
+      mailboxDedupeKey: "event_group",
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      participantMemberIds: ["member_prepared_owner"],
+      recipientPhoneLookupKeys: ["hplk_line"],
+      senderMemberId: "member_first_sender",
+      threadId: "chat_group",
+      tx,
+    })).resolves.toMatchObject({
+      ownerMemberId: "member_prepared_owner",
+      pendingSetupApplied: true,
+    });
+
+    expect(mocks.ensureThreadContainer).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        initialGroupRoomModelMarkdown: expect.anything(),
+      }),
+    );
+    expect(mocks.upsertPreferences).not.toHaveBeenCalled();
   });
 });

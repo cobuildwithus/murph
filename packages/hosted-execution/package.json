@@ -78,6 +78,10 @@
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"
     },
+    "./pending-group-setup": {
+      "types": "./dist/pending-group-setup.d.ts",
+      "default": "./dist/pending-group-setup.js"
+    },
     "./labs": {
       "types": "./dist/labs.d.ts",
       "default": "./dist/labs.js"

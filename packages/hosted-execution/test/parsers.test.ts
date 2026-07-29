@@ -403,6 +403,8 @@ describe("parseHostedExecutionEvent", () => {
   it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
     expect(
       parseHostedExecutionEvent({
+        initialGroupRoomModelMarkdown:
+          "## Explicit setup\n\nKeep this room low-key.",
         kind: "member.activated",
         memberChannels: {
           email: true,
@@ -432,6 +434,8 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toEqual({
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
       kind: "member.activated",
       memberChannels: {
         email: true,
@@ -2315,6 +2319,25 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "prepare_next_group",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_next_group",
+      setup: {
+        roomContextMarkdown: "  Keep this room low-key.  ",
+        style: {
+          personality: { humor: 2 },
+          tone: "casual",
+        },
+      },
+    })).toEqual({
+      action: "prepare_next_group",
+      setup: {
+        roomContextMarkdown: "Keep this room low-key.",
+        style: {
+          personality: { humor: 2 },
+          tone: "casual",
+        },
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "read_chat_name",
     })).toEqual({
       action: "read_chat_name",
@@ -2408,12 +2431,14 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "prepare_next_group",
       result: {
         expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: {},
         status: "prepared",
       },
     })).toEqual({
       action: "prepare_next_group",
       result: {
         expiresAt: "2026-07-29T18:30:00.000Z",
+        setup: {},
         status: "prepared",
       },
     });
@@ -2435,6 +2460,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "prepare_next_group",
       result: {
         expiresAt: "2026-07-29 18:30:00",
+        setup: {},
         status: "prepared",
       },
     })).toThrow(/canonical timestamp/u);
@@ -3401,6 +3427,8 @@ describe("parseHostedExecutionWake", () => {
     expect(
       parseHostedExecutionWake({
         eventId: "member.activated:stripe:user-1:evt-1",
+        initialGroupRoomModelMarkdown:
+          "## Explicit setup\n\nKeep this room low-key.",
         kind: "member.activated",
         memberChannels: {
           email: false,
@@ -3432,6 +3460,8 @@ describe("parseHostedExecutionWake", () => {
       }),
     ).toEqual({
       eventId: "member.activated:stripe:user-1:evt-1",
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
       kind: "member.activated",
       memberChannels: {
         email: false,

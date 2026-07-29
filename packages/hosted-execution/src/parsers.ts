@@ -27,6 +27,9 @@ import {
 import {
   parseHostedClinicalRecordsIdentifier,
 } from "./clinical-records-boundary.ts";
+import {
+  parseHostedExecutionInitialGroupRoomModelMarkdown,
+} from "./pending-group-setup.ts";
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
@@ -225,6 +228,17 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     case "member.activated":
       return buildHostedExecutionMemberActivatedWake({
         eventId,
+        ...(record.initialGroupRoomModelMarkdown === undefined
+          ? {}
+          : {
+              initialGroupRoomModelMarkdown:
+                record.initialGroupRoomModelMarkdown === null
+                  ? null
+                  : requireString(
+                      record.initialGroupRoomModelMarkdown,
+                      "Hosted execution wake member.activated initialGroupRoomModelMarkdown",
+                    ),
+            }),
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
           "Hosted execution wake member.activated memberChannels",
@@ -1159,6 +1173,16 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       );
 
       return {
+        ...(record.initialGroupRoomModelMarkdown === undefined
+          ? {}
+          : {
+              initialGroupRoomModelMarkdown:
+                record.initialGroupRoomModelMarkdown === null
+                  ? null
+                  : parseHostedExecutionInitialGroupRoomModelMarkdown(
+                      record.initialGroupRoomModelMarkdown,
+                    ),
+            }),
         kind,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,

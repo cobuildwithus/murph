@@ -1,7 +1,16 @@
 import "server-only";
 
+import {
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+  parseHostedRuntimePendingGroupSetupInput,
+  type HostedRuntimePendingGroupSetupInput,
+} from "@murphai/hosted-execution/pending-group-setup";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  openHostedUserSecureBoxString,
+  sealHostedUserSecureBoxString,
+} from "../hosted-crypto/secure-box";
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasActiveHostedLinqManagedLine } from "../hosted-onboarding/linq-line-store";
@@ -15,6 +24,8 @@ export const HOSTED_PENDING_GROUP_SETUP_TTL_MS = 30 * 60 * 1_000;
 export const HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS = 32;
 
 const HOSTED_PENDING_GROUP_SETUP_CHANNEL = "linq" as const;
+const HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE =
+  "hosted-pending-group-setup:payload:v1";
 
 export type HostedPendingGroupSetupChannel =
   typeof HOSTED_PENDING_GROUP_SETUP_CHANNEL;
@@ -26,6 +37,7 @@ export interface HostedPendingGroupSetupSnapshot {
   id: string;
   ownerMemberId: string;
   recipientPhoneLookupKey: string;
+  setup: HostedRuntimePendingGroupSetupInput;
 }
 
 interface HostedPendingGroupSetupRow {
@@ -33,6 +45,7 @@ interface HostedPendingGroupSetupRow {
   expiresAt: Date;
   id: string;
   ownerMemberId: string;
+  payloadEncrypted: string;
   recipientPhoneLookupKey: string;
 }
 
@@ -55,6 +68,7 @@ export type HostedPendingGroupSetupCandidateSelection =
 export type HostedPendingGroupSetupClaimReason =
   | "ambiguous"
   | "claim_raced"
+  | "invalid_payload"
   | "no_candidates"
   | "only_candidate"
   | "sender_wins_conflict";
@@ -73,7 +87,7 @@ export type HostedPendingGroupSetupClaimResult =
       kind: "none";
       reason: Extract<
         HostedPendingGroupSetupClaimReason,
-        "ambiguous" | "claim_raced" | "no_candidates"
+        "ambiguous" | "claim_raced" | "invalid_payload" | "no_candidates"
       >;
     };
 
@@ -82,6 +96,7 @@ export type HostedPendingGroupSetupRestoreToken = HostedPendingGroupSetupRow;
 export async function armHostedPendingGroupSetupTx(input: {
   now?: Date;
   ownerMemberId: string;
+  setup: unknown;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupSnapshot> {
   const ownerMemberId = requireNonEmptyString(
@@ -90,6 +105,7 @@ export async function armHostedPendingGroupSetupTx(input: {
   );
   const now = requireValidDate(input.now ?? new Date(), "pending group setup armed at");
   const expiresAt = new Date(now.getTime() + HOSTED_PENDING_GROUP_SETUP_TTL_MS);
+  const setup = parseHostedRuntimePendingGroupSetupInput(input.setup);
 
   const owner = await input.tx.hostedMember.findUnique({
     select: { id: true, suspendedAt: true },
@@ -125,19 +141,35 @@ export async function armHostedPendingGroupSetupTx(input: {
   }
 
   const id = generateHostedRandomPrefixedId("hpgs");
+  const payloadEncrypted = await sealHostedUserSecureBoxString({
+    aad: buildHostedPendingGroupSetupPayloadAad(id),
+    lane: "hosted-member-private-field",
+    prisma: input.tx,
+    scope: HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE,
+    userId: ownerMemberId,
+    value: JSON.stringify({
+      schemaVersion: HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+      setup,
+    }),
+  });
+  if (!payloadEncrypted) {
+    throw new TypeError("Pending group setup payload encryption returned no value.");
+  }
   const rows = await input.tx.$queryRaw<HostedPendingGroupSetupRow[]>(Prisma.sql`
     INSERT INTO "hosted_pending_group_setup" (
       "id", "owner_member_id", "channel", "recipient_phone_lookup_key",
-      "armed_at", "expires_at", "created_at", "updated_at"
+      "payload_encrypted", "armed_at", "expires_at", "created_at", "updated_at"
     )
     VALUES (
       ${id}, ${ownerMemberId}, ${HOSTED_PENDING_GROUP_SETUP_CHANNEL},
-      ${recipientPhoneLookupKey}, ${now}, ${expiresAt}, ${now}, ${now}
+      ${recipientPhoneLookupKey}, ${payloadEncrypted}, ${now}, ${expiresAt},
+      ${now}, ${now}
     )
     ON CONFLICT ("owner_member_id") DO UPDATE SET
       "id" = EXCLUDED."id",
       "channel" = EXCLUDED."channel",
       "recipient_phone_lookup_key" = EXCLUDED."recipient_phone_lookup_key",
+      "payload_encrypted" = EXCLUDED."payload_encrypted",
       "armed_at" = EXCLUDED."armed_at",
       "expires_at" = EXCLUDED."expires_at",
       "created_at" = EXCLUDED."created_at",
@@ -146,6 +178,7 @@ export async function armHostedPendingGroupSetupTx(input: {
       "id",
       "owner_member_id" AS "ownerMemberId",
       "recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
+      "payload_encrypted" AS "payloadEncrypted",
       "armed_at" AS "armedAt",
       "expires_at" AS "expiresAt"
   `);
@@ -153,7 +186,7 @@ export async function armHostedPendingGroupSetupTx(input: {
   if (!row) {
     throw new Error("Pending group setup upsert returned no row.");
   }
-  return projectHostedPendingGroupSetupSnapshot(row);
+  return projectHostedPendingGroupSetupSnapshot(row, setup);
 }
 
 export async function readHostedPendingGroupSetup(input: {
@@ -172,6 +205,7 @@ export async function readHostedPendingGroupSetup(input: {
       setup."id",
       setup."owner_member_id" AS "ownerMemberId",
       setup."recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
+      setup."payload_encrypted" AS "payloadEncrypted",
       setup."armed_at" AS "armedAt",
       setup."expires_at" AS "expiresAt"
     FROM "hosted_pending_group_setup" AS setup
@@ -194,7 +228,15 @@ export async function readHostedPendingGroupSetup(input: {
   ) {
     return null;
   }
-  return projectHostedPendingGroupSetupSnapshot(row);
+  try {
+    return projectHostedPendingGroupSetupSnapshot(
+      row,
+      await openHostedPendingGroupSetupPayload({ prisma, row }),
+    );
+  } catch {
+    // Optional unreadable setup state never becomes group authority.
+    return null;
+  }
 }
 
 export async function cancelHostedPendingGroupSetupTx(input: {
@@ -311,16 +353,28 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
         "id",
         "owner_member_id" AS "ownerMemberId",
         "recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
+        "payload_encrypted" AS "payloadEncrypted",
         "armed_at" AS "armedAt",
         "expires_at" AS "expiresAt"
     `);
     const claimed = claimedRows[0];
     if (claimed) {
+      let setup: HostedRuntimePendingGroupSetupInput;
+      try {
+        setup = await openHostedPendingGroupSetupPayload({
+          prisma: input.tx,
+          row: claimed,
+        });
+      } catch {
+        // Arm validates payloads. Corrupt or future bytes are consumed rather
+        // than repeatedly blocking unrelated new-group admission.
+        return { kind: "none", reason: "invalid_payload" };
+      }
       return {
         claimToken: claimed,
         kind: "claimed",
         reason: selection.reason,
-        setup: projectHostedPendingGroupSetupSnapshot(claimed),
+        setup: projectHostedPendingGroupSetupSnapshot(claimed, setup),
       };
     }
   }
@@ -336,12 +390,12 @@ export async function restoreHostedPendingGroupSetupClaimTx(input: {
   return (await input.tx.$executeRaw(Prisma.sql`
     INSERT INTO "hosted_pending_group_setup" (
       "id", "owner_member_id", "channel", "recipient_phone_lookup_key",
-      "armed_at", "expires_at", "created_at", "updated_at"
+      "payload_encrypted", "armed_at", "expires_at", "created_at", "updated_at"
     )
     VALUES (
       ${token.id}, ${token.ownerMemberId}, ${HOSTED_PENDING_GROUP_SETUP_CHANNEL},
-      ${token.recipientPhoneLookupKey}, ${token.armedAt}, ${token.expiresAt},
-      ${token.armedAt}, ${token.armedAt}
+      ${token.recipientPhoneLookupKey}, ${token.payloadEncrypted},
+      ${token.armedAt}, ${token.expiresAt}, ${token.armedAt}, ${token.armedAt}
     )
     ON CONFLICT ("owner_member_id") DO NOTHING
   `)) > 0;
@@ -358,6 +412,7 @@ async function readCandidateRowsTx(input: {
       setup."id",
       setup."owner_member_id" AS "ownerMemberId",
       setup."recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
+      setup."payload_encrypted" AS "payloadEncrypted",
       setup."armed_at" AS "armedAt",
       setup."expires_at" AS "expiresAt"
     FROM "hosted_pending_group_setup" AS setup
@@ -398,6 +453,7 @@ async function filterCurrentlyEligibleCandidateRows(input: {
 
 function projectHostedPendingGroupSetupSnapshot(
   row: HostedPendingGroupSetupRow,
+  setup: HostedRuntimePendingGroupSetupInput,
 ): HostedPendingGroupSetupSnapshot {
   return {
     armedAt: row.armedAt,
@@ -406,7 +462,54 @@ function projectHostedPendingGroupSetupSnapshot(
     id: row.id,
     ownerMemberId: row.ownerMemberId,
     recipientPhoneLookupKey: row.recipientPhoneLookupKey,
+    setup,
   };
+}
+
+async function openHostedPendingGroupSetupPayload(input: {
+  prisma: PrismaClient | Prisma.TransactionClient;
+  row: HostedPendingGroupSetupRow;
+}): Promise<HostedRuntimePendingGroupSetupInput> {
+  const serialized = await openHostedUserSecureBoxString({
+    aad: buildHostedPendingGroupSetupPayloadAad(input.row.id),
+    lane: "hosted-member-private-field",
+    prisma: input.prisma,
+    scope: HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE,
+    userId: input.row.ownerMemberId,
+    value: input.row.payloadEncrypted,
+  });
+  if (!serialized) {
+    throw new TypeError("Pending group setup payload is missing.");
+  }
+  return parseHostedPendingGroupSetupPayloadEnvelope(JSON.parse(serialized));
+}
+
+function parseHostedPendingGroupSetupPayloadEnvelope(
+  value: unknown,
+): HostedRuntimePendingGroupSetupInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Pending group setup payload must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => key !== "schemaVersion" && key !== "setup",
+    )
+    || record.schemaVersion
+      !== HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION
+  ) {
+    throw new TypeError("Pending group setup payload version is unsupported.");
+  }
+  return parseHostedRuntimePendingGroupSetupInput(record.setup);
+}
+
+function buildHostedPendingGroupSetupPayloadAad(id: string) {
+  return {
+    field: "payload_encrypted",
+    purpose: "pending-group-setup",
+    rowId: id,
+    table: "hosted_pending_group_setup",
+  } as const;
 }
 
 function normalizeLookupKeys(values: readonly string[]): string[] {

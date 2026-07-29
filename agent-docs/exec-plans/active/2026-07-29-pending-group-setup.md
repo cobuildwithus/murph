@@ -110,16 +110,16 @@ Updated: 2026-07-29
 1. [x] Land the ownership intent, roster matching, one-use claim, canonical route
    composition, and focused concurrency foundation.
 2. [x] Add private prepare/read/cancel tool actions and fresh-private-text gating.
-3. [ ] Restore the encrypted sparse style/context payload to those existing
+3. [x] Restore the encrypted sparse style/context payload to those existing
    actions and response contracts.
-4. [ ] Apply style through the synthetic member preference owner on new-route
+4. [x] Apply style through the synthetic member preference owner on new-route
    creation only.
-5. [ ] Extend thread-container activation with optional initial room-model
+5. [x] Extend thread-container activation with optional initial room-model
    Markdown and initialize the existing fixed page idempotently before the first
    conversation turn.
-6. [ ] Complete webhook scenarios, payload/privacy/account-deletion proof, and
+6. [x] Complete webhook scenarios, payload/privacy/account-deletion proof, and
    production-faithful activation/replay coverage.
-7. [ ] Reconcile current `main`, remove temporary source-snapshot scaffolding,
+7. [x] Reconcile current `main`, remove temporary source-snapshot scaffolding,
    and run focused verification.
 8. [ ] Complete preliminary specialist review, parent final review, exact-head
    CI, and final ReviewGPT before marking the PR ready.
@@ -141,5 +141,8 @@ Updated: 2026-07-29
 
 - The ownership-only foundation has focused Web, hosted-execution,
   assistant-engine, and PostgreSQL race proof recorded in the PR.
-- Payload, activation, room-model replay, current-main reconciliation,
-  specialist review, exact-head CI, and final ReviewGPT remain to be completed.
+- The configured payload, activation contract, room-model replay, secret-safe
+  runtime handling, migration/privacy assertions, and real-PostgreSQL
+  claim/restore/corruption/deletion proof pass locally.
+- Specialist review, parent final review, exact-head CI, and final ReviewGPT
+  remain to be completed.

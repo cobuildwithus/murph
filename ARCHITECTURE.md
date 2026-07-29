@@ -1051,19 +1051,27 @@ provisioning path.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
-row is only a one-use ownership intent: it stores the owner, blinded line key,
-and timestamps, with no chat id, roster, provider actor, message, style, or room
-context. Before the transaction for the first inbound on an unbound Linq group,
-Web performs one bounded current-chat read and resolves at most 32 active
-non-Murph roster handles to member ids. Inside the existing route transaction,
-a lone roster-matched intent wins; if several match, only the current sender's
-own intent breaks the tie. Otherwise the canonical first-active-sender fallback
-continues. `DELETE ... RETURNING` is the one-use claim, and the existing
-`ensureHostedThreadContainerRouteTx` remains the only route and
-`ownerMemberId` owner. A route that already exists never changes owner or
-consumes an intent; transaction failure or concurrent convergence preserves the
-intent, expiry is query-time authority, and member deletion removes it by
-foreign-key cascade. Provider add-actor fields are not ownership authority.
+row is only a one-use transfer envelope: it stores the owner, blinded line key,
+timestamps, and one encrypted strict-version payload containing optional sparse
+existing assistant-style fields and bounded explicit room-context Markdown. It
+stores no plaintext setup, chat id, roster, provider actor, message, contact
+label, or participant handle. Before the transaction for the first inbound on
+an unbound Linq group, Web performs one bounded current-chat read and resolves
+at most 32 active non-Murph roster handles to member ids. Inside the existing
+route transaction, a lone roster-matched intent wins; if several match, only
+the current sender's own intent breaks the tie. Otherwise the canonical
+first-active-sender fallback continues. `DELETE ... RETURNING` is the one-use
+claim, and the existing `ensureHostedThreadContainerRouteTx` remains the only
+route and `ownerMemberId` owner. Only a newly created route applies sparse
+style through the synthetic member's existing preference owner and carries
+explicit room context on the existing activation wake to initialize the fixed
+group-room-model page exactly once before conversation work. Existing-route
+convergence restores the envelope and changes neither owner nor configuration.
+Unreadable or future encrypted payloads are consumed as unavailable optional
+setup so they cannot block an accepted group message. Transaction failure
+preserves the intent, expiry is query-time authority, and member deletion
+removes it by foreign-key cascade. Provider add-actor fields are not ownership
+authority.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

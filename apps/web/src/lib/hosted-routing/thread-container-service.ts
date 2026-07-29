@@ -251,6 +251,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   accountLookupKeys?: readonly (string | null | undefined)[];
   channel: HostedThreadDeliveryRouteChannel;
   containerMemberId?: string | null;
+  initialGroupRoomModelMarkdown?: string | null;
   mailboxDedupeKey?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
   occurredAt: Date;
@@ -509,6 +510,9 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     memberChannels: resolveHostedThreadContainerMemberChannels(input.channel),
     memberId: containerMemberId,
     occurredAt: input.occurredAt.toISOString(),
+    ...(input.initialGroupRoomModelMarkdown
+      ? { initialGroupRoomModelMarkdown: input.initialGroupRoomModelMarkdown }
+      : {}),
     signupWelcome: null,
   });
   const appended = await appendHostedMailboxEnvelopeTx({

@@ -25,6 +25,9 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from "../contracts.ts";
 import {
+  parseHostedRuntimePendingGroupSetupInput,
+} from "../pending-group-setup.ts";
+import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
   parseHostedExecutionAssistantAskOrigin,
   parseHostedExecutionAssistantAskOriginInputId,
@@ -1245,9 +1248,21 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "prepare_next_group") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "setup"]),
+      "Hosted runtime group tool prepare_next_group request",
+    );
+    return {
+      action,
+      ...(record.setup === undefined
+        ? {}
+        : { setup: parseHostedRuntimePendingGroupSetupInput(record.setup) }),
+    };
+  }
   if (
     action === "read_current"
-    || action === "prepare_next_group"
     || action === "read_next_group"
     || action === "cancel_next_group"
     || action === "read_chat_name"
@@ -2350,7 +2365,7 @@ export function parseHostedRuntimeGroupToolResponse(
     ) {
       assertAllowedObjectKeys(
         result,
-        new Set(["expiresAt", "status"]),
+        new Set(["expiresAt", "setup", "status"]),
         `${label} prepared`,
       );
       const expiresAt = requireString(result.expiresAt, `${label} expiresAt`);
@@ -2361,7 +2376,14 @@ export function parseHostedRuntimeGroupToolResponse(
       ) {
         throw new TypeError(`${label} expiresAt must be a canonical timestamp.`);
       }
-      return { action, result: { expiresAt, status } };
+      return {
+        action,
+        result: {
+          expiresAt,
+          setup: parseHostedRuntimePendingGroupSetupInput(result.setup),
+          status,
+        },
+      };
     }
     if (
       (action === "read_next_group" || action === "cancel_next_group")

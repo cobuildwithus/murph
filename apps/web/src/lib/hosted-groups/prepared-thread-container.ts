@@ -6,6 +6,9 @@ import {
   bindArmedHostedUsageReferralToNewContainerTx,
 } from "../hosted-growth/usage-referral";
 import {
+  upsertHostedMemberAssistantPreferencesTx,
+} from "../hosted-onboarding/member-preferences";
+import {
   ensureHostedThreadContainerRouteTx,
   type HostedThreadContainerRouteEnsureResult,
 } from "../hosted-routing/thread-container-service";
@@ -15,7 +18,6 @@ import {
   restoreHostedPendingGroupSetupClaimTx,
   type HostedPendingGroupSetupClaimReason,
   type HostedPendingGroupSetupClaimResult,
-  type HostedPendingGroupSetupSnapshot,
 } from "./pending-group-setup";
 
 export type HostedPreparedLinqThreadOwnerResolution =
@@ -36,14 +38,14 @@ export type HostedPreparedLinqThreadContainerResult =
       kind: "ensured";
       ownerMemberId: string;
       ownerResolution: HostedPreparedLinqThreadOwnerResolution;
-      pendingSetup: HostedPendingGroupSetupSnapshot | null;
       pendingSetupApplied: boolean;
       pendingSetupResolution: HostedPendingGroupSetupClaimReason;
     };
 
 /**
- * Composes the existing canonical thread-container owner and usage-referral
- * primitives around one optional roster-matched setup claim.
+ * Composes the existing canonical thread-container, style preference, room
+ * model activation, and usage-referral owners around one optional
+ * roster-matched setup claim.
  * Provider adapters remain responsible only for proving the current roster and
  * current sender member; this service never accepts raw handles.
  */
@@ -83,6 +85,11 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     };
   }
 
+  const initialGroupRoomModelMarkdown = pendingSetupClaim.kind === "claimed"
+    ? buildInitialHostedGroupRoomModelMarkdown(
+        pendingSetupClaim.setup.setup.roomContextMarkdown,
+      )
+    : null;
   let ensure: HostedThreadContainerRouteEnsureResult;
   try {
     ensure = await ensureHostedThreadContainerRouteTx({
@@ -91,6 +98,9 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
         ? { accountLookupKeys: input.accountLookupKeys }
         : {}),
       channel: "linq",
+      ...(initialGroupRoomModelMarkdown
+        ? { initialGroupRoomModelMarkdown }
+        : {}),
       mailboxDedupeKey: input.mailboxDedupeKey,
       occurredAt: input.occurredAt,
       ownerMemberId,
@@ -123,6 +133,17 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
 
   const pendingSetupApplied =
     ensure.created && pendingSetupClaim.kind === "claimed";
+  if (pendingSetupApplied) {
+    const style = pendingSetupClaim.setup.setup.style;
+    if (style) {
+      await upsertHostedMemberAssistantPreferencesTx({
+        memberId: ensure.containerMemberId,
+        occurredAt: input.occurredAt.toISOString(),
+        preferences: style,
+        prisma: input.tx,
+      });
+    }
+  }
   if (ensure.created) {
     await bindArmedHostedUsageReferralToNewContainerTx({
       occurredAt: input.occurredAt,
@@ -141,10 +162,14 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
         ? "pending_only_candidate"
         : "pending_sender_wins_conflict"
       : "fallback_sender",
-    pendingSetup: pendingSetupClaim.kind === "claimed"
-      ? pendingSetupClaim.setup
-      : null,
     pendingSetupApplied,
     pendingSetupResolution: pendingSetupClaim.reason,
   };
+}
+
+function buildInitialHostedGroupRoomModelMarkdown(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value);
+  return normalized ? `## Explicit setup\n\n${normalized}` : null;
 }

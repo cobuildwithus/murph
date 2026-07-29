@@ -179,7 +179,13 @@ Last verified: 2026-07-28
   claim and route creation share one transaction. A concurrent loser
   re-evaluates without the consumed intent, while convergence on an
   already-created route restores the still-valid intent instead of silently
-  spending it.
+  spending it. The optional setup payload is encrypted and versioned; unreadable
+  or future bytes are consumed as unavailable optional setup and fall back to
+  ordinary sender admission instead of wedging the room. For a newly created
+  route, sparse style is committed in the same transaction through the existing
+  synthetic-member preference owner. Optional room context rides the existing
+  activation wake; its fixed-page initialization is exact-replay idempotent and
+  fail-open so it cannot block the accepted first group message.
 - Current-chat naming is one on-demand provider read through
   `murph.group action="read_chat_name"`. It uses the current durable route and
   existing bounded Linq or Telegram request timeout and does not retry, cache,

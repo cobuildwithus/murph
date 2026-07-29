@@ -128,6 +128,11 @@ default destination for every goal or the definition of activation.
   Murph's group even when someone else speaks first. Competing preparations do
   not guess; only a prepared current sender breaks the tie, otherwise the
   existing first-active-sender behavior remains.
+  The same private request may explicitly choose a sparse room style or give
+  compact social guidance for that new group. Murph must not infer or copy
+  private settings, health facts, memories, or contacts into the room. The
+  setup applies only when the route is new; an existing group never changes
+  owner or configuration because someone prepared another group.
 
 ## First-Class Product Objects
 

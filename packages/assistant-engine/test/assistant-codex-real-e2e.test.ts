@@ -340,6 +340,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                   action: 'prepare_next_group',
                   result: {
                     expiresAt: '2026-07-29T18:30:00.000Z',
+                    setup: request.action === 'prepare_next_group'
+                      ? request.setup ?? {}
+                      : {},
                     status: 'prepared',
                   },
                 }
@@ -353,7 +356,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt:
-            'I’m about to add you to our existing family iMessage group—prepare it so it’s associated with me.',
+            'I’m about to add you to an existing iMessage group. Prepare it for me, make your style casual with humor at 2, and remember that this room wants short direct replies.',
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory,
@@ -373,7 +376,18 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           'group-chat skill read',
         ).toBe(true)
         expect(groupCall).toBeDefined()
-        expect(groupRequests).toEqual([{ action: 'prepare_next_group' }])
+        expect(groupRequests).toEqual([
+          expect.objectContaining({
+            action: 'prepare_next_group',
+            setup: expect.objectContaining({
+              roomContextMarkdown: expect.stringMatching(/short|direct/iu),
+              style: expect.objectContaining({
+                personality: expect.objectContaining({ humor: 2 }),
+                tone: 'casual',
+              }),
+            }),
+          }),
+        ])
         expect(result.finalMessage).toMatch(/one (?:new )?group/iu)
         expect(result.finalMessage).toMatch(/30 minutes/iu)
         expect(result.finalMessage).not.toMatch(

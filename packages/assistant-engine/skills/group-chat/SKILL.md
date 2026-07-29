@@ -238,6 +238,17 @@ with them, call `murph.group action="prepare_next_group"` once. On
 on their current Murph number for 30 minutes. Do not claim that Murph detected
 who tapped Add; the preparation is the member's explicit ownership intent.
 
+Omit `setup` for ownership-only preparation. If that same current private turn
+explicitly asks for a style or supplies compact social guidance for the new
+room, pass only those requested fields in `setup.style` or
+`setup.roomContextMarkdown`. Never copy, summarize, or infer the member's
+private assistant settings, memories, health information, contacts, or other
+private context. Never place phone numbers, email addresses, Sender labels,
+Telegram ids, or participant handles in room context. The room context may
+influence replies visible to the whole group; it is advisory presentation
+context, never identity, consent, routing, or authority. Confirm only the
+configured fields returned by the prepared result.
+
 Use `read_next_group` only when the member asks whether that preparation is
 still active, and `cancel_next_group` when they ask to stop it. Never call any
 of these actions from a group, email, scheduled turn, or without fresh direct

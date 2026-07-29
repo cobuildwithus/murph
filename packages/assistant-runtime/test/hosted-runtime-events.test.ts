@@ -19,6 +19,7 @@ import {
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
+  initializeAssistantGroupRoomModel: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
   sendAssistantNotification: vi.fn(),
   upsertAssistantCronAutomation: vi.fn(),
@@ -36,6 +37,8 @@ vi.mock("@murphai/assistant-engine", async () => {
 
   return {
     ...actual,
+    initializeAssistantGroupRoomModel:
+      mocks.initializeAssistantGroupRoomModel,
     sendAssistantNotification: mocks.sendAssistantNotification,
     upsertAssistantCronAutomation: mocks.upsertAssistantCronAutomation,
   };
@@ -124,6 +127,15 @@ function createQueuedNotificationResult(intentId = "intent_notification") {
 }
 
 beforeEach(() => {
+  mocks.initializeAssistantGroupRoomModel.mockResolvedValue({
+    kind: "initialized",
+    state: {
+      body: "## Explicit setup\n\nKeep this room low-key.",
+      digest: "sha256:test",
+      kind: "present",
+      status: "active",
+    },
+  });
   mocks.sendAssistantNotification.mockResolvedValue(createQueuedNotificationResult());
 });
 
@@ -1890,6 +1902,91 @@ describe("executeHostedMailboxEvent", () => {
         threadIsDirect: false,
       }),
     );
+  });
+
+  it("initializes explicit group room setup before accepting activation replay", async () => {
+    const roomContext = "## Explicit setup\n\nKeep this room low-key.";
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:linq-group:member_123:evt_room_setup",
+      initialGroupRoomModelMarkdown: roomContext,
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_room_setup_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.initializeAssistantGroupRoomModel).toHaveBeenCalledExactlyOnceWith({
+      body: roomContext,
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      redactedLogEntries: [
+        expect.objectContaining({
+          redacted: {
+            eventCode: "assistant.group_room_model_activation_seed",
+            outcome: "initialized",
+          },
+        }),
+      ],
+    });
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
+  });
+
+  it("fails open without logging room setup when activation initialization is unavailable", async () => {
+    const roomContext = "## Explicit setup\n\nKeep a private phrase private.";
+    mocks.initializeAssistantGroupRoomModel.mockRejectedValueOnce(
+      new Error("room setup unavailable"),
+    );
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:linq-group:member_123:evt_room_setup_fail",
+      initialGroupRoomModelMarkdown: roomContext,
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_room_setup_fail_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      redactedLogEntries: [
+        expect.objectContaining({
+          level: "warn",
+          redacted: expect.objectContaining({
+            eventCode: "assistant.group_room_model_activation_seed",
+            outcome: "unavailable",
+          }),
+        }),
+      ],
+    });
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
   });
 
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {

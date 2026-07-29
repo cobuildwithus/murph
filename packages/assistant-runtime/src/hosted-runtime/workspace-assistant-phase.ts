@@ -503,6 +503,9 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "leave_membership":
     case "post_disclosure_request":
     case "revoke_disclosure_grant":
+    case "prepare_next_group":
+    case "read_next_group":
+    case "cancel_next_group":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },

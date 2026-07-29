@@ -5,6 +5,10 @@ import {
   selectHostedPendingGroupSetupCandidate,
   type HostedPendingGroupSetupCandidate,
 } from "@/src/lib/hosted-groups/pending-group-setup";
+import {
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES,
+  parseHostedRuntimePendingGroupSetupInput,
+} from "@murphai/hosted-execution/pending-group-setup";
 
 function candidate(
   ownerMemberId: string,
@@ -83,5 +87,54 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
       kind: "none",
       reason: "no_candidates",
     });
+  });
+});
+
+describe("pending group setup payload", () => {
+  it("accepts ownership-only setup and normalizes bounded explicit setup", () => {
+    expect(parseHostedRuntimePendingGroupSetupInput({})).toEqual({});
+    expect(parseHostedRuntimePendingGroupSetupInput({
+      roomContextMarkdown: "  Keep the room low-key.  ",
+      style: {
+        personality: {
+          humor: 2,
+          push: null,
+        },
+        tone: "casual",
+      },
+    })).toEqual({
+      roomContextMarkdown: "Keep the room low-key.",
+      style: {
+        personality: {
+          humor: 2,
+          push: null,
+        },
+        tone: "casual",
+      },
+    });
+  });
+
+  it("rejects unknown settings, raw participant handles, and unsafe text", () => {
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
+      unexpected: true,
+    })).toThrow(/unrecognized key/iu);
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
+      style: { personality: { humor: 99 } },
+    })).toThrow();
+    for (const roomContextMarkdown of [
+      "Ask +15555550123 about it.",
+      "Ask member@example.test about it.",
+      "Ask participant:secret-handle about it.",
+      "Ask Sender #123 about it.",
+      "Unsafe\u0000text",
+    ]) {
+      expect(() => parseHostedRuntimePendingGroupSetupInput({
+        roomContextMarkdown,
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimePendingGroupSetupInput({
+      roomContextMarkdown:
+        "x".repeat(HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES + 1),
+    })).toThrow(/UTF-8 byte limit/u);
   });
 });

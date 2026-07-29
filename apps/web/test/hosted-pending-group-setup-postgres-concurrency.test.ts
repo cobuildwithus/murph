@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import {
+  HostedBillingStatus,
+  Prisma,
+  type PrismaClient,
+} from "@prisma/client";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
 import {
   armHostedPendingGroupSetupTx,
   claimHostedPendingGroupSetupForParticipantsTx,
@@ -27,6 +34,19 @@ if (
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted pending group setup PostgreSQL concurrency",
   () => {
+    beforeEach(() => {
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) =>
+          Buffer.from(value.slice("sealed:".length), "base64url").toString("utf8"),
+        encrypt: ({ value }) =>
+          `sealed:${Buffer.from(value, "utf8").toString("base64url")}`,
+      });
+    });
+
+    afterEach(() => {
+      setHostedSecureBoxStringTestCodecForTests(null);
+    });
+
     it("allows one group to claim an intent and cascades replacement state with its owner", async () => {
       const fixtureId = randomUUID();
       const ownerMemberId = `member_pending_group_${fixtureId}`;
@@ -57,6 +77,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
           now: new Date("2026-07-29T18:00:00.000Z"),
           ownerMemberId,
+          setup: {
+            roomContextMarkdown: "Initial room context.",
+          },
           tx,
         }));
 
@@ -103,12 +126,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             id: firstClaim.setup.id,
             ownerMemberId,
             recipientPhoneLookupKey,
+            setup: {
+              roomContextMarkdown: "Initial room context.",
+            },
           },
         });
 
         await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
           now: new Date("2026-07-29T18:02:00.000Z"),
           ownerMemberId,
+          setup: {
+            roomContextMarkdown: "Stale room context.",
+          },
           tx,
         }));
         const staleClaim = await observer.$transaction((tx) =>
@@ -125,9 +154,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
         const currentSetup = await observer.$transaction((tx) =>
           armHostedPendingGroupSetupTx({
-            now: new Date("2026-07-29T18:03:00.000Z"),
-            ownerMemberId,
-            tx,
+          now: new Date("2026-07-29T18:03:00.000Z"),
+          ownerMemberId,
+          setup: {
+            roomContextMarkdown: "Current room context.",
+          },
+          tx,
           })
         );
         await expect(observer.$transaction((tx) =>
@@ -144,7 +176,41 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           armedAt: currentSetup.armedAt,
           expiresAt: currentSetup.expiresAt,
           id: currentSetup.id,
+          setup: {
+            roomContextMarkdown: "Current room context.",
+          },
         });
+
+        const corruptSetup = await observer.$transaction((tx) =>
+          armHostedPendingGroupSetupTx({
+            now: new Date("2026-07-29T18:05:00.000Z"),
+            ownerMemberId,
+            setup: {
+              roomContextMarkdown: "This encrypted payload will be corrupted.",
+            },
+            tx,
+          })
+        );
+        await observer.$executeRaw(Prisma.sql`
+          UPDATE "hosted_pending_group_setup"
+          SET "payload_encrypted" = ${"not-an-encrypted-payload"}
+          WHERE "id" = ${corruptSetup.id}
+        `);
+        await expect(observer.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: new Date("2026-07-29T18:05:30.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+            tx,
+          })
+        )).resolves.toEqual({
+          kind: "none",
+          reason: "invalid_payload",
+        });
+        expect(await observer.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(0);
 
         await observer.hostedMember.delete({ where: { id: ownerMemberId } });
         expect(await observer.hostedPendingGroupSetup.count({

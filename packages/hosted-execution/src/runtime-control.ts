@@ -41,6 +41,9 @@ import type {
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
 } from "./vault-share-limits.ts";
+import type {
+  HostedRuntimePendingGroupSetupInput,
+} from "./pending-group-setup.ts";
 
 export const HOSTED_MAILBOX_LANES = [
   "system",
@@ -1281,7 +1284,10 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
-  | { action: "prepare_next_group" }
+  | {
+      action: "prepare_next_group";
+      setup?: HostedRuntimePendingGroupSetupInput;
+    }
   | { action: "read_next_group" }
   | { action: "cancel_next_group" }
   | { action: "read_chat_name" }
@@ -1375,13 +1381,21 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "prepare_next_group";
       result:
-        | { expiresAt: string; status: "prepared" }
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "read_next_group";
       result:
-        | { expiresAt: string; status: "prepared" }
+        | {
+            expiresAt: string;
+            setup: HostedRuntimePendingGroupSetupInput;
+            status: "prepared";
+          }
         | { status: "none" }
         | { status: "unavailable"; unavailableReason: string };
     }
