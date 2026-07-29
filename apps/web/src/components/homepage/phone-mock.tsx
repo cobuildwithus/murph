@@ -467,8 +467,7 @@ function Composer() {
   return (
     <div className="bg-[#f5f0e8] px-3 pb-2 pt-1.5">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
+        <span
           aria-hidden="true"
           className="flex size-[30px] shrink-0 items-center justify-center rounded-full border border-[#c4a882]/25 bg-white text-[#5a6e32]"
         >
@@ -480,7 +479,7 @@ function Composer() {
               strokeLinecap="round"
             />
           </svg>
-        </button>
+        </span>
         <div className="flex flex-1 items-center justify-between rounded-full border border-[#c4a882]/25 bg-white py-[6px] pl-4 pr-3">
           <span className="text-[0.8125rem] tracking-tight text-[#736a58]/45">
             iMessage
