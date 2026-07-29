@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { shouldGroupAdjacentConversationInput } from '../src/assistant/automation/grouping.ts'
+import {
+  ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX,
+  collectAssistantAutoReplyGroup,
+  shouldGroupAdjacentConversationInput,
+} from '../src/assistant/automation/grouping.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 
 function createInputSummary(
@@ -25,12 +29,33 @@ function createInputSummary(
     ...(overrides.affirmativeReaction === true
       ? { affirmativeReaction: true }
       : {}),
+    deliveryTarget: overrides.deliveryTarget ?? 'provider-thread-1',
+    groupRoomBatchingEligible: overrides.groupRoomBatchingEligible ?? false,
+    projectionReady: overrides.projectionReady ?? true,
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
 
+function createAuthenticatedGroupSummary(
+  overrides: Partial<AssistantAutomationInputSummary> = {},
+): AssistantAutomationInputSummary {
+  return createInputSummary({
+    conversation: {
+      accountId: 'acct_1',
+      actorId: 'actor_1',
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'room_1',
+      threadIsDirect: false,
+    },
+    deliveryTarget: 'provider-room-1',
+    groupRoomBatchingEligible: true,
+    ...overrides,
+  })
+}
+
 describe('shouldGroupAdjacentConversationInput', () => {
-  it('groups adjacent inputs from the same conversation lane', () => {
+  it('groups adjacent inputs from the same direct conversation lane', () => {
     const first = createInputSummary({
       inputId: 'ain_a',
       optionalInboxCaptureId: 'cap_a',
@@ -43,6 +68,19 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(first, second)).toBe(true)
+  })
+
+  it('stops direct grouping when the conversation actor changes', () => {
+    const first = createInputSummary()
+    const differentActor = createInputSummary({
+      inputId: 'ain_other_actor',
+      conversation: {
+        ...first.conversation,
+        actorId: 'actor_2',
+      },
+    })
+
+    expect(shouldGroupAdjacentConversationInput(first, differentActor)).toBe(false)
   })
 
   it('stops grouping when the conversation lane changes', () => {
@@ -63,7 +101,7 @@ describe('shouldGroupAdjacentConversationInput', () => {
     expect(shouldGroupAdjacentConversationInput(first, differentThread)).toBe(false)
   })
 
-  it('keeps grouping when both inputs share the same native reply target', () => {
+  it('keeps direct grouping when both inputs share the same native reply target', () => {
     const first = createInputSummary({
       inputId: 'ain_reply_a',
       replyToMessageId: 'linq-msg-shared',
@@ -78,11 +116,11 @@ describe('shouldGroupAdjacentConversationInput', () => {
   })
 
   it('keeps affirmative reactions separate from adjacent ordinary replies', () => {
-    const ordinary = createInputSummary({
+    const ordinary = createAuthenticatedGroupSummary({
       inputId: 'ain_ordinary',
       replyToMessageId: 'linq-msg-shared',
     })
-    const reaction = createInputSummary({
+    const reaction = createAuthenticatedGroupSummary({
       affirmativeReaction: true,
       inputId: 'ain_reaction',
       occurredAt: '2026-04-22T10:01:00.000Z',
@@ -94,7 +132,7 @@ describe('shouldGroupAdjacentConversationInput', () => {
     expect(shouldGroupAdjacentConversationInput(reaction, ordinary)).toBe(false)
   })
 
-  it('splits the group when adjacent inputs reply to different assistant messages', () => {
+  it('splits direct inputs that reply to different assistant messages', () => {
     const first = createInputSummary({
       inputId: 'ain_reply_m1',
       replyToMessageId: 'linq-msg-m1',
@@ -108,7 +146,7 @@ describe('shouldGroupAdjacentConversationInput', () => {
     expect(shouldGroupAdjacentConversationInput(first, replyToM2)).toBe(false)
   })
 
-  it('separates an anchored reply from a preceding unanchored input', () => {
+  it('separates a direct anchored reply from a preceding unanchored input', () => {
     const unanchored = createInputSummary({ inputId: 'ain_unanchored' })
     const anchored = createInputSummary({
       inputId: 'ain_anchored',
@@ -118,4 +156,74 @@ describe('shouldGroupAdjacentConversationInput', () => {
 
     expect(shouldGroupAdjacentConversationInput(unanchored, anchored)).toBe(false)
   })
+
+  it('batches authenticated group-room successors across actor and reply-anchor changes', () => {
+    const first = createAuthenticatedGroupSummary({
+      inputId: 'ain_group_actor_a',
+      replyToMessageId: 'linq-anchor-a',
+    })
+    const second = createAuthenticatedGroupSummary({
+      inputId: 'ain_group_actor_b',
+      conversation: {
+        ...first.conversation,
+        actorId: 'actor_2',
+      },
+      replyToMessageId: 'linq-anchor-b',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(first, second)).toBe(true)
+  })
+
+  it.each([
+    ['account', { conversation: {
+      accountId: 'acct_2',
+      actorId: 'actor_2',
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'room_1',
+      threadIsDirect: false,
+    } }],
+    ['room', { conversation: {
+      accountId: 'acct_1',
+      actorId: 'actor_2',
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'room_2',
+      threadIsDirect: false,
+    } }],
+    ['delivery route', { deliveryTarget: 'provider-room-2' }],
+    ['projection readiness', { projectionReady: false }],
+    ['route authority', { groupRoomBatchingEligible: false }],
+  ] as const)('does not batch group inputs across a %s mismatch', (_label, patch) => {
+    const first = createAuthenticatedGroupSummary({ inputId: 'ain_group_a' })
+    const second = createAuthenticatedGroupSummary({
+      inputId: 'ain_group_b',
+      ...patch,
+    })
+
+    expect(shouldGroupAdjacentConversationInput(first, second)).toBe(false)
+  })
+
+  it('caps one initial compound turn at 50 and leaves overflow for the next turn', async () => {
+    const summaries = Array.from(
+      { length: ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX + 1 },
+      (_, index) => createAuthenticatedGroupSummary({
+        inputId: `ain_group_${index}`,
+        occurredAt: new Date(Date.UTC(2026, 3, 22, 10, index)).toISOString(),
+        optionalInboxCaptureId: `cap_group_${index}`,
+        text: `message ${index}`,
+      }),
+    )
+
+    const grouped = await collectAssistantAutoReplyGroup({
+      inputSummaries: summaries,
+      startIndex: 0,
+      vault: '/vaults/test',
+    })
+
+    expect(grouped.items).toHaveLength(ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX)
+    expect(grouped.endIndex).toBe(ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX - 1)
+    expect(summaries[grouped.endIndex + 1]?.inputId).toBe('ain_group_50')
+  })
+
 })

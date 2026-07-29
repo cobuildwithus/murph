@@ -110,7 +110,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship amount, optional fields, and follow-up",
+    "Group usage funding, recovery, and fulfilled receipt",
   );
   expect(sectionsMarkup).toContain("Overall AI usage and fulfilled top-up");
   expect(sectionsMarkup).toContain("Biomarker result detail");

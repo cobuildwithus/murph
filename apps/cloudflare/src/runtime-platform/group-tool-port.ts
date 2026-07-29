@@ -16,6 +16,9 @@ import {
 } from "./web-control-transport.ts";
 
 const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
+const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES =
+  128 * 1024;
+const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOFT_TIMEOUT_MS = 1_000;
 
 export function createHostedRuntimeGroupToolPort(input: {
   boundUserId: string;
@@ -25,13 +28,30 @@ export function createHostedRuntimeGroupToolPort(input: {
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   return {
     async request(request) {
+      const isParticipantDisplayNameRead =
+        request.action === "read_participant_display_names";
+      const timeoutMs = isParticipantDisplayNameRead
+        ? Math.min(
+          input.timeoutMs,
+          HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOFT_TIMEOUT_MS,
+        )
+        : input.timeoutMs;
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
         path: buildHostedRuntimeGroupToolPath(),
-        timeoutMs: input.timeoutMs,
+        ...(isParticipantDisplayNameRead
+          ? {
+              sensitiveResponseBody: {
+                maxBytes:
+                  HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES,
+              },
+              signal: AbortSignal.timeout(timeoutMs),
+            }
+          : {}),
+        timeoutMs,
         transport: input.transport,
       });
 

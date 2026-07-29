@@ -1608,6 +1608,78 @@ test("restarts polling when a frozen retry advances the same purchase", async ()
   }
 });
 
+test("removes frozen sponsor recovery details once group usage is fulfilled", async () => {
+  const status = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(status.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_frozen_fulfilled",
+        retryAllowed: true,
+        status: "reconciling",
+      },
+      customizationAllowed: false,
+      frozenSponsorship: {
+        publicAlias: "Sunday sleep crew",
+        runningBitRequest: "Keep the recovery jokes going.",
+        sponsorMessage: "More room for the group.",
+      },
+      offers: [],
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your original sponsor details are still attached/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Cancel this payment before changing them\./,
+    );
+
+    await act(async () => {
+      status.resolve({
+        purchaseId: "hucp_group_frozen_fulfilled",
+        status: "fulfilled",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /This group has more Murph/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /original sponsor details|Cancel this payment/,
+    );
+    const contactLink = rendered.container.querySelector("a");
+    assert.ok(contactLink);
+    assert.equal(contactLink.textContent, "Open Messages");
+    assert.equal(contactLink.getAttribute("href"), "sms:");
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
+    await clickButton(rendered.container, rendered.window, "Done");
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("preserves a frozen retry key across status-only recovery", async () => {
   let statusReadCount = 0;
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
@@ -4150,17 +4222,29 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.match(rendered.container.textContent ?? "", /Nice one/);
     assert.match(
       rendered.container.textContent ?? "",
-      /This group's available usage has been updated\./,
+      /This group has more Murph/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your contribution landed\. The group has more room to talk\./,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Messages will open\. Choose this group to keep going\./,
     );
     const contactLink = rendered.container.querySelector("a");
     assert.ok(contactLink);
     assert.equal(contactLink.textContent, "Open Messages");
     assert.equal(contactLink.getAttribute("href"), "sms:");
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
+    assert.equal(buttonByText(rendered.container, "Done").disabled, false);
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
   } finally {
     await rendered.cleanup();
   }

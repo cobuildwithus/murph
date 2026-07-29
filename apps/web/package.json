@@ -34,6 +34,7 @@
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",
+    "runtime-logs:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-runtime-log-migrate-deploy.ts",
     "release:production:contract-migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-contract-migrations.ts",
     "release:production:migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     "release:production:verify-deployment-protection": "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment-protection.ts",
