@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+      - name: Show exact source tree
+        run: git rev-parse HEAD^{tree}
       - name: Pack source
         run: |
           git archive --format=zip --output=pending-group-source.zip HEAD
