@@ -1,6 +1,6 @@
 # Dedicated hosted runtime log database
 
-Status: active
+Status: completed
 
 ## Goal
 
@@ -133,3 +133,27 @@ Postgres.
 - `pnpm test:diff`
 - `pnpm verify:acceptance`
 - `git diff --check`, privacy scan, and secret-pattern scan.
+
+## Completion evidence
+
+- Preliminary `completion-specialists` ReviewGPT inspected the exact pushed
+  implementation head. It found two accepted reliability/coverage gaps:
+  post-commit device-sync diagnostics could be skipped by a later failed update,
+  and the real-PostgreSQL suite did not exercise the read and retention SQL.
+  The final implementation flushes already-collected diagnostics from `finally`
+  without changing the canonical error, and the PostgreSQL suite now executes
+  recent reads, timing reads, and bounded retention.
+- Focused migration, mailbox, and device-sync suites pass: 112 tests.
+- The isolated real-PostgreSQL concurrency and SQL suite passes: 6 tests,
+  including both append/deletion lock orderings, overlapping subject deletion,
+  the compatibility receipt guard, recent and timing reads, and bounded
+  retention.
+- `pnpm test:diff apps/web apps/cloudflare` passes, including 7,423 web tests,
+  the production web build, 2,141 Cloudflare Node tests, and 3 Workers tests.
+- `pnpm verify:acceptance` passes, including package coverage, every workspace
+  typecheck and built-package boundary, the production web build, and both
+  Cloudflare verification lanes.
+- Web lint passes with zero errors; 22 unchanged warnings remain outside this
+  task. `pnpm logs:guard` and `git diff --check` pass.
+Updated: 2026-07-29
+Completed: 2026-07-29
