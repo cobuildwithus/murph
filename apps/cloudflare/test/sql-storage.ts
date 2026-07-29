@@ -19,9 +19,12 @@ export interface TestSqlStorageLike {
     ...bindings: SqlStorageValue[]
   ): SqlCursorLike<T>;
   reset(): void;
+  transactionSync<T>(callback: () => T): T;
 }
 
-export function createTestSqlStorage(): TestSqlStorageLike {
+export function createTestSqlStorage(input: {
+  beforeExec?: (query: string) => void;
+} = {}): TestSqlStorageLike {
   const database = new DatabaseSync(":memory:");
   initializeSchema(database);
 
@@ -30,6 +33,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
       query: string,
       ...bindings: SqlStorageValue[]
     ): SqlCursorLike<T> {
+      input.beforeExec?.(query);
       const trimmed = query.trim().toLowerCase();
       if (trimmed.startsWith("select") || trimmed.startsWith("pragma")) {
         const statement = database.prepare(query);
@@ -61,6 +65,17 @@ export function createTestSqlStorage(): TestSqlStorageLike {
         DROP TABLE IF EXISTS runner_bundle_slots;
       `);
       initializeSchema(database);
+    },
+    transactionSync<T>(callback: () => T): T {
+      database.exec("BEGIN TRANSACTION");
+      try {
+        const result = callback();
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   };
 }

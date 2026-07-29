@@ -97,14 +97,22 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: "branch-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: "main",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: "database-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
   HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
   HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
+  HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "metrics-token-test",
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "metrics-token-id-test",
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
+  LINQ_API_TOKEN: "linq-token-test",
 } as const;
 const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
@@ -292,6 +300,9 @@ describe("hosted deploy automation helpers", () => {
       version_metadata?: {
         binding: string;
       };
+      triggers: {
+        crons: string[];
+      };
     };
 
     expect(config.name).toBe("hosted-worker");
@@ -322,6 +333,10 @@ describe("hosted deploy automation helpers", () => {
         name: "USER_RUNNER",
       },
       {
+        class_name: "DatabaseHealthDurableObject",
+        name: "DATABASE_HEALTH_MONITOR",
+      },
+      {
         class_name: "RunnerContainer",
         name: "RUNNER_CONTAINER",
       },
@@ -343,7 +358,16 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: ["DeploySmokeRunnerContainer"],
         tag: "v3",
       },
+      {
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+        tag: "v4",
+      },
     ]);
+    expect(config).toMatchObject({
+      triggers: {
+        crons: ["*/5 * * * *"],
+      },
+    });
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
@@ -504,6 +528,9 @@ describe("hosted deploy automation helpers", () => {
       version_metadata?: {
         binding: string;
       };
+      triggers: {
+        crons: string[];
+      };
     };
     const checkedInConfig = parseJsoncObject(
       await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
@@ -540,6 +567,9 @@ describe("hosted deploy automation helpers", () => {
       version_metadata?: {
         binding: string;
       };
+      triggers: {
+        crons: string[];
+      };
     };
 
     const expectedDefaultInstanceType = {
@@ -568,6 +598,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig).not.toHaveProperty("queues");
     expect(generatedConfig).not.toHaveProperty("queues");
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
+    expect(checkedInConfig.triggers).toEqual(generatedConfig.triggers);
   });
 
   it("keeps the checked-in wrangler scaffold vars aligned with default-rendered deploy vars", async () => {

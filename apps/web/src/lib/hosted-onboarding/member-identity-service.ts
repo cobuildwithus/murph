@@ -56,7 +56,10 @@ import {
   lookupHostedMemberForPrivyPrincipal,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
-import { type HostedLinqParticipantContact } from "./linq-participant-contact";
+import {
+  acquireHostedLinqParticipantPhoneLockTx,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
 
 export {
   createHostedPrivyIdentityConflictError,
@@ -108,6 +111,11 @@ export async function ensureHostedMemberForPhoneResolutionTx(input: {
       httpStatus: 400,
     });
   }
+
+  await acquireHostedLinqParticipantPhoneLockTx({
+    phoneNumber: input.phoneNumber,
+    tx: input.prisma,
+  });
 
   const existingIdentity = await lookupHostedMemberIdentityByPhoneNumber({
     phoneNumber: input.phoneNumber,
@@ -367,6 +375,15 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
+  if (
+    shouldPersistHostedPrivyPhoneIdentity({ authMethod })
+    && input.identity.phone
+  ) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: input.identity.phone.number,
+      tx: input.prisma,
+    });
+  }
   const existingMemberLookup = await lookupHostedMemberForPrivyAuthAttempt({
     authMethod,
     identity: input.identity,
@@ -474,6 +491,18 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     authMethod: input.authMethod,
     identity: input.identity,
   });
+  if (
+    shouldPersistHostedPrivyPhoneIdentity({
+      authMethod,
+      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    })
+    && input.identity.phone
+  ) {
+    await acquireHostedLinqParticipantPhoneLockTx({
+      phoneNumber: input.identity.phone.number,
+      tx: input.prisma,
+    });
+  }
 
   if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
     throw hostedOnboardingError({

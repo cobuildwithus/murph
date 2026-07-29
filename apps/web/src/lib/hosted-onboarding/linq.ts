@@ -4,6 +4,7 @@ export {
   resolveHostedLinqParticipantEmailAddress,
   resolveHostedLinqParticipantPhoneNumber,
   resolveHostedLinqRecipientPhoneNumber,
+  requireHostedLinqMessageEditedEvent,
   requireHostedLinqMessageReceivedEvent,
   summarizeHostedLinqMessage,
   shouldIgnoreHostedLinqForLocalInboundGuard,
@@ -11,6 +12,7 @@ export {
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq-webhook";
 export type {
+  HostedLinqMessageEditedEvent,
   HostedLinqMessageReceivedEvent,
   HostedLinqWebhookEvent,
 } from "./linq-webhook";

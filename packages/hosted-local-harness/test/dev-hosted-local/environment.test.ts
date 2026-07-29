@@ -1609,6 +1609,23 @@ describe("buildWranglerLocalDevConfig", () => {
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
     ]);
+    expect(config.durable_objects).toMatchObject({
+      bindings: expect.arrayContaining([
+        {
+          class_name: "DatabaseHealthDurableObject",
+          name: "DATABASE_HEALTH_MONITOR",
+        },
+      ]),
+    });
+    expect(config.migrations).toEqual(expect.arrayContaining([
+      {
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+        tag: "v4",
+      },
+    ]));
+    expect(config.triggers).toEqual({
+      crons: ["*/5 * * * *"],
+    });
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.image_vars).toEqual({

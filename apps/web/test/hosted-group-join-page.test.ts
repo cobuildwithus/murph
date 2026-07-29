@@ -15,12 +15,14 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
   GroupJoinAcceptForm(props: {
     expectedMembershipId: string | null;
     groupName: string;
+    inviteCode?: string | null;
     postJoinDestination: string;
   }) {
     return createElement(
       "form",
       {
         "data-group-name": props.groupName,
+        "data-invite-code": props.inviteCode ?? "",
         "data-membership-id": props.expectedMembershipId ?? "none",
         "data-post-join-destination": props.postJoinDestination,
       },
@@ -58,8 +60,12 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       "Legal consent gate",
     );
   },
-  GroupJoinSignInButton() {
-    return createElement("button", null, "Continue to join");
+  GroupJoinSignInButton(props: { inviteCode?: string | null }) {
+    return createElement(
+      "button",
+      { "data-invite-code": props.inviteCode ?? "" },
+      "Continue to join",
+    );
   },
 }));
 
@@ -176,7 +182,7 @@ test("passes only sanitized launch consent status to the legal consent gate", as
   expect(markup).not.toContain("Accept group invite");
 });
 
-test("renders the join form for authenticated viewers with current launch consent", async () => {
+test("forwards a phone-bound invite into the authenticated join form", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
     authenticatedMember: { id: "member_123" },
@@ -185,8 +191,11 @@ test("renders the join form for authenticated viewers with current launch consen
     launchGranted: true,
   }));
 
-  const markup = await renderGroupJoinPage("JOIN123");
+  const markup = await renderGroupJoinPage("JOIN123", {
+    invite: "invite_phone_bound",
+  });
 
+  expect(markup).toContain('data-invite-code="invite_phone_bound"');
   expect(markup).toContain("Accept group invite");
   expect(markup).not.toContain('data-legal-consent-gate="true"');
   expect(markup).toContain('href="/home"');
@@ -304,9 +313,71 @@ test("does not offer self-service leave to the group owner", async () => {
   expect(markup).not.toContain("Leave group");
 });
 
+// A cold-outreach recipient arrives on /groups/join/<code>?invite=<code>. If the
+// page drops that invite, authentication can resolve a different provisional
+// identity than the phone member first-contact just created, and the account
+// they finish would not be bound to the group they meant to join.
+test("forwards an invite code from the join link into the sign-in action", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+  });
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce(createSignedOutJoinView());
+
+  const markup = await renderGroupJoinPage("JOIN123", {
+    invite: "invite_opaque",
+  });
+
+  expect(markup).toContain('data-invite-code="invite_opaque"');
+  expect(markup).toContain("Continue to join");
+});
+
+test("omits an invite code when the join link carries none", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+  });
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce(createSignedOutJoinView());
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(markup).toContain('data-invite-code=""');
+});
+
+function createSignedOutJoinView(): {
+  activeVaultShareProjectionKinds: readonly string[];
+  activeVaultShareProjectionScopes: readonly string[];
+  displayName: string;
+  id: string;
+  kind: string;
+  memberCount: number;
+  requestedVaultShareProjections: readonly string[];
+  status: string;
+  viewerCanLeave: boolean;
+  viewerMembershipId: null;
+  viewerMembershipStatus: null;
+} {
+  return {
+    activeVaultShareProjectionKinds: [],
+    activeVaultShareProjectionScopes: [],
+    displayName: "Sunday Sleep Crew",
+    id: "hgrp_123",
+    kind: "custom",
+    memberCount: 2,
+    requestedVaultShareProjections: [],
+    status: "active",
+    viewerCanLeave: false,
+    viewerMembershipId: null,
+    viewerMembershipStatus: null,
+  };
+}
+
 async function renderGroupJoinPage(
   joinCode: string,
-  searchParams?: { postJoin?: string | string[] | undefined },
+  searchParams?: {
+    invite?: string | string[] | undefined;
+    postJoin?: string | string[] | undefined;
+  },
 ): Promise<string> {
   const { default: GroupJoinPage } = await import("../app/groups/join/[joinCode]/page");
 

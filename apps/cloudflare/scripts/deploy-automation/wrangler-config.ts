@@ -110,6 +110,10 @@ export function buildHostedWranglerDeployConfig(
           class_name: "UserRunnerDurableObject",
         },
         {
+          name: "DATABASE_HEALTH_MONITOR",
+          class_name: "DatabaseHealthDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -135,7 +139,14 @@ export function buildHostedWranglerDeployConfig(
         tag: "v3",
         new_sqlite_classes: ["DeploySmokeRunnerContainer"],
       },
+      {
+        tag: "v4",
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+      },
     ],
+    triggers: {
+      crons: ["*/5 * * * *"],
+    },
     r2_buckets: [
       {
         binding: "BUNDLES",

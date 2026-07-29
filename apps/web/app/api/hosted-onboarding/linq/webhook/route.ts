@@ -151,9 +151,24 @@ function resolveMessageTimestampForDiagnostic(input: {
   eventType: string | null;
 }): {
   ms: number | null;
-  source: "created_at" | "received_at" | "sent_at" | null;
+  source: "created_at" | "edited_at" | "received_at" | "sent_at" | null;
 } {
-  if (input.eventType !== "message.received" || !input.data) {
+  if (!input.data) {
+    return {
+      ms: null,
+      source: null,
+    };
+  }
+
+  if (input.eventType === "message.edited") {
+    const editedAtMs = parseIsoTimestampMs(readString(input.data.edited_at));
+    return {
+      ms: editedAtMs,
+      source: editedAtMs === null ? null : "edited_at",
+    };
+  }
+
+  if (input.eventType !== "message.received") {
     return {
       ms: null,
       source: null,

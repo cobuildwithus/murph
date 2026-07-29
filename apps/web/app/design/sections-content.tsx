@@ -15,6 +15,7 @@ import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -87,6 +88,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Clubs early-access marketing page">
+        <ClubsPageStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Changelog archive edition">
         <ChangelogArchiveStudy />
       </StudySection>
@@ -141,7 +148,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join actions and nutrition sharing consents">
+      <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
       </StudySection>
 
@@ -165,7 +172,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sender WAU and MAU">
+      <StudySection title="Ops weekly growth compass with complete and retention-limited sender evidence">
         <GrowthScorecardStudy />
       </StudySection>
 

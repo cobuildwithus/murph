@@ -337,6 +337,46 @@ export async function hasActiveHostedLinqManagedLine(input: {
   return line !== null;
 }
 
+export async function listHostedLinqHealthyProactiveLines(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqAssignableHomeLine[]> {
+  const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
+  const rows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: { not: null },
+      egressPolicy: "enabled",
+      healthStatus: "healthy",
+      phoneNumberEncrypted: { not: null },
+    },
+    orderBy: [
+      { assignmentWeight: "desc" },
+      { phoneNumberLookupKey: "asc" },
+    ],
+    take: limit + 1,
+    select: {
+      activeMemberLimit: true,
+      assignmentWeight: true,
+      maxNewConversationsPerDay: true,
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+      proactiveConversationCount: true,
+      proactiveConversationDayUtc: true,
+    },
+  });
+
+  if (rows.length > limit) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
+      httpStatus: 500,
+      message: `Hosted Linq proactive dispatch has more than ${limit} healthy line(s). Reduce the pool or raise the reviewed limit before dispatching.`,
+      retryable: false,
+    });
+  }
+
+  return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   dayUtc: Date;
   limit: number;
@@ -527,6 +567,8 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   }
 
   switch (input.event.eventType) {
+    case "message.edited":
+      return false;
     case "message.received":
       return projectMessageReceived(input.prisma, lineLookupKey, input.event);
     case "message.delivered":

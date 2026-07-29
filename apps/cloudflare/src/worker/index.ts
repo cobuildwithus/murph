@@ -27,6 +27,27 @@ export const handleWorkerFetch = createWorkerFetchHandler({
   publicRoutes: workerPublicRoutes,
 });
 
+const DATABASE_HEALTH_SINGLETON_NAME = "production";
+
+export function handleDatabaseHealthScheduled(
+  controller: ScheduledController,
+  env: WorkerEnvironmentSource,
+  ctx: WorkerExecutionContext,
+): void {
+  if (env.HOSTED_DATABASE_ALERT_ENABLED !== "1") {
+    return;
+  }
+  const namespace = env.DATABASE_HEALTH_MONITOR;
+  if (!namespace) {
+    throw new Error("DATABASE_HEALTH_MONITOR binding is required.");
+  }
+  ctx.waitUntil(
+    namespace.getByName(DATABASE_HEALTH_SINGLETON_NAME).runScheduledCheck({
+      scheduledAtMs: controller.scheduledTime,
+    }),
+  );
+}
+
 export default {
   async fetch(
     request: Request,
@@ -55,5 +76,12 @@ export default {
       withHostedR2CutoverBucket(env, cutoverContext),
       ctx,
     );
+  },
+  scheduled(
+    controller: ScheduledController,
+    env: WorkerEnvironmentSource,
+    ctx: WorkerExecutionContext,
+  ): void {
+    handleDatabaseHealthScheduled(controller, env, ctx);
   },
 };
