@@ -33,25 +33,24 @@ describe("sleep complaint workflow publishing journeys", () => {
     publishedSleepWorkflows = await buildPublishedSleepWorkflows();
   });
 
+  it("keeps the bedtime-transition protocol authored but out of runnable public artifacts while draft", () => {
+    const key = "protocol_variant:bedtime-transition/standard-tiny-fallback-transition";
+    const { catalog, protocols, web } = publishedSleepWorkflows;
+    const entity = catalog.entities.find((candidate) => candidate.key === key);
+
+    expect(entity).toMatchObject({
+      key,
+      status: "draft",
+    });
+    expect(protocols.runSpecs.protocols.some((protocol) => protocol.key === key))
+      .toBe(false);
+    expect(web.routeIndex.routes.some((route) => route.key === key))
+      .toBe(false);
+    expect(web.experimentIndex.experiments.some((experiment) => experiment.key === key))
+      .toBe(false);
+  });
+
   it.each([
-    {
-      key: "protocol_variant:bedtime-transition/standard-tiny-fallback-transition",
-      optionalSignals: [
-        "biomarker:sleep-onset-latency",
-        "biomarker:daytime-sleepiness",
-      ],
-      primaryBiomarkerKey: "biomarker:bedtime-delay",
-      safetyGateIds: ["dangerous_sleepiness", "external_schedule_constraint"],
-      sessionFieldId: "bedtime_delay_minutes",
-      sessionFieldIds: [
-        "bedtime_delay_minutes",
-        "sleep_opportunity_minutes",
-        "estimated_sleep_onset_latency_minutes",
-        "daytime_sleepiness",
-        "adverse_effects",
-      ],
-      setupSlotIds: ["sleep_attempt_anchor", "transition_cue", "transition_versions"],
-    },
     {
       key: "protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list",
       optionalSignals: [

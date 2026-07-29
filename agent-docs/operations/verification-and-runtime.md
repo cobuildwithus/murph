@@ -380,7 +380,10 @@ against the final base-to-head diff and PR body. Prefer an attached in-app
 Browser for this proof when available, then fall back to the repository-installed
 Playwright runtime against the local catalog when no tab is attached or the
 connection is unusable. Browser attachment alone must not block completion when
-Playwright can capture the required states.
+Playwright can capture the required states. Treat that fallback as required:
+attempt Playwright before asking for a browser attachment or reporting a
+screenshot blocker, and record the exact command and failure only if Playwright
+cannot capture the proof.
 
 ## Scoped Verification Mode
 
