@@ -1362,7 +1362,7 @@ test('sendAssistantMessageLocal drops group preceding replies and resolves the r
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 })
 
-test('sendAssistantMessageLocal resolves one accepted-message ref for reply and reaction delivery', async () => {
+test('sendAssistantMessageLocal preserves a Linq recovery reply target through delivery', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-selected-reply-target-',
   )
@@ -1373,36 +1373,67 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
     event: {
       content: {
         attachmentDescriptors: [],
-        text: 'Reply to this message.',
+        text: 'Create the requested private image.',
       },
       conversation: {
-        accountId: 'telegram-account',
-        actorId: 'telegram-actor',
+        accountId: 'linq-account',
+        actorId: 'linq-actor',
         actorIsSelf: false,
-        source: 'telegram',
+        source: 'linq',
         threadId: 'thread-1',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
       occurredAt: '2026-04-22T10:00:00.000Z',
       receivedAt: '2026-04-22T10:00:00.000Z',
       replyTarget: {
-        channel: 'telegram',
-        messageId: '987654321',
-        threadId: 'thread-1',
+        channel: 'linq',
+        messageId: 'linq-message-selected',
+        threadId: 'linq-chat-selected',
       },
       sourceMetadata: {
         externalThreadRouteAuthorityPresent: true,
-        kind: 'telegram',
-        mediaGroupId: null,
-        replyContext: null,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
       },
       sourceRef: createHostedMailboxSourceRef({
-        eventId: 'evt_selected_reply_target',
+        eventId: 'evt_selected_recovery_target',
         laneSeq: '1',
       }),
     },
   })
-  const session = createAssistantSession()
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-actor',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-chat-selected',
+      },
+      identityId: 'linq-account',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    actorId: 'linq-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'linq-chat-selected',
+    },
+    channel: 'linq',
+    deliveryPolicy: 'binding-target-only',
+    effectiveThreadIsDirect: true,
+    explicitTarget: 'linq-chat-selected',
+    identityId: 'linq-account',
+    replyToMessageId: null,
+    threadId: 'thread-1',
+    threadIsDirect: true,
+  }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     providerOutcome: {
       kind: 'succeeded',
@@ -1418,11 +1449,13 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
             targetInputId: acceptedMessage.inputId,
           },
         ],
-        response: 'Targeted response.',
+        response:
+          'The image is unavailable, but the requested file is still being delivered.',
         responseDeliveryContextOrdinal: 0,
         session,
         targetInputId: acceptedMessage.inputId,
-        transcriptResponse: 'Targeted response.',
+        transcriptResponse:
+          'The image is unavailable, but the requested file is still being delivered.',
       },
     },
     adapter: {
@@ -1430,11 +1463,12 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
         throw new Error('Reaction adapter should not be called by this harness.')
       }),
     },
+    plan,
     realMessageTargetSelection: true,
     session,
   })
 
-  await sendAssistantMessageLocal({
+  const result = await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
         {
@@ -1448,25 +1482,33 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
         },
       ],
     },
+    actorId: 'linq-actor',
+    channel: 'linq',
     deliverResponse: true,
-    prompt: 'Reply to the selected message.',
+    deliveryTarget: 'linq-chat-selected',
+    identityId: 'linq-account',
+    prompt: 'Explain the image recovery at the selected message.',
+    threadId: 'thread-1',
+    threadIsDirect: true,
     vault: context.vaultRoot,
   })
 
+  expect(result.deliveryError).toBeNull()
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
     deliveryNativeReplyRequested: true,
-    deliveryReplyToMessageId: '987654321',
+    deliveryReplyToMessageId: 'linq-message-selected',
   })
   expect(mocks.deliverAssistantReaction).toHaveBeenCalledTimes(1)
   expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
-    deliveryReplyToMessageId: '987654321',
+    deliveryReplyToMessageId: 'linq-message-selected',
   })
   expect(
     mocks.appendAssistantTranscriptEntriesWithRefs.mock.calls
       .flatMap((call) => call[2])
       .find((entry) =>
-        entry.kind === 'user' && entry.text === 'Reply to the selected message.'
+        entry.kind === 'user' &&
+        entry.text === 'Explain the image recovery at the selected message.'
       ),
   ).toMatchObject({
     contentReceivedAt: '2026-04-22T10:00:00.000Z',

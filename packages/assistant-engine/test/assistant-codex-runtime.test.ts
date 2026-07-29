@@ -19661,11 +19661,18 @@ describe('steered final segments', () => {
   })
 
   it('keeps a failed private-media reply obligation after an unrelated vault-file approval', async () => {
+    const replyRef = `ain_${'7'.repeat(32)}`
     const sendVaultFile = vi.fn(async () => ({
       filename: 'report.pdf',
       status: 'approved' as const,
     }))
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: 'selection recorded',
+        id: 110,
+        kind: 'select-reply-target',
+        messageRef: replyRef,
+      },
       {
         expectedSuccess: false,
         expectedText:
@@ -19727,6 +19734,9 @@ describe('steered final segments', () => {
         sendVaultFile,
         vaultFileSendAvailable: true,
       }),
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
     })
 
     expect(sendVaultFile).toHaveBeenCalledOnce()
@@ -19735,6 +19745,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe(
       'The image is unavailable, but the requested file is still being delivered.',
     )
+    expect(result.targetInputId).toBe(replyRef)
     expect(result.responseMedia).toEqual([])
   })
 

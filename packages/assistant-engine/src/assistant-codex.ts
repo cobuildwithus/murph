@@ -3540,9 +3540,6 @@ async function runCodexAppServerTurnOnProcess(
           patch: { kind: 'reply-required', owner: 'vault-file' },
         },
       ]
-      replyTargetPatches = replyTargetPatches.filter(
-        (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
-      )
       return true
     }
     if (
