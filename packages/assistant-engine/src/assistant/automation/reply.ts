@@ -107,6 +107,7 @@ import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   renderAssistantInputAttachmentDescriptorPromptSection,
   renderAssistantInputGroupContextPrompt,
+  renderAssistantInputLinqCorrectionContext,
   type AssistantAutoReplyPromptInput,
   type AssistantTrustedHostedImageCompletion,
 } from './prompt-builder.js'
@@ -1702,7 +1703,30 @@ function promptInputCarriesNativeReplyReference(
   candidate: AssistantInputCandidate,
 ): boolean {
   const metadata = candidate.event.sourceMetadata
-  return metadata?.kind === 'linq' && metadata.replyToMessageId !== null
+  return metadata?.kind === 'linq' &&
+    metadata.replyToMessageId !== null &&
+    metadata.editedTextPartIndex === undefined
+}
+
+function promptInputCorrectionTargetsAcceptedLiveInput(input: {
+  acceptedLiveInputIds: ReadonlySet<string>
+  candidate: AssistantInputCandidate
+}): boolean {
+  const metadata = input.candidate.event.sourceMetadata
+  if (
+    metadata?.kind !== 'linq' ||
+    (
+      metadata.editedSourceInputId === undefined &&
+      metadata.editedTextPartIndex === undefined
+    )
+  ) {
+    return true
+  }
+  return (
+    metadata.editedSourceInputId !== undefined &&
+    metadata.editedTextPartIndex !== undefined &&
+    input.acceptedLiveInputIds.has(metadata.editedSourceInputId)
+  )
 }
 
 interface HostedAutoReplyDeliveryIdempotency {
@@ -2090,6 +2114,25 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       lateInputs.inputs.some((candidate) =>
         candidate.event.sourceMetadata?.kind !== 'email' ||
         candidate.event.sourceMetadata.assistantStyleSettingsAuthorized !== true
+      )
+    ) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+    // A correction may bypass native-reply deferral only when its opaque
+    // source names input already owned by this turn. Older-message edits stay
+    // uncheckpointed for the next ordinary automation scan.
+    const acceptedLiveInputIds = new Set([
+      ...context.inputIds,
+      ...pendingAcceptances.flatMap((pending) => pending.acceptedInputIds),
+    ])
+    if (
+      lateInputs.inputs.some((candidate) =>
+        !promptInputCorrectionTargetsAcceptedLiveInput({
+          acceptedLiveInputIds,
+          candidate,
+        })
       )
     ) {
       return {
@@ -2716,10 +2759,14 @@ function buildCapturelessAssistantInputPrompt(
         projectionStatus: candidate.projection.status,
       })
       const groupContext = renderAssistantInputGroupContextPrompt(candidate.event)
+      const correctionContext = renderAssistantInputLinqCorrectionContext(
+        candidate.event.sourceMetadata,
+      )
       const sections = [
         `Source: ${candidate.event.source}
 Occurred at: ${candidate.event.occurredAt}`,
         groupContext,
+        correctionContext,
         transcript
           ? `Message text:
 ${transcript}`
