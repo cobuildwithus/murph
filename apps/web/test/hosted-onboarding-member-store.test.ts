@@ -4152,6 +4152,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantVoiceCausalSeq: null,
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
+    groupPrivateDisclosureIntroAcknowledgedAt: null,
     id: "member_123",
     pendingActivationTimeZone: null,
     signupNotificationEmailAttemptedAt: null,

@@ -594,7 +594,6 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
-  assistantAskCompletionKind?: "joined_group";
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: (() => void) | null;
@@ -1078,9 +1077,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
-      ...(context?.assistantAskCompletionKind
-        ? { assistantAskCompletionKind: context.assistantAskCompletionKind }
-        : {}),
       ...(context?.assistantAskRequestTargetKind
         ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
         : {}),
@@ -2879,25 +2875,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
-              wakeInput.initialMailboxImportContext?.assistantAskCompletionKind
-              || wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
+              wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
                 ? {
-                    ...(wakeInput.initialMailboxImportContext
-                      .assistantAskCompletionKind
-                      ? {
-                          assistantAskCompletionKind:
-                            wakeInput.initialMailboxImportContext
-                              .assistantAskCompletionKind,
-                        }
-                      : {}),
-                    ...(wakeInput.initialMailboxImportContext
-                      .assistantAskRequestTargetKind
-                      ? {
-                          assistantAskRequestTargetKind:
-                            wakeInput.initialMailboxImportContext
-                              .assistantAskRequestTargetKind,
-                        }
-                      : {}),
+                    assistantAskRequestTargetKind:
+                      wakeInput.initialMailboxImportContext
+                        .assistantAskRequestTargetKind,
                   }
                 : null,
             latencySeed: wakeInput.latencySeed ?? null,
@@ -2990,7 +2972,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input.systemMailboxAdmission === "pre_checkpoint_safe"
             ? {
                 ...(wakeInitialMailboxImportContext ?? {}),
-                assistantAskCompletionKind: "joined_group" as const,
                 assistantAskRequestTargetKind: "joined_group" as const,
               }
             : wakeInitialMailboxImportContext;

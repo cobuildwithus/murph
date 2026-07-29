@@ -1387,6 +1387,7 @@ export type HostedRuntimeGroupAskResult =
 
 export type HostedRuntimeGroupMemberAskResult =
   | { status: "accepted" }
+  | { status: "confirmation_required" }
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 

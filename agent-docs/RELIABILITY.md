@@ -238,7 +238,15 @@ Last verified: 2026-07-29
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions report the accepted newsletter parent to cron immediately and put it into the same canonical pending-delivery field used by ordinary queued notifications, even when the notification turn later fails; that failure remains on the run record instead of reopening composition. A restart before that cron write derives the parent from the durable occurrence-scoped outbox key before admitting the provider and reconnects the existing intent to the same pending-delivery field. Web marks the parent sent only after durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively; the first completed assistant response closes new admission while preserving the existing provider-turn key only long enough for an already-started steer to settle, and a rejected steer plus overflow or later input remains durable and pending for the next ordinary turn. Every completed text or media segment is retained for delivery rather than replaced by a group-only latest response. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
-- Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
+- Reviewed Assistant Ask completions enter the existing foreground-causal,
+  output-only continuation immediately; they do not wait for the routine idle
+  checkpoint or a second wake. The caller Murph may compose from room context,
+  but the resulting outbox intent still carries the completion id and expiry.
+  Linq and Telegram revalidate the exact completion and disclosure authority
+  inside their existing Web-owned messaging-provider-entry checks. If the
+  authority expires or changes after queueing, the outbox first persists the
+  fixed text-only fallback and retries that same intent. Route validity alone
+  cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
   ambiguity fence. Every create retry during the first 30 minutes uses the
@@ -443,10 +451,10 @@ Last verified: 2026-07-29
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
-  wake. A dirty runtime admits only the exact joined-group request and legacy
-  completion shapes through the pre-checkpoint-safe system prefix; consented or
-  reviewed shapes remain checkpoint-gated. Completion ordering uses the
-  existing pending-input occurrence proof, and incomplete or invalid index
+  wake. A dirty runtime admits the exact joined-group request and every
+  accepted-input completion through the pre-checkpoint-safe system prefix;
+  consented-member requests remain checkpoint-gated. Completion ordering uses
+  the existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
 - One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
   deterministic request identity, ten-minute expiry, isolated reviewed

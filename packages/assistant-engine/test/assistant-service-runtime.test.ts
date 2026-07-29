@@ -1096,6 +1096,75 @@ describe("assistant delivery orchestration seam", () => {
     ]);
   });
 
+  it("keeps reviewed Assistant Ask replies in one proof-bound delivery", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey:
+          "reviewed-assistant-ask-completion:aask_done_reviewed",
+        messageLength: 20,
+        providerMessageId: "provider-reviewed",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-reviewed",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        answeredMailboxItemIds: ["aask_done_reviewed"],
+        deliverResponse: true,
+        deliveryIdempotencyKey:
+          "reviewed-assistant-ask-completion:aask_done_reviewed",
+        prompt: "compose reviewed reply",
+        reviewedAssistantAskCompletionExpiresAt:
+          "2099-01-01T00:00:00.000Z",
+        vault: "/vault",
+      },
+      response: "First point.\n---\nSecond point.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-reviewed",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: ["aask_done_reviewed"],
+        deliveryIdempotencyKey:
+          "reviewed-assistant-ask-completion:aask_done_reviewed",
+        message: "First point.\n\nSecond point.",
+      }),
+    );
+  });
+
   it("delivers linq delimiter-only replies as the original literal text", async () => {
     const session = createAssistantSession({
       binding: {

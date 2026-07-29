@@ -2288,6 +2288,10 @@ function parseHostedRuntimeGroupMemberAskResult(
     assertAllowedObjectKeys(result, new Set(["status"]), label);
     return { status };
   }
+  if (status === "confirmation_required") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
   if (status === "completed") {
     assertAllowedObjectKeys(
       result,

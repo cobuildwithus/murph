@@ -1839,6 +1839,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         assistantVoiceCausalSeq: null,
         billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,
         createdAt: now,
+        groupPrivateDisclosureIntroAcknowledgedAt: null,
         id: input.data.id,
         pendingActivationTimeZone: null,
         signupNotificationEmailAttemptedAt: null,
