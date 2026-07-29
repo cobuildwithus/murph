@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   armHostedPendingGroupSetupTx,
   claimHostedPendingGroupSetupForParticipantsTx,
+  readHostedPendingGroupSetup,
+  restoreHostedPendingGroupSetupClaimTx,
 } from "@/src/lib/hosted-groups/pending-group-setup";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -77,11 +79,73 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { ownerMemberId },
         })).toBe(0);
 
+        const firstClaim = results.find((result) => result.kind === "claimed");
+        if (!firstClaim || firstClaim.kind !== "claimed") {
+          throw new Error("Expected one claimed pending group setup.");
+        }
+        await expect(observer.$transaction((tx) =>
+          restoreHostedPendingGroupSetupClaimTx({
+            claimToken: firstClaim.claimToken,
+            tx,
+          })
+        )).resolves.toBe(true);
+        await expect(observer.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: new Date("2026-07-29T18:01:30.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+            tx,
+          })
+        )).resolves.toMatchObject({
+          kind: "claimed",
+          setup: {
+            id: firstClaim.setup.id,
+            ownerMemberId,
+            recipientPhoneLookupKey,
+          },
+        });
+
         await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
           now: new Date("2026-07-29T18:02:00.000Z"),
           ownerMemberId,
           tx,
         }));
+        const staleClaim = await observer.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: new Date("2026-07-29T18:02:30.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+            tx,
+          })
+        );
+        if (staleClaim.kind !== "claimed") {
+          throw new Error("Expected the stale-token fixture to claim its setup.");
+        }
+        const currentSetup = await observer.$transaction((tx) =>
+          armHostedPendingGroupSetupTx({
+            now: new Date("2026-07-29T18:03:00.000Z"),
+            ownerMemberId,
+            tx,
+          })
+        );
+        await expect(observer.$transaction((tx) =>
+          restoreHostedPendingGroupSetupClaimTx({
+            claimToken: staleClaim.claimToken,
+            tx,
+          })
+        )).resolves.toBe(false);
+        await expect(readHostedPendingGroupSetup({
+          now: new Date("2026-07-29T18:04:00.000Z"),
+          ownerMemberId,
+          prisma: observer,
+        })).resolves.toMatchObject({
+          armedAt: currentSetup.armedAt,
+          expiresAt: currentSetup.expiresAt,
+          id: currentSetup.id,
+        });
+
         await observer.hostedMember.delete({ where: { id: ownerMemberId } });
         expect(await observer.hostedPendingGroupSetup.count({
           where: { ownerMemberId },

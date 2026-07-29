@@ -117,4 +117,27 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     });
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
   });
+
+  it("restores the intent before rethrowing a route-admission failure", async () => {
+    const routeFailure = new Error("route admission failed");
+    mocks.ensureThreadContainer.mockRejectedValue(routeFailure);
+
+    await expect(ensureHostedPreparedLinqThreadContainerRouteTx({
+      accountLookupKey: "hplk_line",
+      fallbackOwnerMemberId: "member_first_sender",
+      mailboxDedupeKey: "event_group",
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
+      participantMemberIds: ["member_prepared_owner", "member_first_sender"],
+      recipientPhoneLookupKeys: ["hplk_line"],
+      senderMemberId: "member_first_sender",
+      threadId: "chat_group",
+      tx,
+    })).rejects.toBe(routeFailure);
+
+    expect(mocks.restorePendingSetup).toHaveBeenCalledExactlyOnceWith({
+      claimToken,
+      tx,
+    });
+    expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
+  });
 });

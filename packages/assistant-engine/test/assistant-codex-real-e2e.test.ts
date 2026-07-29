@@ -288,6 +288,108 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'prepares the next group from a private text request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-prepare-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildPrivateGroupPreparationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_group_prepare',
+              recipientKey: 'recipient_private_group_prepare',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_group_prepare'],
+              conversationId: 'conversation_private_group_prepare',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_group_prepare'],
+              originSessionId: 'session_private_group_prepare',
+              recipientKey: 'recipient_private_group_prepare',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'prepare_next_group',
+                  result: {
+                    expiresAt: '2026-07-29T18:30:00.000Z',
+                    status: 'prepared',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'I’m about to add you to our existing family iMessage group—prepare it so it’s associated with me.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const groupCall = actions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('group-chat/SKILL.md')
+            && action.output.includes('# Group Chat')
+          ),
+          'group-chat skill read',
+        ).toBe(true)
+        expect(groupCall).toBeDefined()
+        expect(groupRequests).toEqual([{ action: 'prepare_next_group' }])
+        expect(result.finalMessage).toMatch(/one (?:new )?group/iu)
+        expect(result.finalMessage).toMatch(/30 minutes/iu)
+        expect(result.finalMessage).not.toMatch(
+          /detect(?:ed|s|ing)? who|who (?:tapped|performed) add/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'delivers a group call preview in one turn and calls only after a later exact confirmation',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1319,6 +1421,28 @@ function buildHostedGroupStatusDeveloperInstructions(): string {
       setupCommand: 'murph',
     },
     conversationScope: 'group',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildPrivateGroupPreparationDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
     currentLocalDate: '2026-07-29',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
