@@ -6,6 +6,7 @@ import path from "node:path";
 import type {
   AssistantProviderUsageDraft,
   ConsentedReadOnlyAssistantAskInput,
+  ReadOnlyAssistantAskInput,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
@@ -216,6 +217,120 @@ describe("hosted detached assistant ask controller", () => {
         answer: explanation,
         outcome: "cannot_answer",
       });
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("requeues immediately and closes the stale controller on provider handoff", async () => {
+    const vaultRoot = await createVaultRoot();
+    const resolveProviderAuthority = vi.fn(async () => "handoff" as const);
+    let completionCalls = 0;
+    let providerEgressCount = 0;
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          eventId: "ask_provider_handoff",
+          itemId: "item_provider_handoff",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              completionCalls += 1;
+              return { action: "complete", status: "completed" };
+            }
+            return {
+              action: "prepare",
+              question: "What did the group decide?",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(async (input: ReadOnlyAssistantAskInput) => {
+          await input.beforeProviderEntry?.();
+          providerEgressCount += 1;
+          return { answer: "stale answer", outcome: "answered" as const };
+        }),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        resolveProviderAuthority,
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal(resolveProviderAuthority.mock.calls.length, 1);
+        const item = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(item?.status, "pending");
+        assert.equal(item?.nextAttemptAt, null);
+      });
+      controller.kick();
+      await Promise.resolve();
+      await controller.closeAndRequeue();
+
+      assert.equal(resolveProviderAuthority.mock.calls.length, 1);
+      assert.equal(providerEgressCount, 0);
+      assert.equal(completionCalls, 0);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test("delays retry without provider egress when live authority is unavailable", async () => {
+    const vaultRoot = await createVaultRoot();
+    let providerEgressCount = 0;
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          eventId: "ask_provider_unavailable",
+          itemId: "item_provider_unavailable",
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              throw new Error("Unavailable authority must not complete the ask.");
+            }
+            return {
+              action: "prepare",
+              question: "What did the group decide?",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(async (input: ReadOnlyAssistantAskInput) => {
+          await input.beforeProviderEntry?.();
+          providerEgressCount += 1;
+          return { answer: "unreachable", outcome: "answered" as const };
+        }),
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        resolveProviderAuthority: async () => {
+          throw new Error("control plane unavailable");
+        },
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        const item = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(item?.status, "pending");
+        assert.equal(item?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(providerEgressCount, 0);
     } finally {
       await removeVaultRoot(vaultRoot);
     }

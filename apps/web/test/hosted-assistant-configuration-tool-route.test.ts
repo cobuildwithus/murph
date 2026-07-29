@@ -36,9 +36,11 @@ describe("hosted assistant configuration tool route", () => {
       action: "read",
       result: {
         availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+        availableProviders: ["openai", "venice"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         model: "gpt-5.6-terra",
+        provider: "openai",
         reasoningEffort: "low",
         solAvailable: false,
       },

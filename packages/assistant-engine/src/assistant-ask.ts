@@ -168,6 +168,7 @@ const CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_INSTRUCTIONS = [
 export interface ReadOnlyAssistantAskInput {
   abortSignal?: AbortSignal
   baseInstructions?: string | null
+  beforeProviderEntry?: (() => Promise<void>) | null
   codexCommand?: string
   codexHome?: string | null
   developerInstructions?: string | null
@@ -373,6 +374,7 @@ async function executeConfinedReadOnlyAssistantAskTurn(
       reasoningEffort: input.reasoningEffort,
       sandbox: 'read-only',
     })
+    await input.beforeProviderEntry?.()
     try {
       const result = await executeCodexAppServerTurn({
         abortSignal: input.abortSignal,
