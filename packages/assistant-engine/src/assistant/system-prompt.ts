@@ -529,10 +529,10 @@ function buildAssistantStyleSettingsGuidanceText(input: {
     groupConversation
       ? "- Model, provider, and reasoning controls remain unavailable in a group. Do not use or offer `murph.assistant_configuration` here."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
-    "- Read each tool schema; never guess voice, model, or reasoning ids; never use a same-turn voice demo as activation proof.",
+    "- Read each tool schema; never guess voice, model, provider, or reasoning ids; never use a same-turn voice demo as activation proof.",
     groupConversation
       ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
-      : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention these fallbacks when asked.",
+      : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, provider, or reasoning changes; only mention these fallbacks when asked.",
     "- Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail; `unfiltered`/`filter`/`edge`/`wild` = Unhinged.",
     "- Unhinged (0–10, default 0) scales how much you self-censor your own register among clearly consenting adults. Conversational-only: no Settings row. It never changes safety, truth, privacy, consent, or authority.",
