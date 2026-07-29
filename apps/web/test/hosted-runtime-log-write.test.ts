@@ -15,7 +15,7 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
 
 import {
   HOSTED_RUNTIME_LOG_DATABASE_ENDPOINTS_MUST_MATCH_MESSAGE,
-  HOSTED_RUNTIME_LOG_DATABASE_MUST_BE_DEDICATED_MESSAGE,
+  HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE,
   HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE,
   HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE,
   isHostedRuntimeLogDatabaseConfigured,
@@ -60,7 +60,7 @@ describe("hosted runtime log write routing", () => {
       HOSTED_RUNTIME_LOG_DATABASE_URL:
         "postgresql://logs:two@database.test:5432/primary",
       NODE_ENV: "test",
-    })).toThrow(HOSTED_RUNTIME_LOG_DATABASE_MUST_BE_DEDICATED_MESSAGE);
+    })).toThrow(HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE);
   });
 
   it("writes only to the selected owner", async () => {

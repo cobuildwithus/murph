@@ -2898,7 +2898,7 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("keeps status available from the legacy tail when isolated reads fail", async () => {
+  it("marks the runtime-log window unavailable when isolated reads fail", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
@@ -2917,7 +2917,11 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedRuntimeWebStatusResponse(await response.json());
 
     expect(response.status).toBe(200);
-    expect(payload.recentLogs).toHaveLength(1);
+    expect(payload.recentLogs).toBeUndefined();
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
+      limit: 1,
+      userId: "member_routes_1",
+    });
     expect(consoleWarn).toHaveBeenCalledWith(
       "Hosted runtime status isolated-log read failed.",
       expect.objectContaining({
@@ -2925,6 +2929,25 @@ describe("hosted runtime internal web routes", () => {
       }),
     );
     consoleWarn.mockRestore();
+  });
+
+  it("returns an empty runtime-log window only after both stores succeed", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([]);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([]);
+    mocks.listDedicatedHostedRuntimeLogs.mockResolvedValue([]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=1",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.recentLogs).toEqual([]);
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledOnce();
+    expect(mocks.listDedicatedHostedRuntimeLogs).toHaveBeenCalledOnce();
   });
 
   it("skips both runtime-log databases when status requests no diagnostics", async () => {

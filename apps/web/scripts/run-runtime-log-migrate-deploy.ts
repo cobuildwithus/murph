@@ -32,7 +32,7 @@ export type HostedRuntimeLogMigrationRunner = (
 export interface HostedRuntimeLogMigrateDeployOptions {
   verifyDatabaseEndpoints?: (input: {
     directDatabaseUrl: string;
-    primaryDatabaseUrls: readonly string[];
+    primaryDirectDatabaseUrl: string;
     runtimeDatabaseUrl: string;
   }) => Promise<void>;
   verifyMigrationOwner?: (databaseUrl: string) => Promise<void>;
@@ -102,6 +102,11 @@ export function resolveHostedRuntimeLogMigrationDatabaseUrl(
       "HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL is required for production runtime-log migrations.",
     );
   }
+  if (production && !nonEmpty(environment.DIRECT_DATABASE_URL)) {
+    throw new Error(
+      "DIRECT_DATABASE_URL is required to verify that hosted runtime logs use a separate PostgreSQL cluster.",
+    );
+  }
 
   const source = direct
     ? "HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL" as const
@@ -140,14 +145,13 @@ export function resolveHostedRuntimeLogMigrationDatabaseUrl(
 export async function verifyHostedRuntimeLogDatabaseEndpoints(
   input: {
     directDatabaseUrl: string;
-    primaryDatabaseUrls: readonly string[];
+    primaryDirectDatabaseUrl: string;
     runtimeDatabaseUrl: string;
   },
   createClient: HostedRuntimeLogEndpointProbeClientFactory =
     createHostedRuntimeLogEndpointProbeClient,
 ): Promise<void> {
-  await verifyHostedRuntimeLogDatabaseRelationship({
-    expectedRelationship: "same",
+  await verifyHostedRuntimeLogPooledDirectIdentity({
     leftDatabaseUrl: normalizeHostedWebMigrationDatabaseUrl(
       input.runtimeDatabaseUrl,
     ),
@@ -156,22 +160,23 @@ export async function verifyHostedRuntimeLogDatabaseEndpoints(
     ),
   }, createClient);
 
-  for (const primaryDatabaseUrl of [...new Set(input.primaryDatabaseUrls)]) {
-    await verifyHostedRuntimeLogDatabaseRelationship({
-      expectedRelationship: "different",
-      leftDatabaseUrl: normalizeHostedWebMigrationDatabaseUrl(
-        primaryDatabaseUrl,
-      ),
-      rightDatabaseUrl: normalizeHostedWebMigrationDatabaseUrl(
-        input.directDatabaseUrl,
-      ),
-    }, createClient);
+  const runtimeSystemIdentifier = await readPostgresSystemIdentifier(
+    normalizeHostedWebMigrationDatabaseUrl(input.directDatabaseUrl),
+    createClient,
+  );
+  const primarySystemIdentifier = await readPostgresSystemIdentifier(
+    normalizeHostedWebMigrationDatabaseUrl(input.primaryDirectDatabaseUrl),
+    createClient,
+  );
+  if (runtimeSystemIdentifier === primarySystemIdentifier) {
+    throw new Error(
+      "The hosted runtime log database resolved to the same PostgreSQL cluster as DIRECT_DATABASE_URL.",
+    );
   }
 }
 
-async function verifyHostedRuntimeLogDatabaseRelationship(
+async function verifyHostedRuntimeLogPooledDirectIdentity(
   input: {
-    expectedRelationship: "different" | "same";
     leftDatabaseUrl: string;
     rightDatabaseUrl: string;
   },
@@ -208,14 +213,9 @@ async function verifyHostedRuntimeLogDatabaseRelationship(
         "Hosted runtime log database topology probe returned an invalid PostgreSQL response.",
       );
     }
-    if (input.expectedRelationship === "same" && acquired !== false) {
+    if (acquired !== false) {
       throw new Error(
         "HOSTED_RUNTIME_LOG_DATABASE_URL and HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL did not resolve to the same PostgreSQL database.",
-      );
-    }
-    if (input.expectedRelationship === "different" && acquired !== true) {
-      throw new Error(
-        "The hosted runtime log database resolved to the same PostgreSQL database as DATABASE_URL.",
       );
     }
   } finally {
@@ -234,6 +234,35 @@ async function verifyHostedRuntimeLogDatabaseRelationship(
   }
 }
 
+async function readPostgresSystemIdentifier(
+  databaseUrl: string,
+  createClient: HostedRuntimeLogEndpointProbeClientFactory,
+): Promise<string> {
+  const client = createClient(databaseUrl);
+  let connected = false;
+  try {
+    await client.connect();
+    connected = true;
+    const result = await client.query(
+      'SELECT system_identifier::text AS "systemIdentifier" FROM pg_control_system()',
+    );
+    const systemIdentifier = result.rows[0]?.systemIdentifier;
+    if (
+      typeof systemIdentifier !== "string"
+      || !/^[0-9]+$/u.test(systemIdentifier)
+    ) {
+      throw new Error(
+        "Hosted runtime log database cluster identity probe returned an invalid PostgreSQL response.",
+      );
+    }
+    return systemIdentifier;
+  } finally {
+    if (connected) {
+      await client.end().catch(() => undefined);
+    }
+  }
+}
+
 export async function runHostedRuntimeLogMigrateDeploy(
   environment: HostedRuntimeLogMigrationEnvironment = process.env,
   runCommand: HostedRuntimeLogMigrationRunner = runCommandInherited,
@@ -246,16 +275,20 @@ export async function runHostedRuntimeLogMigrateDeploy(
   const directDatabaseUrl = nonEmpty(
     environment.HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL,
   ) ?? migration.url;
-  const primaryDatabaseUrls = [
-    nonEmpty(environment.DIRECT_DATABASE_URL),
-    nonEmpty(environment.DATABASE_URL),
-  ].filter((value): value is string => value !== null);
+  const primaryDirectDatabaseUrl =
+    nonEmpty(environment.DIRECT_DATABASE_URL)
+    ?? nonEmpty(environment.DATABASE_URL);
+  if (!primaryDirectDatabaseUrl) {
+    throw new Error(
+      "DIRECT_DATABASE_URL or DATABASE_URL is required to verify hosted runtime log database isolation.",
+    );
+  }
   await (
     options.verifyDatabaseEndpoints
     ?? verifyHostedRuntimeLogDatabaseEndpoints
   )({
     directDatabaseUrl,
-    primaryDatabaseUrls,
+    primaryDirectDatabaseUrl,
     runtimeDatabaseUrl,
   });
   const ownerDatabaseUrl = withHostedWebMigrationOwner(migration.url);

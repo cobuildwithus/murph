@@ -7,6 +7,9 @@ import pg, { type Client, type Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  verifyHostedRuntimeLogDatabaseEndpoints,
+} from "../scripts/run-runtime-log-migrate-deploy";
+import {
   deleteExpiredHostedRuntimeLogs,
   deleteHostedRuntimeLogDataForUsers,
   hostedRuntimeLogSubjectKey,
@@ -83,6 +86,21 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}" WITH (FORCE)`);
     await admin?.end();
   }, 30_000);
+
+  it("rejects a second logical database on the primary physical cluster", async () => {
+    const runtimeDatabaseUrl = postgresDatabaseUrl(
+      primaryDatabaseUrl,
+      testDatabaseName,
+    );
+
+    await expect(verifyHostedRuntimeLogDatabaseEndpoints({
+      directDatabaseUrl: runtimeDatabaseUrl,
+      primaryDirectDatabaseUrl: primaryDatabaseUrl,
+      runtimeDatabaseUrl,
+    })).rejects.toThrow(
+      /same PostgreSQL cluster as DIRECT_DATABASE_URL/u,
+    );
+  });
 
   it("keeps pre-change cleanup receipts until isolated deletion is complete", async () => {
     const postgres = requirePool(pool);

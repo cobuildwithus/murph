@@ -44,6 +44,18 @@ describe("hosted runtime log database migration", () => {
     })).toThrow(/HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL is required/u);
   });
 
+  it("requires the primary direct endpoint for production topology proof", () => {
+    expect(() => resolveHostedRuntimeLogMigrationDatabaseUrl({
+      DATABASE_URL: "postgresql://primary-pool.example.test:6543/murph",
+      HOSTED_RUNTIME_LOG_DATABASE_URL:
+        "postgresql://logs-pool.example.test:6543/runtime_logs",
+      HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL:
+        "postgresql://logs-direct.example.test:5432/runtime_logs",
+      HOSTED_RUNTIME_LOG_STORAGE: "primary",
+      VERCEL_ENV: "production",
+    })).toThrow(/DIRECT_DATABASE_URL is required/u);
+  });
+
   it("rejects runtime and direct endpoints that name different databases", () => {
     expect(() => resolveHostedRuntimeLogMigrationDatabaseUrl({
       HOSTED_RUNTIME_LOG_DATABASE_URL:
@@ -87,6 +99,8 @@ describe("hosted runtime log database migration", () => {
     await runHostedRuntimeLogMigrateDeploy(
       {
         DATABASE_URL: "postgresql://primary.example.test:5432/murph",
+        DIRECT_DATABASE_URL:
+          "postgresql://primary.example.test:5432/murph",
         HOSTED_RUNTIME_LOG_STORAGE: "primary",
         HOSTED_RUNTIME_LOG_DATABASE_URL:
           "postgresql://logs-pool.example.test:5432/runtime_logs",
@@ -108,9 +122,8 @@ describe("hosted runtime log database migration", () => {
           expect(input).toEqual({
             directDatabaseUrl:
               "postgresql://logs-direct.example.test:5432/runtime_logs",
-            primaryDatabaseUrls: [
+            primaryDirectDatabaseUrl:
               "postgresql://primary.example.test:5432/murph",
-            ],
             runtimeDatabaseUrl:
               "postgresql://logs-pool.example.test:5432/runtime_logs",
           });
@@ -130,18 +143,18 @@ describe("hosted runtime log database migration", () => {
     }]);
   });
 
-  it("proves pooled/direct identity and primary isolation with advisory locks", async () => {
+  it("proves pooled/direct identity and physical primary isolation", async () => {
     const clients = [
       new RuntimeLogProbeClient(),
       new RuntimeLogProbeClient(false),
-      new RuntimeLogProbeClient(),
-      new RuntimeLogProbeClient(true),
+      new RuntimeLogProbeClient(undefined, "222"),
+      new RuntimeLogProbeClient(undefined, "111"),
     ];
     const createdUrls: string[] = [];
 
     await expect(verifyHostedRuntimeLogDatabaseEndpoints({
       directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
-      primaryDatabaseUrls: ["postgresql://primary.test/murph"],
+      primaryDirectDatabaseUrl: "postgresql://primary.test/murph",
       runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
     }, (databaseUrl) => {
       createdUrls.push(databaseUrl);
@@ -155,45 +168,16 @@ describe("hosted runtime log database migration", () => {
     expect(createdUrls).toEqual([
       "postgresql://logs-pool.test/runtime_logs",
       "postgresql://logs-direct.test/runtime_logs",
-      "postgresql://primary.test/murph",
       "postgresql://logs-direct.test/runtime_logs",
+      "postgresql://primary.test/murph",
     ]);
     expect(clients).toHaveLength(0);
   });
 
-  it("probes both pooled and direct primary endpoints for disguised aliases", async () => {
-    const createdUrls: string[] = [];
-
+  it("rejects split pooled/direct endpoints and shared physical clusters", async () => {
     await expect(verifyHostedRuntimeLogDatabaseEndpoints({
       directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
-      primaryDatabaseUrls: [
-        "postgresql://primary-pool.test/murph",
-        "postgresql://primary-direct.test/murph",
-      ],
-      runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
-    }, createRuntimeLogProbeClientFactory([
-      undefined,
-      false,
-      undefined,
-      true,
-      undefined,
-      true,
-    ], createdUrls))).resolves.toBeUndefined();
-
-    expect(createdUrls).toEqual([
-      "postgresql://logs-pool.test/runtime_logs",
-      "postgresql://logs-direct.test/runtime_logs",
-      "postgresql://primary-pool.test/murph",
-      "postgresql://logs-direct.test/runtime_logs",
-      "postgresql://primary-direct.test/murph",
-      "postgresql://logs-direct.test/runtime_logs",
-    ]);
-  });
-
-  it("rejects split pooled/direct endpoints and primary aliases", async () => {
-    await expect(verifyHostedRuntimeLogDatabaseEndpoints({
-      directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
-      primaryDatabaseUrls: [],
+      primaryDirectDatabaseUrl: "postgresql://primary.test/murph",
       runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
     }, createRuntimeLogProbeClientFactory([undefined, true]))).rejects.toThrow(
       /did not resolve to the same PostgreSQL database/u,
@@ -201,14 +185,26 @@ describe("hosted runtime log database migration", () => {
 
     await expect(verifyHostedRuntimeLogDatabaseEndpoints({
       directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
-      primaryDatabaseUrls: ["postgresql://primary-alias.test/murph"],
+      primaryDirectDatabaseUrl: "postgresql://primary-direct.test/murph",
       runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
     }, createRuntimeLogProbeClientFactory([
       undefined,
       false,
+      { systemIdentifier: "111" },
+      { systemIdentifier: "111" },
+    ]))).rejects.toThrow(/same PostgreSQL cluster as DIRECT_DATABASE_URL/u);
+  });
+
+  it("fails closed when PostgreSQL cannot prove the cluster identity", async () => {
+    await expect(verifyHostedRuntimeLogDatabaseEndpoints({
+      directDatabaseUrl: "postgresql://logs-direct.test/runtime_logs",
+      primaryDirectDatabaseUrl: "postgresql://primary-direct.test/murph",
+      runtimeDatabaseUrl: "postgresql://logs-pool.test/runtime_logs",
+    }, createRuntimeLogProbeClientFactory([
       undefined,
       false,
-    ]))).rejects.toThrow(/same PostgreSQL database as DATABASE_URL/u);
+      { systemIdentifier: "" },
+    ]))).rejects.toThrow(/cluster identity probe returned an invalid/u);
   });
 
   it("keeps the diagnostic schema isolated and free of raw member ids", async () => {
@@ -251,7 +247,14 @@ describe("hosted runtime log database migration", () => {
 
   it("routes every live producer through the new owner and keeps hot status reads log-free", async () => {
     const repoRoot = path.resolve(appRoot, "../..");
-    const [callbackRoute, computerLog, deviceAuthority, mailboxStore, runner] =
+    const [
+      callbackRoute,
+      computerLog,
+      deviceAuthority,
+      legacyWorkspaceStore,
+      mailboxStore,
+      runner,
+    ] =
       await Promise.all([
         readFile(path.join(
           appRoot,
@@ -267,6 +270,10 @@ describe("hosted runtime log database migration", () => {
         ), "utf8"),
         readFile(path.join(
           appRoot,
+          "src/lib/hosted-workspace/store.ts",
+        ), "utf8"),
+        readFile(path.join(
+          appRoot,
           "src/lib/hosted-mailbox/store.ts",
         ), "utf8"),
         readFile(path.join(
@@ -279,6 +286,12 @@ describe("hosted runtime log database migration", () => {
       expect(producer).toContain("hosted-runtime-log/write");
       expect(producer).not.toContain("recordHostedRuntimeLogTx");
     }
+    expect(legacyWorkspaceStore).not.toContain(
+      "function recordHostedRuntimeLog(",
+    );
+    expect(legacyWorkspaceStore).not.toContain(
+      "function recordHostedRuntimeLogTx(",
+    );
     expect(mailboxStore).not.toContain("recordHostedRuntimeLog");
     expect(mailboxStore).not.toContain('"mailbox.appended"');
     expect(runner.replace(/\s+/gu, " ")).toContain(
@@ -291,7 +304,10 @@ class RuntimeLogProbeClient implements HostedRuntimeLogEndpointProbeClient {
   readonly queries: Array<{ text: string; values: readonly unknown[] }> = [];
   private connected = false;
 
-  constructor(private readonly tryLockAcquired?: boolean) {}
+  constructor(
+    private readonly tryLockAcquired?: boolean,
+    private readonly systemIdentifier?: string,
+  ) {}
 
   async connect(): Promise<void> {
     this.connected = true;
@@ -317,16 +333,27 @@ class RuntimeLogProbeClient implements HostedRuntimeLogEndpointProbeClient {
         rows: [{ acquired: this.tryLockAcquired }],
       };
     }
+    if (text.includes("pg_control_system")) {
+      return {
+        rows: [{ systemIdentifier: this.systemIdentifier }],
+      };
+    }
     return { rows: [] };
   }
 }
 
 function createRuntimeLogProbeClientFactory(
-  acquiredByClient: readonly (boolean | undefined)[],
+  probes: readonly (
+    | boolean
+    | undefined
+    | { systemIdentifier: string }
+  )[],
   createdUrls: string[] = [],
 ): (databaseUrl: string) => HostedRuntimeLogEndpointProbeClient {
-  const clients = acquiredByClient.map((acquired) =>
-    new RuntimeLogProbeClient(acquired)
+  const clients = probes.map((probe) =>
+    typeof probe === "object"
+      ? new RuntimeLogProbeClient(undefined, probe.systemIdentifier)
+      : new RuntimeLogProbeClient(probe)
   );
   return (databaseUrl) => {
     createdUrls.push(databaseUrl);

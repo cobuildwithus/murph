@@ -89,7 +89,11 @@ authority only after acquiring the same isolated advisory lock used by cleanup.
 For the migration window, status and latency dashboards merge the isolated
 store with the legacy primary table. IDs deduplicate merged rows and global
 limits still apply after the merge. No row is dual-written and no bulk backfill
-runs during deployment.
+runs during deployment. If the isolated status read is unavailable, the Web
+status response omits its optional `recentLogs` window instead of presenting
+the incomplete legacy tail as complete. The orchestration projection therefore
+reports an unknown log count while workspace and mailbox status remain
+available.
 
 Both stores keep the existing policy until the legacy window drains:
 
@@ -125,13 +129,13 @@ Production requires an explicit storage mode and the isolated runtime-log URL
 in both modes. `primary` controls only new-write routing; the configured
 isolated owner must stay available for compatibility reads, retention, and
 account deletion. Static URL checks reject obvious aliases before connecting.
-The migration preflight then proves the real endpoint topology with a random
-transaction advisory lock: pooled and direct runtime-log endpoints must
-contend for the same lock, while the primary and runtime-log endpoints must not.
-This catches different hostnames that secretly reach the same database. A
-separate Postgres project or cluster is recommended for compute isolation, but
-the hard contract is a distinct PostgreSQL database rather than a second schema
-inside the primary database.
+The migration preflight then proves the real endpoint topology in two steps:
+pooled and direct runtime-log endpoints must contend for the same random
+transaction advisory lock, and the direct primary and runtime-log endpoints
+must report different cluster-wide PostgreSQL system identifiers. Production
+therefore requires a genuinely separate Postgres project or cluster; a second
+schema or logical database on the primary cluster is rejected because it would
+still share compute, storage, WAL, checkpoints, and connection capacity.
 
 Local development and tests default to primary mode. To exercise the isolated
 path locally, set `HOSTED_RUNTIME_LOG_STORAGE=dedicated`, provision a separate
@@ -141,9 +145,10 @@ database, and run:
 pnpm --dir apps/web runtime-logs:migrate:deploy
 ```
 
-The optional real-Postgres lock proof needs only a loopback primary test URL.
-It creates a temporary second database, applies both migrations, proves the
-fences, and drops the database:
+The optional real-Postgres proof needs only a loopback primary test URL. It
+creates a temporary second logical database, proves that the production
+topology preflight rejects it as the same physical cluster, applies both
+migrations, proves the deletion fences, and drops the database:
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test \
@@ -153,13 +158,14 @@ pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
 ```
 
 The production migration wrapper applies isolated migrations before primary
-Prisma migrations, proves pooled/direct identity plus primary isolation with
-live advisory-lock probes, and verifies the canonical schema owner before
-invoking Prisma.
+Prisma migrations, proves pooled/direct identity with a live advisory-lock
+probe, proves physical primary isolation with cluster system identifiers, and
+verifies the canonical schema owner before invoking Prisma.
 
 ## Deployment
 
-1. Provision the isolated Postgres database and direct migration endpoint.
+1. Provision the isolated Postgres project or cluster and its direct migration
+   endpoint.
 2. Set the runtime/direct URLs, pool size, and
    `HOSTED_RUNTIME_LOG_STORAGE=primary` in Vercel production.
 3. Deploy Web. The migration wrapper creates the isolated schema and the new

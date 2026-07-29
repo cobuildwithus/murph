@@ -49,7 +49,7 @@ export const GET = withJsonError(async (request: Request) => {
       highWater,
       redactedStatusJson: redactedStatus,
     })),
-    recentLogs: recentLogs.map((entry) => ({
+    recentLogs: recentLogs?.map((entry) => ({
       at: entry.at,
       attemptId: entry.attemptId,
       checkpointVersion: entry.checkpointVersion,
@@ -92,7 +92,7 @@ type HostedRuntimeStatusLogRecord =
 async function readRecentHostedRuntimeLogsBestEffort(input: {
   limit: number;
   userId: string;
-}): Promise<HostedRuntimeStatusLogRecord[]> {
+}): Promise<HostedRuntimeStatusLogRecord[] | undefined> {
   const legacyLogs = await listLegacyHostedRuntimeLogs(input);
 
   try {
@@ -111,7 +111,7 @@ async function readRecentHostedRuntimeLogsBestEffort(input: {
         code: "HOSTED_RUNTIME_STATUS_LOG_READ_FAILED",
       }),
     });
-    return legacyLogs;
+    return undefined;
   }
 }
 
