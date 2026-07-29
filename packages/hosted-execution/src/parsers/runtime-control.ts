@@ -114,6 +114,8 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedRuntimeIMessageContactToolRequest,
+  type HostedRuntimeIMessageContactToolResponse,
   type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
@@ -3863,6 +3865,87 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     action,
     invite,
   };
+}
+
+export function parseHostedRuntimeIMessageContactToolRequest(
+  value: unknown,
+): HostedRuntimeIMessageContactToolRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime iMessage contact tool request",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["assistantInputId"]),
+    "Hosted runtime iMessage contact tool request",
+  );
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted runtime iMessage contact tool assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool assistantInputId is invalid.",
+    );
+  }
+  return { assistantInputId };
+}
+
+export function parseHostedRuntimeIMessageContactToolResponse(
+  value: unknown,
+): HostedRuntimeIMessageContactToolResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime iMessage contact tool response",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["phoneNumber", "status", "verifiedSenderPhoneHint"]),
+    "Hosted runtime iMessage contact tool response",
+  );
+  const status = requireString(
+    record.status,
+    "Hosted runtime iMessage contact tool response status",
+  );
+  if (status === "identity_required" || status === "unavailable") {
+    if (
+      record.phoneNumber !== null
+      || record.verifiedSenderPhoneHint !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime iMessage contact response without a number requires null phoneNumber and verifiedSenderPhoneHint.",
+      );
+    }
+    return {
+      phoneNumber: null,
+      status,
+      verifiedSenderPhoneHint: null,
+    };
+  }
+  if (status !== "assigned" && status !== "existing") {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response status is invalid.",
+    );
+  }
+  const phoneNumber = requireString(
+    record.phoneNumber,
+    "Hosted runtime iMessage contact tool response phoneNumber",
+  );
+  if (!/^\+[1-9][0-9]{7,14}$/u.test(phoneNumber)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response phoneNumber is invalid.",
+    );
+  }
+  const verifiedSenderPhoneHint = requireString(
+    record.verifiedSenderPhoneHint,
+    "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint",
+  );
+  if (!/^\*{3} [0-9]{4}$/u.test(verifiedSenderPhoneHint)) {
+    throw new TypeError(
+      "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint is invalid.",
+    );
+  }
+  return { phoneNumber, status, verifiedSenderPhoneHint };
 }
 
 export function parseHostedRuntimeAssistantConfigurationToolRequest(
