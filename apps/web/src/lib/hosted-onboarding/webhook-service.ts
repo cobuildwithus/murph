@@ -5,6 +5,7 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedLinqMessageEditedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -19,6 +20,7 @@ import {
 } from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
+  planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
@@ -206,17 +208,42 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
+      if (providerResult.groupJoinOfferHandled) {
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-linq-group-join-offer-reaction",
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: true,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
         signal: input.signal,
       });
-      if (reactionResult.status === "accepted") {
+      // A refused region is a decided outcome for a reaction that provably
+      // targeted the canonical join offer, so it must be consumed here. Falling
+      // through would stage group-runtime work and wake the mailbox only to skip
+      // it, and could produce the group-visible behaviour this path avoids.
+      if (
+        reactionResult.status === "accepted"
+        || reactionResult.reason === "recipient_region_unsupported"
+      ) {
         const response: HostedOnboardingLinqWebhookResponse = {
           duplicate: providerResult.duplicate || undefined,
-          ignored: false,
+          ignored: reactionResult.status !== "accepted",
           ok: true,
-          reason: "accepted-linq-group-join-offer-reaction",
+          reason: reactionResult.status === "accepted"
+            ? "accepted-linq-group-join-offer-reaction"
+            : "ignored-linq-group-join-offer-region-unsupported",
         };
         responseReason = response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {
@@ -262,7 +289,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         return response;
       }
     }
-    if (providerEvent && event.event_type !== "message.received") {
+    if (
+      providerEvent
+      && event.event_type !== "message.received"
+      && event.event_type !== "message.edited"
+    ) {
       const prisma = input.prisma ?? getPrisma();
       const providerResult = event.event_type === "participant.added"
         || event.event_type === "participant.removed"
@@ -301,6 +332,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
+    if (event.event_type === "message.edited") {
+      const editedEvent = requireHostedLinqMessageEditedEvent(event);
+      const planTiming = startHostedOnboardingTiming(
+        "hosted-onboarding.webhook.linq.plan-message-edit",
+        {
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+          eventType: event.event_type,
+        },
+      );
+      let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
+      try {
+        editPlan = await runHostedOnboardingWebhookTransaction(
+          prisma,
+          (transaction) =>
+            planHostedLinqMessageEditedWebhook({
+              event: editedEvent,
+              prisma: transaction,
+            }),
+        );
+      } catch (error) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      finishHostedOnboardingTiming(
+        planTiming,
+        editPlan.response.reason ?? "completed",
+        {
+          duplicate: Boolean(editPlan.response.duplicate),
+          ok: editPlan.response.ok,
+          wakeUserPresent: Boolean(
+            editPlan.wakeHandoffs?.some((handoff) => handoff.userId),
+          ),
+        },
+      );
+
+      scheduleHostedLinqProviderEventIngestionBestEffort({
+        event: providerEvent,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const wakeHandoff = editPlan.wakeHandoffs?.[0];
+      const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+        response: editPlan.response,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+        signal: input.signal,
+        wakeHandoff,
+      });
+      responseReason = editPlan.response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        duplicate: Boolean(editPlan.response.duplicate),
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+        wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+        wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+        wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+      });
+      return editPlan.response;
+    }
+
     const planningResolution = await resolveHostedLinqPlanningEvent({
       event,
       prisma,
@@ -529,12 +623,58 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (plan.desiredSideEffects.length > 0) {
-      await drainHostedLinqSideEffectsDirect({
+      const drainResult = await drainHostedLinqSideEffectsDirect({
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
+      const pendingRequiredSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && skip.reason === "notice_in_flight",
+      );
+      if (pendingRequiredSignup) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          httpStatus: 503,
+          message:
+            "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          retryable: true,
+        });
+      }
+      const decidedUnsentSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && (
+            skip.reason === "effect_unresolved"
+            || skip.reason === "notice_already_claimed"
+            || skip.reason === "notice_target_unauthorized"
+          ),
+      );
+      if (decidedUnsentSignup && drainResult.sentCount === 0) {
+        plan = {
+          ...plan,
+          desiredSideEffects: [],
+          response: {
+            ...(decidedUnsentSignup.reason === "notice_already_claimed"
+              ? { duplicate: true }
+              : { ignored: true }),
+            ok: true,
+            reason: decidedUnsentSignup.reason === "effect_unresolved"
+              ? "signup-link-attempts-exhausted"
+              : decidedUnsentSignup.reason === "notice_already_claimed"
+                ? "signup-link-already-sent"
+                : "signup-link-target-unavailable",
+          },
+        };
+      }
     }
 
     scheduleHostedLinqProviderEventIngestionBestEffort({

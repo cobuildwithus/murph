@@ -947,6 +947,7 @@ model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
   assistantInputLookupKey String?               @map("assistant_input_lookup_key")
+  sourceMessageLookupKey  String?               @map("source_message_lookup_key")
   subscriptionActionClaim String?               @map("subscription_action_claim")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
@@ -975,6 +976,7 @@ model HostedMailboxItem {
   @@unique([userId, assistantInputLookupKey])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
+  @@index([sourceMessageLookupKey, causalSeq])
   @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
@@ -1606,9 +1608,30 @@ model HostedGroupJoinOffer {
   postedAt            DateTime    @map("posted_at")
   revokedAt           DateTime?   @map("revoked_at")
   group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  joinOutreaches       HostedGroupJoinOutreach[]
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")
+}
+
+model HostedGroupJoinOutreach {
+  id                        String               @id
+  offerId                   String               @map("offer_id")
+  participantPhoneLookupKey String               @map("participant_phone_lookup_key")
+  participantPhoneEncrypted String               @map("participant_phone_encrypted")
+  requestedAt               DateTime             @map("requested_at")
+  nextAttemptAt             DateTime             @map("next_attempt_at")
+  attemptCount              Int                  @default(0) @map("attempt_count")
+  lastDeferralReason        String?              @map("last_deferral_reason")
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+  offer                     HostedGroupJoinOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  deliveries                HostedLinqDelivery[]
+
+  @@unique([offerId, participantPhoneLookupKey], map: "hosted_group_join_outreach_offer_participant_key")
+  @@index([nextAttemptAt, requestedAt], map: "hosted_group_join_outreach_due_idx")
+  @@index([participantPhoneLookupKey, nextAttemptAt], map: "hosted_group_join_outreach_participant_due_idx")
+  @@map("hosted_group_join_outreach")
 }
 
 model HostedGroupMember {
@@ -1802,6 +1825,7 @@ model HostedLinqProviderEvent {
   failureReason        String?  @map("failure_reason")
   providerStatus       String?  @map("provider_status")
   providerReason       String?  @map("provider_reason")
+  groupJoinOfferHandledAt DateTime? @map("group_join_offer_handled_at")
   extractionVersion    Int      @default(1) @map("extraction_version")
   extractionJson       Json?    @map("extraction_json")
   payloadShapeJson     Json?    @map("payload_shape_json")
@@ -1821,36 +1845,40 @@ model HostedLinqProviderEvent {
 }
 
 model HostedLinqDelivery {
-  id                   String   @id
-  idempotencyKey       String?  @unique @map("idempotency_key")
-  source               String
-  sourceRef            String?  @map("source_ref")
-  template             String?
-  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
-  phoneNumberHint      String?  @map("phone_number_hint")
-  targetKind           String?  @map("target_kind")
-  linqChatLookupKey    String?  @map("linq_chat_lookup_key")
-  messageLookupKey     String?  @unique @map("message_lookup_key")
-  messageIdSuffix      String?  @map("message_id_suffix")
-  service              String?
-  status               String   @default("attempted")
-  attemptedAt          DateTime @map("attempted_at")
-  acceptedAt           DateTime? @map("accepted_at")
-  deliveredAt          DateTime? @map("delivered_at")
-  failedAt             DateTime? @map("failed_at")
-  retryAfterAt         DateTime? @map("retry_after_at")
-  skippedAt            DateTime? @map("skipped_at")
-  lastReceiptAt        DateTime? @map("last_receipt_at")
-  lastProviderEventId  String?  @map("last_provider_event_id")
-  failureCode          String?  @map("failure_code")
-  failureReason        String?  @map("failure_reason")
-  skipReason           String?  @map("skip_reason")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
-  alerts               HostedLinqAlert[]
-  ingressLatencyTraces HostedIngressLatencyTrace[]
+  id                       String   @id
+  idempotencyKey           String?  @unique @map("idempotency_key")
+  source                   String
+  sourceRef                String?  @map("source_ref")
+  template                 String?
+  groupJoinOutreachId      String?  @map("group_join_outreach_id")
+  groupJoinReplyOccurredAt DateTime? @map("group_join_reply_occurred_at")
+  phoneNumberLookupKey     String?  @map("phone_number_lookup_key")
+  phoneNumberHint          String?  @map("phone_number_hint")
+  targetKind               String?  @map("target_kind")
+  linqChatLookupKey        String?  @map("linq_chat_lookup_key")
+  messageLookupKey         String?  @unique @map("message_lookup_key")
+  messageIdSuffix          String?  @map("message_id_suffix")
+  service                  String?
+  status                   String   @default("attempted")
+  attemptedAt              DateTime @map("attempted_at")
+  acceptedAt               DateTime? @map("accepted_at")
+  deliveredAt              DateTime? @map("delivered_at")
+  failedAt                 DateTime? @map("failed_at")
+  retryAfterAt             DateTime? @map("retry_after_at")
+  skippedAt                DateTime? @map("skipped_at")
+  lastReceiptAt            DateTime? @map("last_receipt_at")
+  lastProviderEventId      String?  @map("last_provider_event_id")
+  failureCode              String?  @map("failure_code")
+  failureReason            String?  @map("failure_reason")
+  skipReason               String?  @map("skip_reason")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+  groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
+  line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  alerts                   HostedLinqAlert[]
+  ingressLatencyTraces     HostedIngressLatencyTrace[]
 
+  @@index([groupJoinOutreachId, status, attemptedAt], map: "hosted_linq_delivery_group_join_outreach_status_idx")
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
