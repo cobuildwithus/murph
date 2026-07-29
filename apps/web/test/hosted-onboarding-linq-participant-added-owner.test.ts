@@ -91,7 +91,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma,
-    })).resolves.toBe("owner_bound");
+    })).resolves.toBeUndefined();
 
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
@@ -118,7 +118,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ participantIsMe: undefined }),
       prisma: {} as never,
-    })).resolves.toBe("owner_bound");
+    })).resolves.toBeUndefined();
 
     expect(mocks.hasActiveHostedLinqManagedLine).toHaveBeenCalledOnce();
   });
@@ -140,7 +140,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ participantIsMe: false }),
       prisma: {} as never,
-    })).resolves.toBe("owner_evidence_missing");
+    })).resolves.toBeUndefined();
 
     expect(mocks.hasActiveHostedLinqManagedLine).not.toHaveBeenCalled();
   });
@@ -149,7 +149,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ actorHandle: null }),
       prisma: {} as never,
-    })).resolves.toBe("owner_evidence_missing");
+    })).resolves.toBeUndefined();
 
     expect(mocks.hasActiveHostedLinqManagedLine).not.toHaveBeenCalled();
     expect(
@@ -161,7 +161,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ actorHandle: LINE_PHONE }),
       prisma: {} as never,
-    })).resolves.toBe("owner_evidence_missing");
+    })).resolves.toBeUndefined();
   });
 
   it("does not bind a route when the actor is unresolved", async () => {
@@ -170,7 +170,51 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma: {} as never,
-    })).resolves.toBe("actor_unresolved");
+    })).resolves.toBeUndefined();
+
+    expect(
+      mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("resolves a verified email actor through the same owner boundary", async () => {
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue({
+      core: {
+        id: OWNER_MEMBER_ID,
+        suspendedAt: null,
+      },
+    });
+
+    await provisionHostedLinqParticipantAddedOwnerTx({
+      event: buildParticipantAddedEvent({
+        actorHandle: "owner@example.com",
+      }),
+      prisma: {} as never,
+    });
+
+    expect(
+      mocks.lookupHostedMemberIdentityByPhoneNumber,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.lookupHostedMemberByVerifiedEmailAddress,
+    ).toHaveBeenCalledWith({
+      address: "owner@example.com",
+      prisma: {},
+    });
+    expect(
+      mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it("does not bind an actor without current runtime access", async () => {
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
+      allowed: false,
+    });
+
+    await provisionHostedLinqParticipantAddedOwnerTx({
+      event: buildParticipantAddedEvent(),
+      prisma: {} as never,
+    });
 
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
@@ -183,7 +227,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma: {} as never,
-    })).resolves.toBe("line_unmanaged");
+    })).resolves.toBeUndefined();
 
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
     expect(

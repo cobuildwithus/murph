@@ -247,7 +247,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(null);
     mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(false);
     mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
-      "owner_evidence_missing",
+      undefined,
     );
     mocks.stageHostedLinqGroupParticipantContext.mockResolvedValue(false);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
@@ -505,7 +505,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(true);
     mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
-      "owner_bound",
+      undefined,
     );
     const rawBody = buildLinqProviderWebhookBody({
       data: {

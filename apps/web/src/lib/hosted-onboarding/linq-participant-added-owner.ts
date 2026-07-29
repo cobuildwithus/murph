@@ -39,16 +39,6 @@ import { normalizePhoneNumber } from "./phone";
 export const HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED_ENV =
   "HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED";
 
-export type HostedLinqParticipantAddedOwnerProvisionOutcome =
-  | "actor_inactive"
-  | "actor_ineligible"
-  | "actor_unresolved"
-  | "line_unmanaged"
-  | "local_inbound_not_allowlisted"
-  | "owner_bound"
-  | "owner_evidence_missing"
-  | "route_authority_conflict";
-
 type HostedLinqParticipantAddedEvent = Extract<
   HostedLinqParticipantChangedEvent,
   { event_type: "participant.added" }
@@ -96,10 +86,10 @@ export async function hasHostedLinqParticipantAddedOwnerCandidate(input: {
 export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
   event: HostedLinqParticipantChangedEvent;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedLinqParticipantAddedOwnerProvisionOutcome> {
+}): Promise<void> {
   const evidence = readHostedLinqParticipantAddedOwnerEvidence(input.event);
   if (!evidence) {
-    return "owner_evidence_missing";
+    return;
   }
 
   if (
@@ -108,7 +98,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       prisma: input.prisma,
     }))
   ) {
-    return "line_unmanaged";
+    return;
   }
 
   const actorContact = createHostedLinqParticipantContact({
@@ -119,7 +109,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
     value: evidence.actorHandle.handle,
   });
   if (!actorContact) {
-    return "actor_unresolved";
+    return;
   }
   if (
     shouldIgnoreHostedLinqForLocalInboundGuard({
@@ -127,7 +117,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       participantContact: actorContact,
     })
   ) {
-    return "local_inbound_not_allowlisted";
+    return;
   }
 
   const actorLookup = actorContact.kind === "phone"
@@ -141,7 +131,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       });
   const actor = actorLookup?.core ?? null;
   if (!actor) {
-    return "actor_unresolved";
+    return;
   }
   if (
     isHostedMemberSuspended(actor.suspendedAt)
@@ -150,13 +140,11 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       prisma: input.prisma,
     })).allowed
   ) {
-    return "actor_inactive";
+    return;
   }
 
   try {
-    const occurredAt = new Date(
-      evidence.occurredAt,
-    );
+    const occurredAt = new Date(evidence.occurredAt);
     const ensured =
       await ensureHostedLinqThreadContainerRouteFromParticipantAddTx({
         accountLookupKey: evidence.accountLookupKey,
@@ -175,19 +163,16 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
         tx: input.prisma,
       });
     }
-    return "owner_bound";
   } catch (error) {
     if (!isHostedOnboardingError(error)) {
       throw error;
     }
-    if (error.code === "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
-      return "route_authority_conflict";
-    }
-    if (error.code === "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED") {
-      return "actor_inactive";
-    }
-    if (error.code === "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER") {
-      return "actor_ineligible";
+    if (
+      error.code === "HOSTED_THREAD_ROUTE_ALREADY_BOUND"
+      || error.code === "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED"
+      || error.code === "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER"
+    ) {
+      return;
     }
     throw error;
   }
