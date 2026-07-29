@@ -519,6 +519,7 @@ export function HeroClocksIn({
   >(() => new Set());
   const [typing, setTyping] = useState(false);
   const [responseInFlight, setResponseInFlightState] = useState(false);
+  const [engaged, setEngagedState] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [groupMode, setGroupModeState] = useState(false);
   const [composeSheet, setComposeSheet] =
@@ -544,6 +545,11 @@ export function HeroClocksIn({
   const setResponseInFlight = (next: boolean) => {
     responseInFlightRef.current = next;
     setResponseInFlightState(next);
+  };
+
+  const setEngaged = () => {
+    engagedRef.current = true;
+    setEngagedState(true);
   };
 
   const nextId = () => ++idRef.current;
@@ -1033,7 +1039,7 @@ export function HeroClocksIn({
     const text = composerValue.trim();
     if (!text || responseInFlightRef.current) return;
 
-    engagedRef.current = true;
+    setEngaged();
     cancelDemoRef.current?.();
     setResponseInFlight(true);
     if (!groupMode) {
@@ -1078,7 +1084,7 @@ export function HeroClocksIn({
     if (engagedRef.current) return;
 
     const restorePrivateThread = groupMode;
-    engagedRef.current = true;
+    setEngaged();
     cancelDemoRef.current?.();
     groupSequenceStartedRef.current = false;
     setComposeSheet("hidden");
@@ -1093,7 +1099,7 @@ export function HeroClocksIn({
   const runExchangeOnce = (ex: Exchange) => {
     if (responseInFlightRef.current) return;
 
-    engagedRef.current = true;
+    setEngaged();
     cancelDemoRef.current?.();
     prepareScheduledDemo();
     setResponseInFlight(true);
@@ -1147,7 +1153,7 @@ export function HeroClocksIn({
     if (composeSheet !== "hidden" || responseInFlightRef.current) return;
     if (f.member) {
       if (groupSequenceStartedRef.current) return;
-      engagedRef.current = true;
+      setEngaged();
       cancelDemoRef.current?.();
       prepareScheduledDemo();
       focusConversation();
@@ -1171,8 +1177,8 @@ export function HeroClocksIn({
   const composeSheetMembers = GROUP_MEMBERS.filter((member) =>
     usedFloaters.has(member.name),
   );
-  const composerBusy = responseInFlight && engagedRef.current;
-  const conversationIsLive = engagedRef.current;
+  const composerBusy = responseInFlight && engaged;
+  const conversationIsLive = engaged;
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
