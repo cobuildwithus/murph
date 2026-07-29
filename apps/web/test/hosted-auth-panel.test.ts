@@ -8,18 +8,10 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   hostedPhoneAuthProps: null as {
-    onAuthCompleted?: (result: {
-      payload: {
-        activationPending: boolean;
-        inviteCode: string;
-        joinUrl: string;
-        stage: string;
-      };
-      redirectUrl: string;
-    }) => Promise<void> | void;
+    interactionGated?: boolean;
+    onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
     onCodeSent?: () => void;
     onCompleted?: (payload: unknown) => Promise<void> | void;
-    sendCodeGated?: boolean;
   } | null,
   loginWithCode: vi.fn(),
   loginWithTelegram: vi.fn(),
@@ -117,7 +109,8 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
     disableSignup?: boolean;
-    onAuthCompleted?: unknown;
+    interactionGated?: boolean;
+    onAuthenticated?: unknown;
     onCodeSent?: () => void;
     onCompleted?: unknown;
     suppressAuthenticatedSessionIssue?: boolean;
@@ -445,7 +438,59 @@ test("HostedAuthPanel keeps auth mounted and puts completion progress on the act
   expect(container.textContent).not.toContain("Setting things up");
   expect(container.textContent).not.toContain("Keep this tab open");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
-  expect(mocks.hostedPhoneAuthProps?.sendCodeGated).toBe(true);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(true);
+});
+
+test("HostedAuthPanel locks every competing method while phone completion is pending", async () => {
+  let resolveCompletion: (() => void) | null = null;
+  mocks.completeHostedPrivyAuth.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveCompletion = () =>
+        resolve({
+          payload: {
+            inviteCode: "invite-code",
+            joinUrl: "/join/invite-code",
+            stage: "active",
+          },
+          redirectUrl: "/home",
+        });
+    }),
+  );
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    void mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
+    });
+    await Promise.resolve();
+  });
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const emailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "phone",
+  });
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(true);
+  expect(telegramButton?.disabled).toBe(true);
+  expect(emailButton?.disabled).toBe(true);
+  expect(container.textContent).not.toContain("Setting things up");
+
+  await act(async () => {
+    resolveCompletion?.();
+    await Promise.resolve();
+  });
 });
 
 test("HostedAuthPanel surfaces shared completion failures and restores the auth methods", async () => {
@@ -481,9 +526,50 @@ test("HostedAuthPanel surfaces shared completion failures and restores the auth 
   expect(container.textContent).toContain("Checkout did not return a redirect URL.");
   expect(container.textContent).not.toContain("Finishing...");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
-  expect(mocks.hostedPhoneAuthProps?.sendCodeGated).toBe(false);
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
   expect(recoveredTelegramButton?.disabled).toBe(false);
   expect(recoveredEmailButton?.disabled).toBe(false);
+});
+
+test("HostedAuthPanel restores phone recovery and competing methods after phone completion fails", async () => {
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
+    new Error("Phone completion did not finish."),
+  );
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedPhoneAuthProps?.onAuthenticated).toBeTypeOf("function");
+  let completionError: unknown = null;
+
+  await act(async () => {
+    try {
+      await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+        authMethod: "phone",
+      });
+    } catch (error) {
+      completionError = error;
+    }
+  });
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Telegram",
+  ) as HTMLButtonElement | undefined;
+  const emailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === "Email",
+  ) as HTMLButtonElement | undefined;
+
+  expect(completionError).toEqual(new Error("Phone completion did not finish."));
+  expect(container.textContent).not.toContain("Phone completion did not finish.");
+  expect(container.textContent).not.toContain("Setting things up");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(false);
+  expect(telegramButton?.disabled).toBe(false);
+  expect(emailButton?.disabled).toBe(false);
 });
 
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {
@@ -699,6 +785,15 @@ test("HostedAuthPanel shows launch consent after homepage signup auth before red
 
 test("HostedAuthPanel phone signup completion pauses on launch consent before redirecting", async () => {
   const onCompleted = vi.fn();
+  mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/home",
+  });
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
@@ -708,17 +803,11 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
   );
   cleanupRender = cleanup;
 
-  expect(mocks.hostedPhoneAuthProps?.onAuthCompleted).toBeTypeOf("function");
+  expect(mocks.hostedPhoneAuthProps?.onAuthenticated).toBeTypeOf("function");
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -759,6 +848,15 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   const onCompleted = vi.fn()
     .mockRejectedValueOnce(new Error("Could not finish sign in."))
     .mockResolvedValueOnce(undefined);
+  mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/home",
+  });
   const { cleanup, container } = await renderClientComponent(
     createElement(HostedAuthPanel, {
       methods: ["phone", "telegram", "email"],
@@ -769,14 +867,8 @@ test("HostedAuthPanel keeps consent mounted until downstream completion succeeds
   cleanupRender = cleanup;
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -813,6 +905,25 @@ function setInputValue(
 
 test("HostedAuthPanel keeps Decline terminal when a late status result says consent is no longer required", async () => {
   const onCompleted = vi.fn();
+  mocks.completeHostedPrivyAuth
+    .mockResolvedValueOnce({
+      payload: {
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    })
+    .mockResolvedValueOnce({
+      payload: {
+        activationPending: false,
+        inviteCode: "second-invite-code",
+        joinUrl: "/join/second-invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
   let releaseLogout: (() => void) | null = null;
   mocks.logoutHostedAppSession.mockImplementationOnce(
     () =>
@@ -831,14 +942,8 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
   cleanupRender = cleanup;
 
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 
@@ -875,14 +980,8 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
   // The panel stays mounted and returns to auth after a successful decline, so
   // a member who changes their mind must be able to finish a fresh attempt.
   await act(async () => {
-    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
-      payload: {
-        activationPending: false,
-        inviteCode: "second-invite-code",
-        joinUrl: "/join/second-invite-code",
-        stage: "active",
-      },
-      redirectUrl: "/home",
+    await mocks.hostedPhoneAuthProps?.onAuthenticated?.({
+      authMethod: "phone",
     });
   });
 

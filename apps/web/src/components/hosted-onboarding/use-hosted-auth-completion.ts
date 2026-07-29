@@ -16,10 +16,10 @@ export interface HostedPrivyAuthenticatedInput {
 }
 
 /**
- * Owns the shared post-Privy-auth tail for every auth method: complete the
- * hosted signup, then hand off (or redirect). Auth method components only
- * authenticate with Privy and report back through `completeAuth`; callers
- * render the pending/error state.
+ * Owns the HostedAuthPanel post-Privy-auth tail for every method: complete the
+ * hosted signup, then hand off (or redirect). Panel auth controls only
+ * authenticate with Privy and report back through `completeAuth`; the panel
+ * renders the pending/error state.
  */
 export function useHostedAuthCompletion(input: {
   inviteCode?: string | null;
@@ -29,7 +29,10 @@ export function useHostedAuthCompletion(input: {
     useState<HostedPrivyAuthMethod | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  async function completeAuth(authenticated: HostedPrivyAuthenticatedInput) {
+  async function completeAuth(
+    authenticated: HostedPrivyAuthenticatedInput,
+    options: { throwOnError?: boolean } = {},
+  ) {
     setCompletingMethod(authenticated.authMethod);
     setErrorMessage(null);
 
@@ -44,10 +47,13 @@ export function useHostedAuthCompletion(input: {
       }
       navigateHostedAuthRedirect(result.redirectUrl);
     } catch (error) {
+      setCompletingMethod(null);
+      if (options.throwOnError) {
+        throw error;
+      }
       setErrorMessage(
         toErrorMessage(error, "We could not finish signing you in."),
       );
-      setCompletingMethod(null);
     }
   }
 

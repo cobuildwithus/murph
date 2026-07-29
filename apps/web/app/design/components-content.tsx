@@ -36,8 +36,9 @@ import {
   DEFAULT_AUTH_DIALOG_TITLE,
 } from "@/src/components/hosted-onboarding/auth-dialog";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
+import { HostedAuthenticatedPhoneAuthState } from "@/src/components/hosted-onboarding/hosted-phone-auth-views";
 import { HostedTelegramAuthButtonPresentation } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
-import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
 import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptanceInput,
@@ -550,19 +551,34 @@ export function ComponentsContent() {
                   </HostedInlineAuthButton>
                 </div>
               </DialogPreviewFrame>
-              <DialogPreviewFrame label="Verification completion">
-                <HostedVerificationCodeStep
+              <DialogPreviewFrame label="Phone verification completion">
+                <HostedCodeEntryStep
                   autoFocus={false}
                   code="123456"
-                  description="We emailed the latest code."
+                  disableSignup={false}
                   disabled
+                  intent="auth"
                   onCodeChange={() => {}}
                   onResendCode={() => {}}
-                  onSubmit={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  onVerifyCode={() => {}}
                   pendingAction="verify-code"
-                  primaryActionLabel="Verify email"
-                  primaryActionPendingLabel="Finishing..."
+                  secondaryActionSize="lg"
                   size="compact"
+                  verificationPhoneNumberHint="*** 2671"
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Phone resume completion">
+                <HostedAuthenticatedPhoneAuthState
+                  body=""
+                  description=""
+                  disabled
+                  onContinue={() => {}}
+                  onUseDifferentNumber={() => {}}
+                  pendingAction="continue"
+                  secondaryActionSize="lg"
+                  title=""
+                  view="manual-resume"
                 />
               </DialogPreviewFrame>
               <DialogPreviewFrame label="Resumable completion">

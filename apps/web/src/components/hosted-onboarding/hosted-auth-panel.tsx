@@ -179,6 +179,10 @@ export function HostedAuthPanel({
     });
   }
 
+  async function handlePhoneAuthenticated(input: { authMethod: "phone" }) {
+    await completion.completeAuth(input, { throwOnError: true });
+  }
+
   async function handleSignOutResumableAuth() {
     await logoutHostedAppSession({ logoutPrivy: logout });
     await onSignOut?.();
@@ -220,12 +224,12 @@ export function HostedAuthPanel({
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
           inviteCode={inviteCode}
-          onAuthCompleted={handleAuthCompleted}
+          interactionGated={authCompletionPending}
+          onAuthenticated={handlePhoneAuthenticated}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}
           phoneInputAutoFocus
           renderCaptcha={false}
-          sendCodeGated={authCompletionPending}
           size={size}
           suppressAuthenticatedSessionIssue={telegramActive || resumableAuth !== null}
         />
