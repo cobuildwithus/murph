@@ -9,7 +9,6 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -19,6 +18,9 @@ import {
   listHostedLinqAssignableHomeLines,
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
+import {
+  readHostedLinqLinePlanningLoadSnapshot,
+} from "../hosted-onboarding/linq-line-planning-load";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getPrisma } from "../prisma";
 
@@ -32,14 +34,19 @@ export interface HostedLinqLineRehomeOverview {
     id: string;
     suspendedAt: string | null;
   };
+  planningProjection: {
+    complete: boolean;
+    unprojectedGroupThreadCount: number;
+  };
 }
 
 export interface HostedLinqLineRehomeTargetLine {
-  activeMemberCount: number;
-  activeMemberLimit: number | null;
+  activeDirectMemberCount: number;
   maxNewConversationsPerDay: number | null;
+  plannedMessages: number;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  provisionedGroupThreadCount: number;
 }
 
 export interface HostedLinqLineRehomeRoutingSummary {
@@ -80,26 +87,37 @@ export async function readHostedLinqLineRehomeOverview(input: {
     }),
     listHostedLinqAssignableHomeLines({ prisma }),
   ]);
-  const activeMembersByRecipientPhone =
-    await countHostedMemberHomeLinqBindingsByRecipientPhone({
-      now,
-      prisma,
-      recipientPhones: targetLines.map((line) => line.phoneNumber),
-    });
+  const planningLoad = await readHostedLinqLinePlanningLoadSnapshot({
+    lines: targetLines,
+    now,
+    prisma,
+  });
 
   return {
-    assignableTargetLines: targetLines.map((line) => ({
-      activeMemberCount: activeMembersByRecipientPhone.get(line.phoneNumber) ?? 0,
-      activeMemberLimit: line.activeMemberLimit,
-      maxNewConversationsPerDay: line.maxNewConversationsPerDay,
-      phoneNumberHint: line.phoneNumberHint,
-      phoneNumberLookupKey: line.phoneNumberLookupKey,
-    })),
+    assignableTargetLines: targetLines.map((line) => {
+      const load = planningLoad.byRecipientPhone.get(line.phoneNumber) ?? {
+        activeDirectMemberCount: 0,
+        plannedMessages: 0,
+        provisionedGroupThreadCount: 0,
+      };
+      return {
+        activeDirectMemberCount: load.activeDirectMemberCount,
+        maxNewConversationsPerDay: line.maxNewConversationsPerDay,
+        plannedMessages: load.plannedMessages,
+        phoneNumberHint: line.phoneNumberHint,
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
+        provisionedGroupThreadCount: load.provisionedGroupThreadCount,
+      };
+    }),
     currentRouting: summarizeHostedLinqRehomeRouting(routingRead),
     generatedAt: now.toISOString(),
     member: {
       id: member.id,
       suspendedAt: member.suspendedAt?.toISOString() ?? null,
+    },
+    planningProjection: {
+      complete: planningLoad.projectionCoverageComplete,
+      unprojectedGroupThreadCount: planningLoad.unprojectedGroupThreadCount,
     },
   };
 }

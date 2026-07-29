@@ -583,6 +583,7 @@ type PrismaFixtureBase = {
   hostedThreadRoute?: {
     findFirst?: MockedFunction;
     findMany?: MockedFunction;
+    groupBy?: MockedFunction;
     updateMany?: MockedFunction;
   };
   hostedUsageReferral?: {
@@ -7679,7 +7680,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
   });
 
-  it("keeps member-initiated first contact on the incoming line at the proactive quota", async () => {
+  it("keeps member-initiated first contact on the incoming line when weighted planning prefers a paced-out fallback", async () => {
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
     const incomingLineLookupKey = createHostedPhoneLookupKey(incomingLinePhone);
@@ -7698,7 +7699,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       input.where?.linqHomeLineAssignedAt
         ? [{
             linqRecipientPhoneLookupKey: incomingLineLookupKey,
-            _count: { _all: 1 },
+            _count: { _all: 500 },
           }]
         : []
     );
@@ -7732,7 +7733,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             phoneNumber: incomingLinePhone,
           },
           {
+            maxNewConversationsPerDay: 1,
             phoneNumber: fallbackLinePhone,
+            proactiveConversationCount: 1,
+            proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
           },
         ],
       }),
@@ -10989,11 +10993,13 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
+        groupBy: vi.fn().mockResolvedValue([]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
   } else {
     prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
+    prisma.hostedThreadRoute.groupBy ??= vi.fn().mockResolvedValue([]);
     prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
   }
   if (!prisma.hostedUsageReferral?.findUnique) {

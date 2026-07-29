@@ -19,6 +19,7 @@ async function main(): Promise<void> {
 
   await prisma.$transaction(async (tx) => {
     await syncHostedLinqConfiguredLinesTx({
+      // Rollback compatibility only; weighted assignment does not read this.
       activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
       observedAt,
       phoneNumbers: environment.linqConversationPhoneNumbers,
