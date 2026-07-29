@@ -10,7 +10,10 @@ import {
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
 } from "../hosted-crypto/secure-box";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
@@ -453,8 +456,14 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
       memberId: container.ownerMemberId,
       prisma: input.prisma,
     });
-  } catch {
-    return finish("consent_unavailable");
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_CONSENT_REQUIRED"
+    ) {
+      return finish("consent_unavailable");
+    }
+    throw error;
   }
 
   const projection = await input.prisma.hostedAddressBookProjection.findUnique({

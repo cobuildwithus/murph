@@ -32,6 +32,7 @@ import {
   replaceHostedAddressBookProjection,
 } from "@/src/lib/hosted-address-book/projection";
 import type { HostedGcpKmsClient } from "@/src/lib/hosted-crypto/gcp-kms";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const KEY_VERSION_NAME =
   "projects/example/locations/global/keyRings/address-book/cryptoKeys/phone-token/cryptoKeyVersions/1";
@@ -497,7 +498,11 @@ describe("hosted address-book projection lifecycle", () => {
     }
     if (condition === "consent") {
       accessMocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(
-        new Error("missing consent"),
+        hostedOnboardingError({
+          code: "HOSTED_CONSENT_REQUIRED",
+          httpStatus: 403,
+          message: "Accept the current Murph legal consent before continuing.",
+        }),
       );
     }
     await expect(readHostedOwnerAddressBookAdvisoryNames({
@@ -516,6 +521,24 @@ describe("hosted address-book projection lifecycle", () => {
       requestedHandleCount: 1,
     });
     expect(accessMocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(crypto.kms.macSign).not.toHaveBeenCalled();
+  });
+
+  it("rethrows failures from the owner consent check", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    const failure = new Error("consent database unavailable");
+    accessMocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(
+      failure,
+    );
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+12125550100"],
+      prisma: store as never,
+      source: SOURCE,
+    })).rejects.toBe(failure);
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
   });
 

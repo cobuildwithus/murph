@@ -1110,7 +1110,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     }
   });
 
-  it("returns unavailable when the automatic owner-contact lookup fails", async () => {
+  it("returns unavailable when advisory consent storage fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
       candidates: [{
@@ -1120,7 +1120,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       status: "ok",
     });
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
-      new Error("sensitive storage failure"),
+      new Error("consent database unavailable"),
     );
 
     await expect(handleHostedRuntimeGroupTool({
@@ -1137,7 +1137,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(
-      "sensitive storage failure",
+      "consent database unavailable",
     );
     warn.mockRestore();
   });
