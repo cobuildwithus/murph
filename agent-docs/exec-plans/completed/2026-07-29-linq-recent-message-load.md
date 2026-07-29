@@ -1,6 +1,6 @@
 # Hosted Linq recent message load balancing
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -73,10 +73,30 @@ Updated: 2026-07-29
 
 ## Verification
 
-- Commands to run: focused Vitest suites, PostgreSQL routing/store tests with
-  `EXPLAIN`, Prisma validation/generation as required, `pnpm test:diff` for the
-  touched owners, `pnpm verify:acceptance`, preliminary specialist ReviewGPT,
-  parent diff review, applicable final ReviewGPT, CI, and merge-tree proof.
-- Expected outcomes: exact metric and precedence behavior pass; PostgreSQL uses
-  the new indexes on a bounded candidate query; no regression in sticky routing,
-  health filters, daily caps, or group-outreach selection.
+- Focused routing, caller, store, migration, and PostgreSQL suites pass,
+  including exact 168-hour boundary behavior and both automatic callers'
+  one-line fast paths.
+- PostgreSQL result and `EXPLAIN (FORMAT JSON, COSTS OFF)` proof pass against
+  the production query shape and both exact partial indexes. A 200,000-effect
+  local scenario used two index-only scans; its immediate warm run planned in
+  5.5 ms and executed in 28.3 ms.
+- Web typecheck and touched-file lint pass. The broad Web suite passes 7,408
+  tests with 226 skipped on the frozen candidate tree.
+- Canonical local `test:diff` admission remained unavailable for ten minutes.
+  The Crabbox acceptance fallback proved all task paths and the Web build. Its
+  first run had one unrelated 1 ms handoff-timeout flake that passed ten of ten
+  isolated reruns. The unchanged-head retry passed that test and the complete
+  Web suite, then hit a composed-verifier race when a concurrent package build
+  removed Contracts `dist` before its prepared artifact check. A direct
+  sequential Contracts build plus coverage/artifact verification passes all
+  215 tests and the artifact check.
+- Preliminary specialist ReviewGPT returned one coverage finding: the
+  PostgreSQL proof was not CI-routed and did not prove the production query
+  plan. The accepted correction adds the existing migrated-PostgreSQL CI route
+  and exact index-plan assertions; no returned patch artifact was used.
+- Local product-experience review found that this is the smallest complete
+  automatic experience and returned no findings. Parent final review found no
+  remaining correctness, ownership, complexity, or evidence gap.
+- Final exact-head ReviewGPT, CI, and merge-tree proof run after plan closure
+  and the final push.
+Completed: 2026-07-29
