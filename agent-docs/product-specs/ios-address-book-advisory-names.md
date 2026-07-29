@@ -24,12 +24,16 @@ policy that this member-scoped design intentionally avoids.
   limited and full system access.
 - It inspects at most 5,000 person contacts, 20,000 phone values, and eight
   phone values per contact, then deterministically emits at most 1,000 rows.
-- Each row contains a canonical E.164 phone number and one safe first-name
-  token plus an optional last initial. iOS resolves structurally valid national
-  formats with the Contacts framework's default country code and a pinned
-  numbering-plan parser; invalid or ambiguous numbers, extensions,
-  sentence-shaped labels, ambiguous duplicate names, role/relationship labels,
-  URLs, email-like labels, and non-person contacts are omitted.
+- Each row contains a canonical E.164 phone number and either one safe
+  first-name token plus an optional last initial, or exactly two distinct safe
+  labels joined by ` / ` when separate Contacts cards disagree. The separator
+  communicates alternatives rather than inventing one full name or selecting
+  an arbitrary card. iOS resolves structurally valid national formats with the
+  Contacts framework's default country code and a pinned numbering-plan
+  parser; invalid or ambiguous numbers, extensions, sentence-shaped labels,
+  more than two conflicting labels, oversized combined labels,
+  role/relationship labels, URLs, email-like labels, and non-person contacts
+  are omitted.
 - An empty projection cannot enable sharing. The server accepts an empty
   contact list only with the exact mutation id of an already-committed
   replacement so iOS can confirm a lost response without persisting contacts.
@@ -105,7 +109,7 @@ The only consumer is the existing route-authorized
 2. Select at most 16 canonical phone handles while retaining each handle's
    durable activation result independently.
 3. Resolve only the human group owner's enabled projection.
-4. Omit ambiguous labels and return each remaining label as
+4. Return each remaining single label or explicit two-label alternative as
    `unverifiedOwnerContactLabel`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
    optional overlay; never degrade the truthful roster.
@@ -169,6 +173,13 @@ cannot be recalled and remain subject to provider, recipient, device, and backup
 retention.
 
 ## Rollout
+
+For the two-label extension, deploy Web acceptance before distributing an iOS
+build that may emit ` / `. Old iOS builds continue sending the existing
+single-label subset, and the updated Web parser accepts both forms. Rolling Web
+back while that iOS build is live can reject an entire replacement, so rollback
+must first stop distribution of the new producer or temporarily disable
+replacement writes.
 
 1. Apply the additive Postgres migration.
 2. Deploy the updated Cloudflare runner consumer while the current Web producer

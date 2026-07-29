@@ -56,7 +56,10 @@ describe("hosted address-book request parsing", () => {
       contacts: [
         { advisoryName: "Alex R.", phoneNumber: "+12125550100" },
         { advisoryName: "Alex R.", phoneNumber: "+12125550100" },
-        { advisoryName: "O’Brien S.", phoneNumber: "+442079460958" },
+        {
+          advisoryName: "O’Brien S. / Renée S.",
+          phoneNumber: "+442079460958",
+        },
         { advisoryName: "Mary-Jane N.", phoneNumber: "+33142278186" },
       ],
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
@@ -65,7 +68,10 @@ describe("hosted address-book request parsing", () => {
       baseRevision: 0,
       contacts: [
         { advisoryName: "Alex R.", phoneNumber: "+12125550100" },
-        { advisoryName: "O’Brien S.", phoneNumber: "+442079460958" },
+        {
+          advisoryName: "O’Brien S. / Renée S.",
+          phoneNumber: "+442079460958",
+        },
         { advisoryName: "Mary-Jane N.", phoneNumber: "+33142278186" },
       ],
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
@@ -87,6 +93,19 @@ describe("hosted address-book request parsing", () => {
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
       schemaVersion: 1,
     })).toThrow(/conflicting/u);
+    for (const advisoryName of [
+      "Alex / Alex",
+      "Alex / alex",
+      "Alex/Bob",
+      "Alex / Bob / Cam",
+    ]) {
+      expect(() => parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName, phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      })).toThrow(/advisory names are invalid/u);
+    }
     expect(() => parseHostedAddressBookReplaceRequest({
       baseRevision: 0,
       contacts: Array.from(
@@ -140,6 +159,15 @@ describe("hosted address-book request parsing", () => {
     expect(() => parseHostedAddressBookReplaceRequest({
       baseRevision: 0,
       contacts: [{ advisoryName: "My therapist", phoneNumber: "+12125550100" }],
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    })).toThrow(/relationships or roles/u);
+    expect(() => parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: [{
+        advisoryName: "Alex / My therapist",
+        phoneNumber: "+12125550100",
+      }],
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
       schemaVersion: 1,
     })).toThrow(/relationships or roles/u);
@@ -259,7 +287,10 @@ describe("hosted address-book projection lifecycle", () => {
     const request = parseHostedAddressBookReplaceRequest({
       baseRevision: 0,
       contacts: [
-        { advisoryName: "Alex R.", phoneNumber: "+12125550100" },
+        {
+          advisoryName: "Alex R. / Lex R.",
+          phoneNumber: "+12125550100",
+        },
         { advisoryName: "Sam K.", phoneNumber: "+442079460958" },
       ],
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
@@ -300,7 +331,7 @@ describe("hosted address-book projection lifecycle", () => {
     });
 
     expect(result.names).toEqual(new Map([
-      ["+12125550100", "Alex R."],
+      ["+12125550100", "Alex R. / Lex R."],
       ["+442079460958", "Sam K."],
     ]));
     expect(result).toMatchObject({
