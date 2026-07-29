@@ -9,7 +9,7 @@ const removedProgressCardUrlExports = [
   "encodeExperimentProgressCard",
 ] as const;
 
-describe("@murphai/contracts 2.0 progress-card URL API removal", () => {
+describe("@murphai/contracts progress-card URL API removal", () => {
   it("keeps the private card schema while removing every URL codec export", () => {
     expect(contracts).toHaveProperty("EXPERIMENT_PROGRESS_CARD_VERSION", 2);
     expect(contracts).toHaveProperty("experimentProgressCardSchema");
