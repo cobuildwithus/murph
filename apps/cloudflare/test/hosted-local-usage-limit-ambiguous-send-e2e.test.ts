@@ -240,7 +240,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(deliveriesAfterAmbiguousSend[0]).toMatchObject({
       acceptedAt: null,
       failedAt: expect.any(Date),
-      failureCode: "linq_usage_limit_dispatch_retryable",
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
       status: "failed",
       template: "ai_usage_quota",
     });
