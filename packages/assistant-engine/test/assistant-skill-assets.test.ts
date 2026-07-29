@@ -1626,7 +1626,10 @@ describe('assistant skill assets', () => {
       'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
     )
     expect(compact).toContain(
-      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
+      'A reminder is a cue. An accountability check-in is normally a separate, later action whose job is to learn the outcome, not repeat the cue.',
+    )
+    expect(compact).toContain(
+      'The accepted dense-loop policy above is the narrow exception',
     )
     expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',

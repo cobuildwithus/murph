@@ -92,6 +92,7 @@ const SIGNED_PRIVATE_IMAGE_URL =
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
+    expect(MURPH_GROUP_TOOL.deferLoading).toBe(true);
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);

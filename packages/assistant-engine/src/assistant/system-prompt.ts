@@ -1577,7 +1577,17 @@ function buildAssistantSharedAutomationPreferenceText(
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(
         "vault-cli memory upsert"
       )} so later automations reuse it instead of asking again.`;
-  return `Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.
+  const openingGuidance = joinPromptSections(
+    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.",
+    conversationScope === "direct"
+      ? `For private reminders, prefer one useful interruption over several: when the current request or recent context shows same-purpose reminders in one practical action window, offer to combine them before saving, without silently changing requested timing. For a dense personal action cadence such as several times in one day or every few hours, do not create an open-ended one-way loop; read ${code(
+          buildAssistantSkillFileRef("behavior-followthrough")
+        )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
+          hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
+        )} so the scheduled turn can inspect the recent reply loop.`
+      : null
+  );
+  return `${openingGuidance}
 
 For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
 
