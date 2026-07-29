@@ -119,6 +119,9 @@ import type {
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
+import {
+  resolveAssistantVaultImageResponseMedia,
+} from '../assistant/vault-file-send.js'
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
@@ -264,7 +267,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
+    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor; the runtime reloads its vault ref and owns the canonical byte metadata before accepting it. Replaces the current response media batch for this turn only. It does not send directly.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2734,15 +2737,28 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
+      const media = await resolveAttachedResponseMedia({
+        media: input.request.media,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+      if (!media) {
+        return {
+          ...toolTextResult(
+            false,
+            'private response image could not be prepared; rerun the trusted command and attach its returned media',
+          ),
+          finalActionPatch: { kind: 'reply-required' },
+        }
+      }
       return {
         ...toolTextResult(
           true,
-          input.request.media.length === 0
+          media.length === 0
             ? 'response media cleared'
-            : `${input.request.media.length} response image${input.request.media.length === 1 ? '' : 's'} attached`,
+            : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
         ),
         responseMediaPatch: {
-          media: input.request.media,
+          media,
           op: 'replace',
         },
       }
@@ -3319,6 +3335,37 @@ export async function executeMurphDynamicToolRequest(input: {
         unknownOutcomeOnTransportError: true,
       })
     }
+  }
+}
+
+async function resolveAttachedResponseMedia(input: {
+  media: readonly AssistantResponseMedia[]
+  vaultRoot: string | null
+}): Promise<AssistantResponseMedia[] | null> {
+  if (!input.media.some((item) => item.kind === 'vault_image')) {
+    return [...input.media]
+  }
+  const vaultRoot = input.vaultRoot
+  if (!vaultRoot) {
+    return null
+  }
+  try {
+    const media: AssistantResponseMedia[] = []
+    for (const item of input.media) {
+      media.push(
+        item.kind === 'vault_image'
+          ? await resolveAssistantVaultImageResponseMedia({
+              alt: item.alt,
+              ref: item.ref,
+              source: item.source,
+              vaultRoot,
+            })
+          : item,
+      )
+    }
+    return media
+  } catch {
+    return null
   }
 }
 

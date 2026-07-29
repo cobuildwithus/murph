@@ -35,6 +35,8 @@ const imageGenerationStartedReplyText =
   "I started generating it and can keep helping while it finishes.";
 const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
+const unavailablePrivateImageReplyText =
+  "I could not prepare that private image, so I have not sent the wrong file.";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
 
@@ -174,7 +176,9 @@ describe("hosted local Codex image media delivery e2e", () => {
       buildAssistantProviderRequestDerivedMurphToolCall(
         "attach_response_media",
         ({ requestMatchText }) => ({
-          media: readPrivateGeneratedMedia(requestMatchText),
+          media: readPrivateGeneratedMedia(requestMatchText, {
+            corruptRelayedHash: true,
+          }),
         }),
       ),
       generatedImageReplyText,
@@ -359,6 +363,67 @@ describe("hosted local Codex image media delivery e2e", () => {
       2,
     );
   }, 360_000);
+
+  it("continues the same turn with a visible recovery when private image preparation fails", async () => {
+    const materializedChatId = `chat_local_codex_media_${userId}`;
+    const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
+    const attachmentCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    });
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("attach_response_media", {
+        media: [{
+          alt: "Unavailable private progress image",
+          contentType: "image/png",
+          filename: "missing-progress.png",
+          kind: "vault_image",
+          ref: "raw/captures/missing-progress.png",
+          sha256: "a".repeat(64),
+          sizeBytes: 123,
+          source: "murph.experiment-progress-card",
+        }],
+      }),
+      buildAssistantProviderMurphToolCall("finish_without_reply", {}),
+      unavailablePrivateImageReplyText,
+    ], {
+      matchInputContains: "Send the unavailable private progress image",
+    });
+
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_codex_missing_private_media_${userId}`,
+        messageId: `msg_codex_missing_private_media_${userId}`,
+        text: "Send the unavailable private progress image.",
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(readObservedLinqMessageParts(replySend)).toEqual([
+      {
+        type: "text",
+        value: unavailablePrivateImageReplyText,
+      },
+    ]);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(attachmentCountBeforeReply);
+
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+  }, 300_000);
 });
 
 function expectPriceableImageUsage(
@@ -400,7 +465,10 @@ function readLatestSavedGeneratedImageRef(): string {
   );
 }
 
-function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
+function readPrivateGeneratedMedia(
+  requestMatchText: string,
+  options: { corruptRelayedHash?: boolean } = {},
+): unknown[] {
   const trustedCompletionContexts = [
     ...requestMatchText.matchAll(
       /\n(\[\{"inputId":.*\}\])\nFor a ready result,/gu,
@@ -430,7 +498,12 @@ function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
             && typeof item.sha256 === "string"
           )
         ) {
-          return result.media;
+          return options.corruptRelayedHash
+            ? result.media.map((item) => ({
+                ...item,
+                sha256: "a".repeat(64),
+              }))
+            : result.media;
         }
       }
     } catch {

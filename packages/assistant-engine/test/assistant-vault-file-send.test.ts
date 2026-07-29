@@ -15,7 +15,10 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  executeMurphDynamicToolRequest,
+  readMurphDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
@@ -335,6 +338,121 @@ describe('assistant vault-file send', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_IMAGE_CHANGED_AFTER_CAPTURE',
     })
+  })
+
+  it('snapshots vault image metadata at the trusted attachment boundary', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-image-attach-',
+    )
+    tempRoots.push(parentRoot)
+    const bytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d,
+    ])
+    const ref = 'raw/captures/progress-card.png'
+    await mkdir(path.join(vaultRoot, 'raw', 'captures'), { recursive: true })
+    await writeFile(path.join(vaultRoot, ...ref.split('/')), bytes)
+    const request = readMurphDynamicToolRequest({
+      id: 1,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: [{
+            alt: 'Experiment progress',
+            contentType: 'image/png',
+            filename: 'progress-card.png',
+            kind: 'vault_image',
+            ref,
+            sha256: 'a'.repeat(64),
+            sizeBytes: bytes.byteLength,
+            source: 'murph.experiment-progress-card',
+          }],
+        },
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
+    })
+    expect(request?.kind).toBe('attach-response-media')
+    if (!request || request.kind !== 'attach-response-media') {
+      throw new Error('Expected a valid response-media tool request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot,
+    })
+    const image = result.responseMediaPatch?.media[0]
+    expect(image).toMatchObject({
+      alt: 'Experiment progress',
+      contentType: 'image/png',
+      filename: 'progress-card.png',
+      kind: 'vault_image',
+      ref,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sizeBytes: bytes.byteLength,
+      source: 'murph.experiment-progress-card',
+    })
+    if (!image || image.kind !== 'vault_image') {
+      throw new Error('Expected attached private image media.')
+    }
+    await expect(readVerifiedAssistantVaultImageBytes({
+      image,
+      vaultRoot,
+    })).resolves.toEqual(bytes)
+  })
+
+  it('rejects an unreadable private image before committing response media', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-image-attach-missing-',
+    )
+    tempRoots.push(parentRoot)
+    const request = readMurphDynamicToolRequest({
+      id: 1,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: [{
+            alt: 'Experiment progress',
+            contentType: 'image/png',
+            filename: 'missing.png',
+            kind: 'vault_image',
+            ref: 'raw/captures/missing.png',
+            sha256: 'a'.repeat(64),
+            sizeBytes: 123,
+            source: 'murph.experiment-progress-card',
+          }],
+        },
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
+    })
+    if (!request || request.kind !== 'attach-response-media') {
+      throw new Error('Expected a valid response-media tool request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining(
+          'private response image could not be prepared',
+        ),
+      }],
+      success: false,
+    })
+    expect(result.finalActionPatch).toEqual({ kind: 'reply-required' })
+    expect(result.responseMediaPatch).toBeUndefined()
   })
 
   it('leaves ordinary vault-file permissions unchanged', async () => {
