@@ -1337,16 +1337,20 @@ provider-event insertion. A managed-line add candidate instead inserts the
 unique provider-event fence first, then retains the existing route-to-chat lock
 order while establishing the canonical route for the active Murph member named
 by `added_by_handle`, or correcting that same route when the legacy
-first-speaker fallback committed first. The preflight that selects this lock
-order grants no authority; the transaction revalidates the active managed line.
+first-speaker fallback committed first. Immutable signed event shape alone
+selects this lock order; the transaction separately revalidates the active
+managed line before granting any authority.
 That managed self-add is consumed as routing authority and is not also staged
 as a human participant-addition hint for the assistant.
 The route retains one `ownerMemberId`; no actor evidence is persisted. The
 legacy first-message fallback may create the container while the rollout gate
 is off, but it does not bind a usage referral. Only the authoritative
-participant-add path binds the final owner's eligible referral after creating
-the container or correcting that provisional owner, so webhook delivery order
-cannot split route and referral ownership. For a routed group, Web then locks
+participant-add path invokes the existing event-time, idempotent referral
+binder after every authoritative ensure. That binds the final owner's eligible
+referral whether the provisional owner needed correction or was already the
+adder, while old rooms and ineligible missions remain unchanged. Webhook
+delivery order therefore cannot split route and referral ownership. For a
+routed group, Web then locks
 the current group owner before mutating the route or reading optional context.
 A unique event may append one bounded
 participant-attributed item to the route's existing encrypted transient

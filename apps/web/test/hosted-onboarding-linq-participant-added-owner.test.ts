@@ -47,9 +47,9 @@ import type {
   HostedLinqParticipantChangedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
-  hasHostedLinqParticipantAddedOwnerCandidate,
   isHostedLinqGroupOwnerFromAdderRequired,
   provisionHostedLinqParticipantAddedOwnerTx,
+  shouldUseHostedLinqParticipantAddedOwnerLockOrder,
 } from "@/src/lib/hosted-onboarding/linq-participant-added-owner";
 
 const CHAT_ID = "chat_existing_friends";
@@ -92,7 +92,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: true });
 
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
@@ -142,7 +142,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     });
   });
 
-  it("does not bind an old room again when ownership was already correct", async () => {
+  it("binds the adder's eligible referral when a provisional owner was already correct", async () => {
     mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx
       .mockResolvedValueOnce({
         activationEventId: null,
@@ -160,47 +160,52 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
 
     expect(
       mocks.bindArmedHostedUsageReferralToNewContainerTx,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledWith({
+      occurredAt: OCCURRED_AT,
+      ownerMemberId: OWNER_MEMBER_ID,
+      targetContainerMemberId: CONTAINER_MEMBER_ID,
+      tx: {},
+    });
   });
 
   it("accepts a managed line even when the provider omits participant is_me", async () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ participantIsMe: undefined }),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: true });
 
     expect(mocks.hasActiveHostedLinqManagedLine).toHaveBeenCalledOnce();
   });
 
-  it("selects the lock-safe owner path only after managed-line preflight", async () => {
-    await expect(hasHostedLinqParticipantAddedOwnerCandidate({
-      event: buildParticipantAddedEvent({ participantIsMe: undefined }),
-      prisma: {} as never,
-    })).resolves.toBe(true);
-
-    expect(mocks.hasActiveHostedLinqManagedLine).toHaveBeenCalledOnce();
+  it("selects the lock-safe owner path from immutable event evidence", () => {
+    expect(shouldUseHostedLinqParticipantAddedOwnerLockOrder(
+      buildParticipantAddedEvent({ participantIsMe: undefined }),
+    )).toBe(true);
+    expect(mocks.hasActiveHostedLinqManagedLine).not.toHaveBeenCalled();
   });
 
   it("rejects explicit non-Murph participant evidence before line lookup", async () => {
-    await expect(hasHostedLinqParticipantAddedOwnerCandidate({
-      event: buildParticipantAddedEvent({ participantIsMe: false }),
-      prisma: {} as never,
-    })).resolves.toBe(false);
+    expect(shouldUseHostedLinqParticipantAddedOwnerLockOrder(
+      buildParticipantAddedEvent({ participantIsMe: false }),
+    )).toBe(false);
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ participantIsMe: false }),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: false });
 
     expect(mocks.hasActiveHostedLinqManagedLine).not.toHaveBeenCalled();
   });
 
-  it("keeps an actor-less payload non-authoritative", async () => {
+  it("keeps an actor-less managed self-add non-authoritative and out of participant context", async () => {
+    expect(shouldUseHostedLinqParticipantAddedOwnerLockOrder(
+      buildParticipantAddedEvent({ actorHandle: null }),
+    )).toBe(false);
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ actorHandle: null }),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: true });
 
-    expect(mocks.hasActiveHostedLinqManagedLine).not.toHaveBeenCalled();
+    expect(mocks.hasActiveHostedLinqManagedLine).toHaveBeenCalledOnce();
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
     ).not.toHaveBeenCalled();
@@ -210,7 +215,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({ actorHandle: LINE_PHONE }),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: true });
   });
 
   it("does not bind a route when the actor is unresolved", async () => {
@@ -219,7 +224,7 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: true });
 
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
@@ -234,12 +239,12 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
       },
     });
 
-    await provisionHostedLinqParticipantAddedOwnerTx({
+    await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent({
         actorHandle: "owner@example.com",
       }),
       prisma: {} as never,
-    });
+    })).resolves.toEqual({ managedSelfAdd: true });
 
     expect(
       mocks.lookupHostedMemberIdentityByPhoneNumber,
@@ -260,10 +265,10 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
       allowed: false,
     });
 
-    await provisionHostedLinqParticipantAddedOwnerTx({
+    await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma: {} as never,
-    });
+    })).resolves.toEqual({ managedSelfAdd: true });
 
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
@@ -276,9 +281,22 @@ describe("provisionHostedLinqParticipantAddedOwnerTx", () => {
     await expect(provisionHostedLinqParticipantAddedOwnerTx({
       event: buildParticipantAddedEvent(),
       prisma: {} as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ managedSelfAdd: false });
 
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(
+      mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit provider self-add out of participant context when the line is inactive", async () => {
+    mocks.hasActiveHostedLinqManagedLine.mockResolvedValue(false);
+
+    await expect(provisionHostedLinqParticipantAddedOwnerTx({
+      event: buildParticipantAddedEvent({ participantIsMe: true }),
+      prisma: {} as never,
+    })).resolves.toEqual({ managedSelfAdd: true });
+
     expect(
       mocks.ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
     ).not.toHaveBeenCalled();

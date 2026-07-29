@@ -34,8 +34,9 @@ the first eligible member who later sends a message.
    correct the same account-scoped route's existing `ownerMemberId` when the
    legacy first-speaker fallback committed first.
 4. Bind a Linq group referral only from that authoritative participant-add
-   path, after route creation or provisional-owner correction. The legacy
-   first-message fallback does not attribute a referral.
+   path. Invoke the existing event-time, idempotent binder after any successful
+   ensure so a same-owner provisional route and a corrected route converge.
+   The legacy first-message fallback does not attribute a referral.
 5. Keep actor and line handles request-local. Persist no new ownership,
    provenance, queue, or pending-event state.
 6. Ship compatibly with

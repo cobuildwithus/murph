@@ -159,11 +159,12 @@ Last verified: 2026-07-28
   existing 500 ms context-crypto bound.
 - A signed `participant.added` event that names a managed Murph line plus an
   explicit `added_by_handle` is the ownership authority for a newly joined
-  Linq group. A read-only managed-line preflight selects the established
-  route-to-chat lock order but grants no authority; the unique provider-ledger
-  insertion then fences actor resolution and managed-line revalidation before
-  the route mutation in the same transaction. This avoids a participant-chat
-  versus new-route lock cycle. The managed self-add does not set the generic
+  Linq group. Immutable signed event shape selects the established
+  route-to-chat lock order; the unique provider-ledger insertion then fences
+  actor resolution and managed-line revalidation before the route mutation in
+  the same transaction. Mutable line state cannot promote a chat-first
+  transaction into route provisioning, avoiding a participant-chat versus
+  new-route lock cycle. The managed self-add does not set the generic
   participant-addition prompt hint. The authoritative ensure may correct only
   the same account-scoped route's existing `ownerMemberId`, so reversed
   participant/message delivery converges without a second owner field. Set
@@ -173,9 +174,11 @@ Last verified: 2026-07-28
   Keep the gate off during the compatibility deploy; actor-bearing events still
   establish or correct ownership while the old fallback remains available.
   That provisional first-message path does not bind usage referrals. The
-  participant-add path binds only the final owner's eligible mission after a
-  create or correction, preserving referral-owner consistency under either
-  webhook delivery order.
+  participant-add path invokes the existing event-time, idempotent binder after
+  every authoritative ensure. It therefore binds only the final owner's
+  eligible mission when the provisional route already had the right owner as
+  well as when creation or correction occurred, preserving referral-owner
+  consistency under either webhook delivery order.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at

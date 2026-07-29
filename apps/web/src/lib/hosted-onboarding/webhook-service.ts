@@ -120,8 +120,8 @@ import {
   stageHostedLinqGroupParticipantContextTx,
 } from "./webhook-provider-linq-participant-context";
 import {
-  hasHostedLinqParticipantAddedOwnerCandidate,
   provisionHostedLinqParticipantAddedOwnerTx,
+  shouldUseHostedLinqParticipantAddedOwnerLockOrder,
 } from "./linq-participant-added-owner";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -1078,16 +1078,15 @@ async function ingestHostedLinqParticipantEventDirect(input: {
   participantChange: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
   prisma: PrismaClient;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  const ownerCandidate =
-    await hasHostedLinqParticipantAddedOwnerCandidate({
-      event: input.participantChange,
-      prisma: input.prisma,
-    });
+  const useOwnerLockOrder =
+    shouldUseHostedLinqParticipantAddedOwnerLockOrder(
+      input.participantChange,
+    );
   return runHostedOnboardingWebhookTransaction(
     input.prisma,
     async (transaction) => {
       const chatId = input.participantChange.data.chat_id;
-      if (chatId && !ownerCandidate) {
+      if (chatId && !useOwnerLockOrder) {
         await acquireHostedLinqChatOwnershipLockTx({
           chatId,
           tx: transaction,
@@ -1105,12 +1104,12 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      await provisionHostedLinqParticipantAddedOwnerTx({
+      const ownerResult = await provisionHostedLinqParticipantAddedOwnerTx({
         event: input.participantChange,
         prisma: transaction,
       });
 
-      if (ownerCandidate) {
+      if (useOwnerLockOrder) {
         await acquireHostedLinqChatOwnershipLockTx({
           chatId,
           tx: transaction,
@@ -1126,7 +1125,7 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      if (!ownerCandidate) {
+      if (!ownerResult.managedSelfAdd) {
         await applyHostedLinqParticipantChangeToRouteTx({
           event: input.participantChange,
           prisma: transaction,

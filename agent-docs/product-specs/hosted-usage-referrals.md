@@ -77,8 +77,10 @@ conversation. The referrer's next newly created thread container binds only
 when its durable owner is that exact referrer and creation happened after
 arming. Existing rooms cannot bind. For Linq, a compatibility first-message
 fallback may provision a provisional route but cannot bind a referral. The
-signed managed-line `participant.added` actor binds only the final owner's
-eligible mission when it creates that route or corrects the provisional owner.
+signed managed-line `participant.added` actor invokes the event-time,
+idempotent binder after the authoritative route ensure. It can therefore bind
+only the final owner's mission that was already armed when Murph was added,
+including when the provisional first-speaker owner was already correct.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
 input context. The model cannot provide identity, beneficiary, route, target,

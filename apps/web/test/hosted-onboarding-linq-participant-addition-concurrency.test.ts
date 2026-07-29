@@ -29,6 +29,7 @@ import {
   recordHostedLaunchRequiredConsent,
 } from "@/src/lib/legal/consent";
 import {
+  ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
   ensureHostedThreadContainerRouteTx,
 } from "@/src/lib/hosted-routing/thread-container-service";
 import {
@@ -148,6 +149,7 @@ async function cleanupRouteFixture(fixture: RouteFixture): Promise<void> {
       id: {
         in: [
           fixture.containerMemberId,
+          fixture.ownerMemberId,
           ...(container ? [container.ownerMemberId] : []),
         ],
       },
@@ -476,6 +478,39 @@ function pauseHostedThreadRouteUpdateAfterWrite(input: {
     get(target, property) {
       if (property === "hostedThreadRoute") {
         return hostedThreadRoute;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function pauseHostedOwnerCorrectionAfterWrite(input: {
+  corrected: Deferred<void>;
+  release: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedThreadContainer = new Proxy(input.tx.hostedThreadContainer, {
+    get(target, property) {
+      if (property === "updateMany") {
+        return async (args: Prisma.HostedThreadContainerUpdateManyArgs) => {
+          const result = await target.updateMany(args);
+          if (result.count === 1 && args.data.ownerMemberId !== undefined) {
+            input.corrected.resolve();
+            await input.release.promise;
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedThreadContainer") {
+        return hostedThreadContainer;
       }
       const value = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
@@ -1122,6 +1157,106 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             periodStart,
           },
         });
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
+    it("serializes a participant-add owner correction ahead of a competing first-speaker ensure", async () => {
+      const fixture = await createRouteFixture();
+      const accountLookupKey = `account_linq_owner_${randomUUID()}`;
+      const adderMemberId = `member_linq_adder_${randomUUID()}`;
+      const threadLookupKey = createHostedExternalThreadLookupKey({
+        accountLookupKey,
+        channel: "linq",
+        threadId: fixture.threadId,
+      });
+      if (!threadLookupKey) {
+        throw new Error("Expected a Linq thread lookup key.");
+      }
+
+      await fixture.observer.hostedMember.create({
+        data: {
+          billingStatus: "active",
+          id: adderMemberId,
+        },
+      });
+      await fixture.observer.hostedMember.update({
+        data: { billingStatus: "active" },
+        where: { id: fixture.ownerMemberId },
+      });
+      await fixture.observer.hostedThreadRoute.update({
+        data: { threadLookupKey },
+        where: {
+          channel_threadIdentityLookupKey: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        },
+      });
+
+      const ownerCorrected = createDeferred();
+      const releaseOwnerCorrection = createDeferred();
+      const contenderPid = createDeferred<number>();
+      let contenderTransaction: Promise<unknown> | null = null;
+      const actorTransaction = fixture.participantClient.$transaction(
+        async (tx) =>
+          ensureHostedLinqThreadContainerRouteFromParticipantAddTx({
+            accountLookupKey,
+            occurredAt: new Date("2026-07-29T05:00:00.000Z"),
+            ownerMemberId: adderMemberId,
+            prisma: pauseHostedOwnerCorrectionAfterWrite({
+              corrected: ownerCorrected,
+              release: releaseOwnerCorrection,
+              tx,
+            }),
+            threadId: fixture.threadId,
+          }),
+      );
+
+      try {
+        await ownerCorrected.promise;
+        contenderTransaction = fixture.messageClient.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          return ensureHostedThreadContainerRouteTx({
+            accountLookupKey,
+            channel: "linq",
+            occurredAt: new Date("2026-07-29T05:00:01.000Z"),
+            ownerMemberId: fixture.ownerMemberId,
+            prisma: tx,
+            threadId: fixture.threadId,
+          });
+        });
+
+        await waitForBlockedBackend({
+          observer: fixture.observer,
+          pid: await contenderPid.promise,
+        });
+        releaseOwnerCorrection.resolve();
+
+        await expect(actorTransaction).resolves.toMatchObject({
+          containerMemberId: fixture.containerMemberId,
+          created: false,
+          ownerCorrected: true,
+        });
+        await expect(contenderTransaction).rejects.toMatchObject({
+          code: "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
+        });
+        await expect(fixture.observer.hostedThreadContainer.findUnique({
+          select: { ownerMemberId: true },
+          where: { memberId: fixture.containerMemberId },
+        })).resolves.toEqual({ ownerMemberId: adderMemberId });
+        await expect(fixture.observer.hostedThreadRoute.count({
+          where: {
+            channel: "linq",
+            threadIdentityLookupKey: fixture.threadIdentityLookupKey,
+          },
+        })).resolves.toBe(1);
+      } finally {
+        releaseOwnerCorrection.resolve();
+        await Promise.allSettled([
+          actorTransaction,
+          ...(contenderTransaction ? [contenderTransaction] : []),
+        ]);
         await cleanupRouteFixture(fixture);
       }
     });

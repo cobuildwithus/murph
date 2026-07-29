@@ -31,8 +31,8 @@ const mocks = vi.hoisted(() => ({
   readHostedLinqDailyState: vi.fn(),
   readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  hasHostedLinqParticipantAddedOwnerCandidate: vi.fn(),
   provisionHostedLinqParticipantAddedOwnerTx: vi.fn(),
+  shouldUseHostedLinqParticipantAddedOwnerLockOrder: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqReadReceipt: vi.fn(),
@@ -199,10 +199,10 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-participant-context",
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-participant-added-owner", () => ({
-  hasHostedLinqParticipantAddedOwnerCandidate:
-    mocks.hasHostedLinqParticipantAddedOwnerCandidate,
   provisionHostedLinqParticipantAddedOwnerTx:
     mocks.provisionHostedLinqParticipantAddedOwnerTx,
+  shouldUseHostedLinqParticipantAddedOwnerLockOrder:
+    mocks.shouldUseHostedLinqParticipantAddedOwnerLockOrder,
 }));
 
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
@@ -245,9 +245,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       status: "accepted",
     });
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(null);
-    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(false);
+    mocks.shouldUseHostedLinqParticipantAddedOwnerLockOrder
+      .mockReturnValue(false);
     mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
-      undefined,
+      { managedSelfAdd: false },
     );
     mocks.stageHostedLinqGroupParticipantContext.mockResolvedValue(false);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
@@ -503,12 +504,55 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("does not stage an actor-less managed self-add as a human participant addition", async () => {
+    const prisma = createPrismaStub();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValueOnce({
+      managedSelfAdd: true,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          added_at: "2026-03-26T12:00:00.000Z",
+          chat_id: "chat_group_1",
+          participant: {
+            handle: "+15550000000",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_actorless_murph_added",
+        eventType: "participant.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      reason: "recorded-linq-provider-event:participant.added",
+    });
+
+    expect(
+      mocks.shouldUseHostedLinqParticipantAddedOwnerLockOrder,
+    ).toHaveReturnedWith(false);
+    expect(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx,
+    ).toHaveBeenCalledOnce();
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(
+      mocks.stageHostedLinqGroupParticipantContext,
+    ).not.toHaveBeenCalled();
+  });
+
   it("uses explicit add-actor evidence once, after the provider duplicate fence", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(true);
+    mocks.shouldUseHostedLinqParticipantAddedOwnerLockOrder
+      .mockReturnValue(true);
     mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
-      undefined,
+      { managedSelfAdd: true },
     );
     const rawBody = buildLinqProviderWebhookBody({
       data: {
@@ -583,7 +627,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     prisma.hostedLinqProviderEvent.findUnique.mockResolvedValueOnce(null);
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(true);
+    mocks.shouldUseHostedLinqParticipantAddedOwnerLockOrder
+      .mockReturnValue(true);
     mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation(
       (input: { rawBody: string }) => JSON.parse(input.rawBody),
     );

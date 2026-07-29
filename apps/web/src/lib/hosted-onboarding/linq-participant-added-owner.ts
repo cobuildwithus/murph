@@ -1,6 +1,5 @@
 import type {
   Prisma,
-  PrismaClient,
 } from "@prisma/client";
 
 import {
@@ -54,6 +53,10 @@ type HostedLinqParticipantAddedOwnerEvidence = {
   occurredAt: string;
 };
 
+export interface HostedLinqParticipantAddedOwnerResult {
+  managedSelfAdd: boolean;
+}
+
 export function isHostedLinqGroupOwnerFromAdderRequired(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
@@ -61,19 +64,14 @@ export function isHostedLinqGroupOwnerFromAdderRequired(
 }
 
 /**
- * Selects the lock-safe participant path without granting authority. The
- * transaction revalidates the managed line before mutating anything.
+ * Selects the only participant shape that can enter route provisioning. This
+ * is derived entirely from immutable signed event data so mutable line state
+ * cannot promote a chat-first transaction into the route-first path.
  */
-export async function hasHostedLinqParticipantAddedOwnerCandidate(input: {
-  event: HostedLinqParticipantChangedEvent;
-  prisma: PrismaClient;
-}): Promise<boolean> {
-  const evidence = readHostedLinqParticipantAddedOwnerEvidence(input.event);
-  return evidence !== null
-    && await hasActiveHostedLinqManagedLine({
-      phoneNumberLookupKeys: evidence.accountLookupKeys,
-      prisma: input.prisma,
-    });
+export function shouldUseHostedLinqParticipantAddedOwnerLockOrder(
+  event: HostedLinqParticipantChangedEvent,
+): boolean {
+  return readHostedLinqParticipantAddedOwnerEvidence(event) !== null;
 }
 
 /**
@@ -86,19 +84,31 @@ export async function hasHostedLinqParticipantAddedOwnerCandidate(input: {
 export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
   event: HostedLinqParticipantChangedEvent;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  const evidence = readHostedLinqParticipantAddedOwnerEvidence(input.event);
-  if (!evidence) {
-    return;
+}): Promise<HostedLinqParticipantAddedOwnerResult> {
+  const managedSelfAdd = readHostedLinqManagedSelfAdd(input.event);
+  if (!managedSelfAdd) {
+    return { managedSelfAdd: false };
   }
 
   if (
     !(await hasActiveHostedLinqManagedLine({
-      phoneNumberLookupKeys: evidence.accountLookupKeys,
+      phoneNumberLookupKeys: managedSelfAdd.accountLookupKeys,
       prisma: input.prisma,
     }))
   ) {
-    return;
+    return {
+      managedSelfAdd:
+        input.event.event_type === "participant.added"
+        && input.event.data.participant.is_me === true,
+    };
+  }
+
+  const evidence = readHostedLinqParticipantAddedOwnerEvidence(
+    input.event,
+    managedSelfAdd,
+  );
+  if (!evidence) {
+    return { managedSelfAdd: true };
   }
 
   const actorContact = createHostedLinqParticipantContact({
@@ -109,7 +119,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
     value: evidence.actorHandle.handle,
   });
   if (!actorContact) {
-    return;
+    return { managedSelfAdd: true };
   }
   if (
     shouldIgnoreHostedLinqForLocalInboundGuard({
@@ -117,7 +127,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       participantContact: actorContact,
     })
   ) {
-    return;
+    return { managedSelfAdd: true };
   }
 
   const actorLookup = actorContact.kind === "phone"
@@ -131,7 +141,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       });
   const actor = actorLookup?.core ?? null;
   if (!actor) {
-    return;
+    return { managedSelfAdd: true };
   }
   if (
     isHostedMemberSuspended(actor.suspendedAt)
@@ -140,7 +150,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       prisma: input.prisma,
     })).allowed
   ) {
-    return;
+    return { managedSelfAdd: true };
   }
 
   try {
@@ -155,14 +165,12 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
         prisma: input.prisma,
         threadId: evidence.chatId,
       });
-    if (ensured.created || ensured.ownerCorrected) {
-      await bindArmedHostedUsageReferralToNewContainerTx({
-        occurredAt,
-        ownerMemberId: actor.id,
-        targetContainerMemberId: ensured.containerMemberId,
-        tx: input.prisma,
-      });
-    }
+    await bindArmedHostedUsageReferralToNewContainerTx({
+      occurredAt,
+      ownerMemberId: actor.id,
+      targetContainerMemberId: ensured.containerMemberId,
+      tx: input.prisma,
+    });
   } catch (error) {
     if (!isHostedOnboardingError(error)) {
       throw error;
@@ -172,29 +180,53 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       || error.code === "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED"
       || error.code === "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER"
     ) {
-      return;
+      return { managedSelfAdd: true };
     }
     throw error;
   }
+  return { managedSelfAdd: true };
 }
 
 function readHostedLinqParticipantAddedOwnerEvidence(
   event: HostedLinqParticipantChangedEvent,
+  managedSelfAdd = readHostedLinqManagedSelfAdd(event),
 ): HostedLinqParticipantAddedOwnerEvidence | null {
-  if (event.event_type !== "participant.added") {
+  if (!managedSelfAdd || event.event_type !== "participant.added") {
     return null;
   }
 
   const actorHandle = event.data.added_by_handle;
-  const chatId = event.data.chat_id;
-  const linePhoneNumber = normalizePhoneNumber(event.data.participant.handle);
   if (
     !actorHandle
     || actorHandle.is_me === true
-    || event.data.participant.is_me === false
+    || normalizePhoneNumber(actorHandle.handle) === managedSelfAdd.linePhoneNumber
+  ) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: managedSelfAdd.accountLookupKey,
+    accountLookupKeys: managedSelfAdd.accountLookupKeys,
+    actorHandle,
+    chatId: managedSelfAdd.chatId,
+    occurredAt: event.data.added_at ?? event.created_at,
+  };
+}
+
+function readHostedLinqManagedSelfAdd(
+  event: HostedLinqParticipantChangedEvent,
+): Omit<HostedLinqParticipantAddedOwnerEvidence, "actorHandle" | "occurredAt">
+  & { linePhoneNumber: string } | null {
+  if (event.event_type !== "participant.added") {
+    return null;
+  }
+
+  const chatId = event.data.chat_id;
+  const linePhoneNumber = normalizePhoneNumber(event.data.participant.handle);
+  if (
+    event.data.participant.is_me === false
     || !chatId
     || !linePhoneNumber
-    || normalizePhoneNumber(actorHandle.handle) === linePhoneNumber
   ) {
     return null;
   }
@@ -207,9 +239,8 @@ function readHostedLinqParticipantAddedOwnerEvidence(
     ? {
         accountLookupKey,
         accountLookupKeys,
-        actorHandle,
         chatId,
-        occurredAt: event.data.added_at ?? event.created_at,
+        linePhoneNumber,
       }
     : null;
 }
