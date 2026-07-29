@@ -43,7 +43,7 @@ test("ClubPage metadata keeps the dedicated club preview and canonical route", (
   );
   assert.equal(
     clubMetadata.description,
-    "Run mileage, movement, workout, and team challenges for your club without spreadsheets or manual scorekeeping.",
+    "Run club challenges in iMessage with automatic scoring from the supported wearables members already use, no spreadsheets required.",
   );
   assert.equal(clubMetadata.alternates?.canonical, "/clubs");
   assert.deepEqual(clubMetadata.openGraph?.images, [
