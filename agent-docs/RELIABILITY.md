@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Current Guardrails
 
@@ -18,11 +18,13 @@ Last verified: 2026-07-27
   After the worker lock is acquired, native `tar` plus the production-compatible
   `zstd` stdin round trip must pass before Git reconstruction, installation, or
   candidate verification. The entrypoint internally selects `profile=static-ssh`;
-  that profile ignores caller scheduling overrides, cannot enter composed
-  acceptance from CPU count alone, and completes package coverage before app and
-  fixture work. Its readiness line, plus the `resources` line for
-  `verify:acceptance`, are required execution evidence rather than optional
-  diagnostics.
+  that profile ignores caller scheduling overrides and admits composed
+  acceptance only when the worker reports both at least 10 logical CPUs and
+  24 GiB of physical memory. The bounded capable plan retains the CLI release
+  interlock and aggregated failure propagation; smaller or memory-unobservable
+  workers retain the serial fallback. Its readiness line, plus the `resources`
+  line for `verify:acceptance`, are required execution evidence rather than
+  optional diagnostics.
   Crabbox's nested static lease and repository directories still resolve to one
   native macOS `lockf` descriptor above the run root, which remains the
   worker-capacity authority. A busy worker fails closed. The remote verifier
