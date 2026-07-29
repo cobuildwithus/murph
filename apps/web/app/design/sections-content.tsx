@@ -20,6 +20,7 @@ import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
@@ -154,6 +155,12 @@ export function SectionsContent() {
 
       <StudySection title="Pulse billing return confirmation">
         <PulseTrialBillingContinuationStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group member plan">
+        <GroupMemberPlanStudy />
       </StudySection>
 
       <Separator />

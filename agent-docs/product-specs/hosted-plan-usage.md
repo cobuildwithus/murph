@@ -71,7 +71,8 @@ The available projection keeps these access states distinct:
 
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
-| Direct trial | Pulse Trial | Trial | Start Pulse |
+| Direct trial | Pulse Trial | Trial | Continue with Group when eligible, otherwise Pulse |
+| Direct paid Group | Group | Monthly | Upgrade to Pulse |
 | Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
 | Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
 | Sponsored member | Family | Monthly | None |
@@ -105,10 +106,11 @@ usage-bearing work blocks and accepted conversation input remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
-Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
-Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
-from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
-usage credit do not redefine this catalog-owned allowance.
+Group, Pulse, and Edge therefore include $2.80, $6.40, and $16.00 from their
+$3.50, $8, and $20 prices. Family-sponsored Pulse and Edge members separately
+receive $5.60 and $15.20 from their $7 and $19 seat prices. Discounts, taxes,
+prorations, trials, and usage credit do not redefine this catalog-owned
+allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -129,23 +131,25 @@ projection omits it.
 
 `apps/web` may return `recommendedAction` only when all available usage is
 exhausted, the forecast projects exhaustion, or at least 80% of overall
-available usage is used. Trial access may recommend **Start Pulse now** with the
-current monthly price. An eligible direct paid Pulse or Edge member may receive
-**Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
-Edge upgrade remains on the plan card. Family and group contexts do not receive
-a top-up recommendation.
+available usage is used. Trial access may recommend continuing with Group at
+trial end when current membership makes that plan eligible; otherwise it may
+recommend **Start Pulse now**. Paid Group may recommend Pulse. An eligible
+direct paid Pulse or Edge member may receive **Add usage**, which opens the
+authenticated fixed-pack Settings dialog. Group does not expose personal
+top-ups. Plan changes remain on the plan card. Family and group contexts do not
+receive a personal top-up recommendation.
 
 An explicit request for the personal top-up page is not a recommendation. After
 a current `paid` read, the assistant may provide
 `/settings?addUsage=true#subscription` even below the proactive threshold.
 
 An opted-in `subscriptionActionQuote` answers a different question: what are
-the current terms for the exact start-now or upgrade choice the member asked
-about? Web resolves that quote even below the usage threshold and without a
-Settings URL. The quote contains the bounded action and current catalog label,
-not a URL. It may be null when the action is ineligible. It is neither a
-recommendation nor consent, and it does not weaken the explicit-confirmation
-rule.
+the current terms for the exact plan and timing the member asked about? Web
+resolves that quote even below the usage threshold and without a Settings URL.
+The signed quote binds the bounded action, member, target plan, timing, exact
+catalog price, expiry, and current billing-state fingerprint. It may be null
+when the action is ineligible. It is neither a recommendation nor consent, and
+it does not weaken the explicit-confirmation rule.
 
 Home and `murph.plan_usage` render only `recommendedAction`. Settings may expose
 **Add usage** at any utilization for an eligible direct paid member, using the
@@ -174,19 +178,22 @@ Family change happened. It must not provide the private management handoff for
 
 ### Private Conversation Actions
 
-`murph.subscription` is a narrow mutation surface for three choices:
+`murph.subscription` is a narrow mutation surface for:
 
-- keep an active Pulse trial scheduled to continue at its natural end;
-- end the trial and start Pulse now; or
-- upgrade an active paid Pulse plan to Edge.
+- keeping an active Pulse trial scheduled to continue as Pulse;
+- ending the trial and starting Pulse now;
+- scheduling an eligible active trial to continue as Group;
+- immediately upgrading Group to Pulse or Edge, or Pulse to Edge; and
+- scheduling Pulse or Edge to change to an eligible lower direct plan at
+  renewal.
 
 These are member-directed actions, not extensions of the read projection's
-`recommendedAction`. A recommendation is never consent. Before an immediate
-start or upgrade, the assistant needs a `subscriptionActionQuote` whose action
-matches the proposed choice, states the returned label, and then gets explicit
-confirmation. When that quote is absent, the assistant does not guess and uses
-the neutral Settings handoff. Continuing a currently active trial does not
-charge now and does not require a start-now quote or recommendation.
+`recommendedAction`. A recommendation is never consent. Before `change_plan`,
+the assistant needs a current `subscriptionActionQuote` whose target and timing
+match the proposed choice, states the returned exact-price label, and then gets
+explicit confirmation. When that quote is absent, the assistant does not guess
+and uses the neutral Settings handoff. The legacy Pulse actions remain bounded
+compatibility entrypoints.
 
 The tool is available only in a private personal conversation with current
 eligible accepted member input. Assistant policy permits a call only after the
@@ -433,12 +440,12 @@ The subscription-action surface adds one nullable action claim to the existing
 mailbox row. The composed usage system adds no second admission gate, persisted
 forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
 wallet or usage account, automatic model switch, custom card form, App Clip,
-or mini app. It does not add a general Stripe API tool: the subscription action contract
-exposes only the three current web-owned operations above, and personal and
+or mini app. It does not add a general Stripe API tool: the contract exposes
+only transitions admitted by the current web-owned plan policy. Personal and
 Family-member usage top-ups remain authenticated Stripe-hosted Settings
-handoffs. Group funding
-uses the existing join code and synthetic member through an authenticated
-fixed-pack page; anonymous funding remains unimplemented.
+handoffs. Group funding uses the existing join code and synthetic member
+through an authenticated fixed-pack page; anonymous funding remains
+unimplemented.
 
 ## Deployment
 

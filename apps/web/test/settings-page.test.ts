@@ -66,13 +66,17 @@ const mocks = vi.hoisted(() => ({
     authenticated: boolean;
     canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
+    canSwitchToGroup?: boolean;
+    canUpgradeToPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
     pulseTrialBillingContinuationPending?: boolean;
+    showGroupPlan?: boolean;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
     usageTopUpOffers?: readonly unknown[];
@@ -104,6 +108,9 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
+      findFirst: vi.fn(async (): Promise<{ id: string } | null> => null),
     },
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
@@ -165,6 +172,14 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: "price_group_test",
+    },
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -291,6 +306,7 @@ beforeEach(() => {
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -399,8 +415,29 @@ test("SettingsPage keeps a signed-out Stripe payment return recoverable", async 
   // absent from the URL, so anyone could craft these parameters. Murph must not
   // vouch for a payment it has not checked.
   assert.match(markup, /One more step/);
-  assert.match(markup, /Sign in to verify and finish your Pulse update\./);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
   assert.doesNotMatch(markup, /card is saved/i);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out Group payment return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.doesNotMatch(markup, /Payment method saved/);
+  assert.doesNotMatch(markup, /Group has not started/);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -1444,6 +1481,48 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
     currentBillingPhase: null,
     currentBillingPlanCode: "launch_monthly",
     currentCheckoutOffer: "pulse_trial_7d",
+  }), undefined);
+});
+
+test("SettingsPage preserves the Group payment-method receipt and fresh start action", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({ id: "membership_123" });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    canStartPaidPulse: true,
+    groupPaymentMethodSaved: true,
+    showGroupPlan: true,
   }), undefined);
 });
 

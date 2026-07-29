@@ -774,7 +774,64 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("rejects an immediate upgrade while another plan change is scheduled", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      scheduledBillingPlanCode: "launch_group_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects an immediate upgrade when Stripe has an untracked schedule", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        memberId: "member_123",
+      },
+      schedule: "sub_sched_untracked",
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
   test("rejects unsupported transitions", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
       targetPlanCode: "launch_monthly",
@@ -1203,6 +1260,7 @@ function makeSubscription(input: {
     trialEnd?: number | null;
     trialFromPlan?: boolean | null;
   };
+  schedule?: string | null;
   status: Stripe.Subscription.Status;
 }): Stripe.Subscription {
   return {
@@ -1229,6 +1287,7 @@ function makeSubscription(input: {
     },
     metadata: input.metadata,
     object: "subscription",
+    schedule: input.schedule ?? null,
     pending_update: input.pendingUpdate === undefined
       ? null
       : {

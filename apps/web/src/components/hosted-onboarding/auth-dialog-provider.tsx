@@ -16,6 +16,8 @@ import {
   HOSTED_APP_INITIAL_VISIT_HOME_PATH,
 } from "@/src/lib/hosted-onboarding/app-routes";
 import {
+  HOSTED_START_PAID_GROUP_RETURN_PARAM,
+  HOSTED_START_PAID_GROUP_RETURN_VALUE,
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
@@ -123,13 +125,31 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+    || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
   );
 }
 
 // Someone returning from Stripe's payment-method page lands on /settings with
-// the signed continuation params. Sending them to /home instead would strand
-// the plan switch they just paid to complete.
+// the payment-return params. Sending them to /home instead would strand the
+// plan choice they just added a card to complete.
+function shouldResumeCurrentSettingsGroupPaymentUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const returnValues = params.getAll(HOSTED_START_PAID_GROUP_RETURN_PARAM);
+  return returnValues.length === 1
+    && returnValues[0] === HOSTED_START_PAID_GROUP_RETURN_VALUE;
+}
+
 function shouldResumeCurrentSettingsPulseTrialPaymentUrl(
   payload: HostedPrivyCompletionPayload,
 ): boolean {

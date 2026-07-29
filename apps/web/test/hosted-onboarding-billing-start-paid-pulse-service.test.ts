@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-onboarding/legacy-usage-price";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedBillingPlanSelectable: vi.fn(),
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
@@ -59,6 +60,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/billing-plan-eligibility", () => ({
+  assertHostedBillingPlanSelectable:
+    mocks.assertHostedBillingPlanSelectable,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig: mocks.requireHostedStripeBillingPlanConfig,
@@ -71,11 +77,13 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
 import {
   continueHostedPulseTrialPaidPlan,
   startHostedPulseTrialPaidPlan,
+  startHostedTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 
 describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertHostedBillingPlanSelectable.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
       mocks.preparedCryptoDomainRoots,
@@ -92,14 +100,20 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
-      async (input: { run: () => Promise<unknown> }) => input.run(),
+      async (input: { run: (tx: unknown) => Promise<unknown> }) =>
+        input.run(mocks.prismaClient),
     );
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
-    mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
-      billingPlanCode: "launch_monthly",
-      priceId: "price_pulse_recurring",
-      stripe: mocks.stripe,
-    });
+    mocks.requireHostedStripeBillingPlanConfig.mockImplementation(
+      (input: { billingPlanCode: string }) => ({
+        billingPlanCode: input.billingPlanCode,
+        priceId:
+          input.billingPlanCode === "launch_group_monthly"
+            ? "price_group_recurring"
+            : "price_pulse_recurring",
+        stripe: mocks.stripe,
+      }),
+    );
     mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
       url: "https://billing.stripe.test/session_123",
     });
@@ -160,6 +174,96 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("starts eligible Group billing now by replacing the Pulse trial item", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_group_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+      ],
+      latestInvoice: makeInvoice({ status: "draft" }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.assertHostedBillingPlanSelectable).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      targetPlanCode: "launch_group_monthly",
+    });
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      {
+        expand: [
+          "items.data.price",
+          "latest_invoice",
+          "latest_invoice.payment_intent",
+        ],
+        items: [{
+          id: "si_price_pulse_recurring",
+          price: "price_group_recurring",
+          quantity: 1,
+        }],
+        metadata: { murphTrialExtensionTargetTrialEnd: "" },
+        payment_behavior: "allow_incomplete",
+        trial_end: "now",
+      },
+      {
+        idempotencyKey: buildExpectedStartPaidPulseIdempotencyKey(
+          "active-trial-end-now-v2",
+          "price_group_recurring",
+        ),
+      },
+    );
+  });
+
+  test("rechecks Group eligibility inside the billing lock before Stripe mutation", async () => {
+    mocks.assertHostedBillingPlanSelectable.mockRejectedValueOnce(
+      Object.assign(new Error("Group plan unavailable."), {
+        code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+      }),
+    );
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects a new Pulse trial action while another plan change is scheduled", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      scheduledBillingPlanCode: "launch_group_monthly",
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_CHANGE_ALREADY_SCHEDULED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("keeps a card-backed active Pulse trial running until its natural end", async () => {
@@ -332,6 +436,44 @@ describe("startHostedPulseTrialPaidPlan", () => {
       return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("returns no-card Group setup to Settings without auto-starting Pulse", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
+      customer: "cus_123",
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url:
+              "https://join.example.test/settings?startGroup=payment_method_saved#subscription",
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: "https://join.example.test/settings#subscription",
+    });
   });
 
   test("returns conversational no-card starts through the signed exact-action bridge", async () => {
@@ -1979,6 +2121,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
 
 function makeBillingRef(input: {
   currentBillingPhase?: string | null;
+  scheduledBillingPlanCode?: string | null;
 } = {}) {
   return {
     currentBillingPhase: input.currentBillingPhase === undefined ? "trial" : input.currentBillingPhase,
@@ -1986,6 +2129,7 @@ function makeBillingRef(input: {
     currentCheckoutOffer: "pulse_trial_7d",
     currentTrialEndsAt: new Date("2026-05-13T00:00:00.000Z"),
     memberId: "member_123",
+    scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
   };
@@ -1993,10 +2137,11 @@ function makeBillingRef(input: {
 
 function buildExpectedStartPaidPulseIdempotencyKey(
   operation?: "active-trial-end-now-v2" | "paused-resume-v1",
+  priceId = "price_pulse_recurring",
 ): string {
   const payload = {
     memberId: "member_123",
-    priceId: "price_pulse_recurring",
+    priceId,
     stripeSubscriptionId: "sub_123",
     trialEnd: "2026-05-13T00:00:00.000Z",
   };

@@ -77,6 +77,34 @@ test("upgrades an authenticated hosted member to Edge", async () => {
   });
 });
 
+test("upgrades an authenticated Group member to Pulse", async () => {
+  mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    status: "upgraded",
+  });
+
+  const response = await billingUpgradeRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
+      body: JSON.stringify({
+        targetPlanCode: "launch_monthly",
+      }),
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: {
+      label: "test-prisma",
+    },
+    targetPlanCode: "launch_monthly",
+  });
+});
+
 test("rejects unauthenticated requests", async () => {
   mocks.requireHostedAppSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
     code: "HOSTED_APP_SESSION_REQUIRED",
@@ -165,7 +193,7 @@ test("rejects unsupported target plan payloads", async () => {
   const response = await billingUpgradeRoute.POST(
     new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
       body: JSON.stringify({
-        targetPlanCode: "launch_monthly",
+        targetPlanCode: "launch_group_monthly",
       }),
       headers: {
         origin: "https://join.example.test",

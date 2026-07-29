@@ -53,8 +53,11 @@ export interface HostedMemberBillingEligibilityState {
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   currentCheckoutOffer: string | null;
+  currentPeriodEnd: Date | null;
   hasStripeCustomerId: boolean;
   hasStripeSubscriptionId: boolean;
+  scheduledBillingEffectiveAt: Date | null;
+  scheduledBillingPlanCode: string | null;
 }
 
 export type HostedMemberStripeBillingLookupMatch =
@@ -282,6 +285,9 @@ export async function readHostedMemberBillingEligibilityState(input: {
       currentBillingPhase: true,
       currentBillingPlanCode: true,
       currentCheckoutOffer: true,
+      currentPeriodEnd: true,
+      scheduledBillingEffectiveAt: true,
+      scheduledBillingPlanCode: true,
       stripeCustomerLookupKey: true,
       stripeSubscriptionLookupKey: true,
     },
@@ -295,8 +301,12 @@ export async function readHostedMemberBillingEligibilityState(input: {
     currentBillingPhase: billingRef.currentBillingPhase,
     currentBillingPlanCode: billingRef.currentBillingPlanCode,
     currentCheckoutOffer: billingRef.currentCheckoutOffer,
+    currentPeriodEnd: billingRef.currentPeriodEnd,
     hasStripeCustomerId: Boolean(billingRef.stripeCustomerLookupKey),
     hasStripeSubscriptionId: Boolean(billingRef.stripeSubscriptionLookupKey),
+    scheduledBillingEffectiveAt:
+      billingRef.scheduledBillingEffectiveAt,
+    scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode,
   };
 }
 
@@ -624,13 +634,6 @@ async function buildHostedMemberBillingRefUpdateData(
       stripeSubscriptionId: null,
       stripeSubscriptionScheduleId: input.stripeSubscriptionScheduleId,
     })).stripeSubscriptionScheduleIdEncrypted;
-  }
-
-  if (input.currentBillingPlanCode === "launch_monthly") {
-    data.scheduledBillingEffectiveAt = null;
-    data.scheduledBillingPlanCode = null;
-    data.stripeSubscriptionScheduleIdEncrypted = null;
-    data.stripeSubscriptionScheduleLookupKey = null;
   }
 
   return data;
