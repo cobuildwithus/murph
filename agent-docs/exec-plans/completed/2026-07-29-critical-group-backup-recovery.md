@@ -28,13 +28,14 @@ State:
 - Implemented the scoped group-line recovery behavior in this task branch.
 - Product-experience review found one retry handling gap; accepted and fixed.
 - Product-experience focused recheck returned `NO FINDINGS`.
-- Focused tests, typecheck, lint, and whitespace checks pass locally.
+- Preliminary `completion-specialists` ReviewGPT returned coverage findings only; accepted and covered direct transport-time access revocation, delivery-store pinned-target matching, route fail-closed negatives, capacity fallback/exhaustion, pinned sender health, and link-free copy invariants.
+- Parent final review found no additional implementation changes required.
+- Focused tests, typecheck, lint, and whitespace checks pass locally. Lint has unrelated existing warnings only.
 
 Next:
-1. Commit and push a review candidate.
-2. Open/update the PR with the required intent, verification, and change-shape contract.
-3. Run the preliminary `completion-specialists` ReviewGPT pass.
-4. Complete parent-final review, final verification, plan closure, final ReviewGPT, CI, and mergeability gates.
+1. Archive this plan through `scripts/finish-task`.
+2. Push the exact final head.
+3. Run final ReviewGPT, CI, and mergeability gates.
 
 Open questions (UNCONFIRMED if needed):
 - None. Prefer the smallest existing private-delivery seam that can bind the selected healthy sender and existing idempotency key.
@@ -44,3 +45,6 @@ Working set (expected):
 - `apps/web/test/hosted-onboarding-*.test.ts`
 - `agent-docs/operations/imessage-deliverability.md`
 - this plan
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
