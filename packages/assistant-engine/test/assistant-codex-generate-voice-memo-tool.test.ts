@@ -618,12 +618,21 @@ describe('executeGenerateVoiceMemoTool', () => {
 })
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
-  it('keeps voice-only replies text-empty in the model-visible contract', () => {
+  it('keeps accompanying text optional and non-duplicative in the model-visible contract', () => {
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'when a loaded Murph skill or product flow explicitly asks for a voice memo',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'If the user asks for voice memos only, attach the voice memo and leave the final response text empty.',
+      'Final response text is optional.',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'the owning skill or product flow marks the response voice-only',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'do not duplicate the memo transcript in text.',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'For a voice-only Linq/iMessage response, do not call murph.select_reply_target because native reply targeting requires accompanying text.',
     )
   })
 
