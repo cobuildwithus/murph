@@ -1,0 +1,105 @@
+name: PR 1097 Land CLI Review Fix
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.number == 1097
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Reconcile current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main
+      - name: Register and review the file-input scoring command
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          test_path = Path('packages/cli/test/cli-typed-agent-inputs-schema.test.ts')
+          test_text = test_path.read_text()
+          old = """    'immunization import-json',
+              'meal import-json',
+          """
+          new = """    'immunization import-json',
+              'knowledge score-challenge',
+              'meal import-json',
+          """
+          if test_text.count(old) != 1:
+              raise SystemExit(f'input review anchor count: {test_text.count(old)}')
+          test_path.write_text(test_text.replace(old, new))
+
+          manifest_path = Path('packages/cli/src/vault-cli-command-manifest.ts')
+          manifest = manifest_path.read_text()
+          old_import = """import { registerRouteCommands } from './commands/route.js'
+          import { registerKnowledgeCommands } from './commands/knowledge.js'
+          import { registerModelCommands } from './commands/model.js'
+          """
+          new_import = """import { registerRouteCommands } from './commands/route.js'
+          import {
+            knowledgeChallengeScoreCommandDescription,
+          } from './commands/knowledge-challenge-score.js'
+          import { registerKnowledgeCommands } from './commands/knowledge.js'
+          import { registerModelCommands } from './commands/model.js'
+          """
+          if manifest.count(old_import) != 1:
+              raise SystemExit(f'manifest import anchor count: {manifest.count(old_import)}')
+          manifest = manifest.replace(old_import, new_import)
+
+          query_import = """import {
+            knowledgeGetResultSchema as knowledgeShowResultSchema,
+          """
+          assistant_import = """import {
+            groupChallengeScoreResultSchema,
+          } from '@murphai/assistant-engine'
+          import {
+            knowledgeGetResultSchema as knowledgeShowResultSchema,
+          """
+          if manifest.count(query_import) != 1:
+              raise SystemExit(f'assistant schema import anchor count: {manifest.count(query_import)}')
+          manifest = manifest.replace(query_import, assistant_import)
+
+          leaf_anchor = """    leafCommands: [
+              {
+                path: ['knowledge', 'upsert'],
+          """
+          leaf_replacement = """    leafCommands: [
+              {
+                path: ['knowledge', 'score-challenge'],
+                description: knowledgeChallengeScoreCommandDescription,
+                hint:
+                  'Pass --input @file.json or -. The body contains only the frozen format, additive scorecard, and explicit normalized participant-component observations.',
+                output: groupChallengeScoreResultSchema,
+              },
+              {
+                path: ['knowledge', 'upsert'],
+          """
+          if manifest.count(leaf_anchor) != 1:
+              raise SystemExit(f'knowledge leaf anchor count: {manifest.count(leaf_anchor)}')
+          manifest_path.write_text(manifest.replace(leaf_anchor, leaf_replacement))
+          PY
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm health-commons:generate
+      - name: Run focused CLI proof
+        run: pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/cli-typed-agent-inputs-schema.test.ts packages/cli/test/knowledge-challenge-score.test.ts
+      - name: Commit focused fix and remove this one-use workflow
+        run: |
+          rm .github/workflows/pr1097-land-cli-review-fix.yml
+          git add -A
+          git commit -m "Review the challenge scoring input surface"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
