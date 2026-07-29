@@ -125,6 +125,13 @@ Updated: 2026-07-29
 - Capability is checked at send time with no durable or long-lived cache.
 - The Messages extension is a local decoder/renderer only and retains no
   composer, poll, API client, credential store, settings, or auth UI.
+- Response-card tool availability is derived from the trusted managed meal
+  closeout automation authority as well as the private-direct audience; manual
+  turns and other automations cannot offer it.
+- The provider result preserves the provider-authored scheduled decision
+  separately from runtime-owned card presentation. The notification owner
+  validates that decision, derives transcript/fallback text from the card, and
+  passes the same card to the existing outbox.
 
 ## Verification
 
@@ -148,3 +155,22 @@ Updated: 2026-07-29
     inline URL, the extension renders offline and after logout/relaunch, the
     generic card and SMS fallback behave correctly, forwarding freezes values,
     and retries do not duplicate delivery.
+
+## Review notes
+
+- Preliminary ReviewGPT found that the scheduled notification adapter parsed
+  runtime-rendered card text as its JSON decision and did not forward the card,
+  that the tool was offered to all private-direct turns, and that the skill's
+  argument mapping was ambiguous. All three findings were accepted and fixed at
+  the existing notification, planning, and skill owners.
+- Parent verification after remediation:
+  - Six directly affected suites: 405 tests passed; the provider-shape
+    regression plus card suites: 408 tests passed.
+  - Full assistant-engine coverage: 181 files passed, 1 skipped; 2,833 tests
+    passed, 8 skipped; statements 89.87%, branches 82.55%, functions 94.20%,
+    lines 89.90%.
+  - Diff-aware dependency/architecture/log guards, six affected-package
+    typechecks, full assistant-engine, assistant CLI, assistant runtime, and
+    assistant daemon lanes passed. The later CLI source subprocess lane hit
+    repeated 60-second local harness timeouts without an assertion failure; the
+    exact-tree remote acceptance had already passed that lane.

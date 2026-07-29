@@ -26,6 +26,7 @@ import {
   readAssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../managed-automations.js'
 import {
@@ -775,6 +776,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
+  const responseCardsAvailable =
+    privateInteractiveAudience &&
+    input.input.scheduledInvocationAuthority?.automationId ===
+      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
@@ -840,7 +845,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
-        responseCardsAvailable: privateInteractiveAudience,
+        responseCardsAvailable,
         phoneCallsAvailable:
           (privateInteractiveAudience || hostedGroupRuntime) &&
           userActionAcceptedInputIds.length > 0 &&

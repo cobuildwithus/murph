@@ -18814,6 +18814,7 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe(
       'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
     )
+    expect(result.providerAuthoredFinalMessage).toBe('Final follow-up answer.')
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,
       media: [],

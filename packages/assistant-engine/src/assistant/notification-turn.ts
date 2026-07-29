@@ -11,6 +11,10 @@ import type {
 } from '@murphai/hosted-execution/runtime-control'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
@@ -535,7 +539,15 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          decision = parseAssistantNotificationDecision(providerResult.response)
+          decision = parseAssistantNotificationDecision(
+            providerResult.providerAuthoredResponse ?? providerResult.response,
+          )
+          if (providerResult.responseCard && decision.kind !== 'send_message') {
+            throw new VaultCliError(
+              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+              'A notification response card requires a send_message decision.',
+            )
+          }
         } catch (error) {
           throw annotateAssistantNotificationError(
             error,
@@ -587,7 +599,9 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
-        const responseText = normalizeRequiredText(decision.text, 'notification response')
+        const responseText = providerResult.responseCard
+          ? renderAssistantResponseCardText(providerResult.responseCard)
+          : normalizeRequiredText(decision.text, 'notification response')
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -630,6 +644,7 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
+            card: providerResult.responseCard ?? null,
             media: providerResult.responseMedia ?? [],
             message: responseText,
             session: savedSession,
@@ -694,6 +709,7 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
+          card: providerResult.responseCard ?? null,
           media: providerResult.responseMedia ?? [],
           message: responseText,
           session: providerResult.session,
@@ -1319,6 +1335,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  card?: AssistantResponseCard | null
   dedupeToken: string | null
   decisionSubject: string | null
   input: AssistantMessageInput
@@ -1372,6 +1389,7 @@ async function deliverAssistantNotificationMessage(input: {
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     signal: input.input.abortSignal,
     ...deliveryFields,
+    card: input.card ?? null,
     media,
     dispatchMode: input.input.deliveryDispatchMode,
   })

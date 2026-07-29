@@ -237,6 +237,8 @@ export interface AssistantProviderTurnExecutionResult {
   finalAction?: AssistantNoReplyDisposition
   reactions?: readonly AssistantTargetedMessageReactionAction[] | null
   response: string
+  /** Final provider-authored text before runtime-owned presentation transforms. */
+  providerAuthoredResponse?: string | null
   /** Capability-free semantic response persisted into model-visible history. */
   transcriptResponse: string | null
   // Completed final answers that were followed by a steered user message and

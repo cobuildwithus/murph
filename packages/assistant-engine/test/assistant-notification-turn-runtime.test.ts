@@ -11,6 +11,10 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
+import {
+  renderAssistantResponseCardText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
@@ -21,6 +25,9 @@ import type {
 import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
+import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -72,6 +79,18 @@ const CODEX_MODEL_PROVIDER_CONFIG = {
   baseUrl: 'https://ai-gateway.vercel.sh/v1',
   envKey: 'VERCEL_AI_API_KEY',
   wireApi: 'responses' as const,
+}
+
+const DAILY_NUTRITION_CARD: AssistantResponseCard = {
+  kind: 'daily_nutrition',
+  localDate: '2026-07-28',
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_490.25, mealCount: 3 },
+    proteinGrams: { total: 94.5, mealCount: 3 },
+    carbsGrams: { total: null, mealCount: 0 },
+    fatGrams: { total: 34.75, mealCount: 2 },
+  },
 }
 
 afterEach(() => {
@@ -2882,6 +2901,60 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
   )
 })
 
+test('sendAssistantNotificationLocal preserves a card decision and delivers deterministic card text', async () => {
+  const providerAuthoredResponse = JSON.stringify({
+    kind: 'send_message',
+    privateSummary: 'Attached the daily nutrition response card.',
+    text: 'Nutrition card attached.',
+  })
+  const renderedText = renderAssistantResponseCardText(DAILY_NUTRITION_CARD)
+  const providerResult = createProviderResult({
+    providerAuthoredResponse,
+    response: renderedText,
+    responseCard: DAILY_NUTRITION_CARD,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-daily-nutrition-card',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryTarget: 'direct-nutrition-card',
+    instructions: 'Complete the automatic meal closeout.',
+    scheduledInvocationAuthority: {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/daily-nutrition-card',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Attached the daily nutrition response card.',
+      text: renderedText,
+    },
+    response: renderedText,
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    card: DAILY_NUTRITION_CARD,
+    media: [],
+    message: renderedText,
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: renderedText,
+    }),
+  )
+  expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+    'Nutrition card attached.',
+  )
+})
+
 test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
   const providerResult = createProviderResult({
     response: JSON.stringify({
@@ -4618,7 +4691,9 @@ async function loadNotificationTurnHarness(input: {
 function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
+  providerAuthoredResponse?: string | null
   rawEvents?: readonly unknown[]
+  responseCard?: ExecutedAssistantProviderTurnResult['responseCard']
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
   route?: CodexThreadIdentity
@@ -4653,8 +4728,10 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
+    providerAuthoredResponse: input?.providerAuthoredResponse ?? null,
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',
+    responseCard: input?.responseCard ?? null,
     responseDeliveryContextOrdinal: 0,
     responseMedia: input?.responseMedia ?? [],
     route: input?.route ?? createRoute(),

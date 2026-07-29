@@ -408,8 +408,12 @@ export async function executeCodexAssistantTurnAttempt(
     result: {
       provider: resolveAssistantChatProviderFromConfig(providerConfig),
       additionalUsages: result.additionalUsages,
-      acceptedNoReplyDeliveryContextOrdinals:
-        result.acceptedNoReplyDeliveryContextOrdinals,
+      ...(result.acceptedNoReplyDeliveryContextOrdinals === undefined
+        ? {}
+        : {
+            acceptedNoReplyDeliveryContextOrdinals:
+              result.acceptedNoReplyDeliveryContextOrdinals,
+          }),
       codexThreadId: result.sessionId,
       ...(result.finalAction
         ? {
@@ -417,10 +421,20 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       response: result.finalMessage,
+      ...(result.providerAuthoredFinalMessage === undefined
+        ? {}
+        : {
+            providerAuthoredResponse:
+              result.providerAuthoredFinalMessage ?? result.finalMessage,
+          }),
       transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
-      targetInputId: result.targetInputId,
-      reactions: result.reactions,
+      ...(result.targetInputId === undefined
+        ? {}
+        : { targetInputId: result.targetInputId }),
+      ...(result.reactions === undefined
+        ? {}
+        : { reactions: result.reactions }),
       precedingResponseSegments: result.precedingAgentMessageSegments.map((segment) => ({
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
         media: segment.media,
@@ -435,7 +449,9 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       responseMedia: result.responseMedia,
-      responseCard: result.responseCard,
+      ...(result.responseCard === undefined
+        ? {}
+        : { responseCard: result.responseCard }),
       stderr: result.stderr,
       stdout: result.stdout,
       rawEvents: result.jsonEvents,

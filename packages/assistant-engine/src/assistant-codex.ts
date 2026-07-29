@@ -546,6 +546,8 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  /** Final model-authored text before runtime-owned presentation transforms. */
+  providerAuthoredFinalMessage?: string | null
   transcriptMessage: string | null
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   finalAction: AssistantNoReplyDisposition | null
@@ -5009,6 +5011,7 @@ async function runCodexAppServerTurnOnProcess(
     finalActionExplicit:
       finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
+    providerAuthoredFinalMessage: modelFinalMessage,
     transcriptMessage:
       finalResponseCard
         ? renderAssistantResponseCardText(finalResponseCard)

@@ -180,15 +180,22 @@ On a scheduled run:
    do not reuse an earlier total or calculate nutrition independently.
 7. When the run covers exactly one local date, the canonical read includes a
    calorie total, and numerical output is permitted for the member, call
-   `murph.attach_response_card` with `kind: "daily_nutrition"`. Copy the
-   top-level meal count, every total, and each metric's supporting meal count
-   exactly from that read. Do not author a second nutrition summary; the runtime
-   renders the closeout and will label partial totals as partial, identifying
-   missing or under-supported macros honestly. For multi-date catch-up, missing
-   calories, or intuitive-eating, eating-disorder-risk, or number-sensitive
-   suppression, retain the current compact text or suppression behavior. Never
-   attach the photos. Suppress the message only when neither a retained photo
-   nor a same-occurrence removal revision is selected.
+   `murph.attach_response_card` with this exact mapping:
+   `card: { kind: "daily_nutrition", localDate: <the single selected date>,
+   mealCount: <top-level mealCount>, totals: { calories, proteinGrams,
+   carbsGrams, fatGrams } }`. Copy each included metric's complete
+   `{ total, mealCount }` pair unchanged from the canonical read. Omit
+   `fiberGrams`; it is outside the closed V1 card contract. After the tool
+   succeeds, return a `send_message` decision without repeating nutrition
+   values in its text; the runtime replaces that text with the deterministic
+   closeout derived from the card. Do not author a second nutrition summary.
+   The runtime labels partial totals as partial and identifies missing or
+   under-supported macros honestly. For
+   multi-date catch-up, missing calories, or intuitive-eating,
+   eating-disorder-risk, or number-sensitive suppression, retain the current
+   compact text or suppression behavior. Never attach the photos. Suppress the
+   message only when neither a retained photo nor a same-occurrence removal
+   revision is selected.
 
 ## Handle edge cases
 
