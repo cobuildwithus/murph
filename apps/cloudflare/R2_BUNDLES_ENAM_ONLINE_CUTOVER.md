@@ -209,6 +209,7 @@ pnpm --dir apps/cloudflare r2:bundles:online-copy -- \
   --immutable-keys-audited \
   --confirm-destination "$DESTINATION_BUCKET" \
   --copier-exclusive \
+  --hold-for-source-put-drain \
   --apply
 ```
 
@@ -222,12 +223,13 @@ investigated.
 
 That provenance exists only in the live process. A later process must reject
 every source-active destination-only eligible object because it cannot
-distinguish clean prior churn from an ambiguous late commit. For the production
-cutover, start the write fence and source-PUT drain before this invocation can
-reach its first zero-source-only cycle. Use the rehearsal duration with a
-conservative margin to schedule that overlap. If a clean rehearsal invocation
-exits with destination-only churn, keep that destination as rehearsal evidence
-only; do not restart copying into it.
+distinguish clean prior churn from an ambiguous late commit.
+
+`--hold-for-source-put-drain` makes the production-cutover process pause at its
+first temporary zero-source-only observation without discarding provenance.
+Continue with step 6 while that exact process waits. A timing-only rehearsal
+must omit this flag; if it exits with destination-only churn, keep that
+destination as rehearsal evidence only and never restart copying into it.
 
 CopyObject is deliberately attempted once. A transport error, `429`, or `5xx`
 is ambiguous because the first request may still commit, so the command fails
@@ -237,11 +239,12 @@ eligible object blocks reuse of that destination.
 
 ### 5. Complete normally or audit an abnormal stop
 
-On normal exit, the command has awaited every bounded worker request, completed
-all internally required cycles, and performed the final source/destination
-inventory validation. That is the source-active copy proof; do not launch a
-separate read-only process afterward because its intentionally fresh provenance
-must distrust clean destination-only churn from the completed process.
+On normal production-cutover exit, the command has received the exact drain
+confirmation, awaited every bounded worker request, completed all internally
+required cycles, and performed coherent final source/destination inventory
+validation. That is the source-active copy proof; do not launch a separate
+read-only process afterward because its intentionally fresh provenance must
+distrust clean destination-only churn from the completed process.
 
 Only if the process crashes or a CopyObject result is ambiguous, wait out the
 request bound and run the strict source-active read-only audit:
@@ -271,10 +274,20 @@ no in-flight write invocation and no new OC direct-PUT issuance or completion
 during the final quiet interval.
 
 The source-active apply invocation from step 4 must remain the sole copier
-through this drain. It automatically copies each new source delta in another
-internal cycle. After the drain is proven, allow that same invocation to reach
-zero source-only objects and exit cleanly. Revoke the copy credential before
-promotion.
+through this drain. When it logs that temporary convergence is waiting for the
+OC PUT drain, complete every proof above, then type the exact process prompt:
+
+```text
+SOURCE_PUT_DRAINED <source-bucket> <destination-bucket>
+```
+
+This is the existing operator drain assertion delivered late to the exact
+provenance-bearing process, not a new persistence owner. The command then
+re-reads active owners before and after both R2 inventories. If ownership or a
+canonical checkpoint changes during those reads, it retries the coherent pair
+inside the same invocation. It copies every delayed source delta in another
+cycle and exits only after the post-confirmation pair has zero source-only
+objects. Revoke the copy credential before promotion.
 
 No CopyObject request may be issued after this point.
 

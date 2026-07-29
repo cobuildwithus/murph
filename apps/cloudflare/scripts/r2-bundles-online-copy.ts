@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -98,6 +99,7 @@ export interface R2BundlesOnlineCopyOptions {
   copierStopped: boolean;
   destination: string;
   finalConvergence: boolean;
+  holdForSourcePutDrain: boolean;
   immutableKeysAudited: boolean;
   phase: R2OnlineCopyPhase;
   source: string;
@@ -146,6 +148,10 @@ interface OnlineCopyDependencies {
   log?: (message: string) => void;
   readInventory?: (bucket: string) => Promise<R2ObjectInventoryEntry[]>;
   runner?: R2BundlesMigrationCommandRunner;
+  waitForSourcePutDrain?: (input: {
+    destination: string;
+    source: string;
+  }) => Promise<void>;
 }
 
 export const R2_BUNDLES_ONLINE_COPY_USAGE = `Usage:
@@ -165,6 +171,9 @@ Options:
   --confirm-destination <name>  Repeat the destination for --apply.
   --copier-exclusive            Assert this is the only apply invocation for
                                 this source/destination pair.
+  --hold-for-source-put-drain   At temporary convergence, retain in-process
+                                provenance until the operator confirms the OC
+                                write and direct-PUT drain.
   --immutable-keys-audited      Assert browser-vault data versions and every
                                 eligible key class are create-only identities.
   --final-convergence           Read-only final directional proof.
@@ -196,6 +205,7 @@ export function parseR2BundlesOnlineCopyArgs(
       destination: { type: "string" },
       "final-convergence": { type: "boolean" },
       help: { short: "h", type: "boolean" },
+      "hold-for-source-put-drain": { type: "boolean" },
       "immutable-keys-audited": { type: "boolean" },
       phase: { type: "string" },
       source: { type: "string" },
@@ -224,6 +234,7 @@ export function parseR2BundlesOnlineCopyArgs(
       "destination",
     ),
     finalConvergence: values["final-convergence"] ?? false,
+    holdForSourcePutDrain: values["hold-for-source-put-drain"] ?? false,
     immutableKeysAudited: values["immutable-keys-audited"] ?? false,
     phase,
     source: normalizeBucketName(requireFlag(values.source, "--source"), "source"),
@@ -314,15 +325,16 @@ export async function runR2BundlesOnlineCopy(
       runner,
     }));
   const client = dependencies.client ?? createOnlineCopyClient(environment);
+  const waitForSourcePutDrain = dependencies.waitForSourcePutDrain
+    ?? waitForOperatorSourcePutDrain;
 
   await inspectInfrastructure({
     destination: options.destination,
     source: options.source,
   });
 
-  let activeOwners = await inspectActiveOwners();
-
   if (options.finalConvergence) {
+    const activeOwners = await inspectActiveOwners();
     await proveFinalDirectionalConvergence({
       activeOwners,
       log,
@@ -332,8 +344,17 @@ export async function runR2BundlesOnlineCopy(
     return;
   }
 
-  let sourceInventory = await readInventory(options.source);
-  let destinationInventory = await readInventory(options.destination);
+  let {
+    activeOwners,
+    destinationInventory,
+    sourceInventory,
+  } = await readCoherentOnlineCopyState({
+    destination: options.destination,
+    inspectActiveOwners,
+    log,
+    readInventory,
+    source: options.source,
+  });
   assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
   assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
   assertCanonicalSnapshotsReachable(
@@ -379,6 +400,7 @@ export async function runR2BundlesOnlineCopy(
 
   let copyCycle = 0;
   let destinationConfirmedCount = 0;
+  let sourcePutDrainConfirmed = false;
   const sourceMissingKeys = new Set<string>();
   while (true) {
     copyCycle += 1;
@@ -416,9 +438,17 @@ export async function runR2BundlesOnlineCopy(
       sourceMissingKeys.add(key);
     }
 
-    sourceInventory = await readInventory(options.source);
-    destinationInventory = await readInventory(options.destination);
-    activeOwners = await inspectActiveOwners();
+    ({
+      activeOwners,
+      destinationInventory,
+      sourceInventory,
+    } = await readCoherentOnlineCopyState({
+      destination: options.destination,
+      inspectActiveOwners,
+      log,
+      readInventory,
+      source: options.source,
+    }));
     assertInventoryEligibleForOnlineCopy(sourceInventory, "source", activeOwners);
     assertInventoryEligibleForOnlineCopy(destinationInventory, "destination", activeOwners);
     assertCanonicalSnapshotsReachable(
@@ -470,6 +500,19 @@ export async function runR2BundlesOnlineCopy(
       );
       continue;
     }
+    if (options.holdForSourcePutDrain && !sourcePutDrainConfirmed) {
+      log(
+        "Online copy reached temporary convergence; retaining source provenance "
+        + "until the operator confirms the OC PUT drain.",
+      );
+      await waitForSourcePutDrain({
+        destination: options.destination,
+        source: options.source,
+      });
+      sourcePutDrainConfirmed = true;
+      log("OC PUT drain confirmed; revalidating source and destination before exit.");
+      continue;
+    }
     log(
       `Copied or confirmed ${destinationConfirmedCount.toLocaleString("en-US")} `
       + "destination immutable object(s); "
@@ -480,6 +523,79 @@ export async function runR2BundlesOnlineCopy(
       + "no destination object was overwritten or deleted.",
     );
     return;
+  }
+}
+
+async function readCoherentOnlineCopyState(input: {
+  destination: string;
+  inspectActiveOwners: () => Promise<R2OnlineCopyActiveOwners>;
+  log: (message: string) => void;
+  readInventory: (bucket: string) => Promise<R2ObjectInventoryEntry[]>;
+  source: string;
+}): Promise<{
+  activeOwners: R2OnlineCopyActiveOwners;
+  destinationInventory: R2ObjectInventoryEntry[];
+  sourceInventory: R2ObjectInventoryEntry[];
+}> {
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    const ownersBefore = await input.inspectActiveOwners();
+    const sourceInventory = await input.readInventory(input.source);
+    const destinationInventory = await input.readInventory(input.destination);
+    const ownersAfter = await input.inspectActiveOwners();
+    if (sameActiveOwners(ownersBefore, ownersAfter)) {
+      return {
+        activeOwners: ownersAfter,
+        destinationInventory,
+        sourceInventory,
+      };
+    }
+    input.log(
+      `Hosted ownership changed during online-copy inventory read ${attempt.toLocaleString("en-US")}; `
+      + "retrying the coherent read in the same invocation.",
+    );
+  }
+}
+
+function sameActiveOwners(
+  left: R2OnlineCopyActiveOwners,
+  right: R2OnlineCopyActiveOwners,
+): boolean {
+  return sameStringSet(left.namespaces, right.namespaces)
+    && sameStringSet(
+      left.canonicalSnapshotObjectKeys,
+      right.canonicalSnapshotObjectKeys,
+    );
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+}
+
+async function waitForOperatorSourcePutDrain(input: {
+  destination: string;
+  source: string;
+}): Promise<void> {
+  const expected = `SOURCE_PUT_DRAINED ${input.source} ${input.destination}`;
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  try {
+    const answer = await readline.question(
+      `After the source write fence and OC direct-PUT drain are proven, type exactly:\n`
+      + `${expected}\n> `,
+    );
+    if (answer !== expected) {
+      throw new TypeError("The OC PUT drain confirmation did not exactly match this bucket pair.");
+    }
+  } finally {
+    readline.close();
   }
 }
 
@@ -551,6 +667,9 @@ function assertOnlineCopyAcknowledgements(options: R2BundlesOnlineCopyOptions): 
   }
   if (options.apply && options.phase !== "source_active") {
     throw new TypeError("--apply requires --phase source_active.");
+  }
+  if (options.holdForSourcePutDrain && !options.apply) {
+    throw new TypeError("--hold-for-source-put-drain requires --apply.");
   }
   if (!options.apply && options.confirmDestination !== null) {
     throw new TypeError("Read-only online-copy checks do not accept --confirm-destination.");
