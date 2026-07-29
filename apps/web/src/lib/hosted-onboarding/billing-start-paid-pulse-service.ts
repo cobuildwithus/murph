@@ -55,6 +55,7 @@ import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
@@ -63,6 +64,10 @@ import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
 } from "./stripe-error-log";
+import {
+  hasHostedStripeSubscriptionPaymentMethod,
+  readHostedStripeSubscriptionPaymentMethodId,
+} from "./stripe-subscription-payment-method";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
 const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings#subscription";
@@ -207,12 +212,52 @@ export async function startHostedTrialPaidPlan(
   if (
     input.targetPlanCode === "launch_group_monthly"
   ) {
-    return scheduleHostedBillingPlanSwitch({
+    const switchResult = await scheduleHostedBillingPlanSwitch({
       memberId: input.memberId,
       now: input.now,
       prisma: input.prisma,
+      requiredSourceBillingPhase: "trial",
       targetPlanCode: input.targetPlanCode,
     });
+    if (switchResult.status !== "payment_method_required") {
+      return switchResult;
+    }
+
+    const prisma = input.prisma ?? getPrisma();
+    const billingRef = await readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma,
+    });
+    const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
+    if (!stripeCustomerId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_NOT_READY",
+        httpStatus: 409,
+        message: "Your subscription is not ready for billing changes yet.",
+      });
+    }
+    const targetConfig = requireHostedStripeBillingPlanConfig({
+      billingPlanCode: input.targetPlanCode,
+    });
+    const now = input.now ?? new Date();
+    const paymentMethodContinuation =
+      resolveHostedPulseTrialPaymentMethodContinuation({
+        continuation: input.paymentMethodContinuation,
+        memberId: input.memberId,
+        targetPlanCode: input.targetPlanCode,
+        timing: input.timing,
+      });
+
+    return {
+      billingPlanCode: input.targetPlanCode,
+      paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        continuation: paymentMethodContinuation,
+        now,
+        stripe: targetConfig.stripe,
+        stripeCustomerId,
+      }),
+      status: "payment_required",
+    };
   }
 
   return transitionHostedPulseTrialPaidPlan({
@@ -304,7 +349,7 @@ async function transitionHostedPulseTrialPaidPlan<
   const sourceConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: START_PAID_PULSE_PLAN,
   });
-  const targetConfig = requireHostedStripeBillingPlanConfig({
+  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
     billingPlanCode: input.targetPlanCode,
   });
   const stripe = targetConfig.stripe;
@@ -620,49 +665,6 @@ function assertHostedStripePulseTrialSubscriptionBillingShapeCanChange(input: {
       message: "Your subscription billing settings are not ready to start paid billing.",
     });
   }
-}
-
-function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
-  return Boolean(readHostedStripeSubscriptionPaymentMethodId(subscription));
-}
-
-/**
- * The payment method that should settle this subscription's next invoice.
- * A resumed trial cuts a cycle invoice immediately, so the card has to be on the
- * subscription: a card held only on the customer leaves that invoice in
- * `requires_payment_method`, which strands the resume in `pending_update` until
- * Stripe expires and voids it.
- */
-function readHostedStripeSubscriptionPaymentMethodId(
-  subscription: Stripe.Subscription,
-): string | null {
-  const subscriptionPaymentMethodId =
-    coerceStripeObjectId(subscription.default_payment_method) ||
-    coerceStripeObjectId(subscription.default_source);
-
-  if (subscriptionPaymentMethodId) {
-    return subscriptionPaymentMethodId;
-  }
-
-  const customer = readExpandedStripeCustomer(subscription.customer);
-  if (!customer) {
-    return null;
-  }
-
-  return coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
-    coerceStripeObjectId(customer.default_source) ||
-    null;
-}
-
-function readExpandedStripeCustomer(
-  customer: Stripe.Subscription["customer"],
-): Stripe.Customer | null {
-  return customer &&
-    typeof customer === "object" &&
-    customer.object === "customer" &&
-    !customer.deleted
-    ? customer
-    : null;
 }
 
 async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {

@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
 import type {
-  HostedPlanUsageRecommendedAction,
   HostedPlanUsageStatus,
-  HostedPlanUsageSubscriptionActionQuote,
 } from "@murphai/hosted-execution/plan-usage";
 
 import { Button } from "@/src/components/ui/button";
@@ -42,20 +40,6 @@ const GROUP_FEATURES = [
   "Private Murph chat",
   "Lighter included AI usage",
 ];
-
-function getAuthorizedPlanChangeTiming(
-  status: HostedPlanUsageStatus,
-  action: Extract<
-    HostedPlanUsageRecommendedAction,
-    { kind: "change_plan" }
-  >,
-): HostedPlanUsageSubscriptionActionQuote["timing"] | null {
-  const quote = status.subscriptionActionQuote;
-  return quote?.action === "change_plan"
-    && quote.targetPlanCode === action.targetPlanCode
-    ? quote.timing
-    : null;
-}
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -221,6 +205,7 @@ export function HostedBillingSettings(props: {
           ? (
               <HostedPlanChangeButton
                 block
+                expectedCurrentPlanCode="launch_group_monthly"
                 mode="upgrade"
                 targetPlanCode="launch_monthly"
               >
@@ -270,7 +255,17 @@ export function HostedBillingSettings(props: {
         : edgeCurrent
         ? <CurrentPlanButton />
         : props.canUpgradeToEdge === true
-          ? <UpgradeToEdgeButton block>Choose Edge</UpgradeToEdgeButton>
+          ? currentPlanCode === "launch_group_monthly"
+            || currentPlanCode === "launch_monthly"
+            ? (
+                <UpgradeToEdgeButton
+                  block
+                  expectedCurrentPlanCode={currentPlanCode}
+                >
+                  Choose Edge
+                </UpgradeToEdgeButton>
+              )
+            : null
           : <BillingPortalButton block variant="secondary" label="Choose Edge" />,
       current: edgeCurrent,
       currentLabel: "Current plan",
@@ -336,19 +331,10 @@ export function HostedBillingSettings(props: {
               Group has not started
             </p>
             <p className="mt-1 max-w-2xl text-sm text-pretty text-muted-foreground">
-              Review the $3.50 monthly price, then confirm if you want Group to
-              begin now.
+              Group has not started. Review the plan options below and make a
+              fresh choice when you are ready.
             </p>
           </div>
-          {props.showGroupPlan === true && props.canStartPaidPulse === true ? (
-            <StartPaidPulseButton
-              successHref="/settings#subscription"
-              targetPlanCode="launch_group_monthly"
-              timing="now"
-            >
-              Review and start Group
-            </StartPaidPulseButton>
-          ) : null}
         </div>
       ) : null}
       {!planResolved ? (
@@ -431,20 +417,7 @@ function PlanUsageBand(props: {
     }
 
     const action = status.recommendedAction;
-    const actionTiming = action?.kind === "change_plan"
-      ? getAuthorizedPlanChangeTiming(status, action)
-      : null;
-    const quotedTrialPlanCode =
-      action?.kind === "change_plan"
-      && actionTiming === "now"
-      && (
-        action.targetPlanCode === "launch_group_monthly"
-        || action.targetPlanCode === "launch_monthly"
-      )
-        ? action.targetPlanCode
-        : null;
-    const hasStartAction =
-      action?.kind === "start_pulse" || quotedTrialPlanCode !== null;
+    const hasStartAction = action?.kind === "start_pulse";
     const canShowStartAction =
       hasStartAction && !props.pulseTrialBillingContinuationPending;
     return (
@@ -464,25 +437,14 @@ function PlanUsageBand(props: {
               {hasStartAction
                 ? props.pulseTrialBillingContinuationPending
                   ? "Finishing your Pulse update."
-                  : quotedTrialPlanCode === "launch_group_monthly"
-                    ? "Start Group to keep private Murph replies available."
-                    : "Start Pulse to keep Murph replying."
+                  : "Start Pulse to keep Murph replying."
                 : "Your trial usage is no longer active."}
             </p>
           </div>
           {canShowStartAction ? (
-            quotedTrialPlanCode ? (
-              <StartPaidPulseButton
-                targetPlanCode={quotedTrialPlanCode}
-                timing="now"
-              >
-                {action?.label ?? "Start plan"}
-              </StartPaidPulseButton>
-            ) : (
-              <StartPaidPulseButton>
-                {action?.label ?? "Start Pulse"}
-              </StartPaidPulseButton>
-            )
+            <StartPaidPulseButton>
+              {action?.label ?? "Start Pulse"}
+            </StartPaidPulseButton>
           ) : null}
         </div>
         {inactiveTopUpDialog}
@@ -495,9 +457,6 @@ function PlanUsageBand(props: {
     ? `Trial ends ${periodEndLabel}`
     : `Resets ${periodEndLabel}`;
   const action = status.recommendedAction;
-  const actionTiming = action?.kind === "change_plan"
-    ? getAuthorizedPlanChangeTiming(status, action)
-    : null;
   const forecast = status.forecast
     ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
@@ -560,37 +519,16 @@ function PlanUsageBand(props: {
           : action?.kind === "start_pulse"
             && !props.pulseTrialBillingContinuationPending ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : action?.kind === "change_plan" ? (
-          (actionTiming === "now" || actionTiming === "at_trial_end")
-          && (
-            action.targetPlanCode === "launch_group_monthly"
-            || action.targetPlanCode === "launch_monthly"
-          ) ? (
-            <StartPaidPulseButton
-              targetPlanCode={action.targetPlanCode}
-              timing={actionTiming}
-            >
-              {action.label}
-            </StartPaidPulseButton>
-          ) : actionTiming === "immediate" ? (
-            <HostedPlanChangeButton
-              currentPeriodEnd={status.periodEnd}
-              mode="upgrade"
-              targetPlanCode={action.targetPlanCode}
-            >
-              {action.label}
-            </HostedPlanChangeButton>
-          ) : actionTiming === "period_end" ? (
-            <HostedPlanChangeButton
-              currentPeriodEnd={status.periodEnd}
-              mode="schedule"
-              targetPlanCode={action.targetPlanCode}
-            >
-              {action.label}
-            </HostedPlanChangeButton>
-          ) : null
         ) : action?.kind === "upgrade_edge" ? (
-          <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
+          <UpgradeToEdgeButton
+            expectedCurrentPlanCode={
+              status.planCode === "launch_group_monthly"
+                ? "launch_group_monthly"
+                : "launch_monthly"
+            }
+          >
+            {action.label}
+          </UpgradeToEdgeButton>
         ) : null}
       </div>
       {props.usageTopUpOffers.length === 0 &&

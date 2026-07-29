@@ -266,6 +266,7 @@ describe("hosted subscription tool", () => {
     });
     expect(mocks.startTrialPaidPlan).toHaveBeenCalledWith({
       memberId: "member_123",
+      paymentMethodContinuation: "conversation",
       prisma: { label: "prisma" },
       targetPlanCode: "launch_group_monthly",
       timing: "at_trial_end",
@@ -336,6 +337,7 @@ describe("hosted subscription tool", () => {
     });
 
     expect(mocks.upgradePlan).toHaveBeenCalledWith({
+      expectedCurrentPlanCode: "launch_monthly",
       memberId: "member_123",
       prisma: { label: "prisma" },
       targetPlanCode: "launch_edge_monthly",

@@ -31,7 +31,10 @@ import {
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
-import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
+import {
+  getHostedOnboardingEnvironment,
+  isHostedBillingPlanSelectionAvailable,
+} from "../hosted-onboarding/runtime";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -245,7 +248,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
         prisma,
         requestedTargetPlanCode:
           input.subscriptionActionTargetPlanCode,
-        trialTiming: exhausted ? "now" : "at_trial_end",
+        trialTiming: "at_trial_end",
       })
     : EMPTY_SUBSCRIPTION_OFFER;
   const personalUsageCreditOfferCodes = shouldResolvePersonalUsageCreditOffers
@@ -457,15 +460,21 @@ async function resolveAvailableSubscriptionOffer(input: {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
 
+    const hasConfirmedGroupMembership =
+      await hasConfirmedHostedGroupMembership({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      });
+    const groupPlanAvailable =
+      hasConfirmedGroupMembership
+      && getHostedOnboardingEnvironment()
+        .stripePriceIdsByPlan.launch_group_monthly !== null
+      && await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: "launch_group_monthly",
+      });
     const trialOffer = resolveHostedTrialContinuationOffer({
-      groupPlanConfigured:
-        getHostedOnboardingEnvironment()
-          .stripePriceIdsByPlan.launch_group_monthly !== null,
-      hasConfirmedGroupMembership:
-        await hasConfirmedHostedGroupMembership({
-          memberId: input.memberId,
-          prisma: input.prisma,
-        }),
+      groupPlanConfigured: groupPlanAvailable,
+      hasConfirmedGroupMembership,
     });
     const targetPlanCode =
       input.requestedTargetPlanCode
@@ -477,6 +486,14 @@ async function resolveAvailableSubscriptionOffer(input: {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
     if (!trialOffer.availablePlanCodes.includes(targetPlanCode)) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+    if (
+      targetPlanCode !== "launch_group_monthly"
+      && !await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: targetPlanCode,
+      })
+    ) {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
     return {
@@ -518,10 +535,23 @@ async function resolveAvailableSubscriptionOffer(input: {
   }
   if (
     targetPlanCode === "launch_group_monthly"
-    && !(await hasConfirmedHostedGroupMembership({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    }))
+    && (
+      !(await hasConfirmedHostedGroupMembership({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      }))
+      || !await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: targetPlanCode,
+      })
+    )
+  ) {
+    return EMPTY_SUBSCRIPTION_OFFER;
+  }
+  if (
+    targetPlanCode !== "launch_group_monthly"
+    && !await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: targetPlanCode,
+    })
   ) {
     return EMPTY_SUBSCRIPTION_OFFER;
   }

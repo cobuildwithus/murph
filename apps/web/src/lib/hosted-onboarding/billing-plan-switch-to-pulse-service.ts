@@ -25,7 +25,11 @@ import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "./runtime";
+import {
+  hasHostedStripeSubscriptionPaymentMethod,
+} from "./stripe-subscription-payment-method";
 import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
@@ -44,6 +48,10 @@ const STRIPE_TRIAL_METADATA_KEYS = [
 ] as const;
 
 export type HostedBillingPlanSwitchResult =
+  | {
+    billingPlanCode: "launch_group_monthly";
+    status: "payment_method_required";
+  }
   | {
     effectiveAt: string;
     scheduledBillingPlanCode: HostedBillingPlanCode;
@@ -77,6 +85,7 @@ export async function scheduleHostedBillingPlanSwitch(input: {
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
+  requiredSourceBillingPhase?: "trial";
   targetPlanCode: HostedBillingPlanCode;
 }): Promise<HostedBillingPlanSwitchResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -89,6 +98,7 @@ export async function scheduleHostedBillingPlanSwitch(input: {
       scheduleHostedBillingPlanSwitchWithLockedOwner({
         memberId: input.memberId,
         now,
+        requiredSourceBillingPhase: input.requiredSourceBillingPhase,
         targetPlanCode: input.targetPlanCode,
         tx,
       }),
@@ -109,6 +119,7 @@ export function scheduleHostedBillingPlanSwitchToPulse(input: {
 async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
   memberId: string;
   now: Date;
+  requiredSourceBillingPhase?: "trial";
   targetPlanCode: HostedBillingPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<HostedBillingPlanSwitchResult> {
@@ -131,6 +142,14 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     memberId: input.memberId,
     prisma: input.tx,
   });
+
+  if (
+    input.requiredSourceBillingPhase
+    && parseHostedBillingPhase(billingRef?.currentBillingPhase)
+      !== input.requiredSourceBillingPhase
+  ) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
 
   assertHostedBillingPlanSwitchSourceState({
     billingRef,
@@ -161,13 +180,15 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
   const sourceConfig = requireHostedSwitchPlanConfig(sourcePlanCode);
-  const targetConfig = requireHostedSwitchPlanConfig(input.targetPlanCode);
+  const targetConfig = await requireValidatedHostedStripeBillingPlanConfig({
+    billingPlanCode: input.targetPlanCode,
+  });
   const stripe = sourceConfig.stripe;
   const subscription = await callHostedStripePlanSwitchOperation(
     "subscription.retrieve",
     () =>
       stripe.subscriptions.retrieve(stripeSubscriptionId, {
-        expand: ["items.data.price"],
+        expand: ["customer", "items.data.price"],
       }),
   );
 
@@ -185,6 +206,17 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     sourceConfig,
     subscription,
   });
+
+  if (
+    input.requiredSourceBillingPhase === "trial"
+    && input.targetPlanCode === "launch_group_monthly"
+    && !hasHostedStripeSubscriptionPaymentMethod(subscription)
+  ) {
+    return {
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    };
+  }
 
   const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
     now: input.now,

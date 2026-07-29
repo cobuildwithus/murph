@@ -166,6 +166,7 @@ test("starts Group after the current trial from an exact request body", async ()
   expect(response.status).toBe(200);
   expect(mocks.startHostedTrialPaidPlan).toHaveBeenCalledWith({
     memberId: "member_123",
+    paymentMethodContinuation: "settings",
     prisma: { label: "test-prisma" },
     targetPlanCode: "launch_group_monthly",
     timing: "at_trial_end",

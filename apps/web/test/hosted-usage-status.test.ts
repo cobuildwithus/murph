@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -29,6 +30,16 @@ vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => (
     mocks.readHostedPersonalUsageCreditOfferCodes,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: "price_group_test",
+    },
+  }),
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
+}));
+
 import {
   projectHostedPersonalAiUsageStatus,
   readHostedPersonalAiUsageStatus,
@@ -44,6 +55,7 @@ const PERIOD_END = new Date("2026-07-11T00:00:00.000Z");
 describe("readHostedPersonalAiUsageStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
     mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
       "usage_10_usd",
     ]);
@@ -389,6 +401,41 @@ describe("readHostedPersonalAiUsageStatus", () => {
         timing: "at_trial_end",
       },
       usedPercent: 10,
+    });
+  });
+
+  it("keeps an exhausted active trial on its natural end-date Group timing", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 10_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_exhausted_trial_group",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      recommendedAction: {
+        kind: "change_plan",
+        targetPlanCode: "launch_group_monthly",
+      },
+      status: "exhausted",
+      subscriptionActionQuote: {
+        targetPlanCode: "launch_group_monthly",
+        timing: "at_trial_end",
+      },
     });
   });
 

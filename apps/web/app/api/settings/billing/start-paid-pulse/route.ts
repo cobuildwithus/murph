@@ -33,7 +33,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   const result = await startHostedTrialPaidPlan({
     memberId: auth.member.id,
-    ...(targetPlanCode === "launch_monthly" && timing === "now"
+    ...(
+      (targetPlanCode === "launch_monthly" && timing === "now")
+      || targetPlanCode === "launch_group_monthly"
       ? { paymentMethodContinuation: "settings" as const }
       : {}),
     prisma,

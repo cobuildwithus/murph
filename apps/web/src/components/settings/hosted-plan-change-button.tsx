@@ -28,9 +28,17 @@ export function HostedPlanChangeButton(props: {
   children?: ReactNode;
   currentPeriodEnd?: string | null;
   disabled?: boolean;
-  mode: "schedule" | "upgrade";
   targetPlanCode: HostedBillingPlanCode;
-}) {
+} & (
+  | {
+    expectedCurrentPlanCode: HostedBillingPlanCode;
+    mode: "upgrade";
+  }
+  | {
+    expectedCurrentPlanCode?: never;
+    mode: "schedule";
+  }
+)) {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,6 +55,9 @@ export function HostedPlanChangeButton(props: {
 
     try {
       const payload = {
+        ...(props.mode === "upgrade" && props.expectedCurrentPlanCode
+          ? { expectedCurrentPlanCode: props.expectedCurrentPlanCode }
+          : {}),
         targetPlanCode: props.targetPlanCode,
       };
       if (props.mode === "schedule") {

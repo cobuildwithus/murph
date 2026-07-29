@@ -59,7 +59,9 @@ import {
   readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes,
 } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
-import { getHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/runtime";
+import {
+  isHostedBillingPlanSelectionAvailable,
+} from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -254,10 +256,7 @@ export default async function SettingsPage({
     billingRef?.scheduledBillingPlanCode,
   );
   const hasScheduledPlanChange = scheduledPlanCode !== null;
-  const groupPlanConfigured = Boolean(
-    getHostedOnboardingEnvironment().stripePriceIdsByPlan
-      .launch_group_monthly,
-  );
+  const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
   const showGroupPlan = resolveVisibleHostedBillingPlanCodes({
     currentPlanCode,
     groupPlanConfigured,
@@ -429,6 +428,12 @@ export default async function SettingsPage({
         <HostedAssistantModelSettings
           canUpgradeToEdge={canUpgradeToEdge}
           configurationAvailable={account?.assistant?.configurationAvailable === true}
+          expectedCurrentPlanCode={
+            currentPlanCode === "launch_group_monthly"
+            || currentPlanCode === "launch_monthly"
+              ? currentPlanCode
+              : undefined
+          }
           initialDormantSolPreference={
             account?.assistant?.dormantSolPreference === true
           }
@@ -570,8 +575,12 @@ async function readSettingsPageData(input: {
       memberId,
       prisma,
     });
+  const groupPlanAvailable =
+    hasConfirmedGroupMembership
+    && await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_group_monthly",
+    });
   const usageStatus = await readHostedPersonalAiUsageStatus({
-    includeSubscriptionActionQuote: true,
     memberId,
     prisma,
   });
@@ -607,6 +616,7 @@ async function readSettingsPageData(input: {
   return {
     familyAccess,
     familyOwner,
+    groupPlanAvailable,
     hasConfirmedGroupMembership,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,

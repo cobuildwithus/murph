@@ -17,6 +17,9 @@ export const POST = withJsonError(async (request: Request) => {
     limitBytes: 2_048,
   });
   const targetPlanCode = parseHostedBillingPlanCode(body.targetPlanCode);
+  const expectedCurrentPlanCode = parseHostedBillingPlanCode(
+    body.expectedCurrentPlanCode,
+  );
 
   if (
     targetPlanCode !== "launch_monthly"
@@ -29,8 +32,19 @@ export const POST = withJsonError(async (request: Request) => {
         "targetPlanCode must be launch_monthly or launch_edge_monthly.",
     });
   }
+  if (
+    !expectedCurrentPlanCode
+    || expectedCurrentPlanCode === targetPlanCode
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
+      httpStatus: 400,
+      message: "Confirm the current plan before upgrading.",
+    });
+  }
 
   const result = await upgradeHostedBillingPlan({
+    expectedCurrentPlanCode,
     memberId: auth.member.id,
     prisma,
     targetPlanCode,

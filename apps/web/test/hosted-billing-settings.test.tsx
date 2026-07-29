@@ -242,9 +242,6 @@ describe("HostedBillingSettings", () => {
   });
 
   test("acknowledges a saved card and requires fresh exact-price Group confirmation", async () => {
-    mocks.requestHostedTrialPlanStartPaid.mockResolvedValueOnce({
-      status: "started",
-    });
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -253,6 +250,8 @@ describe("HostedBillingSettings", () => {
       {
         authenticated: true,
         canStartPaidPulse: true,
+        canSwitchToGroup: true,
+        currentBillingPhase: "trial",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         groupPaymentMethodSaved: true,
@@ -268,46 +267,15 @@ describe("HostedBillingSettings", () => {
       rendered.window.document.body.textContent ?? "",
       /Group has not started/,
     );
-
-    const reviewButton = findLastButtonByText(
-      rendered.window.document,
-      "Review and start Group",
-      rendered.window,
-    );
-    await act(async () => {
-      reviewButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Group begins at \$3\.50\/month/,
+      /Choose Group/,
     );
-    assert.match(
+    assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
-      /charged immediately/,
+      /Review and start Group/,
     );
-
-    const dialog = rendered.window.document.querySelector("[role=dialog]");
-    const confirmButton = [...(dialog?.querySelectorAll("button") ?? [])]
-      .find((button) => button.textContent === "Start Group");
-    assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
-    await act(async () => {
-      confirmButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    assert.deepEqual(
-      mocks.requestHostedTrialPlanStartPaid.mock.calls[0]?.[0],
-      {
-        targetPlanCode: "launch_group_monthly",
-        timing: "now",
-      },
-    );
-    assert.deepEqual(mocks.routerReplace.mock.calls, [
-      ["/settings#subscription"],
-    ]);
+    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
     await rendered.cleanup();
 
     const currentMarkup = renderToStaticMarkup(createElement(
@@ -861,14 +829,18 @@ describe("HostedBillingSettings", () => {
     assert.match(ineligibleUpgradeMarkup, /Upgrade from usage/);
   });
 
-  test("keeps an active trial on the server-selected trial-end path", async () => {
+  test("keeps plan changes out of the usage band for an active trial", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
-    const rendered = await renderClientComponent(createElement(
+    const markup = renderToStaticMarkup(createElement(
       HostedBillingSettings,
       {
         authenticated: true,
+        canStartPaidPulse: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
         usageStatus: buildUsageStatus({
           accessKind: "trial",
           periodKind: "trial",
@@ -888,51 +860,21 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    const actionButton = findButtonByText(
-      rendered.window.document,
-      "Keep Pulse from usage",
-      rendered.window,
-    );
-    await act(async () => {
-      actionButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Your current trial continues/,
-    );
-
-    const confirmButton = findLastButtonByText(
-      rendered.window.document,
-      "Keep Pulse",
-      rendered.window,
-    );
-    await act(async () => {
-      confirmButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    assert.deepEqual(
-      mocks.requestHostedTrialPlanStartPaid.mock.calls[0]?.[0],
-      {
-        targetPlanCode: "launch_monthly",
-        timing: "at_trial_end",
-      },
-    );
-    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
-    await rendered.cleanup();
+    assert.doesNotMatch(markup, /Keep Pulse from usage/);
+    assert.match(markup, /Start Pulse plan/);
   });
 
-  test("uses the immediate paid endpoint selected by the usage status", async () => {
+  test("keeps immediate paid plan changes in the plan cards", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
-    const rendered = await renderClientComponent(createElement(
+    const markup = renderToStaticMarkup(createElement(
       HostedBillingSettings,
       {
         authenticated: true,
+        canUpgradeToPulse: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
         usageStatus: buildUsageStatus({
           planCode: "launch_group_monthly",
           planName: "Group",
@@ -951,51 +893,22 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    const actionButton = findButtonByText(
-      rendered.window.document,
-      "Start Pulse now from usage",
-      rendered.window,
-    );
-    await act(async () => {
-      actionButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-    const confirmButton = findLastButtonByText(
-      rendered.window.document,
-      "Confirm upgrade",
-      rendered.window,
-    );
-    await act(async () => {
-      confirmButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "POST",
-      payload: {
-        targetPlanCode: "launch_monthly",
-      },
-      url: "/api/settings/billing/upgrade-plan",
-    });
-    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
-    await rendered.cleanup();
+    assert.doesNotMatch(markup, /Start Pulse now from usage/);
+    assert.match(markup, /Choose Pulse/);
   });
 
-  test("uses the period-end paid endpoint selected by the usage status", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      effectiveAt: "2026-08-01T00:00:00.000Z",
-      scheduledBillingPlanCode: "launch_group_monthly",
-      status: "scheduled",
-    });
+  test("keeps period-end paid plan changes in the plan cards", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
-    const rendered = await renderClientComponent(createElement(
+    const markup = renderToStaticMarkup(createElement(
       HostedBillingSettings,
       {
         authenticated: true,
+        canSwitchToGroup: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        showGroupPlan: true,
         usageStatus: buildUsageStatus({
           recommendedAction: {
             kind: "change_plan",
@@ -1012,40 +925,8 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    const actionButton = findButtonByText(
-      rendered.window.document,
-      "Choose Group next month from usage",
-      rendered.window,
-    );
-    await act(async () => {
-      actionButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /current plan continues through Aug 1, 2026/,
-    );
-    const confirmButton = findLastButtonByText(
-      rendered.window.document,
-      "Confirm switch",
-      rendered.window,
-    );
-    await act(async () => {
-      confirmButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
-
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "POST",
-      payload: {
-        targetPlanCode: "launch_group_monthly",
-      },
-      url: "/api/settings/billing/switch-plan",
-    });
-    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 0);
-    await rendered.cleanup();
+    assert.doesNotMatch(markup, /Choose Group next month from usage/);
+    assert.match(markup, /Choose Group/);
   });
 
   test("suppresses a plan change when the signed quote targets another plan", async () => {
@@ -1275,6 +1156,7 @@ describe("HostedBillingSettings", () => {
     assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
       method: "POST",
       payload: {
+        expectedCurrentPlanCode: "launch_monthly",
         targetPlanCode: "launch_edge_monthly",
       },
       url: "/api/settings/billing/upgrade-plan",

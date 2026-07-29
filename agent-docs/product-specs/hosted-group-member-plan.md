@@ -41,9 +41,18 @@ Group has its own Stripe recurring Price and direct billing code,
 plan. Runtime capability must never be inverted to infer the direct billing
 SKU because Pulse and Group intentionally share that capability.
 
+Group's configured Price id must be distinct from every established direct
+plan. Before Web exposes a new selection, signs a quote, or mutates Stripe, it
+retrieves the target Price and verifies that it is active, USD-only, fixed
+per-unit, licensed, monthly, and equal to the catalog amount. Environment
+configuration alone is not proof of the price a member accepted.
+
 ## Selection And Transitions
 
 Settings and the private subscription tool consume the same server policy.
+Settings plan cards are the sole Settings owner of plan-change actions; the
+usage band may expose usage top-ups and legacy bounded actions, but it must not
+duplicate `change_plan` controls from the usage projection.
 The supported transitions are:
 
 - active Pulse trial to Group at trial end;
@@ -52,11 +61,19 @@ The supported transitions are:
 - paid Pulse to Edge immediately;
 - paid Edge to Pulse or Group at renewal.
 
-An immediate change requires a short-lived signed quote that binds the member,
-action, target plan, exact current catalog price, timing, expiry, and current
-billing-state fingerprint. The mutation verifies the quote before claiming the
-accepted private input or contacting Stripe. A recommendation is never
-confirmation.
+A private-conversation change requires a short-lived signed quote that binds
+the member, action, target plan, exact current catalog price, timing, expiry,
+and current billing-state fingerprint. The mutation verifies the quote before
+claiming the accepted private input or contacting Stripe. Settings sends the
+current displayed plan as an expected source token. The service compares that
+token under the member billing-mutation lock before any Stripe mutation. A
+recommendation is never confirmation.
+
+One member billing-mutation lock owns the complete direct-plan change:
+authoritative source-plan read, eligibility and provider-Price validation,
+Stripe mutation, and local reconciliation. A concurrent conflicting selection
+therefore observes the winning plan and fails stale instead of applying a
+second change. An exact same-target retry remains idempotent.
 
 Scheduled changes use a Stripe Subscription Schedule. The current phase keeps
 the source recurring Price until the existing period or trial ends; the future
@@ -65,15 +82,26 @@ schedule id, target plan, and effective time as a pending display projection.
 Current entitlement and allowance change only through normal Stripe
 reconciliation after the target phase applies.
 
+An active trial remains scheduled to end at its original Stripe trial boundary
+even when its included AI allowance is exhausted. Group-at-trial-end requires
+a usable subscription payment method before Murph creates or updates a
+schedule. If payment setup is needed, Web opens the payment-method flow and
+requires a fresh plan choice after return; it does not retain a Group mutation
+intent that could be applied against changed billing state.
+
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Group to the private catalog must not make it publicly selectable.
 
 ## Failure And Recovery
 
-- Missing or invalid Group Price configuration hides new Group selection
-  without affecting Pulse or Edge.
+- Missing, duplicate, unreachable, inactive, or catalog-mismatched Group Price
+  configuration hides new Group selection without affecting Pulse or Edge and
+  fails closed again at quote and mutation boundaries.
 - Stale membership, quote, local billing state, Stripe customer, subscription,
   subscription items, or schedule shape fails closed.
+- A cardless Group-at-trial-end choice does not create a schedule. Payment
+  setup returns the member to neutral Settings or conversation context for a
+  fresh exact-price choice.
 - The same accepted-input action and quote may replay idempotently; a conflicting
   action requires new accepted member input.
 - Unknown or foreign Stripe schedules are not reinterpreted or overwritten.

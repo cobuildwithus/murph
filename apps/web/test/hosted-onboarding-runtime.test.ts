@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
   requireHostedStripeCheckoutConfig,
+  requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig,
   requireHostedStripeUsageCreditCheckoutConfig,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "@/src/lib/hosted-onboarding/runtime";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
@@ -88,6 +90,133 @@ describe("requireHostedStripeCheckoutConfig", () => {
     expect(config.stripe).toBeTruthy();
   });
 
+  it("accepts a distinct active monthly Group Price with the catalog amount", async () => {
+    const retrieve = vi.fn().mockResolvedValue(
+      buildRecurringStripePrice(),
+    );
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = {
+      prices: { retrieve },
+    };
+
+    await expect(requireValidatedHostedStripeBillingPlanConfig({
+      billingPlanCode: "launch_group_monthly",
+    })).resolves.toMatchObject({
+      billingPlanCode: "launch_group_monthly",
+      priceId: "price_group_monthly_123",
+    });
+    expect(retrieve).toHaveBeenCalledWith("price_group_monthly_123", {
+      expand: ["currency_options"],
+    });
+  });
+
+  it("rejects a Group Price id reused by another direct plan", () => {
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment({
+        stripePriceIdsByPlan: {
+          launch_edge_monthly: "price_edge_monthly_123",
+          launch_group_monthly: "price_monthly_123",
+          launch_monthly: "price_monthly_123",
+        },
+      });
+
+    expect(() => requireHostedStripeBillingPlanConfig({
+      billingPlanCode: "launch_group_monthly",
+    })).toThrowError(expect.objectContaining({
+      code: "HOSTED_BILLING_PRICE_CONFIGURATION_INVALID",
+      details: {
+        reason: "price_identity_not_distinct",
+      },
+    }));
+  });
+
+  it("does not let an invalid Group identity disable established direct plans", () => {
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment({
+        stripePriceIdsByPlan: {
+          launch_edge_monthly: "price_edge_monthly_123",
+          launch_group_monthly: "price_monthly_123",
+          launch_monthly: "price_monthly_123",
+        },
+      });
+
+    expect(requireHostedStripeBillingPlanConfig({
+      billingPlanCode: "launch_monthly",
+    })).toMatchObject({
+      billingPlanCode: "launch_monthly",
+      priceId: "price_monthly_123",
+    });
+  });
+
+  it.each([
+    {
+      name: "wrong amount",
+      override: { unit_amount: 351 },
+      reason: "price_amount_mismatch",
+    },
+    {
+      name: "wrong currency",
+      override: { currency: "eur" },
+      reason: "price_currency_mismatch",
+    },
+    {
+      name: "inactive",
+      override: { active: false },
+      reason: "price_inactive",
+    },
+    {
+      name: "wrong interval",
+      override: {
+        recurring: {
+          interval: "year",
+          interval_count: 1,
+          usage_type: "licensed",
+        },
+      },
+      reason: "price_recurrence_mismatch",
+    },
+    {
+      name: "wrong Stripe mode",
+      override: { livemode: true },
+      reason: "price_mode_mismatch",
+    },
+  ])("rejects a $name Group Price", async ({ override, reason }) => {
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = {
+      prices: {
+        retrieve: vi.fn().mockResolvedValue(
+          buildRecurringStripePrice(override),
+        ),
+      },
+    };
+
+    await expect(requireValidatedHostedStripeBillingPlanConfig({
+      billingPlanCode: "launch_group_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PRICE_CONFIGURATION_INVALID",
+      details: { reason },
+    });
+  });
+
+  it("rejects missing Group Price configuration before Stripe access", () => {
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment({
+        stripePriceIdsByPlan: {
+          launch_edge_monthly: "price_edge_monthly_123",
+          launch_group_monthly: null,
+          launch_monthly: "price_monthly_123",
+        },
+      });
+
+    expect(() => requireHostedStripeBillingPlanConfig({
+      billingPlanCode: "launch_group_monthly",
+    })).toThrowError(expect.objectContaining({
+      code: "STRIPE_PRICE_ID_REQUIRED",
+    }));
+  });
+
   it("resolves the configured Family price for each member tier", () => {
     globalForHostedOnboarding.__murphHostedOnboardingEnv =
       createHostedOnboardingEnvironment();
@@ -159,3 +288,28 @@ describe("requireHostedStripeCheckoutConfig", () => {
     }));
   });
 });
+
+function buildRecurringStripePrice(
+  override: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    active: true,
+    billing_scheme: "per_unit",
+    currency: "usd",
+    currency_options: null,
+    custom_unit_amount: null,
+    id: "price_group_monthly_123",
+    livemode: false,
+    object: "price",
+    recurring: {
+      interval: "month",
+      interval_count: 1,
+      usage_type: "licensed",
+    },
+    tiers_mode: null,
+    transform_quantity: null,
+    type: "recurring",
+    unit_amount: 350,
+    ...override,
+  };
+}

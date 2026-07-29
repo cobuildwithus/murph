@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: null,
+    },
+  }),
+  isHostedBillingPlanSelectionAvailable: async () => true,
+}));
 
 import {
   projectHostedPersonalAiUsageStatus,

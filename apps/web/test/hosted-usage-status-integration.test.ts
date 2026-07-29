@@ -2,6 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
 }));
@@ -14,6 +15,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: null,
+    },
+  }),
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
+}));
+
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 
 const NOW = new Date("2026-04-09T12:00:00.000Z");
@@ -23,6 +34,7 @@ const TRIAL_END = new Date("2026-04-08T12:00:00.000Z");
 describe("hosted plan usage production gate integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",

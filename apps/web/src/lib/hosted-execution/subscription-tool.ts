@@ -16,6 +16,8 @@ import {
 } from "../hosted-onboarding/billing-plan-change-service";
 import {
   getHostedBillingPlanDefinition,
+  parseHostedBillingPlanCode,
+  type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
   scheduleHostedBillingPlanSwitch,
@@ -47,13 +49,24 @@ export async function handleHostedSubscriptionTool(input: {
   request: HostedRuntimeSubscriptionControlRequest;
 }): Promise<HostedRuntimeSubscriptionToolResponse> {
   const prisma = getPrisma();
-  const quoteTiming = input.request.action === "change_plan"
-    ? await requireHostedBillingPlanQuote({
+  const verifiedQuote = input.request.action === "change_plan"
+    ? await verifyCurrentHostedBillingPlanQuote({
         memberId: input.memberId,
         quoteId: input.request.quoteId,
         targetPlanCode: input.request.targetPlanCode,
       })
     : null;
+  const legacyUpgradeSourcePlanCode =
+    input.request.action === "upgrade_edge"
+      ? parseHostedBillingPlanCode(
+          (
+            await readHostedMemberBillingEligibilityState({
+              memberId: input.memberId,
+              prisma,
+            })
+          )?.currentBillingPlanCode,
+        )
+      : null;
   const actionClaim =
     await claimHostedMailboxConversationSubscriptionAction({
       action: input.request.action,
@@ -87,12 +100,15 @@ export async function handleHostedSubscriptionTool(input: {
   }
 
   switch (input.request.action) {
-    case "change_plan":
+    case "change_plan": {
+      const quote = requireHostedBillingPlanQuote(verifiedQuote);
       return handleHostedQuotedPlanChange({
+        expectedCurrentPlanCode: quote.expectedCurrentPlanCode,
         memberId: input.memberId,
-        quoteTiming: requireHostedBillingPlanQuoteTiming(quoteTiming),
+        quoteTiming: quote.timing,
         targetPlanCode: input.request.targetPlanCode,
       });
+    }
     case "continue_pulse":
       return projectPulseResult({
         action: input.request.action,
@@ -117,6 +133,9 @@ export async function handleHostedSubscriptionTool(input: {
       return projectPlanUpgradeResult({
         action: input.request.action,
         result: await upgradeHostedBillingPlan({
+          ...(legacyUpgradeSourcePlanCode
+            ? { expectedCurrentPlanCode: legacyUpgradeSourcePlanCode }
+            : {}),
           memberId: input.memberId,
           prisma,
           targetPlanCode: "launch_edge_monthly",
@@ -125,11 +144,16 @@ export async function handleHostedSubscriptionTool(input: {
   }
 }
 
-async function requireHostedBillingPlanQuote(input: {
+interface VerifiedHostedBillingPlanQuote {
+  expectedCurrentPlanCode: HostedBillingPlanCode | null;
+  timing: HostedBillingPlanQuoteTiming;
+}
+
+async function verifyCurrentHostedBillingPlanQuote(input: {
   memberId: string;
   quoteId: string;
   targetPlanCode: HostedRuntimeDirectBillingPlanCode;
-}): Promise<HostedBillingPlanQuoteTiming> {
+}): Promise<VerifiedHostedBillingPlanQuote> {
   const prisma = getPrisma();
   const [member, billingState] = await Promise.all([
     readHostedMemberCoreState({
@@ -145,7 +169,7 @@ async function requireHostedBillingPlanQuote(input: {
     throw buildHostedBillingPlanQuoteStaleError();
   }
 
-  return verifyHostedBillingPlanQuote({
+  const timing = verifyHostedBillingPlanQuote({
     memberId: input.memberId,
     now: new Date(),
     quoteId: input.quoteId,
@@ -155,19 +179,26 @@ async function requireHostedBillingPlanQuote(input: {
     }),
     targetPlanCode: input.targetPlanCode,
   });
+  return {
+    expectedCurrentPlanCode: parseHostedBillingPlanCode(
+      billingState.currentBillingPlanCode,
+    ),
+    timing,
+  };
 }
 
-function requireHostedBillingPlanQuoteTiming(
-  timing: HostedBillingPlanQuoteTiming | null,
-): HostedBillingPlanQuoteTiming {
-  if (timing) {
-    return timing;
+function requireHostedBillingPlanQuote(
+  quote: VerifiedHostedBillingPlanQuote | null,
+): VerifiedHostedBillingPlanQuote {
+  if (quote) {
+    return quote;
   }
 
-  throw new TypeError("Quoted plan change timing is required.");
+  throw new TypeError("Verified plan change quote is required.");
 }
 
 async function handleHostedQuotedPlanChange(input: {
+  expectedCurrentPlanCode: HostedBillingPlanCode | null;
   memberId: string;
   quoteTiming: HostedBillingPlanQuoteTiming;
   targetPlanCode: HostedRuntimeDirectBillingPlanCode;
@@ -180,6 +211,7 @@ async function handleHostedQuotedPlanChange(input: {
     return projectQuotedPlanChangeResult({
       result: await startHostedTrialPaidPlan({
         memberId: input.memberId,
+        paymentMethodContinuation: "conversation",
         prisma,
         targetPlanCode: requireHostedTrialPaidTargetPlanCode(
           input.targetPlanCode,
@@ -193,6 +225,9 @@ async function handleHostedQuotedPlanChange(input: {
   if (input.quoteTiming === "immediate") {
     return projectQuotedPlanChangeResult({
       result: await upgradeHostedBillingPlan({
+        ...(input.expectedCurrentPlanCode
+          ? { expectedCurrentPlanCode: input.expectedCurrentPlanCode }
+          : {}),
         memberId: input.memberId,
         prisma,
         targetPlanCode: input.targetPlanCode,
@@ -250,6 +285,10 @@ function projectQuotedPlanChangeResult(input: {
         plan,
         status: "payment_required",
       };
+    case "payment_method_required":
+      throw new TypeError(
+        "Trial payment-method preflight must be projected by the trial transition owner.",
+      );
     case "started":
     case "upgraded":
       return {

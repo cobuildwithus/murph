@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
+  requireValidatedHostedStripeBillingPlanConfig: vi.fn(),
+  scheduleHostedBillingPlanSwitch: vi.fn(),
   withHostedMemberStripeMutationLock: vi.fn(),
   stripe: {
     billingPortal: {
@@ -65,9 +67,15 @@ vi.mock("@/src/lib/hosted-onboarding/billing-plan-eligibility", () => ({
     mocks.assertHostedBillingPlanSelectable,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () => ({
+  scheduleHostedBillingPlanSwitch: mocks.scheduleHostedBillingPlanSwitch,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig: mocks.requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig:
+    mocks.requireValidatedHostedStripeBillingPlanConfig,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
@@ -99,6 +107,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
+    mocks.scheduleHostedBillingPlanSwitch.mockResolvedValue({
+      effectiveAt: "2026-05-10T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_group_monthly",
+      status: "scheduled",
+    });
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
       async (input: { run: (tx: unknown) => Promise<unknown> }) =>
         input.run(mocks.prismaClient),
@@ -113,6 +126,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
             : "price_pulse_recurring",
         stripe: mocks.stripe,
       }),
+    );
+    mocks.requireValidatedHostedStripeBillingPlanConfig.mockImplementation(
+      mocks.requireHostedStripeBillingPlanConfig,
     );
     mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
       url: "https://billing.stripe.test/session_123",
@@ -229,6 +245,64 @@ describe("startHostedPulseTrialPaidPlan", () => {
         ),
       },
     );
+  });
+
+  test("schedules card-backed Group continuation at the active trial end", async () => {
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "settings",
+      targetPlanCode: "launch_group_monthly",
+      timing: "at_trial_end",
+    })).resolves.toEqual({
+      effectiveAt: "2026-05-10T00:00:00.000Z",
+      scheduledBillingPlanCode: "launch_group_monthly",
+      status: "scheduled",
+    });
+
+    expect(mocks.scheduleHostedBillingPlanSwitch).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      prisma: undefined,
+      requiredSourceBillingPhase: "trial",
+      targetPlanCode: "launch_group_monthly",
+    });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("sends cardless Group continuation to payment setup without scheduling", async () => {
+    mocks.scheduleHostedBillingPlanSwitch.mockResolvedValueOnce({
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    });
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
+      targetPlanCode: "launch_group_monthly",
+      timing: "at_trial_end",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
+      customer: "cus_123",
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url:
+              "https://join.example.test/settings?startGroup=payment_method_saved#subscription",
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: "https://join.example.test/settings#subscription",
+    });
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("rechecks Group eligibility inside the billing lock before Stripe mutation", async () => {

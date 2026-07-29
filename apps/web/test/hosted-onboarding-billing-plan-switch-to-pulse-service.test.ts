@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
+  requireValidatedHostedStripeBillingPlanConfig: vi.fn(),
   withHostedMemberStripeMutationLock: vi.fn(),
   stripe: {
     subscriptionSchedules: {
@@ -51,6 +52,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeBillingPlanConfig: mocks.requireHostedStripeBillingPlanConfig,
+  requireValidatedHostedStripeBillingPlanConfig:
+    mocks.requireValidatedHostedStripeBillingPlanConfig,
 }));
 
 import {
@@ -101,6 +104,9 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       }[input.billingPlanCode],
       stripe: mocks.stripe,
     }));
+    mocks.requireValidatedHostedStripeBillingPlanConfig.mockImplementation(
+      mocks.requireHostedStripeBillingPlanConfig,
+    );
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription());
     mocks.stripe.subscriptionSchedules.create.mockResolvedValue(makeSchedule({
       metadata: {},
@@ -139,7 +145,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123", {
-      expand: ["items.data.price"],
+      expand: ["customer", "items.data.price"],
     });
     expect(mocks.stripe.subscriptionSchedules.create).toHaveBeenCalledWith({
       from_subscription: "sub_123",
@@ -573,6 +579,61 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
 
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
   });
+
+  test("requires a usable payment method before scheduling active-trial Group", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
+      id: "group_member_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      defaultPaymentMethod: null,
+      items: ["price_pulse_recurring"],
+      status: "trialing",
+    }));
+
+    await expect(scheduleHostedBillingPlanSwitch({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      requiredSourceBillingPhase: "trial",
+      targetPlanCode: "launch_group_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
+  test("does not reinterpret a stale trial-end choice as a paid downgrade", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
+    await expect(scheduleHostedBillingPlanSwitch({
+      memberId: "member_123",
+      requiredSourceBillingPhase: "trial",
+      targetPlanCode: "launch_group_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+  });
 });
 
 describe("hosted Pulse switch schedule pending-field helpers", () => {
@@ -661,6 +722,7 @@ function makeSubscription(input?: {
   cancelAtPeriodEnd?: boolean;
   currentPeriodEnd?: number;
   customer?: string;
+  defaultPaymentMethod?: string | null;
   items?: string[];
   pendingUpdate?: boolean;
   schedule?: string | null;
@@ -673,6 +735,10 @@ function makeSubscription(input?: {
     cancel_at_period_end: input?.cancelAtPeriodEnd === true,
     current_period_end: input?.currentPeriodEnd ?? 1_778_068_800,
     customer: input?.customer ?? "cus_123",
+    default_payment_method:
+      input?.defaultPaymentMethod === undefined
+        ? "pm_default"
+        : input.defaultPaymentMethod,
     id: "sub_123",
     items: {
       data: itemPriceIds.map((priceId, index) => ({

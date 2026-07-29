@@ -8,6 +8,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
   getPrisma: vi.fn(),
   readHostedPulseTrialContinuationCookie: vi.fn(),
   PulseTrialBillingContinuation: vi.fn((props: {
@@ -175,11 +176,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: () => ({
-    stripePriceIdsByPlan: {
-      launch_group_monthly: "price_group_test",
-    },
-  }),
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -284,6 +282,7 @@ function mockSettingsPageSnapshot(input: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
@@ -741,6 +740,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
       configurationAvailable: true,
+      expectedCurrentPlanCode: "launch_monthly",
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
       solAvailable: true,
@@ -751,7 +751,6 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
-      includeSubscriptionActionQuote: true,
       memberId: "member_123",
       prisma: mocks.prisma,
     });
