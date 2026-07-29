@@ -19,6 +19,11 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
+import {
+  MURPH_AUTOMATION_TOOL,
+  MURPH_GROUP_SHARED_READ_TOOL,
+  MURPH_GROUP_TOOL,
+} from '../src/assistant-codex/dynamic-tools.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -46,6 +51,20 @@ const execFileAsync = promisify(execFile)
 type ScriptedResponse =
   | { delayMs?: number; text: string }
   | {
+    customToolCall: {
+      input: string
+      name: string
+    }
+    delayMs?: number
+  }
+  | {
+    delayMs?: number
+    toolSearchCall: {
+      limit?: number
+      query: string
+    }
+  }
+  | {
     delayMs?: number
     functionCall: {
       arguments: Record<string, unknown>
@@ -56,6 +75,7 @@ type ScriptedResponse =
 
 interface ScriptedStub {
   baseUrl: string
+  captureProviderRequestDiagnostics(): void
   close(): Promise<void>
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
@@ -64,9 +84,20 @@ interface ScriptedStub {
 }
 
 interface ScriptedProviderRequestSummary {
+  customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
   model: string | null
+  providerRequestDiagnostics?: {
+    bytes: number
+    includesAllTools: boolean
+    includesAutomation: boolean
+    includesGroup: boolean
+    includesReadShared: boolean
+    includesSaveNewsletter: boolean
+    includesToolSearch: boolean
+  }
   serviceTier: string | null
+  toolSearchOutputTools?: unknown[]
 }
 
 const codexCommand = path.resolve(
@@ -134,6 +165,290 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('defers broad Murph schemas through native Codex code-mode discovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.captureProviderRequestDiagnostics()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__automation({
+    action: "save",
+    instructions: "Send a short reminder.",
+    schedule: { kind: "dailyLocal", localTime: "09:00" },
+    title: "Morning reminder",
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'NATIVE_DEFERRED_TOOL_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-native-deferred',
+              created: true,
+              lookupId: 'morning-reminder',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      providerRequestDiagnostics: {
+        includesAllTools: true,
+        includesAutomation: false,
+        includesGroup: false,
+        includesSaveNewsletter: false,
+      },
+    })
+    expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
+    const automationOutput =
+      summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('automation-native-deferred')
+    expect(automationOutput).toContain('morning-reminder')
+    expect(automationOutput).toContain('active')
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send a short reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      title: 'Morning reminder',
+    }])
+    expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+
+    const deferredRequestBytes =
+      summaries[0]?.providerRequestDiagnostics?.bytes ?? 0
+    await stopWarmCodexAppServer()
+    const directScenario = await prepareScriptedTurnScenario()
+    directScenario.stub.captureProviderRequestDiagnostics()
+    directScenario.stub.queue({ text: 'DIRECT_TOOL_BASELINE_OK' })
+    const directResult = await executeCodexAppServerTurn({
+      ...directScenario.turnInput,
+      configOverrides: [
+        'features.code_mode.direct_only_tool_namespaces=["murph"]',
+      ],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      env: {
+        ...directScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+    })
+    const directSummary =
+      directScenario.stub.requestSummariesSinceBaseline()[0]
+
+    expect(directResult.finalMessage).toBe('DIRECT_TOOL_BASELINE_OK')
+    expect(directSummary).toMatchObject({
+      providerRequestDiagnostics: {
+        includesAutomation: true,
+        includesGroup: true,
+        includesSaveNewsletter: true,
+      },
+    })
+    expect(
+      (directSummary?.providerRequestDiagnostics?.bytes ?? 0)
+        - deferredRequestBytes,
+    ).toBeGreaterThan(4_000)
+  })
+
+  it('discovers deferred Murph schemas through native Codex tool_search', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.captureProviderRequestDiagnostics()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'create a durable Murph automation reminder',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'save',
+            instructions: 'Send a short reminder.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00' },
+            title: 'Morning reminder',
+          },
+          name: 'automation',
+          namespace: 'murph',
+        },
+      },
+      { text: 'NATIVE_TOOL_SEARCH_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-native-search',
+              created: true,
+              lookupId: 'morning-reminder',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: 'gpt-5.4',
+      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      model: 'gpt-5.4',
+      providerRequestDiagnostics: {
+        includesAllTools: false,
+        includesAutomation: false,
+        includesGroup: false,
+        includesSaveNewsletter: false,
+        includesToolSearch: true,
+      },
+    })
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"automation"',
+    )
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send a short reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      title: 'Morning reminder',
+    }])
+    expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps narrow group reads eager beside deferred Terra tools', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.captureProviderRequestDiagnostics()
+    const groupSharedRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__group({
+  action: "read_shared",
+  projectionScopes: [{ projectionKind: "steps-days.v0" }],
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'EAGER_GROUP_READ_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_GROUP_SHARED_READ_TOOL,
+      ],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async (request) => {
+            groupSharedRequests.push(request)
+            return {
+              members: [],
+              requestedProjectionScopeKeys: ['steps-days.v0'],
+              status: 'none',
+            }
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read shared steps, then reply exactly EAGER_GROUP_READ_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      providerRequestDiagnostics: {
+        includesAllTools: true,
+        includesAutomation: false,
+        includesGroup: false,
+        includesReadShared: true,
+        includesSaveNewsletter: false,
+      },
+    })
+    expect(groupSharedRequests).toEqual([{
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    }])
+    const groupOutput = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(groupOutput).toContain('read_shared')
+    expect(groupOutput).toContain('steps-days.v0')
+    expect(groupOutput).toContain('none')
+    expect(result.finalMessage).toBe('EAGER_GROUP_READ_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {
@@ -1034,6 +1349,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   let responsesRequestCount = 0
   let requestBaseline = 0
   let requestSummaryBaseline = 0
+  let providerRequestDiagnosticsEnabled = false
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -1049,7 +1365,10 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
         : Buffer.from(chunk).toString('utf8')
     }
     responsesRequestCount += 1
-    requestSummaries.push(readScriptedProviderRequestSummary(requestBody))
+    requestSummaries.push(readScriptedProviderRequestSummary(
+      requestBody,
+      providerRequestDiagnosticsEnabled,
+    ))
     const scripted = queuedResponses.shift()
     if (!scripted) {
       response.statusCode = 500
@@ -1067,31 +1386,54 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'functionCall' in scripted
+    const outputItem = 'toolSearchCall' in scripted
       ? {
-        arguments: JSON.stringify(scripted.functionCall.arguments),
-        call_id: `call_${responseId}`,
-        id: `fcall_${responseId}`,
-        name: scripted.functionCall.name,
-        ...(scripted.functionCall.namespace
-          ? { namespace: scripted.functionCall.namespace }
-          : {}),
-        status: 'completed',
-        type: 'function_call',
-      }
-      : {
-        content: [
-          {
-            annotations: [],
-            text: scripted.text,
-            type: 'output_text',
+          arguments: {
+            query: scripted.toolSearchCall.query,
+            ...(scripted.toolSearchCall.limit === undefined
+              ? {}
+              : { limit: scripted.toolSearchCall.limit }),
           },
-        ],
-        id: `msg_${responseId}`,
-        role: 'assistant',
-        status: 'completed',
-        type: 'message',
-      }
+          call_id: `call_${responseId}`,
+          execution: 'client',
+          id: `tsearch_${responseId}`,
+          status: 'completed',
+          type: 'tool_search_call',
+        }
+      : 'customToolCall' in scripted
+      ? {
+          call_id: `call_${responseId}`,
+          id: `ctcall_${responseId}`,
+          input: scripted.customToolCall.input,
+          name: scripted.customToolCall.name,
+          status: 'completed',
+          type: 'custom_tool_call',
+        }
+      : 'functionCall' in scripted
+      ? {
+          arguments: JSON.stringify(scripted.functionCall.arguments),
+          call_id: `call_${responseId}`,
+          id: `fcall_${responseId}`,
+          name: scripted.functionCall.name,
+          ...(scripted.functionCall.namespace
+            ? { namespace: scripted.functionCall.namespace }
+            : {}),
+          status: 'completed',
+          type: 'function_call',
+        }
+      : {
+          content: [
+            {
+              annotations: [],
+              text: scripted.text,
+              type: 'output_text',
+            },
+          ],
+          id: `msg_${responseId}`,
+          role: 'assistant',
+          status: 'completed',
+          type: 'message',
+        }
     writeScriptedSseResponse({
       outputItem,
       response,
@@ -1110,12 +1452,16 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    captureProviderRequestDiagnostics: () => {
+      providerRequestDiagnosticsEnabled = true
+    },
     close: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => resolve())
       })
     },
     markRequestBaseline: () => {
+      providerRequestDiagnosticsEnabled = false
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
     },
@@ -1130,8 +1476,16 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
 function readScriptedProviderRequestSummary(
   requestBody: string,
+  includeDiagnostics: boolean,
 ): ScriptedProviderRequestSummary {
   const body = readRecord(JSON.parse(requestBody))
+  const customToolCallOutputs = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'custom_tool_call_output')
+      .map((item) => readProviderToolOutputText(item?.output))
+      .filter((output): output is string => output !== null)
+    : []
   const functionCallOutputs = Array.isArray(body?.input)
     ? body.input
       .map(readRecord)
@@ -1139,10 +1493,34 @@ function readScriptedProviderRequestSummary(
       .map((item) => readString(item?.output))
       .filter((output): output is string => output !== null)
     : []
+  const toolSearchOutputTools = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'tool_search_output')
+      .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
+    : []
+  const tools = Array.isArray(body?.tools)
+    ? body.tools.map(readRecord)
+    : []
   return {
+    ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
+    ...(includeDiagnostics
+      ? {
+          providerRequestDiagnostics: {
+            bytes: Buffer.byteLength(requestBody),
+            includesAllTools: requestBody.includes('ALL_TOOLS'),
+            includesAutomation: requestBody.includes('"name":"automation"'),
+            includesGroup: requestBody.includes('"name":"group"'),
+            includesReadShared: requestBody.includes('read_shared'),
+            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
+          },
+        }
+      : {}),
     serviceTier: readString(body?.service_tier),
+    ...(toolSearchOutputTools.length > 0 ? { toolSearchOutputTools } : {}),
   }
 }
 
@@ -1156,6 +1534,21 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function readProviderToolOutputText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const textItems = value
+    .map(readRecord)
+    .map((item) => readString(item?.text))
+    .filter((text): text is string => text !== null)
+  return textItems.length > 0 ? textItems.join('\n') : null
 }
 
 function writeScriptedSseResponse(input: {

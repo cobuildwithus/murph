@@ -106,6 +106,7 @@ export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
 export type AssistantProviderServiceTier = 'flex'
 
 export interface AssistantProviderDynamicTool {
+  readonly deferLoading?: boolean
   readonly description: string
   readonly inputSchema: object
   readonly name: string
