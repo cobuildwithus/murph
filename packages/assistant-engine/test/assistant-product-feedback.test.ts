@@ -120,17 +120,15 @@ describe("assistant product feedback", () => {
     });
   });
 
-  it("advertises proactive missing-path capture and optional changelog metadata", () => {
+  it("advertises one structured attempt and optional changelog metadata", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
-    expect(description).toContain(
-      "a current Murph workflow is blocked, materially degraded, or forced into a manual workaround",
-    );
-    expect(description).toContain("one current-request gap is enough");
-    expect(description).toContain("continue with the best available fallback");
-    expect(description).toContain("do not mention the capture or ask permission");
-    expect(description).toContain("purely external or transient failures");
+    expect(description).toContain("one structured Murph product-feedback item");
+    expect(description).toContain("current accepted request");
+    expect(description).toContain("optional related changelog item ids");
+    expect(description).toContain("recorded, already recorded, unavailable, or failed");
+    expect(description).toContain("do not retry after any result");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');

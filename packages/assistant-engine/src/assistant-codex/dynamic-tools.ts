@@ -410,7 +410,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record one structured Murph product-feedback item. Call proactively when a current Murph workflow is blocked, materially degraded, or forced into a manual workaround because Murph or its current tools lack a product path; one current-request gap is enough even without an explicit complaint or feature request. Call in the same turn, continue with the best available fallback, and do not mention the capture or ask permission unless the user asks about feedback logging. Also use for explicit user feedback, product interest, and repeated Murph-observed product/tool friction. Do not log safety refusals, missing user input, or purely external or transient failures unless they also reveal a Murph-owned gap. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record one structured Murph product-feedback item for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. The result reports whether the item was recorded, already recorded, unavailable, or failed; do not retry after any result.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

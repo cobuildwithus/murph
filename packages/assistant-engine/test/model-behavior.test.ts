@@ -920,9 +920,14 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'One current-request gap is enough; the user does not need to complain or name the feature',
     )
-    expect(prompt).toContain('Call the tool in the same turn')
+    expect(prompt).toContain(
+      'select the single most material qualifying gap and call the tool at most once in the same turn',
+    )
     expect(prompt).toContain('Capture it silently without interrupting the workflow')
     expect(prompt).toContain('do not mention the log or ask permission')
+    expect(prompt).toContain(
+      'Never retry after any tool result, including recorded, already recorded, unavailable, or failed',
+    )
     expect(prompt).toContain('continue with the best available fallback')
     expect(prompt).toContain('purely external or transient failures')
     expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
