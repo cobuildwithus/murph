@@ -89,7 +89,7 @@ describe("group phone-call requester activation", () => {
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
   });
@@ -173,7 +173,7 @@ describe("group phone-call requester activation", () => {
         threadId: "another-group-thread",
       },
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(
       requesterMocks.lookupHostedGroupParticipantMemberByHandle,
@@ -196,7 +196,7 @@ describe("group phone-call requester activation", () => {
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
   });
@@ -253,7 +253,7 @@ describe("group phone-call requester activation", () => {
       prisma: {} as never,
       routeAuthority: LINQ_ROUTE_AUTHORITY,
     })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+      code: "HOSTED_GROUP_PHONE_CALL_REQUESTER_PROVENANCE_REQUIRED",
     });
     expect(requesterMocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
   });
