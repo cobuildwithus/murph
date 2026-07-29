@@ -166,19 +166,17 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
     card: {
       eyebrow: "Day 18 · Caffeine",
       comparison: {
-        label: "18 day HRV window",
+        label: "18 night deep sleep window",
         rows: [
           {
-            label: "Mornings after AM coffee",
-            value: "58",
-            unit: "ms",
+            label: "Nights without PM espresso",
+            value: "1h 34m",
             level: 0.92,
             tone: "good",
           },
           {
-            label: "Mornings after PM espresso",
-            value: "44",
-            unit: "ms",
+            label: "Nights after PM espresso",
+            value: "1h 11m",
             level: 0.42,
             delta: "-24%",
             tone: "warn",
@@ -187,7 +185,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       },
     },
     murph:
-      "The clearest pattern is lower HRV after afternoon espresso: down 24% on days you have coffee after 2pm.",
+      "The clearest pattern is less deep sleep after afternoon espresso: 1h 11m vs 1h 34m, down 24% on nights you have coffee after 2pm.",
   },
   {
     topic: "Doctor recap",
@@ -1039,6 +1037,8 @@ export function HeroClocksIn({
     const text = composerValue.trim();
     if (!text || responseInFlightRef.current) return;
 
+    const replaceTransitionThread =
+      groupMode && composeSheet !== "hidden";
     setEngaged();
     cancelDemoRef.current?.();
     setResponseInFlight(true);
@@ -1048,14 +1048,17 @@ export function HeroClocksIn({
     setComposeSheet("hidden");
     setComposerValue("");
 
-    appendItems([
-      {
-        kind: "text",
-        id: nextId(),
-        from: "user",
-        text,
-      },
-    ]);
+    const userItem: SoloTextItem = {
+      kind: "text",
+      id: nextId(),
+      from: "user",
+      text,
+    };
+    if (replaceTransitionThread) {
+      setItems([userItem]);
+    } else {
+      appendItems([userItem]);
+    }
 
     await new Promise((r) => setTimeout(r, 450));
     setTyping(true);
@@ -1156,7 +1159,10 @@ export function HeroClocksIn({
       setEngaged();
       cancelDemoRef.current?.();
       prepareScheduledDemo();
-      focusConversation();
+      // An explicit person choice owns the group audience immediately. The
+      // delayed compose-sheet sequence is presentation only; routing and the
+      // accessible acknowledgement already derive from the group audience.
+      setGroupMode(true);
       startGroupSequence({ allowAfterEngaged: true });
       return;
     }
@@ -1302,6 +1308,13 @@ export function HeroClocksIn({
                     />
                   </div>
                   <div className="relative h-[460px] lg:h-[580px]">
+                    <p role="status" className="sr-only">
+                      {engaged
+                        ? groupMode
+                          ? "Group conversation selected."
+                          : "Private conversation selected."
+                        : ""}
+                    </p>
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#f5f0e8] via-[#f5f0e8]/85 to-transparent"

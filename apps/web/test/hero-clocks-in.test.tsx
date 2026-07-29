@@ -338,7 +338,7 @@ test("topic activation exposes progress and results in the conversation log", as
   await view.cleanup();
 });
 
-test("the Sleep quality evidence and reply both describe HRV", async () => {
+test("the Sleep quality journey uses deep sleep from question through answer", async () => {
   vi.useFakeTimers();
 
   const view = await renderHero({
@@ -357,10 +357,14 @@ test("the Sleep quality evidence and reply both describe HRV", async () => {
   });
 
   const thread = view.container.textContent ?? "";
-  assert.match(thread, /18 day HRV window/);
-  assert.match(thread, /58.*ms.*44.*ms.*-24%/s);
-  assert.match(thread, /lower HRV after afternoon espresso: down 24%/);
-  assert.doesNotMatch(thread, /lower deep sleep.*down 24%/);
+  assert.match(thread, /Why am I sleeping so badly this week\?/);
+  assert.match(thread, /18 night deep sleep window/);
+  assert.match(thread, /1h 34m.*1h 11m.*-24%/s);
+  assert.match(
+    thread,
+    /less deep sleep after afternoon espresso: 1h 11m vs 1h 34m, down 24%/,
+  );
+  assert.doesNotMatch(thread, /\bHRV\b|58.*ms.*44.*ms/s);
 
   await view.cleanup();
 });
@@ -460,6 +464,77 @@ test("topic controls wait for Murph to finish the group kickoff reply", async ()
   await view.cleanup();
 });
 
+test("an explicit member selection immediately owns the group audience", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
+  assert.ok(theoButton);
+  await act(async () => {
+    theoButton.click();
+  });
+
+  const groupConversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Group conversation with Murph"]',
+  );
+  const groupComposer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupConversation);
+  assert.ok(groupComposer);
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+  assert.equal(groupConversation.getAttribute("role"), "log");
+  assert.match(view.container.textContent ?? "", /Group conversation selected/);
+
+  await act(async () => {
+    groupComposer.focus();
+    groupComposer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(view.window, groupComposer, "Keep this with the group.");
+    dispatchInputValueChange(view.window, groupComposer);
+  });
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  assert.match(
+    groupConversation.textContent ?? "",
+    /Keep this with the group\./,
+  );
+  assert.doesNotMatch(
+    groupConversation.textContent ?? "",
+    /How are my steps this week\?/,
+  );
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+
+  await view.cleanup();
+});
+
 test("group start clears the private 1:1 thread and topic clicks return to a fresh private thread", async () => {
   vi.useFakeTimers();
 
@@ -512,6 +587,10 @@ test("group start clears the private 1:1 thread and topic clicks return to a fre
   });
 
   // The group is a fresh conversation: the private exchange must be gone.
+  const groupConversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Group conversation with Murph"]',
+  );
+  assert.ok(groupConversation);
   assert.doesNotMatch(
     view.container.textContent ?? "",
     /How are my steps this week\?/,

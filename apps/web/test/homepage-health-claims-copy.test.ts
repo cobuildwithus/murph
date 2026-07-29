@@ -57,7 +57,7 @@ test("hero demo states patterns and observations instead of causes", () => {
 
   assert.match(
     hero,
-    /The clearest pattern is lower HRV after afternoon espresso/u,
+    /The clearest pattern is less deep sleep after afternoon espresso/u,
   );
   assert.match(hero, /HRV was highest on sauna nights/u);
   assert.match(
