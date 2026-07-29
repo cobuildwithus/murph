@@ -53,6 +53,7 @@ export * from "./hosted-email.ts";
 export * from "./hosted-codex-subscription-auth.ts";
 export * from "./observability.ts";
 export * from "./orchestration-control.ts";
+export * from "./pending-group-setup.ts";
 export * from "./routes.ts";
 export * from "./return-contact.ts";
 export * from "./side-effects.ts";
