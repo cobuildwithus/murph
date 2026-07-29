@@ -1,67 +1,64 @@
-# Compact Dynamic Tool Schemas
+# Defer Broad Dynamic Tool Schemas
 
 ## Outcome
 
-Reduce the fixed Codex context cost of ordinary hosted group turns by moving
-the full `murph.automation` and broad `murph.group` request schemas behind
-explicit on-demand schema discovery.
+Remove the full `murph.automation` and broad `murph.group` schemas from ordinary
+hosted provider input by using Codex's native deferred dynamic-tool loading.
 
 ## Constraints
 
-- Preserve the existing invocation-scoped root-turn authority checks.
-- Preserve the current-conversation route binding for automation writes.
-- Keep canonical automation records in the vault and keep Web-owned group
-  authority at its existing boundary.
-- Keep the existing strict request validators as the execution contract.
-- Do not add persisted state, a second mutation owner, or a compatibility
-  service.
-- Keep narrow detached group-read tools direct so one-shot reads do not gain an
-  unnecessary discovery round trip.
+- Keep the existing direct tool names, argument shapes, validators, and result
+  contracts.
+- Preserve root-turn invocation authority and current-conversation route
+  binding.
+- Keep Vault as the automation owner and Web as the group-authority owner.
+- Use the pinned Codex App Server contract rather than a Murph-owned discovery
+  or execution protocol.
+- Keep narrow scheduled and detached group reads direct.
 
 ## Plan
 
-1. Replace the always-advertised automation and broad group request schemas
-   with a compact `schema | execute` envelope.
-2. Return the existing exact request schema and action guidance only when the
-   model calls the `schema` action.
-3. Validate `execute.request` with the existing strict Zod/domain validators
-   before any effect.
-4. Update prompt guidance and focused tests for discovery, execution, invalid
-   requests, and the maximum fixed schema size.
-5. Measure before/after token cost, run canonical verification and direct
-   request-path proof, complete required review gates, and close this plan with
-   a scoped commit.
+1. Carry `deferLoading` through Murph's provider dynamic-tool type.
+2. Mark only the broad automation and group tools deferred.
+3. Delete Murph's namespace-wide code-mode direct-tool override so explicit
+   per-tool deferral remains authoritative.
+4. Prove with the pinned real App Server that Terra's initial provider input
+   contains generic `ALL_TOOLS` discovery guidance, not either broad schema,
+   and that code-mode execution dispatches the unchanged automation contract.
+5. Measure the fixed-input reduction, run canonical verification, complete the
+   review gates, and close this plan with a scoped commit.
 
 ## Verification
 
-- Focused assistant-engine tests for hosted domain tools, group actions, prompt
-  guidance, and Codex request shaping.
-- `pnpm test:diff packages/assistant-engine/src/assistant-codex/dynamic-tools.ts packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts packages/assistant-engine/src/assistant/system-prompt.ts`
+- Real pinned Codex App Server plus scripted provider proof for native deferred
+  code-mode discovery and callback execution.
+- Focused schema registration and request-forwarding tests.
+- `pnpm test:diff packages/assistant-engine packages/assistant-runtime`
 - `pnpm verify:acceptance`
-- Direct serialized-schema token measurement before and after the change.
-- Preliminary `completion-specialists` ReviewGPT pass with prompt and coverage
-  lenses, followed by parent final review and the final ReviewGPT gate.
+- Base/head provider-input token measurement.
+- Preliminary `completion-specialists` ReviewGPT pass with coverage lens,
+  followed by parent final review and the final ReviewGPT gate.
 
 ## Deployment
 
-The dynamic-tool contract fingerprint changes, so a runtime using the new
-bundle starts a fresh Codex thread contract instead of resuming a thread with
-the old schemas. The change is internal to the runner bundle and needs no Web
-or persisted-state migration.
+The dynamic-tool fingerprint changes, so a runtime using the new bundle starts
+a fresh Codex thread contract instead of resuming a thread with eager schemas.
+The change is runner-only and needs no Web or persisted-state migration.
 
 ## Progress
 
-- Codex App Server accepts dynamic tools at thread start and persists them with
-  the thread; it does not expose a configuration-only lazy schema registry.
-- The broad automation and group definitions now advertise compact discovery
-  contracts. The existing request schemas are returned only by `schema`, and
-  `execute.request` still passes through the existing strict validators.
-- Prompt-known simple group actions and the separately planned narrow
-  scheduled/detached group reads remain direct.
-- Tokenizer proof for the two fixed tool definitions: 6,164 tokens before,
-  430 after, saving 5,734 tokens.
-- Focused engine/runtime verification passed 489 assertions. Canonical
-  `pnpm test:diff packages/assistant-engine packages/assistant-runtime` passed
-  after generating the fresh worktree's ignored Health Commons catalog; the
-  first run's 22 CLI failures were all missing-generated-file errors, and the
-  exact affected files then passed 54/54 before the clean canonical rerun.
+- The pinned Codex `0.145.0` protocol exposes `deferLoading` on
+  `thread/start.dynamicTools`.
+- Canonical Codex source maps that field to deferred tool exposure. Direct-tool
+  models discover it with `tool_search`; Terra's `code_mode_only` path omits the
+  schema from provider input, lists name/description metadata in `ALL_TOOLS`,
+  and routes the selected call through the existing App Server callback.
+- Murph's former `direct_only_tool_namespaces = ["murph"]` override promoted
+  deferred tools back to direct exposure. The override is deleted rather than
+  adding a second Murph discovery protocol.
+- The pinned real App Server proves the deferred automation call reaches the
+  unchanged Murph request callback and that the representative provider request
+  is 5,748 bytes / 1,328 tokenizer tokens smaller than the prior direct
+  namespace configuration.
+- The earlier Murph-owned `schema | execute` candidate was rejected and removed
+  before the final review baseline.

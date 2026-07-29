@@ -73,7 +73,7 @@ A cron automation persisted in the **group runtime's** vault (`bank/automations/
 
 - `schedule: { kind: 'cron', expression: '0 9 * * 0' }` (Sunday 09:00 default; timezone = vault timezone). Weekly uses `cron`, never `every` (which drifts across DST/missed wakes).
 - `continuityPolicy: 'fresh'` (a standalone digest).
-- Setup discovers the root-only `murph.automation` request schema on demand, then uses `action="execute"` with the structured `request.action="save_newsletter"` request. It writes canonical configuration text plus exactly one system-owned delivery tag: `system:group-newsletter:current-chat` or `system:group-newsletter:email`. The model does not author operational instructions, the slug, or reserved tags.
+- Setup uses the structured `murph.automation action="save_newsletter"` action. It writes canonical configuration text plus exactly one system-owned delivery tag: `system:group-newsletter:current-chat` or `system:group-newsletter:email`. The model does not author operational instructions, the slug, or reserved tags.
 - Newsletter configuration or route changes repeat that structured save from the destination group; generic patch is status-only.
 - Name, exact scopes, tone flavor, delivery, and optional custom note live in the automation's **instruction text** — no new config table. This satisfies the persisted-state placement gate: an automation is already a canonical vault record and is the group-scoped source of truth for the newsletter.
 - One automation per group. "Any member can edit" = any member's in-chat request upserts/patches that single record (last-write-wins). `status: paused` stops it.

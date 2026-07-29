@@ -4,7 +4,6 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_AUTOMATION_TOOL,
   MURPH_DEVICE_TOOL,
-  readAutomationDynamicToolSchema,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
@@ -24,6 +23,7 @@ describe('hosted domain dynamic tools', () => {
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
+    expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
@@ -36,9 +36,6 @@ describe('hosted domain dynamic tools', () => {
   it('keeps privileged and generic execution fields out of both schemas', () => {
     const propertyKeys = new Set([
       ...collectJsonSchemaPropertyKeys(MURPH_AUTOMATION_TOOL.inputSchema),
-      ...collectJsonSchemaPropertyKeys(
-        readAutomationDynamicToolSchema().requestSchema,
-      ),
       ...collectJsonSchemaPropertyKeys(MURPH_DEVICE_TOOL.inputSchema),
     ])
     for (const forbidden of [
@@ -57,28 +54,6 @@ describe('hosted domain dynamic tools', () => {
     ]) {
       expect(propertyKeys).not.toContain(forbidden)
     }
-  })
-
-  it('discovers the full automation contract only on demand', async () => {
-    expect(JSON.stringify(MURPH_AUTOMATION_TOOL).length).toBeLessThan(700)
-
-    const request = readRawToolRequest('automation', { action: 'schema' })
-    expect(request).toEqual({ kind: 'automation-schema' })
-    if (!request) {
-      throw new Error('Expected an automation schema request.')
-    }
-
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({}),
-      nextUsageOrdinal: () => 0,
-      progressDelivery: null,
-      request,
-    })
-    expect(readResultPayload(result)).toEqual(
-      readAutomationDynamicToolSchema(),
-    )
   })
 
   it('accepts typed automation writes without exposing model-controlled routes', () => {
@@ -465,15 +440,6 @@ describe('hosted domain dynamic tools', () => {
 })
 
 function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown) {
-  return readRawToolRequest(
-    tool,
-    tool === 'automation'
-      ? { action: 'execute', request: argumentsValue }
-      : argumentsValue,
-  )
-}
-
-function readRawToolRequest(tool: 'automation' | 'device', argumentsValue: unknown) {
   return readMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {

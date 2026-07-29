@@ -2489,10 +2489,7 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Call `murph.automation` with `action: schema` once to retrieve its request shapes, then call `action: execute` with the chosen shape under `request`.',
-    )
-    expect(plan.developerInstructions).toContain(
-      'Use request `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(plan.developerInstructions).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',

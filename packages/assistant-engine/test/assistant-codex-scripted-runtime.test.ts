@@ -19,6 +19,10 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
+import {
+  MURPH_AUTOMATION_TOOL,
+  MURPH_GROUP_TOOL,
+} from '../src/assistant-codex/dynamic-tools.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -46,6 +50,13 @@ const execFileAsync = promisify(execFile)
 type ScriptedResponse =
   | { delayMs?: number; text: string }
   | {
+    customToolCall: {
+      input: string
+      name: string
+    }
+    delayMs?: number
+  }
+  | {
     delayMs?: number
     functionCall: {
       arguments: Record<string, unknown>
@@ -66,6 +77,11 @@ interface ScriptedStub {
 interface ScriptedProviderRequestSummary {
   functionCallOutputs?: string[]
   model: string | null
+  providerRequestBytes: number
+  providerRequestIncludesAllTools: boolean
+  providerRequestIncludesAutomation: boolean
+  providerRequestIncludesGroup: boolean
+  providerRequestIncludesSaveNewsletter: boolean
   serviceTier: string | null
 }
 
@@ -136,6 +152,117 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
+  it('defers broad Murph schemas through native Codex code-mode discovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__automation({
+    action: "save",
+    instructions: "Send a short reminder.",
+    schedule: { kind: "dailyLocal", localTime: "09:00" },
+    title: "Morning reminder",
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'NATIVE_DEFERRED_TOOL_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-native-deferred',
+              created: true,
+              lookupId: 'morning-reminder',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      providerRequestIncludesAllTools: true,
+      providerRequestIncludesAutomation: false,
+      providerRequestIncludesGroup: false,
+      providerRequestIncludesSaveNewsletter: false,
+    })
+    expect(summaries[0]?.providerRequestBytes).toBeGreaterThan(0)
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send a short reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      title: 'Morning reminder',
+    }])
+    expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+
+    const deferredRequestBytes = summaries[0]?.providerRequestBytes ?? 0
+    await stopWarmCodexAppServer()
+    const directScenario = await prepareScriptedTurnScenario()
+    directScenario.stub.queue({ text: 'DIRECT_TOOL_BASELINE_OK' })
+    const directResult = await executeCodexAppServerTurn({
+      ...directScenario.turnInput,
+      configOverrides: [
+        'features.code_mode.direct_only_tool_namespaces=["murph"]',
+      ],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      env: {
+        ...directScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+    })
+    const directSummary =
+      directScenario.stub.requestSummariesSinceBaseline()[0]
+
+    expect(directResult.finalMessage).toBe('DIRECT_TOOL_BASELINE_OK')
+    expect(directSummary).toMatchObject({
+      providerRequestIncludesAutomation: true,
+      providerRequestIncludesGroup: true,
+      providerRequestIncludesSaveNewsletter: true,
+    })
+    expect(
+      (directSummary?.providerRequestBytes ?? 0) - deferredRequestBytes,
+    ).toBeGreaterThan(4_000)
+  })
+
   it('sends flex service tier through real Codex with the patched model catalog', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -157,7 +284,7 @@ describe('real codex app-server with scripted provider', () => {
     })
 
     expect(result.finalMessage).toBe('SCRIPTED_FLEX_OK')
-    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
       {
         model: SCRIPTED_MODEL,
         serviceTier: 'flex',
@@ -468,7 +595,7 @@ describe('real codex app-server with scripted provider', () => {
     expect(second.threadId).toBe(first.threadId)
     expect(second.rolloutRelativePath).toBe(first.rolloutRelativePath)
     expect(second.turnId).not.toBe(first.turnId)
-    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
       {
         model: 'gpt-5.6-luna',
         serviceTier: null,
@@ -1067,31 +1194,40 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'functionCall' in scripted
+    const outputItem = 'customToolCall' in scripted
       ? {
-        arguments: JSON.stringify(scripted.functionCall.arguments),
-        call_id: `call_${responseId}`,
-        id: `fcall_${responseId}`,
-        name: scripted.functionCall.name,
-        ...(scripted.functionCall.namespace
-          ? { namespace: scripted.functionCall.namespace }
-          : {}),
-        status: 'completed',
-        type: 'function_call',
-      }
+          call_id: `call_${responseId}`,
+          id: `ctcall_${responseId}`,
+          input: scripted.customToolCall.input,
+          name: scripted.customToolCall.name,
+          status: 'completed',
+          type: 'custom_tool_call',
+        }
+      : 'functionCall' in scripted
+      ? {
+          arguments: JSON.stringify(scripted.functionCall.arguments),
+          call_id: `call_${responseId}`,
+          id: `fcall_${responseId}`,
+          name: scripted.functionCall.name,
+          ...(scripted.functionCall.namespace
+            ? { namespace: scripted.functionCall.namespace }
+            : {}),
+          status: 'completed',
+          type: 'function_call',
+        }
       : {
-        content: [
-          {
-            annotations: [],
-            text: scripted.text,
-            type: 'output_text',
-          },
-        ],
-        id: `msg_${responseId}`,
-        role: 'assistant',
-        status: 'completed',
-        type: 'message',
-      }
+          content: [
+            {
+              annotations: [],
+              text: scripted.text,
+              type: 'output_text',
+            },
+          ],
+          id: `msg_${responseId}`,
+          role: 'assistant',
+          status: 'completed',
+          type: 'message',
+        }
     writeScriptedSseResponse({
       outputItem,
       response,
@@ -1142,6 +1278,11 @@ function readScriptedProviderRequestSummary(
   return {
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
+    providerRequestBytes: Buffer.byteLength(requestBody),
+    providerRequestIncludesAllTools: requestBody.includes('ALL_TOOLS'),
+    providerRequestIncludesAutomation: requestBody.includes('"name":"automation"'),
+    providerRequestIncludesGroup: requestBody.includes('"name":"group"'),
+    providerRequestIncludesSaveNewsletter: requestBody.includes('save_newsletter'),
     serviceTier: readString(body?.service_tier),
   }
 }

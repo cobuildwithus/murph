@@ -11,7 +11,6 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   executeMurphDynamicToolRequest,
-  readGroupDynamicToolSchema,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
@@ -455,7 +454,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(readGroupDynamicToolSchema().requestSchema.properties.referenceImageRefs.description)
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toContain(
       'set_chat_avatar',

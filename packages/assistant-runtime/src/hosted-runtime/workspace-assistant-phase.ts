@@ -1278,7 +1278,7 @@ function assertHostedAutomationSaveRequest(input: {
   ) {
     throw new VaultCliError(
       "invalid_option",
-      "Use murph.automation action=execute with request.action=save_newsletter to configure this group newsletter.",
+      "Use murph.automation action=save_newsletter to configure this group newsletter.",
     );
   }
 }
@@ -1296,7 +1296,7 @@ function assertHostedAutomationPatchRequest(input: {
   ) {
     throw new VaultCliError(
       "invalid_option",
-      "Use murph.automation action=execute with request.action=save_newsletter to configure this group newsletter.",
+      "Use murph.automation action=save_newsletter to configure this group newsletter.",
     );
   }
   if (
@@ -1327,7 +1327,7 @@ function assertHostedAutomationPatchRequest(input: {
   ) {
     throw new VaultCliError(
       "invalid_option",
-      "Use murph.automation action=execute with request.action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+      "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
     );
   }
 }
