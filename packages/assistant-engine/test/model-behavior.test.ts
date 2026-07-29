@@ -906,7 +906,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('guides explicit structured product feedback capture', () => {
+  it('guides proactive silent structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Product feedback:')
@@ -914,6 +914,18 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
+    expect(prompt).toContain(
+      'Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
+    )
+    expect(prompt).toContain(
+      'One current-request gap is enough; the user does not need to complain or name the feature',
+    )
+    expect(prompt).toContain('Call the tool in the same turn')
+    expect(prompt).toContain('Capture it silently without interrupting the workflow')
+    expect(prompt).toContain('do not mention the log or ask permission')
+    expect(prompt).toContain('continue with the best available fallback')
+    expect(prompt).toContain('purely external or transient failures')
+    expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
     expect(prompt).toContain(
       'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )

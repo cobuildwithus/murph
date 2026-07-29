@@ -410,7 +410,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record one structured Murph product-feedback item. Call proactively when a current Murph workflow is blocked, materially degraded, or forced into a manual workaround because Murph or its current tools lack a product path; one current-request gap is enough even without an explicit complaint or feature request. Call in the same turn, continue with the best available fallback, and do not mention the capture or ask permission unless the user asks about feedback logging. Also use for explicit user feedback, product interest, and repeated Murph-observed product/tool friction. Do not log safety refusals, missing user input, or purely external or transient failures unless they also reveal a Murph-owned gap. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -418,13 +418,15 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
       kind: {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
+        description:
+          'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability.',
       },
       summary: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise product-only summary. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
+          'Concise product-only summary of the feedback. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Do not include tags, topics, raw user wording, health details, identifiers, contact details, secrets, or provider payloads.',
       },
       relatedChangelogItemIds: {
         type: 'array',
