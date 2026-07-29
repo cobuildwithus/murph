@@ -285,8 +285,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
   an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the
   attempt fence and retained across clean samples, mixed inside-fence pages
-  limited to direct-error evidence with full current evidence at the boundary,
-  health-suppressed recovery,
+  limited to direct-error evidence, full current mixed evidence when no older
+  pending obligation owns the open boundary, health-suppressed recovery,
   documented formatted/deprecated Linq inventory shapes with duplicate and
   mismatch rejection, zero message POSTs for unhealthy or indeterminate
   chat/line health, healthy auto-selected Linq delivery, discovery-only

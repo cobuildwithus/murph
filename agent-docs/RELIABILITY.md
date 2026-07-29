@@ -50,7 +50,12 @@ Last verified: 2026-07-27
   When a direct error forces admission inside an acknowledged incident's
   closed attempt fence, that pending body contains only the non-replayable
   direct-error evidence; co-occurring replayable gauges remain in the persisted
-  sample but cannot become stale pending claims.
+  sample but cannot become stale pending claims. That exact direct-error page
+  owns the next eligible attempt. A replayable condition still unsafe at that
+  boundary remains eligible for the following paced recurrence, so its
+  diagnostic text may follow up to one interval later while the operator has
+  already received a valid database page. This explicit prioritization keeps
+  admitted message bodies immutable without another mutable-message lifecycle.
   An acknowledged incident's replayable gauge or monitoring recurrence does
   not admit stale evidence while the attempt fence is closed; once the fence
   opens, a still-unsafe current sample admits the recurrence, while recovery
