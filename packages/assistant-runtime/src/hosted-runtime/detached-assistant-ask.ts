@@ -7,6 +7,9 @@ import {
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import {
+  AssistantActiveTurnInputUnavailableError,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   parseAssistantUsageRecord,
@@ -40,7 +43,7 @@ const HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS = [
   "run-assistant-ask",
 ] as const;
 
-type HostedDetachedAssistantAskRunResult = "idle" | "settled";
+type HostedDetachedAssistantAskRunResult = "handoff" | "idle" | "settled";
 
 export interface HostedDetachedAssistantAskController {
   closeAndRequeue(): Promise<void>;
@@ -68,6 +71,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   modelProvider?: string | null;
   now?: () => string;
   onStateMutation(): void;
+  resolveProviderAuthority?(): Promise<"current" | "handoff">;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   userEnvKeys?: readonly string[];
   vaultRoot: string;
@@ -117,6 +121,7 @@ export function createHostedDetachedAssistantAskController(
       modelProvider: input.modelProvider ?? null,
       now,
       onStateMutation: input.onStateMutation,
+      resolveProviderAuthority: input.resolveProviderAuthority ?? null,
       usageRecordPort: input.usageRecordPort ?? null,
       userEnvKeys: input.userEnvKeys ?? [],
       vaultRoot: input.vaultRoot,
@@ -128,6 +133,11 @@ export function createHostedDetachedAssistantAskController(
       (result) => {
         if (activePromise !== completion) {
           return;
+        }
+        if (result === "handoff") {
+          closed = true;
+          paused = true;
+          kickRequested = false;
         }
         const shouldKick = kickRequested || result === "settled";
         kickRequested = false;
@@ -216,11 +226,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
   modelProvider: string | null;
   now: () => string;
   onStateMutation(): void;
+  resolveProviderAuthority: (() => Promise<"current" | "handoff">) | null;
   usageRecordPort: HostedRuntimeUsageRecordPort | null;
   userEnvKeys: readonly string[];
   vaultRoot: string;
 }): Promise<HostedDetachedAssistantAskRunResult> {
   let claimed: HostedSystemMailboxPendingItem | null = null;
+  let providerHandoffRequested = false;
   const providerUsages: ReadOnlyAssistantAskProviderUsageEvent[] = [];
   try {
     claimed = await claimHostedSystemMailboxItem({
@@ -274,6 +286,20 @@ async function runOneHostedDetachedAssistantAsk(input: {
     }
     const executionInput = {
       abortSignal: input.abortSignal,
+      ...(input.resolveProviderAuthority
+        ? {
+            async beforeProviderEntry() {
+              if (
+                await input.resolveProviderAuthority?.() === "handoff"
+              ) {
+                providerHandoffRequested = true;
+                throw new AssistantActiveTurnInputUnavailableError(
+                  "Assistant provider changed; retrying the ask with the saved provider.",
+                );
+              }
+            },
+          }
+        : {}),
       codexHome: input.codexHome,
       env: { ...input.env },
       model: input.model,
@@ -343,11 +369,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
       input,
       nextAttemptAt: aborted
         ? null
-        : new Date(
+        : providerHandoffRequested
+          ? null
+          : new Date(
             Date.parse(input.now()) + HOSTED_DETACHED_ASSISTANT_ASK_RETRY_DELAY_MS,
           ).toISOString(),
     });
-    return "settled";
+    return providerHandoffRequested ? "handoff" : "settled";
   } finally {
     if (
       claimed

@@ -102,6 +102,13 @@ const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
   "JUNCTION_REGION",
 ] as const;
 
+const VENICE_RUNTIME_REQUIRED_ENV_NAMES = [
+  "VENICE_API_KEY",
+  "HOSTED_VENICE_LUNA_MODEL",
+  "HOSTED_VENICE_TERRA_MODEL",
+  "HOSTED_VENICE_SOL_MODEL",
+] as const;
+
 const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
   "CF_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -402,6 +409,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       `Junction runtime env must set ${JUNCTION_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
+    );
+  }
+
+  const missingVeniceEnv = listMissingPartialGroupEnvNames(
+    source,
+    VENICE_RUNTIME_REQUIRED_ENV_NAMES,
+  );
+  if (
+    missingVeniceEnv.length > 0
+    && missingVeniceEnv.length < VENICE_RUNTIME_REQUIRED_ENV_NAMES.length
+  ) {
+    errors.push(
+      `Venice runtime env must set ${VENICE_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
     );
   }
 

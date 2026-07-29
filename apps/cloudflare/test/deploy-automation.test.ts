@@ -71,7 +71,6 @@ const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
   "OPENROUTER_API_KEY",
   "PERPLEXITY_API_KEY",
   "TOGETHER_API_KEY",
-  "VENICE_API_KEY",
   "VLLM_API_KEY",
   // XAI_API_KEY left this list when xAI became a real intercepted provider
   // (x_search); it is now an optional worker secret.
@@ -1160,6 +1159,7 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
+      VENICE_API_KEY: "venice-key",
     })).toEqual({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -1178,6 +1178,7 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
+      VENICE_API_KEY: "venice-key",
     });
   });
 

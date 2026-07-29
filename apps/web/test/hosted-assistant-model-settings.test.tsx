@@ -4,8 +4,10 @@ import path from "node:path";
 
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -103,6 +105,226 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
   assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
+test("members can switch the provider without changing Terra, Luna, or Sol", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: false,
+    model: HOSTED_ASSISTANT_TERRA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    solAvailable: true,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  assert.ok(veniceInput);
+  await act(async () => {
+    veniceInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /Terra through Venice/u);
+  assert.match(
+    view.container.textContent ?? "",
+    /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
+  );
+  assert.ok(isRadioChecked(findModelRadio(
+    view.container,
+    HOSTED_ASSISTANT_TERRA_MODEL,
+  )));
+  view.cleanup();
+});
+
+test("a model-only save adopts the server's canonical provider", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: false,
+    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+    solAvailable: true,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
+    url: "/api/settings/assistant-model",
+  });
+  const openAiInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_OPENAI_PROVIDER}"]`,
+  );
+  assert.ok(openAiInput);
+  assert.ok(isRadioChecked(openAiInput));
+  assert.match(
+    view.container.textContent ?? "",
+    /New core replies will use Luna through OpenAI\./u,
+  );
+
+  view.cleanup();
+});
+
+test("a provider-only save preserves a dormant Sol preference", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: true,
+    model: HOSTED_ASSISTANT_TERRA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    solAvailable: false,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: true,
+      configurationAvailable: true,
+      initialDormantSolPreference: true,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  assert.ok(veniceInput);
+
+  await act(async () => {
+    veniceInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  view.cleanup();
+});
+
+test("a combined provider and model save preserves both choices for retry", async () => {
+  const combinedPayload = {
+    model: HOSTED_ASSISTANT_SOL_MODEL,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+  };
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("temporary failure"))
+    .mockResolvedValueOnce({
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      updated: true,
+    });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  assert.ok(veniceInput);
+
+  await act(async () => {
+    veniceInput.click();
+    solInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  assert.equal(
+    view.container.querySelector('[role="alert"]')?.textContent,
+    "We couldn’t save this change. Try again.",
+  );
+  assert.ok(isRadioChecked(veniceInput));
+  assert.ok(isRadioChecked(solInput));
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  const statusLine = view.container.querySelector<HTMLElement>(
+    '[aria-live="polite"]',
+  );
+  assert.ok(statusLine);
+  assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
+  assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("non-Edge members can explicitly save Luna as their default model", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
@@ -141,7 +363,7 @@ test("non-Edge members can explicitly save Luna as their default model", async (
   });
   assert.match(
     view.container.textContent ?? "",
-    /GPT-5\.6 Luna is now Murph’s default\./,
+    /Future core replies will use GPT-5\.6 Luna\./,
   );
   assert.ok(isRadioChecked(lunaInput));
   assert.ok(findButton(view.container, "Save change").disabled);
@@ -209,7 +431,7 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   });
   assert.match(
     view.container.textContent ?? "",
-    /GPT-5\.6 Sol is now Murph’s default\./,
+    /Future core replies will use GPT-5\.6 Sol\./,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -259,7 +481,7 @@ test("a generic save failure keeps the selected model available to retry", async
 
   assert.match(
     view.container.textContent ?? "",
-    /GPT-5\.6 Sol is now Murph’s default\./,
+    /Future core replies will use GPT-5\.6 Sol\./,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -460,6 +682,55 @@ test("a stale Edge page removes Sol without changing the saved model", async () 
   view.cleanup();
 });
 
+test("a stale Venice page falls back to OpenAI and removes the unavailable choice", async () => {
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      message: "unavailable",
+    }),
+  );
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const veniceInput = view.container.querySelector<HTMLInputElement>(
+    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  );
+  assert.ok(veniceInput);
+
+  await act(async () => {
+    veniceInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  assert.match(
+    view.container.textContent ?? "",
+    /Venice is no longer available\. Murph will keep using OpenAI\./,
+  );
+  assert.equal(
+    view.container.querySelector(
+      `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+    ),
+    null,
+  );
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("refreshed eligibility resets the client state after an Edge upgrade", async () => {
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
@@ -530,7 +801,7 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
   assert.ok(isRadioChecked(lunaInput));
   assert.match(
     view.container.textContent ?? "",
-    /GPT-5\.6 Luna is now Murph’s default\./,
+    /Future core replies will use GPT-5\.6 Luna\./,
   );
 
   view.cleanup();
@@ -597,6 +868,25 @@ test("members without active personal access see read-only model controls", () =
   assert.match(markup, /<fieldset[^>]*disabled=""/);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Save change<\/button>/);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan/);
+});
+
+test("members without active personal access see both provider and model controls explained", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: false,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /Provider and model choices are read-only until personal Murph access is active\./,
+  );
 });
 
 function findModelRadio(
