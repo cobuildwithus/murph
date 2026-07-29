@@ -67,6 +67,7 @@ type ScriptedResponse =
 
 interface ScriptedStub {
   baseUrl: string
+  captureProviderRequestDiagnostics(): void
   close(): Promise<void>
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
@@ -77,11 +78,13 @@ interface ScriptedStub {
 interface ScriptedProviderRequestSummary {
   functionCallOutputs?: string[]
   model: string | null
-  providerRequestBytes: number
-  providerRequestIncludesAllTools: boolean
-  providerRequestIncludesAutomation: boolean
-  providerRequestIncludesGroup: boolean
-  providerRequestIncludesSaveNewsletter: boolean
+  providerRequestDiagnostics?: {
+    bytes: number
+    includesAllTools: boolean
+    includesAutomation: boolean
+    includesGroup: boolean
+    includesSaveNewsletter: boolean
+  }
   serviceTier: string | null
 }
 
@@ -160,6 +163,7 @@ describe('real codex app-server with scripted provider', () => {
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
+    scenario.stub.captureProviderRequestDiagnostics()
     const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
@@ -218,12 +222,14 @@ if (!tool) {
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      providerRequestIncludesAllTools: true,
-      providerRequestIncludesAutomation: false,
-      providerRequestIncludesGroup: false,
-      providerRequestIncludesSaveNewsletter: false,
+      providerRequestDiagnostics: {
+        includesAllTools: true,
+        includesAutomation: false,
+        includesGroup: false,
+        includesSaveNewsletter: false,
+      },
     })
-    expect(summaries[0]?.providerRequestBytes).toBeGreaterThan(0)
+    expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
     expect(automationRequests).toEqual([{
       action: 'save',
       instructions: 'Send a short reminder.',
@@ -233,9 +239,11 @@ if (!tool) {
     expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
 
-    const deferredRequestBytes = summaries[0]?.providerRequestBytes ?? 0
+    const deferredRequestBytes =
+      summaries[0]?.providerRequestDiagnostics?.bytes ?? 0
     await stopWarmCodexAppServer()
     const directScenario = await prepareScriptedTurnScenario()
+    directScenario.stub.captureProviderRequestDiagnostics()
     directScenario.stub.queue({ text: 'DIRECT_TOOL_BASELINE_OK' })
     const directResult = await executeCodexAppServerTurn({
       ...directScenario.turnInput,
@@ -254,12 +262,15 @@ if (!tool) {
 
     expect(directResult.finalMessage).toBe('DIRECT_TOOL_BASELINE_OK')
     expect(directSummary).toMatchObject({
-      providerRequestIncludesAutomation: true,
-      providerRequestIncludesGroup: true,
-      providerRequestIncludesSaveNewsletter: true,
+      providerRequestDiagnostics: {
+        includesAutomation: true,
+        includesGroup: true,
+        includesSaveNewsletter: true,
+      },
     })
     expect(
-      (directSummary?.providerRequestBytes ?? 0) - deferredRequestBytes,
+      (directSummary?.providerRequestDiagnostics?.bytes ?? 0)
+        - deferredRequestBytes,
     ).toBeGreaterThan(4_000)
   })
 
@@ -284,7 +295,7 @@ if (!tool) {
     })
 
     expect(result.finalMessage).toBe('SCRIPTED_FLEX_OK')
-    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       {
         model: SCRIPTED_MODEL,
         serviceTier: 'flex',
@@ -595,7 +606,7 @@ if (!tool) {
     expect(second.threadId).toBe(first.threadId)
     expect(second.rolloutRelativePath).toBe(first.rolloutRelativePath)
     expect(second.turnId).not.toBe(first.turnId)
-    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       {
         model: 'gpt-5.6-luna',
         serviceTier: null,
@@ -1161,6 +1172,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   let responsesRequestCount = 0
   let requestBaseline = 0
   let requestSummaryBaseline = 0
+  let providerRequestDiagnosticsEnabled = false
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -1176,7 +1188,10 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
         : Buffer.from(chunk).toString('utf8')
     }
     responsesRequestCount += 1
-    requestSummaries.push(readScriptedProviderRequestSummary(requestBody))
+    requestSummaries.push(readScriptedProviderRequestSummary(
+      requestBody,
+      providerRequestDiagnosticsEnabled,
+    ))
     const scripted = queuedResponses.shift()
     if (!scripted) {
       response.statusCode = 500
@@ -1246,12 +1261,16 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    captureProviderRequestDiagnostics: () => {
+      providerRequestDiagnosticsEnabled = true
+    },
     close: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => resolve())
       })
     },
     markRequestBaseline: () => {
+      providerRequestDiagnosticsEnabled = false
       requestBaseline = responsesRequestCount
       requestSummaryBaseline = requestSummaries.length
     },
@@ -1266,6 +1285,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
 function readScriptedProviderRequestSummary(
   requestBody: string,
+  includeDiagnostics: boolean,
 ): ScriptedProviderRequestSummary {
   const body = readRecord(JSON.parse(requestBody))
   const functionCallOutputs = Array.isArray(body?.input)
@@ -1278,11 +1298,17 @@ function readScriptedProviderRequestSummary(
   return {
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
-    providerRequestBytes: Buffer.byteLength(requestBody),
-    providerRequestIncludesAllTools: requestBody.includes('ALL_TOOLS'),
-    providerRequestIncludesAutomation: requestBody.includes('"name":"automation"'),
-    providerRequestIncludesGroup: requestBody.includes('"name":"group"'),
-    providerRequestIncludesSaveNewsletter: requestBody.includes('save_newsletter'),
+    ...(includeDiagnostics
+      ? {
+          providerRequestDiagnostics: {
+            bytes: Buffer.byteLength(requestBody),
+            includesAllTools: requestBody.includes('ALL_TOOLS'),
+            includesAutomation: requestBody.includes('"name":"automation"'),
+            includesGroup: requestBody.includes('"name":"group"'),
+            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+          },
+        }
+      : {}),
     serviceTier: readString(body?.service_tier),
   }
 }
