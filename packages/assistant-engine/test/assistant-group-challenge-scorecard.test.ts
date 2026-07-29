@@ -132,6 +132,73 @@ describe('group challenge additive scorecards', () => {
     expect(result.participantScores[0]?.verifiedPoints).toBe(39)
   })
 
+  it('applies a point cap before converting an otherwise oversized product', () => {
+    const result = scoreGroupChallenge({
+      format: { kind: 'individual', objective: { kind: 'ranking' } },
+      participants: [
+        {
+          participantId: 'participant_1',
+          components: [{
+            componentId: 'bounded',
+            quantity: Number.MAX_SAFE_INTEGER,
+            status: 'available',
+          }],
+        },
+      ],
+      scorecard: {
+        components: [{
+          id: 'bounded',
+          label: 'Bounded',
+          maxPoints: 7,
+          perQuantity: 1,
+          points: Number.MAX_SAFE_INTEGER,
+          quantityUnit: 'units',
+        }],
+      },
+    })
+
+    expect(result.participantScores[0]?.verifiedPoints).toBe(7)
+  })
+
+  it('caps target progress safely after a participant exceeds the target', () => {
+    const result = scoreGroupChallenge({
+      format: {
+        kind: 'collective',
+        objective: { kind: 'target', targetPoints: 1 },
+      },
+      participants: [
+        {
+          participantId: 'participant_1',
+          components: [{
+            componentId: 'large-score',
+            quantity: 1,
+            status: 'available',
+          }],
+        },
+      ],
+      scorecard: {
+        components: [{
+          id: 'large-score',
+          label: 'Large score',
+          perQuantity: 1,
+          points: Number.MAX_SAFE_INTEGER,
+          quantityUnit: 'units',
+        }],
+      },
+    })
+
+    expect(result.scoreboard).toMatchObject({
+      kind: 'collective',
+      objectiveProgress: {
+        remainingPoints: 0,
+        targetPoints: 1,
+        targetReached: true,
+        verifiedProgressBasisPoints: 10_000,
+      },
+      verifiedPoints: Number.MAX_SAFE_INTEGER,
+    })
+  })
+
   it('rejects a sixth component instead of growing an open-ended formula surface', () => {
     const components = Array.from({ length: 6 }, (_, index) => ({
       id: `component-${index + 1}`,
@@ -155,6 +222,31 @@ describe('group challenge additive scorecards', () => {
       ],
       scorecard: { components },
     })).toThrow('require 1-5 components')
+  })
+
+  it('rejects unbounded stable ids before they become durable scorecard keys', () => {
+    expect(() => scoreGroupChallenge({
+      format: { kind: 'individual', objective: { kind: 'ranking' } },
+      participants: [
+        {
+          participantId: 'participant_1',
+          components: [{
+            componentId: 'a'.repeat(81),
+            quantity: 1,
+            status: 'available',
+          }],
+        },
+      ],
+      scorecard: {
+        components: [{
+          id: 'a'.repeat(81),
+          label: 'Too long',
+          perQuantity: 1,
+          points: 1,
+          quantityUnit: 'units',
+        }],
+      },
+    })).toThrow('1-80 characters in lowercase kebab-case')
   })
 
   it('reuses participant scores for team sums without hiding partial coverage', () => {
