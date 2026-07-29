@@ -200,333 +200,319 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
   const failureDiagnostics: HostedRuntimeLogEntry[] = [];
-  try {
-    for (const update of parsed.updates) {
-      const applied = await controlPlane.store.withConnectionMutationLock(
-        update.connectionId,
-        async (tx) => {
-          const record = await tx.deviceConnection.findFirst({
-            where: {
-              id: update.connectionId,
-              userId: input.trustedUserId,
-            },
-            ...hostedConnectionRecordArgs,
-          });
+  for (const update of parsed.updates) {
+    const applied = await controlPlane.store.withConnectionMutationLock(
+      update.connectionId,
+      async (tx) => {
+        const record = await tx.deviceConnection.findFirst({
+          where: {
+            id: update.connectionId,
+            userId: input.trustedUserId,
+          },
+          ...hostedConnectionRecordArgs,
+        });
 
-          if (!record) {
-            return {
-              failureDiagnostic: null,
-              update: {
-                connection: null,
-                connectionId: update.connectionId,
-                status: "missing",
-                tokenUpdate: "missing",
-                writeUpdate: "missing",
-              },
-            } satisfies HostedRuntimeFailureApplyResult;
-          }
-
-          const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
-            input.trustedUserId,
-            update.connectionId,
-            tx,
-          );
-          const durableConnection = storedAccount
-            ? null
-            : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId, tx);
-          const durableExternalAccountId =
-            storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null;
-          const sources = await controlPlane.store.listConnectionSources(record.id, tx);
-          const baseline = buildHostedRuntimeConnectionSnapshot(
-            record,
-            storedAccount,
-            durableExternalAccountId,
-            sources.map(toHostedRuntimeConnectionSourceSnapshot),
-            {
-              includeCredentialMaterial: true,
-            },
-          );
-          const disconnectInProgress = isDeviceSyncDisconnectInProgress(record);
-          const historicalMetadataResolution = resolveHostedRuntimeHistoricalMetadata({
-            baselineMetadata: baseline.connection.metadata,
-            candidateMetadata: update.connection?.metadata,
-            provider: record.provider,
-          });
-          const sourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
-            connectionId: record.id,
-            currentSources: sources,
-            historicalMetadata: historicalMetadataResolution?.metadata
-              ?? baseline.connection.metadata,
-            provider: record.provider,
-            updates: update.sources ?? [],
-          });
-          const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
-          const credentialMutationRequested = update.credential !== undefined;
-          const sourceMutationRequested = sourceUpdates.toApply.length > 0;
-          const sourceVersionMismatch =
-            (update.sources?.length ?? 0) > 0 && sourceUpdates.staleCount > 0;
-          const historicalResetStateMismatch = isHostedRuntimeHistoricalResetStateInconsistent({
-            currentSources: sources,
-            historicalMetadata: historicalMetadataResolution?.metadata
-              ?? baseline.connection.metadata,
-            provider: record.provider,
-            sourceUpdates: sourceUpdates.toApply,
-          });
-          const connectionWriteRequested =
-            stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
-          const junctionSourceMutationRequested = record.provider.trim().toLowerCase() === "junction"
-            && (update.sources?.length ?? 0) > 0;
-          const connectionVersionMismatch = (stateMutationRequested || junctionSourceMutationRequested)
-            && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
-          const connectionEpochMismatch = connectionWriteRequested
-            && baseline.connection.connectedAt !== update.observedConnectedAt;
-          const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
-          const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
-            && baselineTokenVersion !== update.observedTokenVersion;
-          const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
-            && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
-          const versionMismatch =
-            disconnectInProgress
-            || connectionEpochMismatch
-            || connectionVersionMismatch
-            || tokenVersionMismatch
-            || tokenRefreshLeaseConflict
-            || (stateMutationRequested && sourceVersionMismatch)
-            || historicalMetadataResolution?.rejected === true
-            || historicalResetStateMismatch;
-          const credentialUpdate = update.credential === undefined
-            ? undefined
-            : resolveHostedRuntimeCredentialUpdate(update.credential);
-          if (credentialUpdate) {
-            validateHostedRuntimeCredentialMutation({
-              baseline,
-              credential: credentialUpdate,
-              provider: record.provider,
-            });
-          }
-          const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
-          let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
-          let tokenBundlePersistenceRequested = false;
-          let credentialToPersist:
-            | Exclude<
-              HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
-              { kind: "oauth_tokens" } | { kind: "oauth_tokens_redacted" }
-            >
-            | undefined;
-
-          if (!versionMismatch && update.connection) {
-            if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
-              nextAccount.displayName = update.connection.displayName ?? null;
-            }
-            if (Object.prototype.hasOwnProperty.call(update.connection, "metadata")) {
-              nextAccount.metadata = historicalMetadataResolution?.metadata
-                ?? sanitizeStoredDeviceSyncMetadata(update.connection.metadata ?? {});
-            }
-            if (Object.prototype.hasOwnProperty.call(update.connection, "scopes")) {
-              nextAccount.scopes = [...(update.connection.scopes ?? [])];
-            }
-            if (Object.prototype.hasOwnProperty.call(update.connection, "status") && update.connection.status) {
-              nextAccount.status = normalizeHostedDeviceSyncLifecycleStatus(update.connection.status);
-            }
-            if (Object.prototype.hasOwnProperty.call(update.connection, "setupExpiresAt")) {
-              nextAccount.setupExpiresAt = update.connection.setupExpiresAt ?? null;
-            }
-            if (Object.prototype.hasOwnProperty.call(update.connection, "setupPhase")) {
-              nextAccount.setupPhase = update.connection.setupPhase ?? null;
-            }
-          }
-
-          if (!versionMismatch && update.localState) {
-            if (update.localState.clearError) {
-              nextAccount.lastErrorCode = null;
-              nextAccount.lastErrorMessage = null;
-            }
-
-            for (const field of [
-              "lastErrorCode",
-              "lastErrorMessage",
-              "lastSyncCompletedAt",
-              "lastSyncErrorAt",
-              "lastSyncStartedAt",
-              "lastWebhookAt",
-              "nextReconcileAt",
-            ] as const) {
-              if (Object.prototype.hasOwnProperty.call(update.localState, field)) {
-                nextAccount[field] = update.localState[field] ?? null;
-              }
-            }
-          }
-
-          let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
-          if (versionMismatch && update.credential !== undefined) {
-            tokenUpdate = "skipped_version_mismatch";
-          } else if (update.credential !== undefined) {
-            if (!credentialUpdate) {
-              throw new TypeError("Hosted device-sync runtime credential update was not parsed.");
-            }
-
-            if (credentialUpdate.kind === "oauth_tokens") {
-              if ("clearTokens" in credentialUpdate) {
-                tokenBundleToPersist = null;
-                tokenBundlePersistenceRequested = true;
-                nextAccount.accessTokenExpiresAt = null;
-                tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
-              } else {
-                tokenBundleToPersist = {
-                  ...credentialUpdate.tokenBundle,
-                  tokenVersion: computeNextHostedTokenVersion(
-                    getHostedRuntimeOAuthTokenBundle(baseline.credential),
-                    credentialUpdate.tokenBundle,
-                  ),
-                };
-                tokenBundlePersistenceRequested = true;
-                nextAccount.accessTokenExpiresAt = tokenBundleToPersist.accessTokenExpiresAt;
-                tokenUpdate = "applied";
-              }
-            } else {
-              credentialToPersist = credentialUpdate;
-              nextAccount.accessTokenExpiresAt = null;
-              tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
-            }
-          } else {
-            tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "unchanged" : "missing";
-          }
-
-          const writeUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] =
-            versionMismatch || sourceVersionMismatch
-            ? "skipped_version_mismatch"
-            : connectionWriteRequested
-              ? "applied"
-              : "unchanged";
-
-          if (!versionMismatch && (stateMutationRequested || credentialMutationRequested)) {
-            await controlPlane.store.syncDurableConnectionState(nextAccount, tx);
-          }
-
-          if (!versionMismatch && sourceMutationRequested) {
-            for (const source of sourceUpdates.toApply) {
-              await controlPlane.store.upsertConnectionSource({
-                connectionId: update.connectionId,
-                sourceInstanceKey: source.sourceInstanceKey,
-                sourceProviderSlug: source.sourceProviderSlug,
-                ...(Object.prototype.hasOwnProperty.call(source, "displayName")
-                  ? { displayName: source.displayName ?? null }
-                  : {}),
-                status: source.status,
-                ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
-                  ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
-                  : {}),
-                ...(Object.prototype.hasOwnProperty.call(source, "lastErrorCode")
-                  ? { lastErrorCode: source.lastErrorCode ?? null }
-                  : {}),
-                ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
-                  ? { lastErrorMessage: source.lastErrorMessage ?? null }
-                  : {}),
-                ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
-                  ? { firstSeenAt: source.firstSeenAt ?? null }
-                  : {}),
-                ...(Object.prototype.hasOwnProperty.call(source, "lastDataAt")
-                  ? { lastDataAt: source.lastDataAt ?? null }
-                  : {}),
-                lastSeenAt: source.lastSeenAt,
-                tx,
-              });
-            }
-          }
-
-          if (!versionMismatch && credentialToPersist) {
-            await persistHostedRuntimeCredentialSnapshot({
-              connectionId: update.connectionId,
-              credential: credentialToPersist,
-              tx,
-            });
-          } else if (!versionMismatch && tokenBundlePersistenceRequested) {
-            await controlPlane.store.persistStoredConnectionTokenBundle({
-              connectionId: update.connectionId,
-              externalAccountId: storedAccount?.externalAccountId,
-              provider: record.provider,
-              tokenBundle: tokenBundleToPersist ?? null,
-              tx,
-            });
-          }
-
-          const failureDiagnostic =
-            !versionMismatch && (stateMutationRequested || credentialMutationRequested)
-              ? buildHostedRuntimeFailureApplyDiagnostic({
-                  appliedAt,
-                  baseline,
-                  nextAccount,
-                  update,
-                })
-              : null;
-
-          const refreshedRecord = await tx.deviceConnection.findFirst({
-            where: {
-              id: update.connectionId,
-              userId: input.trustedUserId,
-            },
-            ...hostedConnectionRecordArgs,
-          });
-          const refreshedStoredAccount = refreshedRecord
-            ? await controlPlane.store.getStoredConnectionAccountForUser(
-                input.trustedUserId,
-                update.connectionId,
-                tx,
-              )
-            : null;
-          const refreshedSources = refreshedRecord
-            ? await controlPlane.store.listConnectionSources(refreshedRecord.id, tx)
-            : [];
-
+        if (!record) {
           return {
-            failureDiagnostic,
+            failureDiagnostic: null,
             update: {
-              connection: refreshedRecord
-                ? buildHostedRuntimeConnectionSnapshot(
-                    refreshedRecord,
-                    refreshedStoredAccount,
-                    durableExternalAccountId,
-                    refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
-                  ).connection
-                : null,
+              connection: null,
               connectionId: update.connectionId,
-              status: "updated",
-              tokenUpdate,
-              writeUpdate,
+              status: "missing",
+              tokenUpdate: "missing",
+              writeUpdate: "missing",
             },
           } satisfies HostedRuntimeFailureApplyResult;
-        },
-      );
-      updates.push(applied.update);
-      if (applied.failureDiagnostic) {
-        failureDiagnostics.push(applied.failureDiagnostic);
-      }
-    }
-  } finally {
-    if (failureDiagnostics.length > 0) {
-      const entries = [...failureDiagnostics];
-      const task = async () => {
-        await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
-          entries,
-          userId: input.trustedUserId,
-        });
-      };
-      if (input.scheduleFailureDiagnostics) {
-        try {
-          input.scheduleFailureDiagnostics(task);
-        } catch (error) {
-          console.warn(
-            "Hosted device-sync failure diagnostic scheduling failed.",
-            formatHostedExecutionSafeLogErrorDetails(error, {
-              code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_SCHEDULING_FAILED",
-            }),
-          );
         }
-      } else {
-        await task();
-      }
+
+        const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
+          input.trustedUserId,
+          update.connectionId,
+          tx,
+        );
+        const durableConnection = storedAccount
+          ? null
+          : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId, tx);
+        const durableExternalAccountId =
+          storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null;
+        const sources = await controlPlane.store.listConnectionSources(record.id, tx);
+        const baseline = buildHostedRuntimeConnectionSnapshot(
+          record,
+          storedAccount,
+          durableExternalAccountId,
+          sources.map(toHostedRuntimeConnectionSourceSnapshot),
+          {
+            includeCredentialMaterial: true,
+          },
+        );
+        const disconnectInProgress = isDeviceSyncDisconnectInProgress(record);
+        const historicalMetadataResolution = resolveHostedRuntimeHistoricalMetadata({
+          baselineMetadata: baseline.connection.metadata,
+          candidateMetadata: update.connection?.metadata,
+          provider: record.provider,
+        });
+        const sourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
+          connectionId: record.id,
+          currentSources: sources,
+          historicalMetadata: historicalMetadataResolution?.metadata
+            ?? baseline.connection.metadata,
+          provider: record.provider,
+          updates: update.sources ?? [],
+        });
+        const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
+        const credentialMutationRequested = update.credential !== undefined;
+        const sourceMutationRequested = sourceUpdates.toApply.length > 0;
+        const sourceVersionMismatch =
+          (update.sources?.length ?? 0) > 0 && sourceUpdates.staleCount > 0;
+        const historicalResetStateMismatch = isHostedRuntimeHistoricalResetStateInconsistent({
+          currentSources: sources,
+          historicalMetadata: historicalMetadataResolution?.metadata
+            ?? baseline.connection.metadata,
+          provider: record.provider,
+          sourceUpdates: sourceUpdates.toApply,
+        });
+        const connectionWriteRequested =
+          stateMutationRequested || credentialMutationRequested || sourceMutationRequested;
+        const junctionSourceMutationRequested = record.provider.trim().toLowerCase() === "junction"
+          && (update.sources?.length ?? 0) > 0;
+        const connectionVersionMismatch = (stateMutationRequested || junctionSourceMutationRequested)
+          && (baseline.connection.updatedAt ?? null) !== update.observedUpdatedAt;
+        const connectionEpochMismatch = connectionWriteRequested
+          && baseline.connection.connectedAt !== update.observedConnectedAt;
+        const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
+        const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
+          && baselineTokenVersion !== update.observedTokenVersion;
+        const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
+          && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
+        const versionMismatch =
+          disconnectInProgress
+          || connectionEpochMismatch
+          || connectionVersionMismatch
+          || tokenVersionMismatch
+          || tokenRefreshLeaseConflict
+          || (stateMutationRequested && sourceVersionMismatch)
+          || historicalMetadataResolution?.rejected === true
+          || historicalResetStateMismatch;
+        const credentialUpdate = update.credential === undefined
+          ? undefined
+          : resolveHostedRuntimeCredentialUpdate(update.credential);
+        if (credentialUpdate) {
+          validateHostedRuntimeCredentialMutation({
+            baseline,
+            credential: credentialUpdate,
+            provider: record.provider,
+          });
+        }
+        const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
+        let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
+        let tokenBundlePersistenceRequested = false;
+        let credentialToPersist:
+          | Exclude<
+            HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
+            { kind: "oauth_tokens" } | { kind: "oauth_tokens_redacted" }
+          >
+          | undefined;
+
+        if (!versionMismatch && update.connection) {
+          if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
+            nextAccount.displayName = update.connection.displayName ?? null;
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "metadata")) {
+            nextAccount.metadata = historicalMetadataResolution?.metadata
+              ?? sanitizeStoredDeviceSyncMetadata(update.connection.metadata ?? {});
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "scopes")) {
+            nextAccount.scopes = [...(update.connection.scopes ?? [])];
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "status") && update.connection.status) {
+            nextAccount.status = normalizeHostedDeviceSyncLifecycleStatus(update.connection.status);
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "setupExpiresAt")) {
+            nextAccount.setupExpiresAt = update.connection.setupExpiresAt ?? null;
+          }
+          if (Object.prototype.hasOwnProperty.call(update.connection, "setupPhase")) {
+            nextAccount.setupPhase = update.connection.setupPhase ?? null;
+          }
+        }
+
+        if (!versionMismatch && update.localState) {
+          if (update.localState.clearError) {
+            nextAccount.lastErrorCode = null;
+            nextAccount.lastErrorMessage = null;
+          }
+
+          for (const field of [
+            "lastErrorCode",
+            "lastErrorMessage",
+            "lastSyncCompletedAt",
+            "lastSyncErrorAt",
+            "lastSyncStartedAt",
+            "lastWebhookAt",
+            "nextReconcileAt",
+          ] as const) {
+            if (Object.prototype.hasOwnProperty.call(update.localState, field)) {
+              nextAccount[field] = update.localState[field] ?? null;
+            }
+          }
+        }
+
+        let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
+        if (versionMismatch && update.credential !== undefined) {
+          tokenUpdate = "skipped_version_mismatch";
+        } else if (update.credential !== undefined) {
+          if (!credentialUpdate) {
+            throw new TypeError("Hosted device-sync runtime credential update was not parsed.");
+          }
+
+          if (credentialUpdate.kind === "oauth_tokens") {
+            if ("clearTokens" in credentialUpdate) {
+              tokenBundleToPersist = null;
+              tokenBundlePersistenceRequested = true;
+              nextAccount.accessTokenExpiresAt = null;
+              tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
+            } else {
+              tokenBundleToPersist = {
+                ...credentialUpdate.tokenBundle,
+                tokenVersion: computeNextHostedTokenVersion(
+                  getHostedRuntimeOAuthTokenBundle(baseline.credential),
+                  credentialUpdate.tokenBundle,
+                ),
+              };
+              tokenBundlePersistenceRequested = true;
+              nextAccount.accessTokenExpiresAt = tokenBundleToPersist.accessTokenExpiresAt;
+              tokenUpdate = "applied";
+            }
+          } else {
+            credentialToPersist = credentialUpdate;
+            nextAccount.accessTokenExpiresAt = null;
+            tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
+          }
+        } else {
+          tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "unchanged" : "missing";
+        }
+
+        const writeUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] =
+          versionMismatch || sourceVersionMismatch
+          ? "skipped_version_mismatch"
+          : connectionWriteRequested
+            ? "applied"
+            : "unchanged";
+
+        if (!versionMismatch && (stateMutationRequested || credentialMutationRequested)) {
+          await controlPlane.store.syncDurableConnectionState(nextAccount, tx);
+        }
+
+        if (!versionMismatch && sourceMutationRequested) {
+          for (const source of sourceUpdates.toApply) {
+            await controlPlane.store.upsertConnectionSource({
+              connectionId: update.connectionId,
+              sourceInstanceKey: source.sourceInstanceKey,
+              sourceProviderSlug: source.sourceProviderSlug,
+              ...(Object.prototype.hasOwnProperty.call(source, "displayName")
+                ? { displayName: source.displayName ?? null }
+                : {}),
+              status: source.status,
+              ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
+                ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorCode")
+                ? { lastErrorCode: source.lastErrorCode ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
+                ? { lastErrorMessage: source.lastErrorMessage ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
+                ? { firstSeenAt: source.firstSeenAt ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastDataAt")
+                ? { lastDataAt: source.lastDataAt ?? null }
+                : {}),
+              lastSeenAt: source.lastSeenAt,
+              tx,
+            });
+          }
+        }
+
+        if (!versionMismatch && credentialToPersist) {
+          await persistHostedRuntimeCredentialSnapshot({
+            connectionId: update.connectionId,
+            credential: credentialToPersist,
+            tx,
+          });
+        } else if (!versionMismatch && tokenBundlePersistenceRequested) {
+          await controlPlane.store.persistStoredConnectionTokenBundle({
+            connectionId: update.connectionId,
+            externalAccountId: storedAccount?.externalAccountId,
+            provider: record.provider,
+            tokenBundle: tokenBundleToPersist ?? null,
+            tx,
+          });
+        }
+
+        const failureDiagnostic =
+          !versionMismatch && (stateMutationRequested || credentialMutationRequested)
+            ? buildHostedRuntimeFailureApplyDiagnostic({
+                appliedAt,
+                baseline,
+                nextAccount,
+                update,
+              })
+            : null;
+
+        const refreshedRecord = await tx.deviceConnection.findFirst({
+          where: {
+            id: update.connectionId,
+            userId: input.trustedUserId,
+          },
+          ...hostedConnectionRecordArgs,
+        });
+        const refreshedStoredAccount = refreshedRecord
+          ? await controlPlane.store.getStoredConnectionAccountForUser(
+              input.trustedUserId,
+              update.connectionId,
+              tx,
+            )
+          : null;
+        const refreshedSources = refreshedRecord
+          ? await controlPlane.store.listConnectionSources(refreshedRecord.id, tx)
+          : [];
+
+        return {
+          failureDiagnostic,
+          update: {
+            connection: refreshedRecord
+              ? buildHostedRuntimeConnectionSnapshot(
+                  refreshedRecord,
+                  refreshedStoredAccount,
+                  durableExternalAccountId,
+                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
+                ).connection
+              : null,
+            connectionId: update.connectionId,
+            status: "updated",
+            tokenUpdate,
+            writeUpdate,
+          },
+        } satisfies HostedRuntimeFailureApplyResult;
+      },
+    ).catch(async (error: unknown) => {
+      await flushHostedRuntimeFailureApplyDiagnostics({
+        entries: failureDiagnostics,
+        schedule: input.scheduleFailureDiagnostics,
+        userId: input.trustedUserId,
+      });
+      throw error;
+    });
+    updates.push(applied.update);
+    if (applied.failureDiagnostic) {
+      failureDiagnostics.push(applied.failureDiagnostic);
     }
   }
+  await flushHostedRuntimeFailureApplyDiagnostics({
+    entries: failureDiagnostics,
+    schedule: input.scheduleFailureDiagnostics,
+    userId: input.trustedUserId,
+  });
 
   return {
     appliedAt,
@@ -1180,6 +1166,39 @@ async function writeHostedRuntimeFailureApplyDiagnosticsBestEffort(input: {
         runtimeFailureCode: first?.errorCode ?? null,
       });
     }
+  }
+}
+
+async function flushHostedRuntimeFailureApplyDiagnostics(input: {
+  entries: readonly HostedRuntimeLogEntry[];
+  schedule?: (task: () => Promise<void>) => void;
+  userId: string;
+}): Promise<void> {
+  if (input.entries.length === 0) {
+    return;
+  }
+
+  const entries = [...input.entries];
+  const task = async () => {
+    await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
+      entries,
+      userId: input.userId,
+    });
+  };
+  if (!input.schedule) {
+    await task();
+    return;
+  }
+
+  try {
+    input.schedule(task);
+  } catch (error) {
+    console.warn(
+      "Hosted device-sync failure diagnostic scheduling failed.",
+      formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_SCHEDULING_FAILED",
+      }),
+    );
   }
 }
 
