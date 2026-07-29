@@ -21,6 +21,7 @@ import {
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type {
@@ -83,6 +84,7 @@ interface ScriptedStub {
 }
 
 interface ScriptedProviderRequestSummary {
+  customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
   model: string | null
   providerRequestDiagnostics?: {
@@ -90,6 +92,7 @@ interface ScriptedProviderRequestSummary {
     includesAllTools: boolean
     includesAutomation: boolean
     includesGroup: boolean
+    includesReadShared: boolean
     includesSaveNewsletter: boolean
     includesToolSearch: boolean
   }
@@ -239,6 +242,18 @@ if (!tool) {
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
+    const executionOutput = readRecord(
+      readCodeModeExecutionOutput(summaries[1]),
+    )
+    const automationOutput = readRecord(JSON.parse(
+      readString(executionOutput?.result) ?? 'null',
+    ))
+    expect(executionOutput?.found).toBe(true)
+    expect(automationOutput).toMatchObject({
+      automationId: 'automation-native-deferred',
+      lookupId: 'morning-reminder',
+      status: 'active',
+    })
     expect(automationRequests).toEqual([{
       action: 'save',
       instructions: 'Send a short reminder.',
@@ -362,6 +377,88 @@ if (!tool) {
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps narrow group reads eager beside deferred Terra tools', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.captureProviderRequestDiagnostics()
+    const groupSharedRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__group({
+  action: "read_shared",
+  projectionScopes: [{ projectionKind: "steps-days.v0" }],
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'EAGER_GROUP_READ_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_GROUP_SHARED_READ_TOOL,
+      ],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async (request) => {
+            groupSharedRequests.push(request)
+            return {
+              members: [],
+              requestedProjectionScopeKeys: ['steps-days.v0'],
+              status: 'none',
+            }
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read shared steps, then reply exactly EAGER_GROUP_READ_OK.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]).toMatchObject({
+      providerRequestDiagnostics: {
+        includesAllTools: true,
+        includesAutomation: false,
+        includesGroup: false,
+        includesReadShared: true,
+        includesSaveNewsletter: false,
+      },
+    })
+    expect(groupSharedRequests).toEqual([{
+      projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+    }])
+    const groupOutput = readRecord(JSON.parse(
+      readString(readCodeModeExecutionOutput(summaries[1])) ?? 'null',
+    ))
+    expect(groupOutput).toMatchObject({
+      action: 'read_shared',
+      result: { status: 'none' },
+    })
+    expect(result.finalMessage).toBe('EAGER_GROUP_READ_OK')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {
@@ -1392,6 +1489,13 @@ function readScriptedProviderRequestSummary(
   includeDiagnostics: boolean,
 ): ScriptedProviderRequestSummary {
   const body = readRecord(JSON.parse(requestBody))
+  const customToolCallOutputs = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'custom_tool_call_output')
+      .map((item) => readProviderToolOutputText(item?.output))
+      .filter((output): output is string => output !== null)
+    : []
   const functionCallOutputs = Array.isArray(body?.input)
     ? body.input
       .map(readRecord)
@@ -1409,6 +1513,7 @@ function readScriptedProviderRequestSummary(
     ? body.tools.map(readRecord)
     : []
   return {
+    ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
     ...(includeDiagnostics
@@ -1418,6 +1523,7 @@ function readScriptedProviderRequestSummary(
             includesAllTools: requestBody.includes('ALL_TOOLS'),
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
+            includesReadShared: requestBody.includes('read_shared'),
             includesSaveNewsletter: requestBody.includes('save_newsletter'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
@@ -1438,6 +1544,33 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function readProviderToolOutputText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const textItems = value
+    .map(readRecord)
+    .map((item) => readString(item?.text))
+    .filter((text): text is string => text !== null)
+  return textItems.length > 0 ? textItems.join('\n') : null
+}
+
+function readCodeModeExecutionOutput(
+  summary: ScriptedProviderRequestSummary | undefined,
+): unknown {
+  const output = summary?.customToolCallOutputs?.[0] ?? ''
+  const marker = '\nOutput:\n\n'
+  const markerIndex = output.lastIndexOf(marker)
+  if (markerIndex < 0) {
+    throw new Error('Expected a code-mode execution output marker.')
+  }
+  return JSON.parse(output.slice(markerIndex + marker.length))
 }
 
 function writeScriptedSseResponse(input: {

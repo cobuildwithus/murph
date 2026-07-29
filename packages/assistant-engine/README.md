@@ -149,7 +149,10 @@ Broad, low-frequency native tools use Codex's `deferLoading` field while keeping
 their ordinary argument and result contracts. The pinned App Server owns
 discovery: direct-tool models use native `tool_search`, while code-mode models
 expose only generic `ALL_TOOLS` metadata and dispatch the selected tool through
-`exec`. Murph must not add a second discovery action or execution envelope.
+`exec`. Narrow non-deferred tools remain eager: direct-tool models receive the
+native function, while code-mode-only models receive its schema in `exec`
+guidance without a search step. Murph must not add a second discovery action,
+execution envelope, or compatibility namespace.
 
 Runtime authority remains independent of advertisement. Hosted transports are
 typed services on `AssistantHostedToolContext`, and each tool checks that service

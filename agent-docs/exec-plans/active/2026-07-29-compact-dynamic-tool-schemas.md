@@ -7,14 +7,15 @@ hosted provider input by using Codex's native deferred dynamic-tool loading.
 
 ## Constraints
 
-- Keep the existing direct tool names, argument shapes, validators, and result
+- Keep the existing tool names, argument shapes, validators, and result
   contracts.
 - Preserve root-turn invocation authority and current-conversation route
   binding.
 - Keep Vault as the automation owner and Web as the group-authority owner.
 - Use the pinned Codex App Server contract rather than a Murph-owned discovery
   or execution protocol.
-- Keep narrow scheduled and detached group reads direct.
+- Keep narrow scheduled and detached group reads eagerly available without a
+  deferred discovery step.
 
 ## Plan
 
@@ -64,6 +65,14 @@ The change is runner-only and needs no Web or persisted-state migration.
   Codex advertises native `tool_search`, returns the deferred automation schema
   in `tool_search_output`, then routes the namespaced typed call through the
   unchanged callback.
+- A mixed-surface Terra proof confirms Codex keeps a narrow non-deferred group
+  schema in the ordinary `exec` surface beside deferred automation metadata and
+  routes its result back to the provider continuation without a discovery step.
+  Pinned Codex exposes native provider functions in code-mode-only models only
+  through a namespace-wide override; retaining that override would also
+  re-expose both broad schemas, and a new tool namespace would be a Murph-owned
+  compatibility protocol. The canonical behavior is therefore documented as
+  eager code-mode availability, not native-provider directness.
 - The existing opt-in live-model automation probe and a new production-prompt
   group-status probe cover ordinary natural-language discovery. The local
   environment has no configured provider key, so that credentialed lane remains
