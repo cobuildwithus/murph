@@ -9535,7 +9535,7 @@ describe('assistant auto-reply runtime', () => {
     expect(JSON.stringify(preparedInputs[0])).not.toContain('participantId')
   })
 
-  it('rechecks speaker labels in each ordinary Linq group turn', async () => {
+  it('delegates speaker-label resolution in each ordinary Linq group turn', async () => {
     const handles = ['+15551110001', '+15552220002'] as const
     const createTurnInputs = (turn: number) => handles.map((
       senderHandle,
@@ -10180,19 +10180,14 @@ describe('assistant auto-reply runtime', () => {
         ),
       }),
     )
-    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledTimes(3)
-    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
-      channel: 'linq',
-      senderHandles: ['+15551110000'],
-    })
-    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
-      channel: 'linq',
-      senderHandles: ['+15552220000'],
-    })
-    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
-      channel: 'linq',
-      senderHandles: ['+15553330000'],
-    })
+    expect(groupParticipantDisplayNameReader.read.mock.calls.map(([call]) => call))
+      .toEqual([
+        { channel: 'linq', senderHandles: ['+15551110000'] },
+        { channel: 'linq', senderHandles: ['+15552220000'] },
+        { channel: 'linq', senderHandles: ['+15551110000'] },
+        { channel: 'linq', senderHandles: ['+15553330000'] },
+        { channel: 'linq', senderHandles: ['+15553330000'] },
+      ])
     expect(listInputCandidatesByIds).toHaveBeenCalledTimes(5)
     expect(listNewConversationInputs).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()

@@ -83,6 +83,7 @@ import {
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteConversationKey,
   resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
@@ -673,6 +674,7 @@ function createHostedAssistantAutomationOperationScope(
           && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
+        runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
@@ -808,6 +810,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupEmailIngress: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
@@ -828,10 +831,23 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
   }
+  const routeChannel = normalizeAssistantRouteString(
+    input.currentDeliveryRoute?.channel,
+  )?.toLowerCase();
+  const routeConversationKey =
+    routeChannel === "linq"
+    && input.currentDeliveryRoute?.threadIsDirect === false
+      ? resolveAssistantDeliveryRouteConversationKey({
+          ...input.currentDeliveryRoute,
+          channel: routeChannel,
+        })
+      : null;
   const groupParticipantDisplayNameReader =
-    input.groupSharedReadAvailable && input.groupToolPort
+    input.groupSharedReadAvailable && routeConversationKey && input.groupToolPort
       ? createHostedGroupParticipantDisplayNameReader({
           groupToolPort: input.groupToolPort,
+          routeConversationKey,
+          runtimeMemberId: input.runtimeMemberId,
         })
       : null;
   return {

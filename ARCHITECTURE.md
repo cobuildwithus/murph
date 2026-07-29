@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Accepted-Message Targeting
 
@@ -1265,15 +1265,21 @@ human group owner's explicitly enabled address-book projection may provide one
 safe unique canonical-phone label marked as unverified. Failure leaves the
 speaker unnamed.
 
-The assistant operation that owns one compound turn also owns one in-memory
-positive-and-negative Linq label memo. The initial prompt reads all unresolved
-unique handles in one bounded batch; later live admissions reuse resolved and
-fail-soft misses and read only newly unresolved handles. The memo ends with the
-compound turn and is never checkpointed, copied into profile truth, or promoted
-to another cache owner. Profile and owner-contact labels are presentation
-only. The name read returns no member or participant identifier. For
-participant-scoped effects, the opaque `Message ref` plus trusted server
-derivation remains the sole path; display
+The assistant-runtime Linq presentation adapter owns both the compound
+operation memo and one bounded opportunistic process cache. Initial prompt
+preparation reads unresolved unique handles in one batch; later live admissions
+reuse operation-local positive, negative, and fail-soft entries and read only
+new handles. Across ordinary turns in the same resident Node process, validated
+positive labels have a fixed one-hour TTL and valid successful omissions have a
+fixed five-minute TTL. Entries are keyed by the callback-bound runtime member,
+exact accepted-input route conversation key, channel, and normalized handle in
+a 2,048-entry insertion-ordered `Map`; hits do not slide TTL or eviction order.
+There are no timers, single-flight owner, mutation invalidation, persistence, or
+distributed coordination. Failures never enter the process cache, while cold
+starts, deploys, expiry, and other process instances simply re-read Web. Neither cache layer is checkpointed or
+copied into profile truth. Profile and owner-contact labels remain presentation
+only, and the name read returns no member or participant identifier. For participant-scoped effects, the opaque
+`Message ref` plus trusted server derivation remains the sole path; display
 labels and handles are never selectors.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger

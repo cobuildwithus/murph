@@ -14,7 +14,6 @@ import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type {
   AssistantExecutionContext,
   AssistantGroupParticipantDisplayName,
-  AssistantHostedGroupParticipantDisplayNameReader,
 } from '../execution-context.js'
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
@@ -150,11 +149,6 @@ type AssistantAutoReplyReceiptRecord =
 
 type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
-
-interface AssistantAutoReplyLinqSpeakerNameMemo {
-  reader: AssistantHostedGroupParticipantDisplayNameReader
-  resolvedByHandle: Map<string, AssistantGroupParticipantDisplayName | null>
-}
 
 export interface AssistantAutoReplyHistoryMetrics {
   outboxScanElapsedMs?: number
@@ -553,11 +547,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   vault: string
 }): Promise<AssistantAutoReplyResolvedGroupOutcome> {
   let context = input.context
-  // One transient memo spans the initial batch and all live admissions owned by
-  // this compound-turn operation. It is never checkpointed or persisted.
-  const linqSpeakerNameMemo = createAssistantAutoReplyLinqSpeakerNameMemo(
-    input.executionContext,
-  )
 
   const decision = await evaluateAssistantAutoReplyGroup({
     allowSelfAuthored: input.allowSelfAuthored,
@@ -566,7 +555,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     group: context,
     onEvent: input.onEvent,
     historyReader: input.historyReader,
-    linqSpeakerNameMemo,
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
@@ -665,7 +653,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
         deliveryTarget: decision.deliveryTarget,
         executionContext: input.executionContext,
         historyReader: input.historyReader,
-        linqSpeakerNameMemo,
         onAcceptedContext(nextContext) {
           acceptedContext = nextContext
           input.onAcceptedContext?.(nextContext)
@@ -1267,7 +1254,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
   historyReader: AssistantAutoReplyHistoryReader
-  linqSpeakerNameMemo: AssistantAutoReplyLinqSpeakerNameMemo | null
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
   receiptFallbackEnabled: boolean
@@ -1496,7 +1482,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const preparedInput = await prepareAssistantAutoReplyInputWithContext({
     executionContext: input.executionContext,
     inputs: promptInputs,
-    linqSpeakerNameMemo: input.linqSpeakerNameMemo,
     onEvent: input.onEvent,
     vault: input.vault,
   })
@@ -1853,13 +1838,12 @@ function stringifyHostedAutoReplyDeliveryKeyParts(
 async function prepareAssistantAutoReplyInputWithContext(input: {
   executionContext?: AssistantExecutionContext | null
   inputs: readonly AssistantAutoReplyPromptInput[]
-  linqSpeakerNameMemo: AssistantAutoReplyLinqSpeakerNameMemo | null
   onEvent?: ((event: AssistantRunEvent) => void) | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
   const promptInputs = await enrichAssistantAutoReplyLinqSpeakerNames({
+    executionContext: input.executionContext,
     inputs: input.inputs,
-    memo: input.linqSpeakerNameMemo,
   })
   const materializeWorkspaceArtifacts =
     input.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null
@@ -1872,25 +1856,13 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
     : await prepareAssistantAutoReplyInput(promptInputs, input.vault)
 }
 
-function createAssistantAutoReplyLinqSpeakerNameMemo(
-  executionContext?: AssistantExecutionContext | null,
-): AssistantAutoReplyLinqSpeakerNameMemo | null {
-  const reader =
-    executionContext?.hosted?.groupParticipantDisplayNameReader ?? null
-  return reader
-    ? {
-        reader,
-        resolvedByHandle: new Map(),
-      }
-    : null
-}
-
 async function enrichAssistantAutoReplyLinqSpeakerNames(input: {
+  executionContext?: AssistantExecutionContext | null
   inputs: readonly AssistantAutoReplyPromptInput[]
-  memo: AssistantAutoReplyLinqSpeakerNameMemo | null
 }): Promise<readonly AssistantAutoReplyPromptInput[]> {
-  const memo = input.memo
-  if (!memo) {
+  const reader =
+    input.executionContext?.hosted?.groupParticipantDisplayNameReader ?? null
+  if (!reader) {
     return input.inputs
   }
   const senderHandles = [...new Set(input.inputs.flatMap((promptInput) => {
@@ -1907,59 +1879,47 @@ async function enrichAssistantAutoReplyLinqSpeakerNames(input: {
     return input.inputs
   }
 
-  const unresolvedHandles = senderHandles.filter(
-    (senderHandle) => !memo.resolvedByHandle.has(senderHandle),
-  )
-  if (unresolvedHandles.length > 0) {
-    const unresolvedHandleSet = new Set(unresolvedHandles)
-    let resolved: readonly AssistantGroupParticipantDisplayName[] = []
-    try {
-      resolved = await memo.reader.read({
-        channel: 'linq',
-        senderHandles: unresolvedHandles,
-      })
-    } catch {
-      // The lookup is presentation-only. Cache the fail-soft miss for this
-      // compound turn so later live admissions cannot turn an outage into a
-      // hot-path retry loop.
-    }
-    const resolvedByHandle = new Map<
-      string,
-      AssistantGroupParticipantDisplayName
-    >()
-    const ambiguousHandles = new Set<string>()
-    for (const entry of resolved) {
-      const senderHandle = normalizeNullableString(entry.senderHandle)
-      const displayName = normalizeNullableString(entry.displayName)
-      if (
-        !senderHandle ||
-        !displayName ||
-        !unresolvedHandleSet.has(senderHandle) ||
-        ambiguousHandles.has(senderHandle) ||
-        (
-          entry.displayNameSource !== 'profile-name' &&
-          entry.displayNameSource !== 'unverified-owner-contact'
-        )
-      ) {
-        continue
-      }
-      if (resolvedByHandle.has(senderHandle)) {
-        resolvedByHandle.delete(senderHandle)
-        ambiguousHandles.add(senderHandle)
-        continue
-      }
-      resolvedByHandle.set(senderHandle, {
-        displayName,
-        displayNameSource: entry.displayNameSource,
-        senderHandle,
-      })
-    }
-    for (const senderHandle of unresolvedHandles) {
-      memo.resolvedByHandle.set(
-        senderHandle,
-        resolvedByHandle.get(senderHandle) ?? null,
+  const senderHandleSet = new Set(senderHandles)
+  let resolved: readonly AssistantGroupParticipantDisplayName[] = []
+  try {
+    resolved = await reader.read({
+      channel: 'linq',
+      senderHandles,
+    })
+  } catch {
+    // The runtime reader owns operation-local failure suppression. This
+    // boundary remains fail-soft if another implementation still throws.
+  }
+  const resolvedByHandle = new Map<
+    string,
+    AssistantGroupParticipantDisplayName
+  >()
+  const ambiguousHandles = new Set<string>()
+  for (const entry of resolved) {
+    const senderHandle = normalizeNullableString(entry.senderHandle)
+    const displayName = normalizeNullableString(entry.displayName)
+    if (
+      !senderHandle ||
+      !displayName ||
+      !senderHandleSet.has(senderHandle) ||
+      ambiguousHandles.has(senderHandle) ||
+      (
+        entry.displayNameSource !== 'profile-name' &&
+        entry.displayNameSource !== 'unverified-owner-contact'
       )
+    ) {
+      continue
     }
+    if (resolvedByHandle.has(senderHandle)) {
+      resolvedByHandle.delete(senderHandle)
+      ambiguousHandles.add(senderHandle)
+      continue
+    }
+    resolvedByHandle.set(senderHandle, {
+      displayName,
+      displayNameSource: entry.displayNameSource,
+      senderHandle,
+    })
   }
 
   return input.inputs.map((promptInput) => {
@@ -1973,7 +1933,7 @@ async function enrichAssistantAutoReplyLinqSpeakerNames(input: {
     }
     const senderHandle = normalizeNullableString(metadata.senderHandle)
     const speakerLabel = senderHandle
-      ? memo.resolvedByHandle.get(senderHandle) ?? null
+      ? resolvedByHandle.get(senderHandle) ?? null
       : null
     return speakerLabel
       ? {
@@ -2187,7 +2147,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   historyReader: AssistantAutoReplyHistoryReader
-  linqSpeakerNameMemo: AssistantAutoReplyLinqSpeakerNameMemo | null
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
   inputSource: AssistantActiveTurnInputSource
@@ -2328,7 +2287,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         getContext: () => context,
         inputSourceCursor: lateInputs.nextCursor,
         lateInputs: lateCapturelessCandidates,
-        linqSpeakerNameMemo: input.linqSpeakerNameMemo,
         onAcceptedContext(nextContext) {
           context = nextContext
           input.onAcceptedContext(nextContext)
@@ -2369,7 +2327,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     const preparedInput = await prepareAssistantAutoReplyInputWithContext({
       executionContext: input.executionContext,
       inputs: contextualizedLatePromptInputs,
-      linqSpeakerNameMemo: input.linqSpeakerNameMemo,
       onEvent: input.onEvent,
       vault: input.vault,
     })
@@ -2800,7 +2757,6 @@ async function admitCapturelessAssistantInputs(input: {
   getContext(): AssistantAutoReplyGroupContext
   inputSourceCursor: AssistantInputCandidate['event']['cursor'] | null
   lateInputs: readonly AssistantInputCandidate[]
-  linqSpeakerNameMemo: AssistantAutoReplyLinqSpeakerNameMemo | null
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
   pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
@@ -2816,7 +2772,6 @@ async function admitCapturelessAssistantInputs(input: {
       ),
       replyContext: input.replyContexts.get(candidate.event.inputId) ?? null,
     })),
-    linqSpeakerNameMemo: input.linqSpeakerNameMemo,
     onEvent: input.onEvent,
     vault: input.vault,
   })
