@@ -13828,6 +13828,98 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("retries prepared room setup before planning the first group conversation", async () => {
+    const callOrder: string[] = [];
+    const now = "2026-07-29T18:01:00.000Z";
+    const item = createGroupRoomModelInitializationSystemMailboxItem();
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) =>
+      input?.allowedRouteActions?.includes("initialize-group-room-model")
+        ? {
+            at: now,
+            reason: "assistant",
+          }
+        : {
+            at: null,
+            reason: null,
+          }
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockImplementationOnce(async (input) => {
+        callOrder.push("room-model-failed");
+        expect(input.allowedRouteActions).toEqual([
+          "initialize-group-room-model",
+        ]);
+        return {
+          errorCode: "group_room_model_unavailable",
+          errorMessage: "Group room model unavailable.",
+          itemId: item.itemId,
+          nextWakeAt: "2026-07-29T18:02:00.000Z",
+          status: "retryable_failed",
+        };
+      })
+      .mockImplementationOnce(async (input) => {
+        callOrder.push("room-model-initialized");
+        expect(input.allowedRouteActions).toEqual([
+          "initialize-group-room-model",
+        ]);
+        return {
+          item,
+          itemId: item.itemId,
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-activated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    const input = createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    });
+
+    const failed = await runHostedWorkspaceAssistantPhase(input);
+
+    expect(failed).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-07-29T18:02:00.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedGroupRoomModelInitializationRetryableFailed: 1,
+      }),
+    }));
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+
+    const replay = await runHostedWorkspaceAssistantPhase(input);
+
+    expect(callOrder).toEqual([
+      "room-model-failed",
+      "room-model-initialized",
+      "assistant",
+    ]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+    });
+    expect(replay).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedGroupRoomModelInitializationProcessed: 1,
+      }),
+    }));
+  });
+
   it("applies member preference mailbox work before planning fresh conversation input", async () => {
     const callOrder: string[] = [];
     let preferenceWakeChecks = 0;
@@ -16250,6 +16342,29 @@ function createMemberPreferencesSystemMailboxItem() {
       preferences: {
         tone: "formal" as const,
       },
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createGroupRoomModelInitializationSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_group_room_model",
+    mailboxDedupeKey: "member.activated:prepared-group-room-model",
+    routeAction: "initialize-group-room-model" as const,
+    wake: {
+      eventId: "member.activated:prepared-group-room-model",
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
+      kind: "member.activated" as const,
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
       userId: "member_synthetic_phase",
     },
   };

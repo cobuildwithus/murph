@@ -61,16 +61,16 @@ export async function executeHostedMemberActivatedWake(input: {
         }),
       );
     } catch (error) {
-      // Optional group context must never block the accepted first message.
       redactedLogEntries.push(
         emitHostedGroupRoomModelSeedLifecycleLog({
           error,
           level: "warn",
-          message: "Hosted group room model activation seed skipped.",
+          message: "Hosted group room model activation seed will retry.",
           outcome: "unavailable",
           wake: input.wake,
         }),
       );
+      throw error;
     }
   }
 

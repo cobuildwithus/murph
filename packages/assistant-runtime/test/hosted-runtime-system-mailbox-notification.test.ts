@@ -132,6 +132,45 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("routes prepared group room setup through required initialization", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:prepared-group-room-model",
+      initialGroupRoomModelMarkdown:
+        "## Explicit setup\n\nKeep this room low-key.",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_group_runtime",
+      occurredAt: FIXED_NOW,
+      signupWelcome: null,
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedActivationItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot))
+        .toMatchObject({
+          pending: [
+            {
+              routeAction: "initialize-group-room-model",
+              wake: {
+                kind: "member.activated",
+              },
+            },
+          ],
+        });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("keeps hosted member context on queued notification wakes", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({

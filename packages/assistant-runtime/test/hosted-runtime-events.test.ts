@@ -1947,7 +1947,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
   });
 
-  it("fails open without logging room setup when activation initialization is unavailable", async () => {
+  it("keeps activation retryable without logging room setup when initialization is unavailable", async () => {
     const roomContext = "## Explicit setup\n\nKeep a private phrase private.";
     mocks.initializeAssistantGroupRoomModel.mockRejectedValueOnce(
       new Error("room setup unavailable"),
@@ -1965,28 +1965,27 @@ describe("executeHostedMailboxEvent", () => {
       signupWelcome: null,
     });
 
-    const result = await executeHostedMailboxEvent({
+    await expect(executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       sourceMailboxItemId: "hmi_room_setup_fail_123",
       vaultRoot: "/tmp/assistant-runtime-events",
-    });
+    })).rejects.toThrow("room setup unavailable");
 
-    expect(result).toMatchObject({
-      mailboxLane: "member-activated",
-      redactedLogEntries: [
-        expect.objectContaining({
-          level: "warn",
-          redacted: expect.objectContaining({
-            eventCode: "assistant.group_room_model_activation_seed",
-            outcome: "unavailable",
-          }),
-        }),
-      ],
-    });
-    expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          eventCode: "assistant.group_room_model_activation_seed",
+          outcome: "unavailable",
+        },
+        level: "warn",
+      }),
+    );
+    expect(
+      JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
+    ).not.toContain(roomContext);
   });
 
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {
