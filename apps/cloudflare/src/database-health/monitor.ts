@@ -459,7 +459,7 @@ async function fetchPlanetScaleMetrics(input: {
   fetchImplementation: DatabaseHealthFetch;
 }): Promise<string> {
   const authorization =
-    `token ${input.config.planetScaleServiceTokenId}:`
+    `${input.config.planetScaleServiceTokenId}:`
     + input.config.planetScaleServiceToken;
   const discoveryUrl = new URL(
     `/v1/organizations/${encodeURIComponent(input.config.organization)}/metrics`,
