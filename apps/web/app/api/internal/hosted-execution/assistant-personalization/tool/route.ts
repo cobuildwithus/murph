@@ -1,5 +1,8 @@
 import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+  HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION,
+  HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION,
+  HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
 } from "@murphai/hosted-execution/assistant-personalization";
@@ -14,7 +17,7 @@ import {
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
-const BODY_LIMIT_BYTES = 2_048;
+const BODY_LIMIT_BYTES = 32 * 1_024;
 const RETIRED_PREFERENCE_CAUSAL_SEQ_ACTION = "resolve_preference_causal_seq";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -28,15 +31,9 @@ export const POST = withJsonError(async (request: Request) => {
     );
   }
   const body = parseHostedRuntimeAssistantPersonalizationToolRequest(payload);
-  if (
-    (
-      body.action === "update"
-      || body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION
-    )
-    && authority === null
-  ) {
+  if (assistantPersonalizationActionRequiresInputAuthority(body.action) && authority === null) {
     throw new TypeError(
-      "Assistant personalization update requires assistant input authority.",
+      "Assistant personalization action requires assistant input authority.",
     );
   }
 
@@ -47,6 +44,16 @@ export const POST = withJsonError(async (request: Request) => {
     scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
   }));
 });
+
+function assistantPersonalizationActionRequiresInputAuthority(
+  action: string,
+): boolean {
+  return action === "update"
+    || action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION
+    || action === HOSTED_RUNTIME_PREPARE_NEXT_GROUP_ACTION
+    || action === HOSTED_RUNTIME_READ_PENDING_GROUP_SETUP_ACTION
+    || action === HOSTED_RUNTIME_CANCEL_PENDING_GROUP_SETUP_ACTION;
+}
 
 function isAssistantPreferenceCausalSeqRequest(value: unknown): boolean {
   return typeof value === "object"
