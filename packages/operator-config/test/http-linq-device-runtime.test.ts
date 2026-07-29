@@ -58,14 +58,14 @@ function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   })
 }
 
-function requireStringRequestBody(body: string | Blob | undefined): string {
+function requireStringRequestBody(body: BodyInit | null | undefined): string {
   if (typeof body !== 'string') {
     assert.fail('Expected a JSON string request body.')
   }
   return body
 }
 
-function parseJsonRequestBody(body: string | Blob | undefined): Record<string, unknown> {
+function parseJsonRequestBody(body: BodyInit | null | undefined): Record<string, unknown> {
   return JSON.parse(requireStringRequestBody(body)) as Record<string, unknown>
 }
 
@@ -414,6 +414,189 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     (error) => error instanceof VaultCliError && error.code === 'LINQ_INVALID_INPUT',
   )
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime sends a terminal payment URL as a separate rich-link message', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bodies: Record<string, unknown>[] = []
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    bodies.push(parseJsonRequestBody(requireStringRequestBody(init.body)))
+    requestCount += 1
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {
+        id: requestCount === 1 ? 'message-text' : 'message-link',
+      },
+    })
+  })
+
+  const result = await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'payment-message-123',
+      message: 'Complete payment here:\n[secure checkout](https://pay.example.test/checkout/session_123).',
+      nativeReplyRequested: true,
+      replyToMessageId: 'incoming-123',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(result.message.id, 'message-text')
+  assert.deepEqual(bodies, [
+    {
+      message: {
+        idempotency_key: 'payment-message-123',
+        parts: [{
+          type: 'text',
+          value: 'Complete payment here:',
+        }],
+        reply_to: {
+          message_id: 'incoming-123',
+        },
+      },
+    },
+    {
+      message: {
+        idempotency_key: 'payment-message-123:link',
+        parts: [{
+          type: 'link',
+          value: 'https://pay.example.test/checkout/session_123',
+        }],
+      },
+    },
+  ])
+})
+
+test('linq runtime sends a link-only payment URL without adding text', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let body: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    body = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {
+        id: 'message-link',
+      },
+    })
+  })
+
+  const result = await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      idempotencyKey: 'payment-message-123',
+      message: 'https://pay.example.test/checkout/session_123',
+      nativeReplyRequested: true,
+      replyToMessageId: 'incoming-123',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.equal(result.message.id, 'message-link')
+  assert.deepEqual(body, {
+    message: {
+      idempotency_key: 'payment-message-123',
+      parts: [{
+        type: 'link',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+      reply_to: {
+        message_id: 'incoming-123',
+      },
+    },
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const requests: Array<{ body: Record<string, unknown>; url: string }> = []
+  const fetchImplementation = vi.fn(async (url: string, init: RequestInit) => {
+    requests.push({
+      body: parseJsonRequestBody(requireStringRequestBody(init.body)),
+      url,
+    })
+    if (url.endsWith('/chats')) {
+      return createJsonResponse({
+        chat: {
+          id: 'chat-created',
+          message: { id: 'message-text' },
+        },
+      })
+    }
+    return createJsonResponse({
+      chat_id: 'chat-created',
+      id: 'message-link',
+    })
+  })
+
+  await assert.doesNotReject(() => createLinqChat(
+    {
+      from: '+15550000000',
+      idempotencyKey: 'create-123',
+      message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+      to: ['+15550000001'],
+    },
+    { env, fetchImplementation },
+  ))
+
+  assert.deepEqual(requests, [
+    {
+      body: {
+        from: '+15550000000',
+        message: {
+          idempotency_key: 'create-123',
+          parts: [{
+            type: 'text',
+            value: 'Your secure payment link:',
+          }],
+        },
+        to: ['+15550000001'],
+      },
+      url: 'https://linq.example.test/chats',
+    },
+    {
+      body: {
+        message: {
+          idempotency_key: 'create-123:link',
+          parts: [{
+            type: 'link',
+            value: 'https://pay.example.test/checkout/session_123',
+          }],
+        },
+      },
+      url: 'https://linq.example.test/chats/chat-created/messages',
+    },
+  ])
+})
+
+test('linq runtime never fabricates text for a link-only new chat', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        message: 'https://pay.example.test/checkout/session_123',
+        to: ['+15550000001'],
+      },
+      { fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_INVALID_INPUT'
+      && error.message.includes('caller-supplied text or media'),
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test('linq runtime omits the text part for media-only messages and rejects empty text-only sends', async () => {

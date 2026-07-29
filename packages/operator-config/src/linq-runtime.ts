@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 
+import { splitTrailingHttpsLink } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -41,6 +42,7 @@ import {
 import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
 import {
   renderMarkdownMessageText,
+  sanitizeUserFacingMessageLinks,
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
@@ -353,6 +355,63 @@ export async function sendLinqChatMessage(
     signal?: AbortSignal
   } = {},
 ): Promise<MessageSendResponse> {
+  const split = splitTrailingHttpsLink(
+    sanitizeUserFacingMessageLinks(input.message),
+  )
+  if (!split.linkUrl) {
+    return sendLinqChatMessageParts(input, dependencies)
+  }
+
+  const hasPrimaryMessage =
+    split.message.trim().length > 0 || (input.media?.length ?? 0) > 0
+  if (!hasPrimaryMessage) {
+    return sendLinqChatRichLink(
+      {
+        chatId: input.chatId,
+        idempotencyKey: input.idempotencyKey,
+        linkUrl: split.linkUrl,
+        ...(input.nativeReplyRequested === true
+          ? { nativeReplyRequested: true as const }
+          : {}),
+        replyToMessageId: input.replyToMessageId,
+      },
+      dependencies,
+    )
+  }
+
+  const primaryResponse = await sendLinqChatMessageParts(
+    {
+      ...input,
+      message: split.message,
+    },
+    dependencies,
+  )
+  await sendLinqChatRichLink(
+    {
+      chatId: input.chatId,
+      idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
+    },
+    dependencies,
+  )
+  return primaryResponse
+}
+
+async function sendLinqChatMessageParts(
+  input: {
+    chatId: string
+    idempotencyKey?: string | null
+    media?: readonly LinqMessageMediaInput[] | null
+    message: string
+    nativeReplyRequested?: true
+    replyToMessageId?: string | null
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  },
+): Promise<MessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const message = normalizeNullableString(input.message) ?? ''
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -365,19 +424,72 @@ export async function sendLinqChatMessage(
     replyToMessageId,
   })
 
+  return sendLinqChatMessageBody({
+    body,
+    chatId,
+    idempotencyKey,
+    replyToMessageId:
+      input.nativeReplyRequested === true ? replyToMessageId : null,
+  }, dependencies)
+}
+
+async function sendLinqChatRichLink(
+  input: {
+    chatId: string
+    idempotencyKey?: string | null
+    linkUrl: string
+    nativeReplyRequested?: true
+    replyToMessageId?: string | null
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  },
+): Promise<MessageSendResponse> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const replyToMessageId = input.nativeReplyRequested === true
+    ? normalizeRequiredString(input.replyToMessageId, 'native reply target message id')
+    : null
+
+  return sendLinqChatMessageBody({
+    body: buildLinqRichLinkMessageBody({
+      idempotencyKey,
+      linkUrl: input.linkUrl,
+      replyToMessageId,
+    }),
+    chatId,
+    idempotencyKey,
+    replyToMessageId,
+  }, dependencies)
+}
+
+async function sendLinqChatMessageBody(
+  input: {
+    body: MessageSendParams
+    chatId: string
+    idempotencyKey: string | null
+    replyToMessageId: string | null
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  },
+): Promise<MessageSendResponse> {
   return requestLinqJson<MessageSendResponse>({
     details: {
-      hasIdempotencyKey: idempotencyKey !== null,
-      hasReplyToMessageId:
-        input.nativeReplyRequested === true && replyToMessageId !== null,
+      hasIdempotencyKey: input.idempotencyKey !== null,
+      hasReplyToMessageId: input.replyToMessageId !== null,
       operation: 'send_message',
       provider: 'linq',
     },
     env: dependencies.env ?? process.env,
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    body,
+    path: `/chats/${encodeURIComponent(input.chatId)}/messages`,
+    body: input.body,
     signal: dependencies.signal,
   })
 }
@@ -748,6 +860,53 @@ export async function createLinqChat(
     signal?: AbortSignal
   } = {},
 ): Promise<CreateLinqChatResult> {
+  const split = splitTrailingHttpsLink(
+    sanitizeUserFacingMessageLinks(input.message),
+  )
+  if (!split.linkUrl) {
+    return createLinqChatWithPrimaryMessage(input, dependencies)
+  }
+
+  if (split.message.trim().length === 0 && (input.media?.length ?? 0) === 0) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'A new Linq chat with a rich link must include caller-supplied text or media.',
+    )
+  }
+
+  const result = await createLinqChatWithPrimaryMessage(
+    {
+      ...input,
+      message: split.message,
+    },
+    dependencies,
+  )
+  const chatId = requireLinqCreatedChatIdForRichLink(result)
+  await sendLinqChatRichLink(
+    {
+      chatId,
+      idempotencyKey: buildLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
+    },
+    dependencies,
+  )
+  return result
+}
+
+async function createLinqChatWithPrimaryMessage(
+  input: {
+    from: string
+    idempotencyKey?: string | null
+    media?: readonly LinqMessageMediaInput[] | null
+    message: string
+    to: readonly string[]
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  },
+): Promise<CreateLinqChatResult> {
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -779,6 +938,26 @@ export async function createLinqChat(
     chatId: normalizeNullableString(response.chat?.id ?? null),
     messageId: normalizeNullableString(response.chat?.message?.id ?? null),
   }
+}
+
+function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): string {
+  const chatId = normalizeNullableString(result.chatId)
+  if (chatId) {
+    return chatId
+  }
+
+  throw new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    'Linq chat create response was missing a chat id for the rich-link follow-up.',
+    {
+      failureStage: 'http',
+      method: 'POST',
+      operation: 'create_chat',
+      path: '/chats',
+      provider: 'linq',
+      retryable: true,
+    },
+  )
 }
 
 export async function createLinqWebhookSubscription(
@@ -1565,6 +1744,40 @@ function normalizeRequiredString(value: string | null | undefined, label: string
   }
 
   return normalized
+}
+
+function buildLinqRichLinkMessageBody(input: {
+  idempotencyKey?: string | null
+  linkUrl: string
+  replyToMessageId?: string | null
+}): MessageSendParams {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  return {
+    message: {
+      parts: [{
+        type: 'link',
+        value: normalizeRequiredString(input.linkUrl, 'rich link url'),
+      }],
+      ...(idempotencyKey
+        ? {
+            idempotency_key: idempotencyKey,
+          }
+        : {}),
+      ...(replyToMessageId
+        ? {
+            reply_to: {
+              message_id: replyToMessageId,
+            },
+          }
+        : {}),
+    },
+  }
+}
+
+function buildLinqRichLinkIdempotencyKey(value: string | null | undefined): string | null {
+  const idempotencyKey = normalizeNullableString(value)
+  return idempotencyKey ? `${idempotencyKey}:link` : null
 }
 
 function buildLinqMessageBody(input: {

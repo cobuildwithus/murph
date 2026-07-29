@@ -20,6 +20,7 @@ import {
   updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
   shareHostedLinqContactCard,
@@ -395,6 +396,93 @@ describe("getHostedLinqReactionTargetMessage", () => {
   });
 });
 
+describe("createHostedLinqChat", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("uses caller-supplied text before a rich-link follow-up", async () => {
+    const requests: Array<{ body: unknown; url: RequestInfo | URL }> = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ body: readJsonRequestBody(init), url });
+      if (requests.length === 1) {
+        return createJsonResponse({
+          chat: {
+            id: "chat_created",
+            message: { id: "msg_text" },
+          },
+        }, 200);
+      }
+      return createJsonResponse({
+        chat_id: "chat_created",
+        message: { id: "msg_link" },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqChat({
+      from: "+15550000000",
+      idempotencyKey: "create-123",
+      message: "Your secure payment link:\nhttps://pay.example.test/checkout/session_123",
+      to: ["+15550000001"],
+    })).resolves.toEqual({
+      chatId: "chat_created",
+      messageId: "msg_text",
+    });
+
+    expect(requests).toEqual([
+      {
+        body: {
+          from: "+15550000000",
+          message: {
+            idempotency_key: "create-123",
+            parts: [{
+              type: "text",
+              value: "Your secure payment link:",
+            }],
+          },
+          to: ["+15550000001"],
+        },
+        url: new URL("chats", "https://linq.example.test/api/partner/v3/"),
+      },
+      {
+        body: {
+          message: {
+            idempotency_key: "create-123:link",
+            parts: [{
+              type: "link",
+              value: "https://pay.example.test/checkout/session_123",
+            }],
+          },
+        },
+        url: new URL(
+          "chats/chat_created/messages",
+          "https://linq.example.test/api/partner/v3/",
+        ),
+      },
+    ]);
+  });
+
+  it("never fabricates text for a link-only new chat", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqChat({
+      from: "+15550000000",
+      message: "https://pay.example.test/checkout/session_123",
+      to: ["+15550000001"],
+    })).rejects.toThrow(
+      "A new Linq chat with a rich link must include caller-supplied text.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("sendHostedLinqChatMessage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -556,6 +644,201 @@ describe("sendHostedLinqChatMessage", () => {
             value: "hello",
           },
         ],
+      },
+    });
+  });
+
+  it("sends a terminal payment URL after its caller-supplied text", async () => {
+    const requestBodies: unknown[] = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(readJsonRequestBody(init));
+      requestCount += 1;
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: {
+          id: requestCount === 1 ? "msg_text" : "msg_link",
+        },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+      replyToMessageId: "msg_parent_123",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_text",
+    });
+
+    expect(requestBodies).toEqual([
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123",
+          parts: [{
+            type: "text",
+            value: "Complete payment here:",
+          }],
+        },
+      },
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      },
+    ]);
+  });
+
+  it("replays both stable message identities when the rich-link follow-up is retried", async () => {
+    const requestBodies: unknown[] = [];
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(readJsonRequestBody(init));
+      requestCount += 1;
+      if (requestCount === 2) {
+        return createJsonResponse({}, 503);
+      }
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: {
+          id: requestCount === 4 ? "msg_link" : "msg_text",
+        },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const input = {
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+    };
+    await expect(sendHostedLinqChatMessage(input)).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: true,
+    });
+    await expect(sendHostedLinqChatMessage(input)).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_text",
+    });
+
+    expect(requestBodies.map((body) =>
+      (body as { message: { idempotency_key: string } }).message.idempotency_key
+    )).toEqual([
+      "payment-message:evt_123",
+      "payment-message:evt_123:link",
+      "payment-message:evt_123",
+      "payment-message:evt_123:link",
+    ]);
+  });
+
+  it("bounds each half of a two-request rich-link send to five seconds", async () => {
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return createJsonResponse({
+          chat_id: "chat_123",
+          message: { id: "msg_text" },
+        }, 200);
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = readRequestSignal(init);
+        signal?.addEventListener(
+          "abort",
+          () => reject(signal.reason ?? new Error("aborted")),
+          { once: true },
+        );
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message: "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+    });
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq outbound reply timed out.",
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expectation;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a link-only payment URL without adding text", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: { id: "msg_link" },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message: "https://pay.example.test/checkout/session_123",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_link",
+    });
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    expect(readJsonRequestBody(firstCall?.[1])).toEqual({
+      message: {
+        idempotency_key: "payment-message:evt_123",
+        parts: [{
+          type: "link",
+          value: "https://pay.example.test/checkout/session_123",
+        }],
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a reaction-bound group offer in one text message", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: { id: "msg_offer" },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const message =
+      "Like or heart this message if these default sharing choices look right: your Murph profile name. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.";
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "group-join-offer:123",
+      message,
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_offer",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readJsonRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual({
+      message: {
+        idempotency_key: "group-join-offer:123",
+        parts: [{
+          type: "text",
+          value: message,
+        }],
       },
     });
   });

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { splitTrailingHttpsLink } from "@murphai/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -14,13 +15,21 @@ import type {
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
 
-import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
+import {
+  fetchLinqApi,
+  fetchLinqApiJson,
+  LINQ_API_DEFAULT_TIMEOUT_MS,
+  LinqApiTimeoutError,
+} from "../linq/api";
 import {
   readHostedExecutionControlOrigin,
 } from "../hosted-execution/environment";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
+
+const HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS =
+  Math.floor(LINQ_API_DEFAULT_TIMEOUT_MS / 2);
 
 export type HostedLinqSendResult = {
   chatId: string | null;
@@ -32,6 +41,50 @@ export async function createHostedLinqChat(input: {
   idempotencyKey?: string | null;
   message: string;
   signal?: AbortSignal;
+  to: string[];
+}): Promise<HostedLinqSendResult> {
+  const split = splitTrailingHttpsLink(input.message);
+  if (!split.linkUrl) {
+    return createHostedLinqChatWithPrimaryMessage(input);
+  }
+  if (!split.message.trim()) {
+    throw new TypeError(
+      "A new Linq chat with a rich link must include caller-supplied text.",
+    );
+  }
+
+  const result = await createHostedLinqChatWithPrimaryMessage({
+    ...input,
+    message: split.message,
+    timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
+  });
+  if (!result.chatId) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq chat create response was missing a chat id for the rich-link follow-up.",
+      httpStatus: 502,
+      retryable: true,
+    });
+  }
+
+  await sendHostedLinqMessageBody({
+    body: buildHostedLinqRichLinkMessageBody({
+      idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
+    }),
+    chatId: result.chatId,
+    signal: input.signal,
+    timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
+  });
+  return result;
+}
+
+async function createHostedLinqChatWithPrimaryMessage(input: {
+  from: string;
+  idempotencyKey?: string | null;
+  message: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
   to: string[];
 }): Promise<HostedLinqSendResult> {
   const messageBody = buildHostedLinqTextMessageBody({
@@ -50,6 +103,7 @@ export async function createHostedLinqChat(input: {
     path: "chats",
     signal: input.signal,
     timeoutMessage: "Linq chat create timed out.",
+    timeoutMs: input.timeoutMs,
   });
 
   if (!response.ok) {
@@ -77,18 +131,73 @@ export async function sendHostedLinqChatMessage(input: {
   replyToMessageId?: string | null;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
-  const replyToMessageId = normalizeNullableString(input.replyToMessageId);
+  const split = splitTrailingHttpsLink(input.message);
+  if (!split.linkUrl) {
+    return sendHostedLinqTextMessage(input);
+  }
 
-  const response = await fetchHostedLinqJsonApiOrThrow({
-    body: JSON.stringify(buildHostedLinqTextMessageBody({
+  if (!split.message.trim()) {
+    return sendHostedLinqMessageBody({
+      body: buildHostedLinqRichLinkMessageBody({
+        idempotencyKey: input.idempotencyKey,
+        linkUrl: split.linkUrl,
+      }),
+      chatId: input.chatId,
+      signal: input.signal,
+    });
+  }
+
+  const primaryResult = await sendHostedLinqTextMessage({
+    ...input,
+    message: split.message,
+    timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
+  });
+  await sendHostedLinqMessageBody({
+    body: buildHostedLinqRichLinkMessageBody({
+      idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(input.idempotencyKey),
+      linkUrl: split.linkUrl,
+    }),
+    chatId: input.chatId,
+    signal: input.signal,
+    timeoutMs: HOSTED_LINQ_MULTI_REQUEST_TIMEOUT_MS,
+  });
+  return primaryResult;
+}
+
+async function sendHostedLinqTextMessage(input: {
+  chatId: string;
+  idempotencyKey?: string | null;
+  message: string;
+  replyToMessageId?: string | null;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<HostedLinqSendResult> {
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId);
+  return sendHostedLinqMessageBody({
+    body: buildHostedLinqTextMessageBody({
       idempotencyKey: input.idempotencyKey,
       message: input.message,
       replyToMessageId,
-    })),
+    }),
+    chatId: input.chatId,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
+}
+
+async function sendHostedLinqMessageBody(input: {
+  body: MessageSendParams;
+  chatId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<HostedLinqSendResult> {
+  const response = await fetchHostedLinqJsonApiOrThrow({
+    body: JSON.stringify(input.body),
     method: "POST",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`,
     signal: input.signal,
     timeoutMessage: "Linq outbound reply timed out.",
+    timeoutMs: input.timeoutMs,
   });
 
   if (!response.ok) {
@@ -711,6 +820,33 @@ function normalizeRequiredStringList(values: readonly string[], label: string): 
 
 function isRetryableHostedLinqStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+function buildHostedLinqRichLinkMessageBody(input: {
+  idempotencyKey?: string | null;
+  linkUrl: string;
+}): MessageSendParams {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey);
+  return {
+    message: {
+      parts: [{
+        type: "link",
+        value: normalizeRequiredString(input.linkUrl, "rich link url"),
+      }],
+      ...(idempotencyKey
+        ? {
+            idempotency_key: idempotencyKey,
+          }
+        : {}),
+    },
+  };
+}
+
+function buildHostedLinqRichLinkIdempotencyKey(
+  value: string | null | undefined,
+): string | null {
+  const idempotencyKey = normalizeNullableString(value);
+  return idempotencyKey ? `${idempotencyKey}:link` : null;
 }
 
 function buildHostedLinqTextMessageBody(input: {
