@@ -55,13 +55,12 @@ The new-person mission deliberately reuses normal Murph onboarding instead of
 creating a referral-specific claim or activation system. After arming, Murph
 tells the referrer only to bring one new person and Murph together in a fresh
 group. The ordinary first-reply group setup flow owns the reciprocal onboarding:
-Murph asks whether the newcomer wants a personal Murph, shares the recognizable
-first-party website handoff only after that person accepts, and asks them to
-return after setup. The person completes the ordinary activation flow with the
-same provider identity observed in the target, returns to the group, and says
-hi. The combination of post-arm activation and target presence provides
-attribution; the browser never chooses the referrer, destination, target,
-policy, or reward.
+Murph shares its contact card once and naturally invites the newcomer to save
+and text it. Setup happens in the newcomer's 1:1 thread after they initiate it.
+The person completes the ordinary activation flow with the same provider
+identity observed in the target, returns to the group, and says hi. The
+combination of post-arm activation and target presence provides attribution;
+the browser never chooses the referrer, destination, target, policy, or reward.
 
 ## State and attribution
 

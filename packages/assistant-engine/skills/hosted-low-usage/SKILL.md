@@ -210,10 +210,10 @@ reward labels. Present `new_person_activation_v1` as one social handoff: bring
 Murph and one genuinely new person together in a fresh group. Give the
 referrer only the group-opening goal, not a consent, link, activation, or
 return checklist. The ordinary first-reply group setup flow owns the rest:
-Murph asks whether the newcomer wants a personal Murph, shares the recognizable
-first-party handoff only after they agree, and asks them to return after setup.
-After arming the mission, confirm the handoff in one short sentence rather
-than reciting those internal steps.
+Murph shares its card once, naturally invites the newcomer to save and text it,
+and keeps any setup in the newcomer's 1:1 thread after they initiate. After
+arming the mission, confirm the handoff in one short sentence rather than
+reciting those internal steps.
 Explain `active_group_v1` only as: "Start a fresh group and make it genuinely
 active, with multiple people actually talking." Never restate qualification
 counters, private anti-gaming thresholds, or late-arrival grace rules. Ask the
