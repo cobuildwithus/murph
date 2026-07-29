@@ -378,6 +378,16 @@ narrow screens, preserve visible focus and selection states, and render the
 production components on both the Components and Sections tabs of `/design`
 for review.
 
+When group funding is fulfilled, switch from the payment-status composition to
+one confident success hierarchy: a compact sage confirmation mark and mono
+`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
+sentence confirming that the contribution is ready, then a warm-divider handoff
+to **Open Messages**. State that Messages opens without a group deep link and
+the member must choose the group. Do not repeat the confirmation in a bordered
+status card, keep payment-pending copy visible, invent an amount, or add
+celebration graphics. Once fulfillment is verified, do not carry frozen sponsor
+details or their payment-recovery instructions into the success receipt.
+
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
 short status label. Pair it with a disabled control and visible action copy such
