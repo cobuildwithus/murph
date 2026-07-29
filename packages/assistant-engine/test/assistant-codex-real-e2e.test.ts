@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -132,6 +132,13 @@ interface ResumeCacheProbeSummary {
     usageCount: number
   }
 }
+
+const EXPERIMENT_START_EXACT_KEY =
+  'protocol_variant:dry-sauna/bryan-johnson-blueprint'
+const EXPERIMENT_START_STARTER_KEY =
+  'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
+const EXPERIMENT_START_PAGE_REVISION = `sha256:${'1'.repeat(64)}`
+const EXPERIMENT_START_RUN_SPEC_REVISION = `sha256:${'2'.repeat(64)}`
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
@@ -422,6 +429,96 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ...config.temporaryPaths,
         ])
       }
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex experiment onboarding e2e', () => {
+  it(
+    'resolves a name-first experiment start without replacing the exact match with its starter',
+    async () => {
+      const result = await runNameFirstExperimentStartProbe({
+        dryRunRevisionMismatch: false,
+      })
+      const startCommands = result.actions.filter((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment start')
+      )
+
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('experiment-onboarding/SKILL.md')
+          && action.output.includes('# Experiment onboarding')
+        ),
+        'experiment-onboarding skill read',
+      ).toBe(true)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli commons protocol show')
+          && action.command.includes(EXPERIMENT_START_EXACT_KEY)
+        ),
+        'exact named protocol show',
+      ).toBe(true)
+      expect(startCommands).toHaveLength(2)
+      expect(
+        startCommands.filter((action) =>
+          action.kind === 'command' && action.command.includes('--dry-run')
+        ),
+      ).toHaveLength(1)
+      for (const action of startCommands) {
+        if (action.kind !== 'command') {
+          continue
+        }
+        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
+        expect(normalizedCommand).toContain(
+          `--from-protocol ${EXPERIMENT_START_EXACT_KEY}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
+        )
+        expect(normalizedCommand).not.toContain(EXPERIMENT_START_STARTER_KEY)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'stops after a name-first revision mismatch instead of retrying unpinned',
+    async () => {
+      const result = await runNameFirstExperimentStartProbe({
+        dryRunRevisionMismatch: true,
+      })
+      const startCommands = result.actions.filter((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment start')
+      )
+
+      expect(startCommands.length).toBeGreaterThan(0)
+      expect(
+        startCommands.some((action) =>
+          action.kind === 'command' && !action.command.includes('--dry-run')
+        ),
+        'no real start after revision mismatch',
+      ).toBe(false)
+      for (const action of startCommands) {
+        if (action.kind !== 'command') {
+          continue
+        }
+        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
+        expect(normalizedCommand).toContain(
+          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
+        )
+      }
+      expect(result.finalMessage).toMatch(/changed|revision|updated/iu)
     },
     360_000,
   )
@@ -1285,6 +1382,172 @@ async function materializeAssistantSkill(input: {
   )
 }
 
+async function runNameFirstExperimentStartProbe(input: {
+  dryRunRevisionMismatch: boolean
+}): Promise<{
+  actions: CapabilityRoutingAction[]
+  finalMessage: string
+}> {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-name-first-experiment-e2e-'),
+  )
+
+  try {
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'experiment-onboarding',
+    })
+    await materializeExperimentStartVaultCli({
+      binDirectory,
+      dryRunRevisionMismatch: input.dryRunRevisionMismatch,
+    })
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions:
+        buildExperimentOnboardingDeveloperInstructions(),
+      env: {
+        ...config.env,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt: [
+        'I want to start the Bryan Johnson Sauna experiment.',
+        'Use its default one-day test plan starting tomorrow.',
+        'There are no active experiments or saved-context changes, its safety screen has no questions, and I decline reminders or other support.',
+        input.dryRunRevisionMismatch
+          ? 'If the selected protocol changed during validation, stop and tell me; do not retry or start a different revision.'
+          : 'Create the run now after the required dry run.',
+      ].join(' '),
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    return {
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      finalMessage: result.finalMessage,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+async function materializeExperimentStartVaultCli(input: {
+  binDirectory: string
+  dryRunRevisionMismatch: boolean
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const exploreResult = JSON.stringify({
+    groups: [{
+      matchedProtocol: {
+        key: EXPERIMENT_START_EXACT_KEY,
+        title: 'Bryan Johnson Sauna',
+      },
+      starterCandidate: {
+        protocol: {
+          key: EXPERIMENT_START_STARTER_KEY,
+          title: 'Finnish Dry Sauna',
+        },
+      },
+    }],
+    matchedEntity: {
+      entityType: 'protocol_variant',
+      key: EXPERIMENT_START_EXACT_KEY,
+      revision: {
+        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
+        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
+      },
+      title: 'Bryan Johnson Sauna',
+    },
+    starterCandidate: {
+      protocol: {
+        key: EXPERIMENT_START_STARTER_KEY,
+        title: 'Finnish Dry Sauna',
+      },
+    },
+  })
+  const showResult = JSON.stringify({
+    protocol: {
+      experimentOnboarding: {
+        safetyScreen: {
+          mustAsk: [],
+        },
+        setupSlots: [],
+      },
+      key: EXPERIMENT_START_EXACT_KEY,
+      protocol: {
+        sessionFieldIds: [],
+      },
+      revision: {
+        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
+        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
+      },
+      routeId: 'bryan-johnson-sauna',
+      safety: {
+        stopIf: [],
+      },
+      testPlans: [{
+        baselineDays: 0,
+        id: 'default',
+        interventionDays: 1,
+        primaryBiomarkerKey: 'biomarker:heat-exposure',
+      }],
+      title: 'Bryan Johnson Sauna',
+    },
+  })
+  const dryRunResult = input.dryRunRevisionMismatch
+    ? '{"error":{"code":"protocol_revision_mismatch","message":"The selected protocol changed."}}'
+    : '{"dryRun":true,"ok":true}'
+  const dryRunExit = input.dryRunRevisionMismatch ? 'exit 1' : 'exit 0'
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'command_line="$*"',
+      'case "$command_line" in',
+      '  *"commons protocol explore"*|*"commons protocol list"*)',
+      `    printf '%s\\n' '${exploreResult}'`,
+      '    ;;',
+      '  *"commons protocol show"*)',
+      `    printf '%s\\n' '${showResult}'`,
+      '    ;;',
+      '  *"experiment start"*"--dry-run"*)',
+      `    printf '%s\\n' '${dryRunResult}'`,
+      `    ${dryRunExit}`,
+      '    ;;',
+      '  *"experiment start"*)',
+      '    printf \'%s\\n\' \'{"experiment":{"id":"experiment-bryan"},"ok":true}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 function buildGroupPointOfViewDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -1300,6 +1563,28 @@ function buildGroupPointOfViewDeveloperInstructions(): string {
     conversationScope: 'group',
     currentLocalDate: '2026-07-27',
     currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildExperimentOnboardingDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
