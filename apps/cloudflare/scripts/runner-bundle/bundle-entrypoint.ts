@@ -57,11 +57,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
-// The private-media and current hosted-alert integration measured 9,761,860B
-// total and an 8,009,225B static closure on 2026-07-28. The combined graph added
-// no forbidden boot input; production assembly below still fails closed if any
-// dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_761_860 + 32_768;
+// The pending-group setup transfer measured 9,798,049B in exact-head Linux CI
+// and 9,833,515B in a fresh macOS assembly on 2026-07-29. The intended growth is
+// concentrated in the extended hosted-execution parser, assistant activation,
+// and deferred group-tool surfaces; neither assembly reported a new forbidden
+// boot input. Use the higher observed clean measurement plus the established
+// 32KiB allowance while the entry and static-closure ratchets below continue to
+// guard eager graph growth independently.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_833_515 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
