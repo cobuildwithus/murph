@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  claimHostedPendingGroupSetupForParticipantsTx,
   selectHostedPendingGroupSetupCandidate,
   type HostedPendingGroupSetupCandidate,
 } from "@/src/lib/hosted-groups/pending-group-setup";
@@ -13,6 +14,21 @@ function candidate(
 }
 
 describe("selectHostedPendingGroupSetupCandidate", () => {
+  it("refuses to select from an oversized partial roster at the claim boundary", async () => {
+    await expect(claimHostedPendingGroupSetupForParticipantsTx({
+      participantMemberIds: Array.from(
+        { length: 33 },
+        (_, index) => `member_${index}`,
+      ),
+      recipientPhoneLookupKeys: ["line_lookup_key"],
+      senderMemberId: "member_0",
+      tx: {} as never,
+    })).resolves.toEqual({
+      kind: "none",
+      reason: "no_candidates",
+    });
+  });
+
   it("selects the only roster-matched pending setup even when someone else speaks first", () => {
     expect(selectHostedPendingGroupSetupCandidate({
       candidates: [candidate("parent")],

@@ -252,11 +252,16 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   senderMemberId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupClaimResult> {
-  const participantMemberIds = normalizeBoundedMemberIds(input.participantMemberIds);
+  const participantMemberIds = normalizeLookupKeys(input.participantMemberIds);
   const recipientPhoneLookupKeys = normalizeLookupKeys(
     input.recipientPhoneLookupKeys,
   );
-  if (participantMemberIds.length === 0 || recipientPhoneLookupKeys.length === 0) {
+  if (
+    participantMemberIds.length === 0
+    || participantMemberIds.length
+      > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
+    || recipientPhoneLookupKeys.length === 0
+  ) {
     return { kind: "none", reason: "no_candidates" };
   }
   const now = requireValidDate(input.now ?? new Date(), "pending group setup claim time");
@@ -402,13 +407,6 @@ function projectHostedPendingGroupSetupSnapshot(
     ownerMemberId: row.ownerMemberId,
     recipientPhoneLookupKey: row.recipientPhoneLookupKey,
   };
-}
-
-function normalizeBoundedMemberIds(values: readonly string[]): string[] {
-  return normalizeLookupKeys(values).slice(
-    0,
-    HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
-  );
 }
 
 function normalizeLookupKeys(values: readonly string[]): string[] {
