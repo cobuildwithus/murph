@@ -12,6 +12,8 @@ const DATABASE_HEALTH_SCHEMA_VERSION = 1;
 export interface DatabaseHealthAlertState {
   alertSequence: number;
   consecutiveScrapeFailures: number;
+  deferredDirectErrorCheckedAtMs: number | null;
+  deferredDirectErrorCount: number;
   incidentOpen: boolean;
   incidentSequence: number;
   lastAlertAttemptedAtMs: number | null;
@@ -36,6 +38,8 @@ export interface DatabaseHealthStoredSample {
 interface DatabaseHealthMetaRow extends Record<string, DurableObjectSqlValue> {
   alert_sequence: number;
   consecutive_scrape_failures: number;
+  deferred_direct_error_checked_at_ms: number | null;
+  deferred_direct_error_count: number;
   incident_open: number;
   incident_sequence: number;
   last_alert_attempted_at_ms: number | null;
@@ -94,6 +98,9 @@ export class DatabaseHealthStore {
     return {
       alertSequence: row.alert_sequence,
       consecutiveScrapeFailures: row.consecutive_scrape_failures,
+      deferredDirectErrorCheckedAtMs:
+        row.deferred_direct_error_checked_at_ms,
+      deferredDirectErrorCount: row.deferred_direct_error_count,
       incidentOpen: row.incident_open === 1,
       incidentSequence: row.incident_sequence,
       lastAlertAttemptedAtMs: row.last_alert_attempted_at_ms,
@@ -146,10 +153,29 @@ export class DatabaseHealthStore {
        SET
          alert_sequence = alert_sequence + 1,
          pending_alert_idempotency_key = ?,
-         pending_alert_message = ?
+         pending_alert_message = ?,
+         deferred_direct_error_count = 0,
+         deferred_direct_error_checked_at_ms = NULL
        WHERE singleton = 1`,
       input.idempotencyKey,
       input.message,
+    );
+    return this.readAlertState();
+  }
+
+  deferDirectConnectionErrors(input: {
+    checkedAtMs: number;
+    count: number;
+  }): DatabaseHealthAlertState {
+    this.sql.exec(
+      `UPDATE database_health_meta
+       SET
+         deferred_direct_error_count =
+           deferred_direct_error_count + ?,
+         deferred_direct_error_checked_at_ms = ?
+       WHERE singleton = 1`,
+      input.count,
+      input.checkedAtMs,
     );
     return this.readAlertState();
   }
@@ -329,6 +355,8 @@ export class DatabaseHealthStore {
          incident_open,
          incident_sequence,
          alert_sequence,
+         deferred_direct_error_count,
+         deferred_direct_error_checked_at_ms,
          last_alert_attempted_at_ms,
          pending_alert_idempotency_key,
          pending_alert_message
@@ -353,6 +381,8 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       incident_open INTEGER NOT NULL DEFAULT 0 CHECK (incident_open IN (0, 1)),
       incident_sequence INTEGER NOT NULL DEFAULT 0,
       alert_sequence INTEGER NOT NULL DEFAULT 0,
+      deferred_direct_error_count INTEGER NOT NULL DEFAULT 0,
+      deferred_direct_error_checked_at_ms INTEGER,
       last_alert_attempted_at_ms INTEGER,
       pending_alert_idempotency_key TEXT,
       pending_alert_message TEXT,

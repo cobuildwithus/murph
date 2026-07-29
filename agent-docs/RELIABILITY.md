@@ -47,15 +47,23 @@ Last verified: 2026-07-27
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
+  If another immutable page already owns the single pending-message slot, the
+  same transaction advances the sample baseline and accumulates the later
+  direct-error count plus latest check time in the existing alert row instead
+  of dropping it. An acknowledged older page cannot close the incident while
+  that evidence remains. The next run with a free slot atomically promotes the
+  accumulated count into one direct-error page, which then follows the ordinary
+  attempt fence, health preflight, exact-body retry, and restart contract.
   When a direct error forces admission inside an acknowledged incident's
   closed attempt fence, that pending body contains only the non-replayable
   direct-error evidence; co-occurring replayable gauges remain in the persisted
   sample but cannot become stale pending claims. That exact direct-error page
   owns the next eligible attempt. A replayable condition still unsafe at that
-  boundary remains eligible for the following paced recurrence, so its
-  diagnostic text may follow up to one interval later while the operator has
-  already received a valid database page. This explicit prioritization keeps
-  admitted message bodies immutable without another mutable-message lifecycle.
+  boundary remains eligible for the following paced recurrence. The same
+  one-slot ordering applies in reverse: a later direct-error obligation waits
+  behind an older page but cannot be consumed by the counter baseline. This
+  explicit prioritization keeps admitted bodies immutable without another
+  message queue or delivery lifecycle.
   An acknowledged incident's replayable gauge or monitoring recurrence does
   not admit stale evidence while the attempt fence is closed; once the fence
   opens, a still-unsafe current sample admits the recurrence, while recovery

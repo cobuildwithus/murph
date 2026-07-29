@@ -751,6 +751,117 @@ describe("database health monitor", () => {
     expect(currentMessage).toContain("Checked 00:35 UTC");
   });
 
+  it("preserves a direct error behind an older health-suppressed gauge page", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => Response.json({
+          ...createLinqChatResponseBody(),
+          health_status: { status: "HEALTHY" },
+        }),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+        () => new Response(null, { status: 503 }),
+      ],
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy" });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 5,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 4),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCount: 2,
+    });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_failed" });
+    expect(harness.linqRequests).toHaveLength(1);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCount: 2,
+    });
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(
+        FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 2,
+      ),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCount: 2,
+      incidentOpen: true,
+      pendingAlertMessage: null,
+    });
+
+    await expect(
+      harness.runScheduledCheck(
+        FIVE_MINUTES_MS * 2 + THIRTY_MINUTES_MS * 2,
+      ),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCount: 0,
+      pendingAlertMessage: expect.stringContaining(
+        "2 direct migration connection errors",
+      ),
+    });
+
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(
+        FIVE_MINUTES_MS + THIRTY_MINUTES_MS * 3,
+      ),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.linqRequests).toHaveLength(3);
+    const olderGaugePage = await readLinqRequestBody(harness.linqRequests[1]);
+    const directErrorPage = await readLinqRequestBody(harness.linqRequests[2]);
+    expect(olderGaugePage.message.parts[0]?.value)
+      .toContain("PgBouncer wait 9s");
+    expect(directErrorPage.message.parts[0]?.value)
+      .toContain("2 direct migration connection errors");
+    expect(directErrorPage.message.parts[0]?.value)
+      .not.toContain("PgBouncer wait");
+    expect(
+      harness.monitor.readRecentSamples(10)
+        .filter((sample) => sample.directConnectionErrorDelta === 2),
+    ).toHaveLength(1);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      deferredDirectErrorCount: 0,
+      incidentOpen: false,
+      pendingAlertMessage: null,
+    });
+  });
+
   it("retains a direct-error page suppressed by Linq health after recovery", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

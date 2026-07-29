@@ -755,11 +755,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
-  from the current sample once the attempt fence opens. An older pending direct
-  obligation owns that boundary unchanged; any gauge still unsafe afterward
-  remains eligible for the following paced recurrence instead of introducing
-  mutable pending-message state. Acknowledged Linq entry is the only operation
-  that clears a pending page. SQLite contains no connection URL,
+  from the current sample once the attempt fence opens. Any direct-error delta
+  observed while the single immutable message slot is occupied accumulates as
+  count-plus-check-time evidence in the same alert row and transaction that
+  advances the persisted sample baseline. After the older message is
+  acknowledged, the next run atomically promotes that evidence into the one
+  pending message slot; provider pacing still applies, and retry never mutates
+  a provider-entered body. Acknowledged Linq entry is the only operation that
+  clears a pending page. SQLite contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.

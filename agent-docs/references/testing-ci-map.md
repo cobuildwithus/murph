@@ -286,7 +286,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   counter-baseline advancement, one-sample direct errors admitted inside the
   attempt fence and retained across clean samples, mixed inside-fence pages
   limited to direct-error evidence, full current mixed evidence when no older
-  pending obligation owns the open boundary, health-suppressed recovery,
+  pending obligation owns the open boundary, and later direct-error evidence
+  retained behind an older health-suppressed page across baseline advancement,
+  recovery, provider pacing, and monitor restarts,
   documented formatted/deprecated Linq inventory shapes with duplicate and
   mismatch rejection, zero message POSTs for unhealthy or indeterminate
   chat/line health, healthy auto-selected Linq delivery, discovery-only

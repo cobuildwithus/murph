@@ -237,16 +237,51 @@ export class DatabaseHealthMonitor {
       this.store.setConsecutiveScrapeFailures(sample.failures);
     }
 
-    if (sample.conditions.length > 0) {
-      let alertState = this.store.readAlertState();
+    let alertState = this.store.readAlertState();
+    const currentDirectError = sample.conditions.find(
+      (condition) =>
+        condition.kind === "direct_migration_admission_failures",
+    );
+    const hasExistingPendingAlert =
+      alertState.pendingAlertIdempotencyKey !== null
+      && alertState.pendingAlertMessage !== null;
+    if (currentDirectError && hasExistingPendingAlert) {
+      alertState = this.store.deferDirectConnectionErrors({
+        checkedAtMs: input.checkedAtMs,
+        count: currentDirectError.count,
+      });
+    }
+
+    const directErrorCountAvailableForAdmission =
+      hasExistingPendingAlert
+        ? 0
+        : (
+          alertState.deferredDirectErrorCount
+          + (currentDirectError?.count ?? 0)
+        );
+    if (
+      sample.conditions.length > 0
+      || directErrorCountAvailableForAdmission > 0
+    ) {
       const isNewIncident = !alertState.incidentOpen;
       if (isNewIncident) {
         alertState = this.store.openIncident();
       }
-      const hasDirectConnectionError = sample.conditions.some(
-        (condition) =>
-          condition.kind === "direct_migration_admission_failures",
-      );
+      const conditionsWithDeferredDirectErrors =
+        directErrorCountAvailableForAdmission > 0
+          ? [
+            ...sample.conditions.filter(
+              (condition) =>
+                condition.kind !== "direct_migration_admission_failures",
+            ),
+            {
+              count: directErrorCountAvailableForAdmission,
+              kind: "direct_migration_admission_failures" as const,
+            },
+          ]
+          : sample.conditions;
+      const hasDirectConnectionError =
+        directErrorCountAvailableForAdmission > 0;
       const attemptFenceOpen =
         alertState.lastAlertAttemptedAtMs === null
         || (
@@ -255,11 +290,19 @@ export class DatabaseHealthMonitor {
         );
       const admittedConditions =
         !isNewIncident && !attemptFenceOpen && hasDirectConnectionError
-          ? sample.conditions.filter(
+          ? conditionsWithDeferredDirectErrors.filter(
             (condition) =>
               condition.kind === "direct_migration_admission_failures",
           )
-          : sample.conditions;
+          : conditionsWithDeferredDirectErrors;
+      const admittedCheckedAtMs =
+        admittedConditions.length === 1
+        && admittedConditions[0]?.kind
+          === "direct_migration_admission_failures"
+        && currentDirectError === undefined
+        && alertState.deferredDirectErrorCheckedAtMs !== null
+          ? alertState.deferredDirectErrorCheckedAtMs
+          : input.checkedAtMs;
       if (
         (
           !alertState.pendingAlertIdempotencyKey
@@ -275,7 +318,7 @@ export class DatabaseHealthMonitor {
           }),
           message: buildDatabaseAlertMessage({
             alertSequence: nextAlertSequence,
-            checkedAtMs: input.checkedAtMs,
+            checkedAtMs: admittedCheckedAtMs,
             conditions: admittedConditions,
             incidentSequence: alertState.incidentSequence,
           }),
@@ -314,7 +357,11 @@ export class DatabaseHealthMonitor {
     const hasPendingAlert =
       alertState.pendingAlertIdempotencyKey !== null
       && alertState.pendingAlertMessage !== null;
-    if (input.conditions.length === 0 && !hasPendingAlert) {
+    if (
+      input.conditions.length === 0
+      && !hasPendingAlert
+      && alertState.deferredDirectErrorCount === 0
+    ) {
       if (
         input.sampleStatus === "ok"
         && alertState.incidentOpen
@@ -367,9 +414,11 @@ export class DatabaseHealthMonitor {
         message,
       });
       this.store.recordAlertSuccess();
+      const stateAfterSuccess = this.store.readAlertState();
       if (
         input.sampleStatus === "ok"
         && input.conditions.length === 0
+        && stateAfterSuccess.deferredDirectErrorCount === 0
       ) {
         this.store.closeIncident();
       }
