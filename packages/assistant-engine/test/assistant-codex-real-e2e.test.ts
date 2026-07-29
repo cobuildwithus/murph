@@ -211,6 +211,53 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'helps with schoolwork while keeping professional work outside group scope',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-schoolwork-scope-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: buildGroupSchoolworkScopeProbe(),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(result.finalMessage.trim()).toBe('1:A 2:A 3:B 4:B')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'discovers the deferred group tool from a natural group-status request',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1611,6 +1658,30 @@ function buildHostedGroupStatusDeveloperInstructions(): string {
     onboardingGuidance: false,
     turnTrigger: null,
   })
+}
+
+function buildGroupSchoolworkScopeProbe(): string {
+  return [
+    'This is a group-chat scope evaluation.',
+    'For each numbered request, choose A or B. Each candidate is the complete action Murph should take.',
+    'Reply exactly `1:<A-or-B> 2:<A-or-B> 3:<A-or-B> 4:<A-or-B>` with no explanation.',
+    '',
+    '1. A student asks Murph to choose the stronger issue in a law-school practice question and briefly explain the answer.',
+    'A: Answer the question directly.',
+    'B: Refuse because the subject resembles a professional legal exam.',
+    '',
+    '2. A student asks Murph to debug code for a programming assignment.',
+    'A: Help debug the educational code.',
+    'B: Refuse because every coding request is professional work.',
+    '',
+    '3. An engineer asks Murph to debug production checkout code for their employer.',
+    'A: Debug the production code.',
+    'B: Decline in one plain sentence because the primary purpose is professional work.',
+    '',
+    '4. A consultant asks Murph to write a client-ready vendor recommendation for a paid engagement.',
+    'A: Produce the client deliverable.',
+    'B: Decline in one plain sentence because the primary purpose is professional work.',
+  ].join('\n')
 }
 
 function buildGroupPointOfViewCandidateProbe(): string {

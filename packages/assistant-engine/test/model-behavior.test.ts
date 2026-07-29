@@ -352,22 +352,26 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('No child outlives the final reply')
   })
 
-  it('keeps unrelated professional errands outside Murph scope', () => {
+  it('allows schoolwork while keeping unrelated professional work outside Murph scope', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Scope boundary:')
     expect(prompt).toContain(
-      'Own personal health, vault records, experiments, routines, health-relevant research/logistics, and Murph setup.',
+      'Own health, records, experiments, routines, Murph setup, schoolwork, and health-relevant context.',
     )
     expect(prompt).toContain(
-      'Briefly decline unrelated work/school tasks, customer support, procurement, bulk operations, or non-health research',
+      'Answer assignments, essays, drafts, exams, and educational code directly, even in professional subjects; no hypothetical/practice framing or scope disclaimer.',
     )
     expect(prompt).toContain(
-      'tool availability does not expand scope',
+      'Decline professional work: production code, client deliverables, or operations',
     )
     expect(prompt).toContain(
-      'Work and life context is relevant when it affects health, schedule, stress, travel, or routines.',
+      'tools do not expand scope',
     )
+    expect(prompt).toContain(
+      'health-relevant context',
+    )
+    expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
@@ -1917,7 +1921,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd12bea1bda587aa3b5d76617a6b7facd88c4931945271c21f43b673fb585aeb1',
+      '3b65542a6bbff106dd1fe1268ecc7421273e44d9e921c34ec350f7e077966db7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2482,11 +2486,18 @@ describe('assistant conversation scope', () => {
       'Ordinary shared-life help is in scope: research public options, compare choices, plan travel or outings, build an itinerary, and coordinate or carry out group logistics with available group-safe tools.',
     )
     expect(prompt).toContain(
-      'A plan, comparison, or reservation for the room is not a work deliverable.',
+      'Schoolwork and study help are also in scope, including assignments, essays, exam questions, drafts, and educational code.',
     )
     expect(prompt).toContain(
-      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable, in one plain sentence without lecturing; tool availability does not expand scope.',
+      'Answer directly in the room\'s register without requiring "hypothetical" or "practice" framing or adding a school/professional-scope disclaimer, even when the subject is professional.',
     )
+    expect(prompt).toContain(
+      'A plan, comparison, reservation, school assignment, or study answer is not professional work.',
+    )
+    expect(prompt).toContain(
+      'Decline only requests whose primary purpose is actual professional work—such as production code, a client deliverable, or an operational work task—in one plain sentence without lecturing; tool availability does not expand scope.',
+    )
+    expect(prompt).not.toContain('work, school, or professional deliverable')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
@@ -2679,14 +2690,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Conversation scope: unverified external audience.')
     expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
     expect(prompt).toContain(
-      'Casual conversation, general knowledge, and ordinary personal or shared-life planning from public information are fine.',
+      'Casual conversation, general knowledge, schoolwork and study help, and ordinary personal or shared-life planning from public information are fine.',
     )
     expect(prompt).toContain(
-      'Classify the request by its purpose, not by whether it needs research or produces a plan: a comparison, itinerary, or other ordinary-life plan is not a work deliverable.',
+      'Schoolwork and study help include assignments, essays, exam questions, drafts, and educational code, even in professional subjects.',
     )
     expect(prompt).toContain(
-      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable; tool availability does not expand scope.',
+      'Answer them directly without requiring "hypothetical" or "practice" framing or adding a school/professional-scope disclaimer.',
     )
+    expect(prompt).toContain(
+      'Classify the request by its purpose, not by whether it needs research or produces a plan: a comparison, itinerary, school assignment, study answer, or other ordinary-life plan is not professional work.',
+    )
+    expect(prompt).toContain(
+      'Decline only requests whose primary purpose is actual professional work, such as production code, a client deliverable, or an operational work task; tool availability does not expand scope.',
+    )
+    expect(prompt).not.toContain('work, school, or professional deliverable')
     expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
     expect(prompt).not.toContain('Conversation scope: hosted group chat.')
     expect(prompt).not.toContain('PERSONAL_CLI_CONTRACT')
