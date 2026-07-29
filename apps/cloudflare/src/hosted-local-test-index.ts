@@ -8,6 +8,9 @@ export {
 export {
   HostedLocalTestUserRunnerDurableObject as UserRunnerDurableObject,
 } from "./worker/hosted-local-test-user-runner-durable-object.ts";
+export {
+  DatabaseHealthDurableObject,
+} from "./worker/database-health-durable-object.ts";
 
 import {
   handleHostedEmailIngress,
@@ -28,6 +31,9 @@ import {
 import {
   workerPublicRoutes,
 } from "./worker/public-routes.ts";
+import {
+  handleDatabaseHealthScheduled,
+} from "./worker/index.ts";
 
 export const handleHostedLocalTestWorkerFetch = createWorkerFetchHandler({
   internalRoutes: hostedLocalTestInternalRoutes,
@@ -52,5 +58,12 @@ export default {
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
     await handleHostedEmailIngress(message, env, ctx);
+  },
+  scheduled(
+    controller: ScheduledController,
+    env: WorkerEnvironmentSource,
+    ctx: WorkerExecutionContext,
+  ): void {
+    handleDatabaseHealthScheduled(controller, env, ctx);
   },
 };

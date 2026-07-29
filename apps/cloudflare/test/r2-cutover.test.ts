@@ -1,0 +1,173 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { R2BucketLike } from "../src/bundle-store.ts";
+import {
+  locateHostedR2ObjectBucketRole,
+  resolveHostedR2CutoverContext,
+} from "../src/r2-cutover.ts";
+
+const storedObject = { size: 1 } as never;
+type TestR2Object = typeof storedObject;
+
+function createBucket(input: {
+  get?: (key: string) => Promise<TestR2Object | null>;
+  head?: (key: string) => Promise<TestR2Object | null>;
+  name: string;
+  operations: string[];
+}): R2BucketLike {
+  return {
+    delete: async (key: string | string[]) => {
+      input.operations.push(`${input.name}:delete:${Array.isArray(key) ? key.join(",") : key}`);
+    },
+    get: input.get ?? (async (key) => {
+      input.operations.push(`${input.name}:get:${key}`);
+      return null;
+    }),
+    head: input.head ?? (async (key) => {
+      input.operations.push(`${input.name}:head:${key}`);
+      return null;
+    }),
+    list: async ({ prefix }: { prefix?: string }) => {
+      input.operations.push(`${input.name}:list:${prefix ?? ""}`);
+      return { objects: [], truncated: false };
+    },
+    put: async (key: string) => {
+      input.operations.push(`${input.name}:put:${key}`);
+    },
+  } as unknown as R2BucketLike;
+}
+
+describe("R2 OC to ENAM cutover bucket", () => {
+  it("keeps source_active reads, writes, and lists on OC while deleting OC then ENAM", async () => {
+    const operations: string[] = [];
+    const source = createBucket({
+      get: async (key) => {
+        operations.push(`source:get:${key}`);
+        return storedObject;
+      },
+      name: "source",
+      operations,
+    });
+    const destination = createBucket({ name: "destination", operations });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    });
+
+    expect(await context.bucket.get("one")).toBe(storedObject);
+    await context.bucket.put("two", new Uint8Array([2]));
+    await context.bucket.list?.({ prefix: "users/" });
+    await context.bucket.delete?.("three");
+
+    expect(operations).toEqual([
+      "source:get:one",
+      "source:put:two",
+      "source:list:users/",
+      "source:delete:three",
+      "destination:delete:three",
+    ]);
+  });
+
+  it("uses ENAM then OC only after a definitive destination miss", async () => {
+    const operations: string[] = [];
+    const source = createBucket({
+      get: async (key) => {
+        operations.push(`source:get:${key}`);
+        return storedObject;
+      },
+      name: "source",
+      operations,
+    });
+    const destination = createBucket({
+      get: async (key) => {
+        operations.push(`destination:get:${key}`);
+        return null;
+      },
+      name: "destination",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+
+    expect(await context.bucket.get("fallback")).toBe(storedObject);
+    await context.bucket.put("new", new Uint8Array([1]));
+
+    expect(operations).toEqual([
+      "destination:get:fallback",
+      "source:get:fallback",
+      "destination:put:new",
+    ]);
+  });
+
+  it("does not turn destination operational failures into source fallback reads", async () => {
+    const operations: string[] = [];
+    const sourceGet = vi.fn(async () => storedObject);
+    const source = createBucket({ get: sourceGet, name: "source", operations });
+    const destination = createBucket({
+      get: async () => {
+        throw new Error("destination unavailable");
+      },
+      name: "destination",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+
+    await expect(context.bucket.get("key")).rejects.toThrow("destination unavailable");
+    expect(sourceGet).not.toHaveBeenCalled();
+  });
+
+  it("propagates a partial dual-delete failure and preserves source-first order", async () => {
+    const operations: string[] = [];
+    const source = createBucket({ name: "source", operations });
+    const destination = createBucket({ name: "destination", operations });
+    destination.delete = async () => {
+      operations.push("destination:delete:key");
+      throw new Error("destination delete failed");
+    };
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+
+    await expect(context.bucket.delete?.("key")).rejects.toThrow("destination delete failed");
+    expect(operations).toEqual(["source:delete:key", "destination:delete:key"]);
+  });
+
+  it("locates direct reads by fixed bucket role and rejects incomplete bridge config", async () => {
+    const operations: string[] = [];
+    const source = createBucket({
+      head: async () => storedObject,
+      name: "source",
+      operations,
+    });
+    const destination = createBucket({
+      head: async () => null,
+      name: "destination",
+      operations,
+    });
+    const context = resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+      HOSTED_R2_CUTOVER_PHASE: "destination_active",
+    });
+
+    await expect(locateHostedR2ObjectBucketRole(context, "key")).resolves.toBe("source");
+    expect(() => resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      BUNDLES_ENAM: destination,
+    })).toThrow("HOSTED_R2_CUTOVER_PHASE");
+    expect(() => resolveHostedR2CutoverContext({
+      BUNDLES: source,
+      HOSTED_R2_CUTOVER_PHASE: "source_active",
+    })).toThrow("BUNDLES_ENAM");
+  });
+});

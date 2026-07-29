@@ -43,8 +43,10 @@ const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const KMS_KEY_VERSION_PATTERN =
   /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+\/cryptoKeyVersions\/([1-9][0-9]*)$/u;
-const ADVISORY_NAME_PATTERN =
+const ADVISORY_NAME_COMPONENT_PATTERN =
   /^[\p{L}\p{M}]+(?:[.'\u2019-][\p{L}\p{M}]+)*(?: [\p{L}\p{M}]\p{M}*\.)?$/u;
+const ADVISORY_NAME_ALIAS_SEPARATOR = " / ";
+const ADVISORY_NAME_ALIAS_LIMIT = 4;
 const RELATIONSHIP_OR_ROLE_WORDS = new Set([
   "aunt",
   "boss",
@@ -324,6 +326,10 @@ export async function replaceHostedAddressBookProjection(input: {
           })),
         });
       }
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -382,6 +388,10 @@ export async function deleteHostedAddressBookProjection(input: {
         },
         where: { memberId: input.memberId },
       });
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -389,6 +399,22 @@ export async function deleteHostedAddressBookProjection(input: {
       source,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function clearHostedOwnerPendingGroupEventContextTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedThreadRoute.updateMany({
+    data: {
+      pendingGroupReactionContextEncrypted: null,
+    },
+    where: {
+      container: {
+        ownerMemberId: input.memberId,
+      },
+    },
+  });
 }
 
 export async function readHostedOwnerAddressBookAdvisoryNames(input: {
@@ -766,14 +792,22 @@ function requireSafeAdvisoryName(value: unknown): string {
   }
   const words = normalized
     .toLocaleLowerCase("en-US")
-    .split(/[ .'\u2019-]+/u)
+    .split(/[ /.'\u2019-]+/u)
     .filter(Boolean);
   if (words.some((word) => RELATIONSHIP_OR_ROLE_WORDS.has(word))) {
     throw invalidAddressBookRequest(
       "Contact advisory names cannot contain relationships or roles.",
     );
   }
-  if (!ADVISORY_NAME_PATTERN.test(normalized)) {
+  const advisoryNames = normalized.split(ADVISORY_NAME_ALIAS_SEPARATOR);
+  const distinctAdvisoryNames = new Set(
+    advisoryNames.map((name) => name.toLocaleLowerCase("en-US")),
+  );
+  if (
+    advisoryNames.length > ADVISORY_NAME_ALIAS_LIMIT
+    || distinctAdvisoryNames.size !== advisoryNames.length
+    || advisoryNames.some((name) => !ADVISORY_NAME_COMPONENT_PATTERN.test(name))
+  ) {
     throw invalidAddressBookRequest("Contact advisory names are invalid.");
   }
   return normalized;

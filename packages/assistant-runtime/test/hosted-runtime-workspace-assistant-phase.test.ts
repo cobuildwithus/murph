@@ -7282,6 +7282,93 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
   });
 
+  it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        transportIdempotent: false,
+      },
+    };
+    const feedback = {
+      idempotencyKey: "feedback-after-member-delivery",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    let resolveFeedback: (value: {
+      feedbackId: string;
+      recorded: boolean;
+    }) => void = () => {
+      throw new Error("Product feedback completion was not initialized.");
+    };
+    const feedbackCompletion = new Promise<{
+      feedbackId: string;
+      recorded: boolean;
+    }>((resolve) => {
+      resolveFeedback = resolve;
+    });
+    let memberDeliveryCompleted = false;
+    const recordProductFeedback = vi.fn(() => {
+      expect(memberDeliveryCompleted).toBe(true);
+      return feedbackCompletion;
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback);
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [
+            deliveryEffect.effectId,
+          ],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(
+      async () => {
+        memberDeliveryCompleted = true;
+        return [createSentDeliveryOutcome()];
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+
+    const postCheckpointPromise = result.afterCheckpoint?.();
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledOnce();
+      expect(recordProductFeedback).toHaveBeenCalledWith(feedback);
+    });
+    expect(memberDeliveryCompleted).toBe(true);
+
+    let postCheckpointSettled = false;
+    void postCheckpointPromise?.then(() => {
+      postCheckpointSettled = true;
+    });
+    await Promise.resolve();
+    expect(postCheckpointSettled).toBe(false);
+
+    resolveFeedback({
+      feedbackId: "feedback_synthetic",
+      recorded: true,
+    });
+    await postCheckpointPromise;
+  });
+
   it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
     const staleOutboxWakeAt = "2026-05-08T16:00:05.000Z";
     const deliveryEffect = createDeliveryEffect();
@@ -15580,6 +15667,9 @@ function createPhaseInput(input: {
   runtimePhoneCalls?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["phoneCalls"]
   >;
+  runtimeProductFeedbackPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["productFeedbackPort"]
+  >;
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -15743,6 +15833,9 @@ function createPhaseInput(input: {
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
         ...(input.runtimePhoneCalls ? { phoneCalls: input.runtimePhoneCalls } : {}),
+        ...(input.runtimeProductFeedbackPort
+          ? { productFeedbackPort: input.runtimeProductFeedbackPort }
+          : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }
           : {}),

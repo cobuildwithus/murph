@@ -53,6 +53,17 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
+`murph.group action="read_chat_name"` is the on-demand provider-title primitive.
+Web resolves the signed callback member's single encrypted thread-container
+route only after the model invokes it, then performs one bounded Linq chat read
+or Telegram `getChat` read. The model supplies no provider thread id. Linq's
+synthetic comma-joined handle label is returned as no name rather than exposing
+phone or email handles. The result contains only bounded untrusted display text
+with `ok`, `none`, or `unavailable` status; it grants no authority and creates
+no cache, retry, reconciliation, wake field, or new state owner. New-group setup
+may pass the exact immediately preceding `ok` result into the existing
+`create_join_link` or `post_join_offer` display-name field.
+
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
 the bounded, route-authorized current-turn Linq sender handles already visible
@@ -307,7 +318,12 @@ runtime entitlement authority. Direct wakes reject it. The growth projection
 uses current blind-index resolution only for legacy wakes and unregistered Linq
 participants, falls back to the existing keyed opaque sender identity when no
 legacy registration remains, and omits valid group-email wakes because that
-channel has no authenticated per-sender attribution.
+channel has no authenticated per-sender attribution. Mailbox content retirement
+remains authoritative over analytics: the projection never decrypts a row after
+its content-retirement marker is set, reports any affected rolling count as a
+lower bound, and withholds a week-over-week comparison when either weekly
+window has incomplete group-sender evidence. Missing unretired content remains
+an integrity failure.
 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
@@ -743,6 +759,31 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
+- The same Cloudflare app owns one production database-health singleton that is
+  deliberately independent of hosted Web and Postgres. A five-minute Cron
+  Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
+  scrape the configured PlanetScale production branch, retain 30 days of
+  normalized connection metrics or classified scrape failures, evaluate the
+  branch-local PgBouncer and Postgres connection conditions, and page one
+  preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
+  bounded state maps, error-counter baselines, failure codes, and alert
+  admission state. First-incident and non-replayable direct-error alert
+  admission shares one synchronous SQLite transaction with sample/baseline
+  persistence; an inside-fence direct-error body excludes co-occurring
+  replayable evidence, and acknowledged replayable recurrence is admitted only
+  from the current sample once the attempt fence opens. Any direct-error delta
+  observed while the single immutable message slot is occupied accumulates as
+  count-plus-check-time evidence in the same alert row and transaction that
+  advances the persisted sample baseline. After the older message is
+  acknowledged, the next run atomically promotes that evidence into the one
+  pending message slot; provider pacing still applies, and retry never mutates
+  a provider-entered body. Acknowledged Linq entry is the only operation that
+  clears a pending page. SQLite contains no connection URL,
+  credential, query, member identifier, phone number, or raw response. This is
+  operational monitoring history, never health truth, routing authority, or a
+  product control plane.
+  The Web-owned reply-latency monitor remains a separate Resend-email incident
+  owner and never falls back to this Linq path.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:
@@ -774,19 +815,20 @@ the tokens and encrypted labels. Full replacement, explicit deletion,
 permission-loss deletion after the companion next reconciles in the foreground,
 and account deletion use that one lifecycle. Replacement remains gated by
 active access and current launch consent. An enabled projection remains active
-until one of those deletion paths runs. The only consumer is the existing
-route-authorized group participant read. It consults the human group owner's
-projection only while the owner still exists, remains unsuspended, and holds
-current launch consent, for at most 16 canonical phone participant handles. The
-enclosing route authorization owns admission to that live read; the optional
-overlay does not separately reinterpret the owner's current personal or
-sponsored billing after the projection was validly enabled. Participant
-selection remains independent of each participant's durable `hasOwnMurph`
-activation result, and a match is exposed only as current-turn
-`unverifiedOwnerContactLabel` presentation text. It is never identity,
-membership, consent, routing, profile, invite, or signup authority, and it
-cannot override a registered participant's Murph identity. Failures omit the
-optional overlay without changing the truthful live roster.
+until one of those deletion paths runs. The consumers are the existing
+route-authorized group participant read and the signed Linq participant-change
+context path described below. Each consults the human group owner's projection
+only while the owner still exists, remains unsuspended, and holds current launch
+consent. The live roster read is bounded to at most 16 canonical phone
+participant handles; the event path requests only the single normalized changed
+handle. The enclosing route authorization owns admission to either read; the
+optional overlay does not separately reinterpret the owner's current personal
+or sponsored billing after the projection was validly enabled. A match is
+exposed only as current-turn `unverifiedOwnerContactLabel` presentation text.
+It is never identity, membership, consent, routing, profile, invite, or signup
+authority, and it cannot override a registered participant's Murph identity.
+Failures omit the optional overlay without changing the truthful live roster or
+the signed participant-change fact.
 The full boundary and rollout contract is
 `agent-docs/product-specs/ios-address-book-advisory-names.md`.
 
@@ -1224,6 +1266,41 @@ mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. There is no other
 Web-to-Cloudflare prewarm or nudge path.
 
+Hosted Linq message edits are immutable correction inputs, not mutations of an
+accepted mailbox item or transcript. Each accepted inbound Linq conversation
+message stores a private versioned blind lookup key for its provider-global
+message id. A verified `message.edited` webhook locks that source lineage,
+finds the already-accepted original, and revalidates its exact sender, chat,
+direction, direct home route or same group route, and container access before
+appending a structured correction through the ordinary mailbox and wake
+handoff. The lock is edit-only: ordinary accepted messages write the blind
+source index without an additional source-lock query. An edit that races an
+uncommitted original receives the existing bounded retryable missing-source
+outcome and resolves after provider retry; simultaneous edits serialize from
+lineage read through correction append. Optional group `senderMemberId`
+attribution and personal entitlement
+never grant or remove owner-backed room authority: an absent participant
+projection remains eligible, while an existing projection that positively
+records removal or a different handle fails closed. The
+replacement text stays user-authored data; only the separate part index,
+deterministic opaque reference to the original accepted assistant input, and
+correction framing are trusted runtime metadata. That reference distinguishes
+corrections to different originals without exposing provider identifiers.
+Corrections accepted before planning may join the current turn, corrections
+accepted during an active turn may steer it only when their opaque original
+reference names an input already accepted into that same turn, and corrections
+to older inputs remain ordinary pending conversation work. The owner keeps at
+most the provider-supported five corrections, rejects conflicting replay,
+ignores stale or ambiguous ordering, and retries a missing original only within
+the provider delivery window. If the referenced input already received a
+completed answer,
+the assistant sends one concise follow-up only when the correction materially
+changes that answer or action; immaterial wording changes end with the existing
+durable `finish_without_reply` policy. It
+does not rewrite history, cancel a turn, rerun onboarding, fetch the message
+from Linq, create a second queue, or use the provider diagnostic ledger as
+correctness state. Outbound edit events are diagnostic only.
+
 Participant-derived thread-container authority is a seven-day lease over an
 authoritative provider observation, reused by ordinary access, AI admission,
 usage allowance, and newsletter projection. A non-direct Linq inbound may
@@ -1235,37 +1312,59 @@ rosters therefore cannot turn an omitted or departed participant into an
 unbounded subscription capability.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
-facts, not runtime work. A unique participant addition may set one nullable
-coalescing bit only on an existing thread route; it does not retain the
-participant identity, create authority, fetch the roster, append mailbox work,
-or wake a runtime. The next normally admitted non-direct message takes the
-canonical chat-ownership lock before the route row, consumes exact `true` in the
-same transaction as its ordinary mailbox append, and carries one typed context
-hint. The runner records that hint in the existing tolerant mailbox-to-input
-sidecar rather than the strict persisted assistant-input event, projects it only
-onto the transient input candidate, and renders the same fixed context for both
-normal and captureless active-turn prompt paths. It exposes the hint only with
-route authority and explicit group attestation, while the existing live roster
-tool remains the sole decision-time participant source. Duplicate additions
-coalesce, removals remain ledger-only, and any failed or raced append rolls
-consumption back.
+facts, not standalone runtime work. The shared ingress contract normalizes the
+documented full participant handle (or Linq's deprecated handle fallback), but
+the diagnostic ledger still stores no participant id, handle, phone, email, or
+label. For a routed group, Web takes the canonical chat-ownership lock before
+provider-event insertion, then locks the group owner before mutating the route
+or reading optional context. A unique event may then append one bounded
+participant-attributed item to the route's existing encrypted transient
+group-event buffer in that same transaction. The item says which canonical
+handle was added or removed and may include the human group owner's unverified
+address-book label only when that phone is not proven to have an activated
+Murph identity. The locked route rejects any participant
+lookup key that belongs to its own Linq account, even when the provider omits
+`is_me`. No live-roster fetch is needed: the signed participant event is
+evidence of the change, while the existing live roster tool remains the sole
+decision-time source for current membership and join-offer decisions.
 
-Hosted Linq group reactions use the same one-shot context boundary. A unique,
+Participant events still create no mailbox item, wake, route, membership,
+invite, consent, share, or outbound message. A unique addition also sets the
+existing nullable coalescing bit in the same transaction as ledger insertion;
+that anonymous hint is the durable fallback when optional contact lookup,
+encryption, or detailed staging fails. Removals have no automatic reply or
+generic fallback: their detailed item is intentionally optional context. The
+same chat lock serializes this transaction against the next normally admitted
+non-direct message, so a later message cannot consume the route between ledger
+insertion and detailed staging. That message then locks the route row, consumes
+the addition bit and encrypted buffer in the same transaction as its ordinary
+mailbox append, and carries them through the existing tolerant
+mailbox-to-input sidecar. Prompt assembly exposes the buffer only with route
+authority and explicit group attestation, clearly marks it as weak context
+rather than a message or instruction, and uses the same path for normal and
+captureless turns. Duplicate events do not restage context, and any failed or
+raced mailbox append rolls consumption back.
+
+Hosted Linq group reactions share that one-shot context boundary. A unique,
 verified reaction for an active account-bound group route is checked against
 the live roster and exact reacted-to message, then appends one actor-attributed
-entry to an encrypted transient buffer on that route. The same nullable column
-holds the newest ten entries in insertion order; older entries fall off without
-creating a separately processed queue. Each entry keeps the canonical active
-roster handle, reaction action/type, and bounded target text, but no provider
-identifier, URL, or attachment metadata. It is optional lossy context, not
-product truth, and creates no mailbox item or wake. The next normally admitted
-group message consumes and clears the whole buffer under the existing chat and
-route locks, carries it on that ordinary `conversation.message`, and exposes it
-only through the existing tolerant mailbox-input sidecar as a clearly quoted
-weak prompt hint. Corrupt context fails open, authority rotation clears it, and
-a failed or raced mailbox append rolls consumption back. Append decrypt and
-reseal share one 500 ms deadline, and consume decrypt has the same bound, so
-optional crypto cannot inherit the general KMS deadline while holding locks.
+entry to the same encrypted transient buffer on that route. The legacy physical
+column name remains reaction-specific, but its logical owner is the bounded
+group-event buffer. It holds the newest ten entries in insertion order; older
+entries fall off without creating a separately processed queue. Reaction
+entries keep the canonical active roster handle, action/type, and bounded
+target text, but no provider identifier, URL, or attachment metadata.
+Participant entries keep only the normalized handle, change action, and
+optional unverified owner label. Address-book replacement or deletion takes the
+same owner-member lock as label staging and clears pending encrypted group-event
+buffers for that owner's routes before committing. A staged label therefore
+cannot survive Stop, permission-loss cleanup, or replacement; the existing
+anonymous addition bit remains independent. Clearing may also discard pending
+optional reaction context, which is already lossy and creates no work owner.
+Corrupt context fails open, authority rotation clears it, and a failed or raced
+mailbox append rolls consumption back. Append decrypt and reseal share one
+500 ms deadline, and consume decrypt has the same bound, so optional crypto
+cannot inherit the general KMS deadline while holding locks.
 When raising the consumed hint beyond the legacy 512-character contract, deploy
 the hosted runner bundle before the web producer so every parser accepts the
 new 5,129-character maximum before web can emit it. Once web has written the
@@ -1474,17 +1573,21 @@ entrypoint first proves native `tar` plus the production-compatible `zstd`
 stdin compression/decompression contract, then rebuilds the detached base plus
 staged candidate and verifies both tree ids before installing dependencies.
 That entrypoint internally selects the `static-ssh` verification profile; the
-root verifier disables CPU-count-only composed admission and completes package
-coverage before app and fixture work for that profile. Later checkout writes
-cannot change the run, while the dirty candidate preserves implicit diff
-scope. A native macOS `lockf` descriptor inherited by the verifier is the single
-remote-capacity owner until its exact child groups exit. For that same finite
-lifetime, native `caffeinate` prevents idle system sleep without changing a
-persistent power setting. The verifier then removes only that run directory.
-The local artifact lock protects cooperating local producers and candidate
-capture, not remote completion. The lane reuses the same synthetic verification
-core and adds no daemon, coordinator, queue, scheduler, shared checkout, or
-product state.
+root verifier admits composed acceptance only when it observes at least 10
+logical CPUs and 24 GiB of physical memory. That capable plan starts three
+two-worker package lanes, initially limits them to the three-worker CLI plus one
+two-worker peer, and overlaps one-worker app pools plus fixture verification;
+CLI terminal state retains the existing release and failure-propagation
+contract. Smaller or memory-unobservable workers retain the serial two-process
+fallback. Later checkout writes cannot change the run, while the dirty candidate
+preserves implicit diff scope. A native macOS `lockf` descriptor inherited by
+the verifier is the single remote-capacity owner until its exact child groups
+exit. For that same finite lifetime, native `caffeinate` prevents idle system
+sleep without changing a persistent power setting. The verifier then removes
+only that run directory. The local artifact lock protects cooperating local
+producers and candidate capture, not remote completion. The lane reuses the same
+synthetic verification core and adds no daemon, coordinator, queue, scheduler,
+shared checkout, or product state.
 
 Ordinary Vitest output is contained beneath one marked process-owned temp root
 that is removed at teardown and recovered conservatively after an abrupt stop.

@@ -3699,6 +3699,7 @@ async function createMissingBrowserVaultReplicaRefForTest(
     keyId: "browser-vault-replica:d",
     objectKey: await hostedBrowserVaultReplicaObjectKey({
       dataVersion,
+      generatedAt: "2026-04-20T08:00:00.000Z",
       userId,
     }),
     replicaSchema: "murph.browser-vault-replica",

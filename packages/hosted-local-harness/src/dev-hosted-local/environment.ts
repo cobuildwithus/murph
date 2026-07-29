@@ -13,6 +13,7 @@ import {
   HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
+  HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -411,6 +412,11 @@ function resolveHostedLocalR2PresignEnvironment(
     HOSTED_R2_PRESIGN_BUCKET_NAME:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_BUCKET_NAME)
       ?? HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
+    HOSTED_R2_CUTOVER_PHASE:
+      normalizeOptionalString(env.HOSTED_R2_CUTOVER_PHASE) ?? "source_active",
+    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME:
+      normalizeOptionalString(env.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME)
+      ?? HOSTED_LOCAL_R2_PRESIGN_ENAM_BUCKET_NAME,
     ...(controlEndpoint ? { HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: controlEndpoint } : {}),
     ...(endpoint ? { HOSTED_R2_PRESIGN_ENDPOINT: endpoint } : {}),
     ...(dockerBridgeHost ? { MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: dockerBridgeHost } : {}),
@@ -1033,6 +1039,7 @@ export function buildWranglerLocalDevConfig(
     // Local Cloudflare container cold starts are materially slower than the hosted runtime.
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
+    HOSTED_R2_CUTOVER_PHASE: resolveWranglerEnvValue("HOSTED_R2_CUTOVER_PHASE", source) ?? "source_active",
   };
 
   for (const key of new Set(WRANGLER_VAR_ALLOWLIST)) {
@@ -1092,6 +1099,10 @@ export function buildWranglerLocalDevConfig(
           class_name: "UserRunnerDurableObject",
         },
         {
+          name: "DATABASE_HEALTH_MONITOR",
+          class_name: "DatabaseHealthDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -1114,12 +1125,24 @@ export function buildWranglerLocalDevConfig(
         tag: "v3",
         new_sqlite_classes: ["DeploySmokeRunnerContainer"],
       },
+      {
+        tag: "v4",
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+      },
     ],
+    triggers: {
+      crons: ["*/5 * * * *"],
+    },
     r2_buckets: [
       {
         binding: "BUNDLES",
         bucket_name: "murph-hosted-bundles",
         preview_bucket_name: "murph-hosted-bundles-preview",
+      },
+      {
+        binding: "BUNDLES_ENAM",
+        bucket_name: "murph-hosted-bundles-enam",
+        preview_bucket_name: "murph-hosted-bundles-preview-enam",
       },
     ],
     // Wrangler proxies the Workers AI binding through a remote session. The

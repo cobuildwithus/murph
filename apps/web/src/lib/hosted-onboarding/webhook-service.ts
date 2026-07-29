@@ -5,6 +5,8 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedLinqMessageEditedEvent,
+  requireHostedLinqParticipantChangedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -19,6 +21,7 @@ import {
 } from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
+  planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
@@ -89,6 +92,9 @@ import {
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
 import type {
@@ -111,6 +117,9 @@ import {
   stageHostedLinqGroupReactionContext,
 } from "./webhook-provider-linq-reaction-context";
 import {
+  stageHostedLinqGroupParticipantContextTx,
+} from "./webhook-provider-linq-participant-context";
+import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
 import type {
@@ -120,6 +129,7 @@ import {
   createHostedPostCommitDeadline,
   readHostedPostCommitRemainingMs,
 } from "./bounded-post-commit";
+import { lockHostedMemberRow } from "./shared";
 
 export {
   handleHostedStripeWebhook,
@@ -287,12 +297,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         return response;
       }
     }
-    if (providerEvent && event.event_type !== "message.received") {
+    if (
+      providerEvent
+      && event.event_type !== "message.received"
+      && event.event_type !== "message.edited"
+    ) {
       const prisma = input.prisma ?? getPrisma();
       const providerResult = event.event_type === "participant.added"
         || event.event_type === "participant.removed"
         ? await ingestHostedLinqParticipantEventDirect({
             event: providerEvent,
+            participantChange: requireHostedLinqParticipantChangedEvent(event),
             prisma,
           })
         : await ingestHostedLinqProviderEventDirect({
@@ -326,6 +341,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
+    if (event.event_type === "message.edited") {
+      const editedEvent = requireHostedLinqMessageEditedEvent(event);
+      const planTiming = startHostedOnboardingTiming(
+        "hosted-onboarding.webhook.linq.plan-message-edit",
+        {
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+          eventType: event.event_type,
+        },
+      );
+      let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
+      try {
+        editPlan = await runHostedOnboardingWebhookTransaction(
+          prisma,
+          (transaction) =>
+            planHostedLinqMessageEditedWebhook({
+              event: editedEvent,
+              prisma: transaction,
+            }),
+        );
+      } catch (error) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      finishHostedOnboardingTiming(
+        planTiming,
+        editPlan.response.reason ?? "completed",
+        {
+          duplicate: Boolean(editPlan.response.duplicate),
+          ok: editPlan.response.ok,
+          wakeUserPresent: Boolean(
+            editPlan.wakeHandoffs?.some((handoff) => handoff.userId),
+          ),
+        },
+      );
+
+      scheduleHostedLinqProviderEventIngestionBestEffort({
+        event: providerEvent,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const wakeHandoff = editPlan.wakeHandoffs?.[0];
+      const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+        response: editPlan.response,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+        signal: input.signal,
+        wakeHandoff,
+      });
+      responseReason = editPlan.response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        duplicate: Boolean(editPlan.response.duplicate),
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+        wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+        wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+        wakeHandoffStarted: wakeHandoffResult?.started ?? false,
+      });
+      return editPlan.response;
+    }
+
     const planningResolution = await resolveHostedLinqPlanningEvent({
       event,
       prisma,
@@ -993,38 +1071,68 @@ async function ingestHostedLinqProviderEventDirect(input: {
 
 async function ingestHostedLinqParticipantEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  participantChange: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
   prisma: PrismaClient;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(input.prisma, async (transaction) => {
-    const providerResult = await ingestHostedLinqProviderEventTx({
-      event: input.event,
-      prisma: transaction,
-    });
-    if (providerResult.duplicate || input.event.eventType !== "participant.added") {
-      return providerResult;
-    }
+  return runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    async (transaction) => {
+      const chatId = input.participantChange.data.chat_id;
+      if (chatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId,
+          tx: transaction,
+        });
+      }
+      const providerResult = await ingestHostedLinqProviderEventTx({
+        event: input.event,
+        prisma: transaction,
+      });
+      if (providerResult.duplicate) {
+        return providerResult;
+      }
 
-    const chatId = input.event.linqChatId;
-    if (!chatId) {
-      return providerResult;
-    }
+      if (!chatId) {
+        return providerResult;
+      }
 
-    const route = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: transaction,
-      threadId: chatId,
-    });
-    if (!route) {
-      return providerResult;
-    }
+      const route = await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: transaction,
+        threadId: chatId,
+      });
+      if (!route) {
+        return providerResult;
+      }
 
+      await applyHostedLinqParticipantChangeToRouteTx({
+        event: input.participantChange,
+        prisma: transaction,
+        route,
+      });
+      return providerResult;
+    },
+  );
+}
+
+export async function applyHostedLinqParticipantChangeToRouteTx(input: {
+  event: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
+  prisma: Prisma.TransactionClient;
+  route: HostedThreadRouteSnapshot;
+}): Promise<void> {
+  const chatId = input.event.data.chat_id;
+  if (!chatId) {
+    return;
+  }
+  await lockHostedMemberRow(input.prisma, input.route.owner.id);
+  if (input.event.event_type === "participant.added") {
     await markHostedLinqThreadRouteParticipantAdditionPendingTx({
-      containerMemberId: route.containerMemberId,
-      prisma: transaction,
+      containerMemberId: input.route.containerMemberId,
+      prisma: input.prisma,
       threadId: chatId,
     });
-    return providerResult;
-  });
+  }
+  await stageHostedLinqGroupParticipantContextTx(input);
 }
 
 function scheduleHostedLinqProviderEventIngestionBestEffort(input: {

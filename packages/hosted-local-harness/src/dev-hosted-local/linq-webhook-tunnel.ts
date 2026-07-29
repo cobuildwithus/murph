@@ -13,6 +13,7 @@ import type { HostedLocalDevConfig } from "./types.ts";
 export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
   "/api/hosted-onboarding/linq/webhook";
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.edited",
   "message.sent",
   "message.received",
   "participant.added",
@@ -372,6 +373,7 @@ export function normalizeLinqWebhookPublicUrl(value: string): {
     }
     target.pathname = HOSTED_LOCAL_LINQ_WEBHOOK_PATH;
   }
+  target.searchParams.set("version", "2026-02-03");
 
   return {
     publicBaseUrl: parsed.origin,
