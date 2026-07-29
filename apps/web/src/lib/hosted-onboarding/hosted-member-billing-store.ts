@@ -107,6 +107,12 @@ export interface PreparedHostedMemberStripeCheckoutSession {
   stripeCheckoutSessionLookupKey: string;
 }
 
+export interface PreparedHostedMemberStripeCustomer {
+  stripeCustomerId: string;
+  stripeCustomerIdEncrypted: string;
+  stripeCustomerLookupKey: string;
+}
+
 export interface PreparedHostedMemberStripeCheckoutCompletion {
   memberId: string;
   stripeCustomerId: string;
@@ -492,6 +498,33 @@ export async function prepareHostedMemberStripeCheckoutSession(input: {
   return {
     stripeCheckoutSessionIdEncrypted,
     stripeCheckoutSessionLookupKey,
+  };
+}
+
+export async function prepareHostedMemberStripeCustomer(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  stripeCustomerId: string;
+}): Promise<PreparedHostedMemberStripeCustomer> {
+  const stripeCustomerLookupKey =
+    createHostedStripeCustomerLookupKey(input.stripeCustomerId);
+  if (!stripeCustomerLookupKey) {
+    throw new TypeError("Stripe Customer ID is invalid.");
+  }
+  const { stripeCustomerIdEncrypted } =
+    await buildHostedMemberBillingPrivateColumns({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      stripeCustomerId: input.stripeCustomerId,
+      stripeSubscriptionId: null,
+    });
+  if (!stripeCustomerIdEncrypted) {
+    throw new TypeError("Stripe Customer ID encryption failed.");
+  }
+  return {
+    stripeCustomerId: input.stripeCustomerId,
+    stripeCustomerIdEncrypted,
+    stripeCustomerLookupKey,
   };
 }
 
@@ -922,6 +955,61 @@ export async function writeHostedMemberStripeBillingRefTx(
   }
 
   return projectHostedMemberStripeBillingRefSnapshot(billingRef, input.tx);
+}
+
+export async function bindPreparedHostedMemberStripeCustomerIfMissingTx(input: {
+  memberId: string;
+  preparedCustomer: PreparedHostedMemberStripeCustomer;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    return false;
+  }
+  assertHostedMemberNotSuspended(member);
+  await assertHostedMemberStripeBillingIdentifiersAvailableTx({
+    memberId: input.memberId,
+    stripeCustomerId: input.preparedCustomer.stripeCustomerId,
+    tx: input.tx,
+  });
+
+  const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    select: { stripeCustomerLookupKey: true },
+    where: { memberId: input.memberId },
+  });
+  if (currentBillingRef?.stripeCustomerLookupKey) {
+    return false;
+  }
+
+  try {
+    await input.tx.hostedMemberBillingRef.upsert({
+      where: { memberId: input.memberId },
+      create: {
+        memberId: input.memberId,
+        stripeCustomerIdEncrypted:
+          input.preparedCustomer.stripeCustomerIdEncrypted,
+        stripeCustomerLookupKey:
+          input.preparedCustomer.stripeCustomerLookupKey,
+      },
+      update: {
+        stripeCustomerIdEncrypted:
+          input.preparedCustomer.stripeCustomerIdEncrypted,
+        stripeCustomerLookupKey:
+          input.preparedCustomer.stripeCustomerLookupKey,
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw buildHostedStripeBillingIdentityConflictError("stripeCustomerId");
+    }
+    throw error;
+  }
+
+  return true;
 }
 
 export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {

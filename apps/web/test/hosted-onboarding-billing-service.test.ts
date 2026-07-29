@@ -516,6 +516,11 @@ describe("createHostedBillingCheckout", () => {
       maxNetworkRetries: 0,
       timeout: 5_000,
     });
+    expect(
+      mocks.stripe.customers.create.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.$transaction.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -534,6 +539,52 @@ describe("createHostedBillingCheckout", () => {
       prisma.hostedMemberBillingRef.upsert.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.stripe.checkout.sessions.create.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("uses the durable customer that wins while Pulse Trial customer creation is in flight", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerIdEncrypted: null,
+        stripeCustomerLookupKey: null,
+        stripeSubscriptionIdEncrypted: null,
+        stripeSubscriptionLookupKey: null,
+      },
+    });
+    const { stripeCustomerIdEncrypted } =
+      await buildHostedMemberBillingPrivateColumns({
+        memberId: "member_123",
+        stripeCustomerId: "cus_concurrent_winner",
+        stripeSubscriptionId: null,
+      });
+    mocks.stripe.customers.create.mockImplementationOnce(async () => {
+      prisma.setBillingRefState({
+        stripeCustomerIdEncrypted,
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey("cus_concurrent_winner"),
+      });
+      return { id: "cus_losing_candidate" };
+    });
+
+    await expect(createHostedBillingCheckout({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: "cus_concurrent_winner",
+      }),
+      expect.anything(),
     );
   });
 

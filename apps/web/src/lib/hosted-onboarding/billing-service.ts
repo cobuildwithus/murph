@@ -30,9 +30,10 @@ import {
   type HostedOnboardingError,
 } from "./errors";
 import {
-  bindHostedMemberStripeCustomerIdIfMissingTx,
+  bindPreparedHostedMemberStripeCustomerIfMissingTx,
   bindHostedMemberStripeCheckoutSessionTx,
   clearHostedMemberStripeCheckoutAttemptTx,
+  prepareHostedMemberStripeCustomer,
   prepareHostedMemberStripeCheckoutSession,
   readHostedMemberStripeBillingRef,
   revalidateHostedMemberStripeCheckoutAttemptUnderLockTx,
@@ -871,38 +872,52 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
   prisma: PrismaClient;
   stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
 }): Promise<string> {
-  return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    const currentBillingRef = await readHostedMemberStripeBillingRef({
+  const existingBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (existingBillingRef?.stripeCustomerId) {
+    return existingBillingRef.stripeCustomerId;
+  }
+
+  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
+    memberId: input.memberId,
+    requestOptions: {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    },
+    stripe: input.stripe,
+  });
+  const preparedCustomer = await prepareHostedMemberStripeCustomer({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    stripeCustomerId: candidateStripeCustomerId,
+  });
+  const bound = await input.prisma.$transaction(
+    (tx) => bindPreparedHostedMemberStripeCustomerIfMissingTx({
       memberId: input.memberId,
-      prisma: tx,
+      preparedCustomer,
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
+  if (bound) {
+    return candidateStripeCustomerId;
+  }
+
+  const currentBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (!currentBillingRef?.stripeCustomerId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+      httpStatus: 409,
+      message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+      retryable: true,
     });
-    const candidateStripeCustomerId = currentBillingRef?.stripeCustomerId
-      ?? await createHostedPulseTrialStripeCustomer({
-        memberId: input.memberId,
-        requestOptions: {
-          maxNetworkRetries: 0,
-          timeout: 5_000,
-        },
-        stripe: input.stripe,
-      });
-    const billingRef = currentBillingRef?.stripeCustomerId
-      ? currentBillingRef
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: input.memberId,
-          stripeCustomerId: candidateStripeCustomerId,
-          tx,
-        });
-    if (!billingRef?.stripeCustomerId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-        httpStatus: 409,
-        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-        retryable: true,
-      });
-    }
-    return billingRef.stripeCustomerId;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }
+  return currentBillingRef.stripeCustomerId;
 }
 
 async function resolveHostedBillingCheckoutAuth(
