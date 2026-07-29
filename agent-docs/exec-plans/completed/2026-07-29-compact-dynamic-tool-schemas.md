@@ -77,5 +77,26 @@ The change is runner-only and needs no Web or persisted-state migration.
   group-status probe cover ordinary natural-language discovery. The local
   environment has no configured provider key, so that credentialed lane remains
   an explicitly reported verification blocker rather than default-on proof.
+- The shared hosted provider stub now scripts Murph calls through Codex's
+  canonical Terra `exec` custom-tool surface while retaining ordinary
+  `function_call` items for shell tools. Its provider-surface assertion now
+  distinguishes eager code-mode tools from the generic `ALL_TOOLS` deferred
+  discovery contract instead of expecting the removed namespace schemas.
+- The formerly failing hosted Telegram and media-delivery suites pass against a
+  freshly assembled runner bundle using pinned Codex `0.145.0` (5/5 and 2/2).
+- The canonical affected-owner diff verifier passes on the remediation head:
+  every architecture/dependency/privacy guard and affected typecheck, 7,171
+  package tests, 2,055 Cloudflare Node tests, and 2 Workers-runtime tests.
+- Canonical remote acceptance passes on a synthetic, secret-free 16-vCPU
+  Blacksmith Testbox: full workspace typecheck, every package coverage owner,
+  the Web production build, Cloudflare Node verification, and Workers
+  verification completed in 6m20s (`tbx_01kyq09wxyxgm8bac1771a8am8`). An
+  earlier remote aggregate exited after its visible owners passed; the
+  failure-focused rerun found no failing owner and completed cleanly.
+- The remaining final PR-head ReviewGPT and CI gates will run after the plan is
+  archived on the exact pushed head.
 - The earlier Murph-owned `schema | execute` candidate was rejected and removed
   before the final review baseline.
+Status: completed
+Updated: 2026-07-29
+Completed: 2026-07-29
