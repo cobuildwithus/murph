@@ -1,6 +1,6 @@
 # Inline iMessage daily nutrition response card
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -174,3 +174,4 @@ Updated: 2026-07-29
     assistant daemon lanes passed. The later CLI source subprocess lane hit
     repeated 60-second local harness timeouts without an assertion failure; the
     exact-tree remote acceptance had already passed that lane.
+Completed: 2026-07-29
