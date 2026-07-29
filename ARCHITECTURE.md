@@ -793,9 +793,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
   scrape the configured PlanetScale production branch, retain 30 days of
   normalized connection metrics or classified scrape failures, evaluate the
-  branch-local PgBouncer and Postgres connection conditions, and page one
-  preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
-  bounded state maps, error-counter baselines, failure codes, and alert
+  branch-local PgBouncer and Postgres connection conditions, and page two
+  preconfigured direct operator Linq chats. Its SQLite contains only counts,
+  ratios, bounded state maps, error-counter baselines, failure codes, and alert
   admission state. First-incident and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
   persistence; an inside-fence direct-error body excludes co-occurring
@@ -806,8 +806,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   advances the persisted sample baseline. After the older message is
   acknowledged, the next run atomically promotes that evidence into the one
   pending message slot; provider pacing still applies, and retry never mutates
-  a provider-entered body. Acknowledged Linq entry is the only operation that
-  clears a pending page. SQLite contains no connection URL,
+  a provider-entered body. Before posting, the monitor resolves both direct
+  chats and requires two distinct sole external recipients. Primary recipient
+  identity is a prerequisite for secondary provider entry, so an unresolved
+  primary identity suppresses both operations while an unresolved secondary
+  identity may still allow the primary. Delivery health is independent from
+  identity: a known but unhealthy primary destination does not block a healthy,
+  distinct secondary. If distinct chats resolve to the same recipient, only
+  the primary operation may enter Linq and the page stays pending until
+  configuration is corrected. Otherwise the two
+  direct-chat deliveries settle independently: the primary retains the existing
+  idempotency key, the secondary uses a stable derived key, and a partial
+  failure retains the pending page for a later globally paced replay. Only
+  acknowledged entry to both distinct recipients clears a pending page. SQLite
+  contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.

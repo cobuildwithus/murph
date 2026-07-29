@@ -86,16 +86,31 @@ Last verified: 2026-07-29
   actual wall time, not the Cron slot, and is written before network egress.
   The message's UTC check time likewise comes from the actual completed
   collection run while the Cron slot remains only the persisted sample
-  identity. Every eligible attempt retrieves the configured direct chat and
-  current line reputation; unhealthy or indeterminate delivery health produces
-  no message POST and retains the pending alert for the next paced attempt.
-  Healthy delivery uses Linq's no-`from` auto-selection route. A
-  transport-ambiguous or rejected send keeps the exact persisted body and Linq
-  idempotency key for the next eligible attempt; acknowledged recurrences
-  advance the alert sequence and choose another fixed opening from current
-  metric evidence. Message variation must remain contextual and
-  deterministic, never random padding. Database pages intentionally have no
-  quiet hours.
+  identity. Every eligible cycle independently retrieves both configured
+  direct chats and current line reputation; unhealthy or indeterminate health
+  suppresses that destination's message POST without blocking the other
+  destination, and retains the pending alert for the next paced cycle. Healthy
+  destinations are compared before provider entry. Primary recipient identity
+  is required before any secondary POST: an unresolved primary identity
+  suppresses both positions, while an unresolved secondary identity does not
+  block a healthy primary. A known primary identity with unhealthy or
+  indeterminate delivery health still permits a healthy distinct secondary
+  POST; the suppressed primary keeps the page pending.
+  Distinct chat ids that resolve to the same external recipient admit only the
+  primary POST and keep the page pending; after configuration is corrected,
+  stable provider
+  idempotency deduplicates that primary replay while the actual secondary
+  receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
+  route separately for each chat. The primary retains the persisted Linq
+  idempotency key and the secondary uses a stable derived key. A
+  transport-ambiguous or rejected send keeps the exact persisted body and both
+  destination keys for the next eligible cycle; only acknowledged entry to both
+  distinct recipients clears the pending alert. An idempotent replay of a
+  destination that already succeeded cannot produce another recipient-visible
+  message. Acknowledged recurrences advance the alert
+  sequence and choose another fixed opening from current metric evidence.
+  Message variation must remain contextual and deterministic, never random
+  padding. Database pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
