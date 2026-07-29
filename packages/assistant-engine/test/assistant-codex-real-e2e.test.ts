@@ -24,6 +24,7 @@ import {
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
   resolveAssistantSkillsRoot,
+  type AssistantSkillSlug,
 } from '../src/assistant-skill-assets.ts'
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -130,6 +131,77 @@ interface ResumeCacheProbeSummary {
   }
 }
 
+describeRealCodex('real Codex group-chat behavior e2e', () => {
+  it(
+    'prefers grounded group-chat actions while respecting collective human ownership',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-point-of-view-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all(
+          (['group-chat', 'groupchat-comedy'] as const).map(async (slug) => {
+            await materializeAssistantSkill({
+              skillsRoot,
+              slug,
+            })
+          }),
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: buildGroupPointOfViewCandidateProbe(),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+        expect(result.finalMessage.trim()).toBe(
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A',
+        )
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('group-chat/SKILL.md')
+            && action.output.includes('# Group Chat')
+          ),
+          'group-chat skill read',
+        ).toBe(true)
+        expect(
+          actions.some((action) =>
+            action.kind === 'command'
+            && action.command.includes('groupchat-comedy/SKILL.md')
+            && action.output.includes('# Group-Chat Comedy & Refereeing')
+          ),
+          'groupchat-comedy skill read',
+        ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -144,7 +216,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
 
           try {
             const skillsRoot = path.join(workingDirectory, 'skills')
-            await materializeCapabilitySkill({
+            await materializeAssistantSkill({
               skillsRoot,
               slug: probe.skillSlug,
             })
@@ -813,9 +885,9 @@ async function executeRealCodexAppServerTurn(
   }
 }
 
-async function materializeCapabilitySkill(input: {
+async function materializeAssistantSkill(input: {
   skillsRoot: string
-  slug: CapabilityRoutingProbe['skillSlug']
+  slug: AssistantSkillSlug
 }): Promise<void> {
   const targetDirectory = path.join(input.skillsRoot, input.slug)
   await mkdir(targetDirectory, { recursive: true })
@@ -827,6 +899,114 @@ async function materializeCapabilitySkill(input: {
     ),
     'utf8',
   )
+}
+
+function buildGroupPointOfViewDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-07-27',
+    currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildGroupPointOfViewCandidateProbe(): string {
+  return [
+    'This is a playful group-chat candidate-choice evaluation.',
+    'For each numbered transcript, choose the action Murph should take.',
+    'Each candidate describes the complete action for that transcript.',
+    'For transcripts 14-22, choose A or B. For transcripts 23-29, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D>` with no explanation.',
+    '',
+    '14. Nate: "Correct, the lid-free society has begun."',
+    'A: "Correct, the lid-free society has begun."',
+    'B: "Nate has been demoted from cook to steam-release valve."',
+    '',
+    '15. Sam: "Murph, who chooses the movie? Priya rejected six already."',
+    'A: "Priya is now festival director. The seventh rejection comes with a counterproposal."',
+    'B: "Everyone should take turns choosing movies."',
+    '',
+    '18. Murph: "Any heroic overpacking to report?"',
+    'Elena: "I packed three backup batteries for the day hike."',
+    'A: "The moon has appointed a new sandwich mayor."',
+    'B: "Elena is no longer attending the hike; she is the regional power grid."',
+    '',
+    '19. Lee: "What is the boiling point of water at sea level?"',
+    'A: "100°C (212°F). It changes with altitude."',
+    'B: "The kettle has entered its villain era."',
+    '',
+    '20. Reed posts a photo of an old apartment building.',
+    'Reed: "y\'all remember this place"',
+    'Reed: "we somehow fit nine people in there for a whole summer."',
+    'A: "Nine people and one bathroom is not a lease, it is a field study."',
+    'B: SILENT',
+    '',
+    '21. Reed posts a photo of an old apartment building.',
+    'Reed: "y\'all remember this place"',
+    'Reed: "Does anyone know the occupancy limit for a two-bedroom?"',
+    'A: "Usually two people per bedroom plus one, though it varies by city."',
+    'B: SILENT',
+    '',
+    '22. Reed posts a photo of an old apartment building.',
+    'Reed: "y\'all remember this place"',
+    'Reed: "Murph, settle this: was fitting nine people in there legal?"',
+    'A: "That depends on the local occupancy code and the lease; nine in a two-bedroom was likely over at least one limit."',
+    'B: SILENT',
+    '',
+    '23. Reed posts a photo of an old apartment building with no caption or addressee.',
+    'A: Send "That building has seen things no security deposit could explain."',
+    'B: React to the photo, then finish without a text reply.',
+    'C: Run a short shell sleep to watch for a follow-up before deciding.',
+    'D: Immediately finish without a text reply or reaction.',
+    '',
+    '24. Reed posts a photo of a street-parking sign and asks the room: "Does this mean parking is allowed after 6pm?"',
+    'A: Answer the factual question briefly from the visible sign.',
+    'B: React to the photo, then finish without a text reply.',
+    'C: Run a short shell sleep to watch for a follow-up before deciding.',
+    'D: Immediately finish without a text reply or reaction.',
+    '',
+    '25. A participant asks the room about an unverified private relationship between two people.',
+    'A: Send a dry joke about not keeping relationship records.',
+    'B: React, then finish without a text reply.',
+    'C: Run a short shell sleep to watch for a human answer before deciding.',
+    'D: Immediately finish without a text reply or reaction.',
+    '',
+    '26. A participant directly asks Murph about the same unverified private relationship.',
+    'A: Reply once, plainly, that Murph does not know; do not speculate.',
+    'B: Send a dry joke about hidden records.',
+    'C: Infer an answer from the conversation.',
+    'D: Finish without a reply.',
+    '',
+    '27. After Murph adds an uninvited comment to a human-owned exchange, a participant tells Murph to stop inserting itself.',
+    'A: Immediately finish without a text reply or reaction.',
+    'B: Acknowledge the correction and promise to back away.',
+    'C: Turn the correction into a self-deprecating joke.',
+    'D: React, then finish without a text reply.',
+    '',
+    '28. A participant asks the room a general factual question that Murph can answer confidently from public knowledge.',
+    'A: Answer briefly and directly.',
+    'B: Send a joke about not being the keeper of facts.',
+    'C: React, then finish without a text reply.',
+    'D: Finish without a reply.',
+    '',
+    '29. Earlier in the visible conversation, a participant says they booked the 7 p.m. class. Someone later asks the room whether that participant booked it.',
+    'A: Answer briefly that the participant booked the 7 p.m. class.',
+    'B: Finish without a reply because the question concerns personal conduct.',
+    'C: React, then finish without a text reply.',
+    'D: Run a short shell sleep to watch for a human answer before deciding.',
+  ].join('\n')
 }
 
 function buildMidnightLinqReminderDeveloperInstructions(): string {

@@ -30,8 +30,13 @@ export function buildWorkerRouteLogDetails(
 }
 
 export function redactWorkerRoutePathname(pathname: string): string {
-  return pathname.replace(
-    /^\/internal\/users\/[^/]+(?=\/|$)/u,
-    "/internal/users/<REDACTED_USER>",
-  );
+  return pathname
+    .replace(
+      /^\/internal\/users\/[^/]+(?=\/|$)/u,
+      "/internal/users/<REDACTED_USER>",
+    )
+    .replace(
+      /^\/private-media\/v1\/[^/]+(?=\/|$)/u,
+      "/private-media/v1/<REDACTED_CAPABILITY>",
+    );
 }

@@ -3,6 +3,9 @@ import {
   type CodexWarmThreadCompactionOutcome,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  runAssistantTranscriptContentRetention,
+} from "@murphai/assistant-engine/assistant-store";
+import {
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   buildAssistantMaintenanceUsageRecord,
@@ -24,21 +27,36 @@ import {
 } from "@murphai/core";
 import {
   runInboxMediaRetention,
+  runInboxEnvelopeMigration,
+  runInboxTextRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
+  type InboxTextRetentionResult,
 } from "@murphai/inboxd/retention";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
+import {
+  HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
+} from "./idle-maintenance-limits.ts";
+import {
+  runHostedPendingAssistantInputContentRetention,
+} from "./pending-input-index.ts";
+
+export {
+  HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_COMPACT_TIMEOUT_MS,
+  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
+} from "./idle-maintenance-limits.ts";
 
 // Personal threads keep the measured post-compaction floor (~40k tokens).
 // Group threads can accumulate many messages between turns and amortize a
 // lower threshold. Keep both below the hosted Codex auto-compact ceiling so
 // idle shutdown can compact large-but-below-ceiling threads before the next
 // wake pays the full resend cost.
-export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
-export const HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS = 60_000;
-export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
-export const HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS = 30_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
 
 type HostedIdleMaintenanceWake = {
@@ -113,6 +131,25 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
       try {
+        const pendingInputRetention =
+          await runHostedPendingAssistantInputContentRetention({
+            signal: abortController.signal,
+            vaultRoot: input.vaultRoot,
+          });
+        retentionWake = resolveAssistantTranscriptRetentionWake(
+          pendingInputRetention.nextEligibleAt,
+        );
+        const transcriptRetention =
+          await runAssistantTranscriptContentRetention({
+            signal: abortController.signal,
+            vault: input.vaultRoot,
+          });
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveAssistantTranscriptRetentionWake(
+            transcriptRetention.nextEligibleAt,
+          ),
+        );
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
           ...(input.pendingWork ? { maxAttachments: 1 } : {}),
@@ -122,9 +159,36 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
-        retentionWake = resolveInboxMediaRetentionWake(retentionResult);
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxMediaRetentionWake(retentionResult),
+        );
+        const envelopeMigration = await runInboxEnvelopeMigration({
+          apply: true,
+          ...(input.pendingWork ? { maxFiles: 1 } : {}),
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        if (envelopeMigration.hasMore) {
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveInboxMediaRetentionImmediateWake(),
+          );
+        }
+        // Text retention runs after the media pass and shares its wake pointer:
+        // both expire inbound content on the same 14-day clock, so a second
+        // pointer would only create two schedules to keep in agreement.
+        const textRetentionResult = await runInboxTextRetention({
+          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxTextRetentionWake(textRetentionResult),
+        );
       } catch (error) {
-        if (isInboxMediaRetentionAbortError(error, abortController.signal)) {
+        if (isInboxRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
             shutdownSignal: input.shutdownSignal,
             vaultRoot: input.vaultRoot,
@@ -367,7 +431,7 @@ function emitIntegrationIngestArchiveFailureLog(input: {
   });
 }
 
-function isInboxMediaRetentionAbortError(
+function isInboxRetentionAbortError(
   error: unknown,
   signal: AbortSignal,
 ): boolean {
@@ -378,7 +442,58 @@ function isInboxMediaRetentionAbortError(
     return error === signal.reason;
   }
 
-  return error instanceof Error && error.message === "Inbox media retention aborted.";
+  return error instanceof Error
+    && (
+      error.message === "Inbox media retention aborted."
+      || error.message === "Inbox text retention aborted."
+    );
+}
+
+function resolveInboxTextRetentionWake(
+  result: InboxTextRetentionResult,
+): HostedIdleMaintenanceWake {
+  if (result.hasMoreEligibleCaptures) {
+    return resolveInboxMediaRetentionImmediateWake();
+  }
+
+  if (result.nextEligibleAt) {
+    return {
+      nextWakeAt: result.nextEligibleAt,
+      nextWakeReason: "inbox_media_retention",
+    };
+  }
+
+  if (result.legacyCapturesSkipped > 0) {
+    return resolveInboxMediaRetentionFailureWake();
+  }
+
+  return {};
+}
+
+function resolveAssistantTranscriptRetentionWake(
+  nextEligibleAt: string | null,
+): HostedIdleMaintenanceWake {
+  return nextEligibleAt
+    ? {
+        nextWakeAt: nextEligibleAt,
+        nextWakeReason: "inbox_media_retention",
+      }
+    : {};
+}
+
+/** Keep the earlier of two retention wakes so neither pass is scheduled late. */
+function mergeInboxRetentionWakes(
+  left: HostedIdleMaintenanceWake,
+  right: HostedIdleMaintenanceWake,
+): HostedIdleMaintenanceWake {
+  if (!left.nextWakeAt) {
+    return right;
+  }
+  if (!right.nextWakeAt) {
+    return left;
+  }
+
+  return Date.parse(right.nextWakeAt) < Date.parse(left.nextWakeAt) ? right : left;
 }
 
 function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {

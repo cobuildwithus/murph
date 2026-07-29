@@ -632,14 +632,14 @@ export async function readHostedMemberAssistantNotificationState(input: {
     return null;
   }
 
-  const [phoneNumber, routing] = await Promise.all([
-    memberRecord.identity
-      ? readHostedMemberIdentityPhoneNumber(memberRecord.identity, input.prisma)
-      : null,
-    memberRecord.routing
-      ? projectHostedMemberRoutingState(memberRecord.routing, input.prisma)
-      : null,
-  ]);
+  // This projection is used from interactive transactions. Keep the narrow
+  // private-field reads ordered on that transaction's single connection.
+  const phoneNumber = memberRecord.identity
+    ? await readHostedMemberIdentityPhoneNumber(memberRecord.identity, input.prisma)
+    : null;
+  const routing = memberRecord.routing
+    ? await projectHostedMemberRoutingState(memberRecord.routing, input.prisma)
+    : null;
   return {
     identity: memberRecord.identity
       ? {

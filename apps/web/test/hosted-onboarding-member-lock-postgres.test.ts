@@ -1095,7 +1095,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(
           cleanupIdsAfter.filter((cleanup) => !cleanupIdsBefore.has(cleanup.id)),
-        ).toEqual([]);
+        ).toHaveLength(0);
       } finally {
         accountDeletionBoundaries.connectedAppsRevocationFails = true;
         setHostedSecureBoxStringTestCodecForTests(null);

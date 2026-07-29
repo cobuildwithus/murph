@@ -27,7 +27,6 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
@@ -39,6 +38,9 @@ import type {
 import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+} from '@murphai/hosted-execution/runtime-control'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -123,7 +125,6 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
@@ -143,8 +144,8 @@ export interface AssistantProviderTurn {
   permissions?: string | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
+  requireHostedPrivateImageDelivery?: boolean | null
   runtimeWorkspaceRoots?: readonly string[] | null
-  requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
@@ -240,6 +241,7 @@ export interface AssistantProviderTurnExecutionResult {
   // completion order. Delivered ahead of `response` because Codex frontends
   // render every completed agent message.
   precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
+  productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
   /** Accepted-input ordinal whose delivery context owns `response` and `responseMedia`. */
   responseDeliveryContextOrdinal: number
   /** Accepted input selected as the native target for this response, if any. */

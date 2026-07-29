@@ -232,6 +232,9 @@ function createRuntimeStore(input: {
     claimNextAttachmentParseJob() {
       return null
     },
+    redactCaptureText() {
+      return false
+    },
     close,
     completeAttachmentParseJob() {
       return {
@@ -333,6 +336,7 @@ function createRuntimeStore(input: {
     },
   } satisfies RuntimeStore & {
     databasePath: string
+    redactCaptureText(): boolean
     enqueueDerivedJobs(input: { captureId: string; stored: unknown }): void
     findByExternalId(
       source: string,

@@ -162,13 +162,103 @@ describe('assistant execution prompt contract', () => {
       'The humans are the protagonists, and Murph is an active, low-ego participant—not a passive help desk.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Create openings, join clearly open room beats, and yield when a specific human owns the exchange.',
+      'Create openings, join clearly open room beats, and yield when one or more humans own the exchange.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
     )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Human ownership can be collective.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'gets first refusal even when no individual is named',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'send no reply or reaction unless Murph is addressed',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Read immediate same-purpose same-sender elaborations as one beat.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Floor follows authority, not punctuation.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Apply this gate before any live-volley watch',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      "private relationships, personal conduct, shared social history, recognition, or recollection",
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'finish without text or reaction immediately. Do not sleep or watch on that terminal human-private branch.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Only participation cases that remain genuinely ambiguous after this gate may use the bounded live-volley watch.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'say plainly that you do not know; do not speculate or turn the limit into a bit.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'finish without a reply or reaction immediately',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Do not sleep or watch for a follow-up',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'no apology, acknowledgment, or backing-away bit',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'not a position to endorse or reject by reflex',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'agreement and disagreement are both tools, never defaults',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'heighten it, challenge it, invert it, reframe it, nominate someone, choose a side',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If no strong move is earned, answer plainly, react, or stay silent.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'never random weirdness or invented facts',
+    )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'active, low-ego participant',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Human ownership can be collective.',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Floor follows authority, not punctuation.',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'finish without a reply or reaction immediately',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'a new decision unit even inside the same accepted provider turn',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'A complaint that Murph inserted itself into a human-owned beat',
     )
   })
 
@@ -816,7 +906,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('guides explicit structured product feedback capture', () => {
+  it('guides proactive silent structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Product feedback:')
@@ -824,6 +914,24 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
+    expect(prompt).toContain(
+      'Treat the current request as a high-confidence inferred feature request when a Murph workflow is blocked, materially degraded, or forced into a manual workaround',
+    )
+    expect(prompt).toContain(
+      'One current-request gap is enough; the user does not need to complain or name the feature',
+    )
+    expect(prompt).toContain(
+      'select the single most material qualifying gap and call the tool at most once in the same turn',
+    )
+    expect(prompt).toContain('Capture it silently without interrupting the workflow')
+    expect(prompt).toContain('do not mention the log or ask permission')
+    expect(prompt).toContain(
+      'Never retry after any tool result, including accepted, already accepted, or unavailable',
+    )
+    expect(prompt).toContain('persistence is best-effort after the reply')
+    expect(prompt).toContain('Continue with the best available fallback')
+    expect(prompt).toContain('purely external or transient failures')
+    expect(prompt).toContain('Use `feature_request` for a missing or unsupported path')
     expect(prompt).toContain(
       'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )

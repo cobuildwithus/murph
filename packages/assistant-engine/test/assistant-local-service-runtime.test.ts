@@ -7,6 +7,9 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  HostedRuntimeProductFeedbackRecord,
+} from '@murphai/hosted-execution/runtime-control'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -151,6 +154,73 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.ok(
     (mocks.maybeRunAssistantRuntimeMaintenance.mock.invocationCallOrder[0] ?? 0) >
       (mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY),
+  )
+})
+
+test('sendAssistantMessageLocal hands off product feedback only after durable reply handoff', async () => {
+  const session = createAssistantSession()
+  const productFeedbackCandidate: HostedRuntimeProductFeedbackRecord = {
+    idempotencyKey: 'feedback-after-reply',
+    kind: 'feature_request',
+    relatedChangelogItemIds: [],
+    summary: 'Speculative: support the missing Murph path.',
+  }
+  const acceptProductFeedbackCandidate = vi.fn(() => {
+    throw new Error('Best-effort product feedback handoff failed.')
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-product-feedback',
+        productFeedbackCandidate,
+        response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        route: {
+          routeId: 'route-product-feedback',
+        },
+        session,
+        transcriptResponse: 'assistant response',
+      },
+    },
+    session,
+  })
+
+  await expect(sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-product-feedback',
+        productFeedbackCandidateSink: {
+          acceptProductFeedbackCandidate,
+        },
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Use a missing Murph path.',
+    vault: '/vaults/test',
+  })).resolves.toMatchObject({
+    response: 'assistant response',
+    status: 'completed',
+  })
+
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
+  ).toBeGreaterThan(
+    mocks.finalizeDeliveredAssistantTurn.mock.invocationCallOrder[0] ??
+      Number.POSITIVE_INFINITY,
+  )
+  expect(
+    acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
+  ).toBeGreaterThan(
+    mocks.dispatchAssistantReply.mock.invocationCallOrder[0] ??
+      Number.POSITIVE_INFINITY,
   )
 })
 
@@ -525,6 +595,150 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
     response: '',
     status: 'completed',
   })
+})
+
+test('sendAssistantMessageLocal preserves image presence for media-only image replies', async () => {
+  const session = createAssistantSession()
+  const imageMedia: AssistantResponseMedia = {
+    alt: 'Generated image',
+    kind: 'image',
+    source: null,
+    url: 'https://cdn.example.test/assistant/media-only.png',
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-image-media-only',
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: '',
+        responseMedia: [imageMedia],
+        route: { routeId: 'route-image-media-only' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Create an image without accompanying text',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('[This response included an image attachment.]')
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe('')
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    imageMedia,
+  ])
+})
+
+test('sendAssistantMessageLocal preserves image presence beside transcript text', async () => {
+  const session = createAssistantSession()
+  const imageMedia: AssistantResponseMedia = {
+    alt: 'Generated image',
+    kind: 'image',
+    source: null,
+    url: 'https://cdn.example.test/assistant/generated.png',
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-image-with-text',
+        response: 'The image is ready.',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'The image is ready.',
+        responseMedia: [imageMedia],
+        route: { routeId: 'route-image-with-text' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Create an image',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe(
+    '[This response included an image attachment.]\n\nThe image is ready.',
+  )
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    imageMedia,
+  ])
+})
+
+test('sendAssistantMessageLocal preserves image presence for preceding replies', async () => {
+  const session = createAssistantSession()
+  const imageMedia: AssistantResponseMedia = {
+    alt: 'Generated image',
+    kind: 'image',
+    source: null,
+    url: 'https://cdn.example.test/assistant/preceding.png',
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            media: [imageMedia],
+            response: 'The first image is ready.',
+          },
+        ],
+        response: 'The follow-up is ready.',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'The follow-up is ready.',
+        route: { routeId: 'route-preceding-image-with-text' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Create an image, then refine it',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual([
+    '[This response included an image attachment.]\n\nThe first image is ready.',
+  ])
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        media: [imageMedia],
+        response: 'The first image is ready.',
+      }),
+    ])
 })
 
 test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', async () => {
@@ -1247,6 +1461,15 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
   expect(mocks.deliverAssistantReaction).toHaveBeenCalledTimes(1)
   expect(mocks.deliverAssistantReaction.mock.calls[0]?.[0]?.input).toMatchObject({
     deliveryReplyToMessageId: '987654321',
+  })
+  expect(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.calls
+      .flatMap((call) => call[2])
+      .find((entry) =>
+        entry.kind === 'user' && entry.text === 'Reply to the selected message.'
+      ),
+  ).toMatchObject({
+    contentReceivedAt: '2026-04-22T10:00:00.000Z',
   })
 })
 
@@ -7542,6 +7765,7 @@ async function loadLocalServiceModule(input?: {
             targetInputId: string
           }[] | null
           rawEvents?: unknown[]
+          productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
           route?: {
             routeId?: string
           }

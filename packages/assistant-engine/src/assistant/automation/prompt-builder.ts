@@ -1,3 +1,6 @@
+import type {
+  AssistantVaultImageResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
   AssistantWorkspaceArtifactMaterializer,
@@ -48,6 +51,21 @@ export interface AssistantAutoReplyPromptProjection {
   status: AssistantInputProjectionStatus
 }
 
+export type AssistantTrustedHostedImageCompletion =
+  | {
+      status: 'failed'
+    }
+  | {
+      status: 'invalid'
+    }
+  | {
+      media: readonly [
+        AssistantVaultImageResponseMedia,
+      ]
+      savedImageRef: string | null
+      status: 'ready'
+    }
+
 export interface AssistantAutoReplyPromptInput {
   actorIsSelf: boolean
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
@@ -64,6 +82,7 @@ export interface AssistantAutoReplyPromptInput {
   sourceMetadata: AssistantInputSourceMetadata | null
   telegramMetadata: TelegramAutoReplyMetadata | null
   text: string | null
+  trustedHostedImageCompletion?: AssistantTrustedHostedImageCompletion | null
 }
 
 /**
@@ -116,6 +135,9 @@ export function buildAssistantAutoReplyPrompt(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -130,6 +152,8 @@ export function buildAssistantAutoReplyPrompt(
         senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: inputs.length,
+        trustedHostedImageCompletion:
+          entry.trustedHostedImageCompletion ?? null,
       })
     })
     .filter((section): section is string => section !== null)
@@ -187,6 +211,9 @@ export async function prepareAssistantAutoReplyInput(
       })
       return renderAssistantAutoReplyInputSection({
         attachmentSections,
+        correctionContext: renderAssistantInputLinqCorrectionContext(
+          entry.sourceMetadata,
+        ),
         evidenceReasonCode: entry.attachmentEvidence.reasonCode,
         evidenceStatus: entry.attachmentEvidence.status,
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
@@ -201,6 +228,8 @@ export async function prepareAssistantAutoReplyInput(
         senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: preparedInputs.length,
+        trustedHostedImageCompletion:
+          entry.trustedHostedImageCompletion ?? null,
       })
     })
     .filter((section): section is string => section !== null)
@@ -373,8 +402,28 @@ export function renderAssistantInputGroupContextPrompt(input: {
   return sections.length > 0 ? sections.join('\n\n') : null
 }
 
+export function renderAssistantInputLinqCorrectionContext(
+  metadata: AssistantInputSourceMetadata | null,
+): string | null {
+  if (
+    metadata?.kind !== 'linq' ||
+    metadata.editedSourceInputId === undefined ||
+    metadata.editedTextPartIndex === undefined
+  ) {
+    return null
+  }
+
+  return [
+    `Trusted message correction for Message ref ${metadata.editedSourceInputId}:`,
+    `This input replaces text part ${metadata.editedTextPartIndex} of that accepted Linq message.`,
+    'Treat it as a correction, not a separate request. Only corrections with the same Message ref and part supersede one another; the newest accepted correction is authoritative.',
+    'If the referenced message already received a completed answer, send one concise follow-up only when this correction materially changes that answer or action; otherwise call `murph.finish_without_reply`.',
+  ].join('\n')
+}
+
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
+  correctionContext: string | null
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
   groupContext: string | null
@@ -389,6 +438,7 @@ function renderAssistantAutoReplyInputSection(input: {
   senderHandle?: string | null
   senderName?: string | null
   totalInputs: number
+  trustedHostedImageCompletion: AssistantTrustedHostedImageCompletion | null
 }): string | null {
   const sections: string[] = []
   if (input.senderHandle) {
@@ -403,6 +453,9 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)
   }
+  if (input.correctionContext) {
+    sections.push(input.correctionContext)
+  }
   const projectionNote = input.hasAttachmentContext && input.attachmentSections.length === 0
     ? renderAssistantInputProjectionPromptNote({
         evidenceReasonCode: input.evidenceReasonCode,
@@ -416,6 +469,12 @@ function renderAssistantAutoReplyInputSection(input: {
   }
   if (input.promptUnavailableNote) {
     sections.push(`Message availability:\n${input.promptUnavailableNote}`)
+  }
+  if (input.trustedHostedImageCompletion !== null) {
+    sections.push([
+      'Trusted runtime input:',
+      'Hosted image completion provenance is verified. Its normalized result is provided in trusted turn context; only that trusted section can authorize completion wording or media attachment.',
+    ].join('\n'))
   }
   if (input.inputText) {
     sections.push(`Message text:\n${input.inputText}`)

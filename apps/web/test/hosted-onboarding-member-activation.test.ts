@@ -601,6 +601,37 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(4);
   });
 
+  it("suppresses the canned signup welcome when the accepted inbound is the welcome turn", async () => {
+    const member = makeMemberSnapshot();
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_instant_start",
+          sourceType: "hosted.linq.instant-start",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        suppressSignupWelcome: true,
+      }),
+    ).resolves.toMatchObject({
+      activated: true,
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+        signupWelcome: null,
+      }),
+      tx: expect.anything(),
+    });
+  });
+
   it("does not enqueue a signup welcome when Linq only assigned a home line", async () => {
     const member = makeMemberSnapshot();
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValueOnce({

@@ -50,7 +50,7 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
 }
 
 interface HostedLocalTestRunnerContainerStubLike {
-  armGeneratedImageUploadTypeErrorForTest?(
+  armGeneratedImageProviderBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
   armCanonicalCheckpointLostAckForTest?(
@@ -73,9 +73,24 @@ interface HostedLocalTestRunnerContainerStubLike {
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseGeneratedImageProviderBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   releaseShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true; released: boolean }>;
+}
+
+function hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
+  HostedLocalTestRunnerContainerStubLike,
+  "armGeneratedImageProviderBarrierForTest" | "releaseGeneratedImageProviderBarrierForTest"
+>> {
+  return "armGeneratedImageProviderBarrierForTest" in stub
+    && typeof stub.armGeneratedImageProviderBarrierForTest === "function"
+    && "releaseGeneratedImageProviderBarrierForTest" in stub
+    && typeof stub.releaseGeneratedImageProviderBarrierForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
@@ -85,15 +100,6 @@ function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
 } {
   return "armCanonicalCheckpointLostAckForTest" in stub
     && typeof stub.armCanonicalCheckpointLostAckForTest === "function";
-}
-
-function hasHostedLocalTestRunnerContainerGeneratedImageUploadTypeErrorControl(
-  stub: object,
-): stub is HostedLocalTestRunnerContainerStubLike & {
-  armGeneratedImageUploadTypeErrorForTest(input: { userId: string }): Promise<{ ok: true }>;
-} {
-  return "armGeneratedImageUploadTypeErrorForTest" in stub
-    && typeof stub.armGeneratedImageUploadTypeErrorForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(
@@ -194,14 +200,38 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       return requireHostedWorkerTestEnvironment(context);
     },
     async handle(context, params) {
-      return handleTestGeneratedImageUploadTypeErrorRoute(context, params.userId);
+      return handleTestGeneratedImageProviderBarrierRoute(
+        context,
+        params.userId,
+        "arm",
+      );
     },
     match: matchHostedLocalTestUserRoute(
       "/__test/users/",
-      "/generated-image-upload-type-error",
+      "/generated-image-provider-barrier/arm",
     ),
     methods: ["POST"],
-    name: "test-generated-image-upload-type-error",
+    name: "test-arm-generated-image-provider-barrier",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestGeneratedImageProviderBarrierRoute(
+        context,
+        params.userId,
+        "release",
+      );
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/generated-image-provider-barrier/release",
+    ),
+    methods: ["POST"],
+    name: "test-release-generated-image-provider-barrier",
     wrongMethodResponse: "not-found",
   },
   {
@@ -435,9 +465,10 @@ export async function handleTestCanonicalCheckpointLostAckRoute(
   return json(await stub.armCanonicalCheckpointLostAckForTest({ userId }));
 }
 
-export async function handleTestGeneratedImageUploadTypeErrorRoute(
+async function handleTestGeneratedImageProviderBarrierRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
+  action: "arm" | "release",
 ): Promise<Response> {
   if (!isHostedWorkerTestEnvironment(context.env)) {
     return notFound();
@@ -449,7 +480,7 @@ export async function handleTestGeneratedImageUploadTypeErrorRoute(
     userId,
     "Hosted execution bound user does not match the test runner user.",
     "test-runner-bound-user-mismatch",
-    "test-generated-image-upload-type-error",
+    `test-${action}-generated-image-provider-barrier`,
   );
   if (boundUserResponse) {
     return boundUserResponse;
@@ -459,15 +490,16 @@ export async function handleTestGeneratedImageUploadTypeErrorRoute(
     source: context.env,
     userId,
   });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
-  if (!hasHostedLocalTestRunnerContainerGeneratedImageUploadTypeErrorControl(stub)) {
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (!hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(stub)) {
     throw new Error(
-      "Hosted runner container generated-image upload TypeError test RPC is unavailable.",
+      "Hosted runner container generated-image provider barrier test RPC is unavailable.",
     );
   }
-  return json(await stub.armGeneratedImageUploadTypeErrorForTest({ userId }));
+  const result = action === "arm"
+    ? await stub.armGeneratedImageProviderBarrierForTest({ userId })
+    : await stub.releaseGeneratedImageProviderBarrierForTest({ userId });
+  return json(result);
 }
 
 export async function handleTestSnapshotPublicationCorruptionRoute(

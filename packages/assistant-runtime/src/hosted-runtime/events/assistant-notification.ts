@@ -131,6 +131,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   ];
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
+  let deliveryIntentIds: string[] = [];
 
   try {
     const notificationResult = await sendAssistantNotification(
@@ -147,6 +148,12 @@ export async function executeHostedAssistantNotificationWake(input: {
       ),
     );
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
+    const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
+    const deliveryIntentId =
+      deliveryOutcome && "intentId" in deliveryOutcome
+        ? deliveryOutcome.intentId
+        : null;
+    deliveryIntentIds = deliveryIntentId ? [deliveryIntentId] : [];
     if (isHostedSignupWelcomeNotification(input.wake)) {
       seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
         logDetails: buildHostedAssistantNotificationLogDetails(input.wake),
@@ -190,6 +197,7 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   return createNoopMailboxEffect({
     conversationMetrics: null,
+    deliveryIntentIds,
     mailboxLane: "assistant-notification",
     nextWakeAt: seededOnboardingFollowupWakeAt,
     nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
@@ -326,7 +334,8 @@ function shouldSkipFailedHostedAssistantNotification(
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      wake.notification.firstContact != null
+      wake.notification.notificationPromptProfile === "creative-response"
+      || wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )
   );
@@ -551,6 +560,12 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
+    ...(wake.notification.notificationPromptProfile
+      ? {
+          notificationPromptProfile:
+            wake.notification.notificationPromptProfile,
+        }
+      : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     route: wake.notification.route,
@@ -573,6 +588,7 @@ function buildAssistantNotificationInputFromRoute(input: {
   firstContactPolicy: AssistantNotificationInput["firstContactPolicy"];
   instructions: string;
   logDetails: HostedExecutionStructuredLogDetails;
+  notificationPromptProfile?: AssistantNotificationInput["notificationPromptProfile"];
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
   responsePolicy: AssistantNotificationInput["responsePolicy"];
   route: HostedExecutionAssistantNotificationRoute;
@@ -621,6 +637,9 @@ function buildAssistantNotificationInputFromRoute(input: {
     firstContactPolicy: input.firstContactPolicy,
     identityId: route.identityId,
     instructions: input.instructions,
+    ...(input.notificationPromptProfile
+      ? { notificationPromptProfile: input.notificationPromptProfile }
+      : {}),
     onTraceEvent(event) {
       const contextEntry = emitHostedAssistantContextTraceLog({
         event,

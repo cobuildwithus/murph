@@ -44,6 +44,33 @@ import {
 } from '../src/assistant-cli-contracts.ts'
 
 describe('assistant CLI delivery contracts', () => {
+  it('accepts hash-bound private vault images without a public URL', () => {
+    const media = {
+      alt: 'Generated mobility setup',
+      contentType: 'image/webp' as const,
+      filename: 'generated-mobility.webp',
+      kind: 'vault_image' as const,
+      ref: 'raw/captures/generated-mobility.webp',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+      source: 'gpt-image-2',
+    }
+
+    expect(assistantResponseMediaSchema.parse(media)).toEqual(media)
+    expect(() => assistantResponseMediaSchema.parse({
+      ...media,
+      ref: '../generated-mobility.webp',
+    })).toThrow()
+    expect(() => assistantResponseMediaSchema.parse({
+      ...media,
+      contentType: 'image/svg+xml',
+    })).toThrow()
+    expect(() => assistantResponseMediaSchema.parse({
+      ...media,
+      url: 'https://example.test/private-image',
+    })).toThrow()
+  })
+
   it('keeps the supported messaging channels explicit after the hard cut', () => {
     expect(assistantChannelNameValues).toEqual(['telegram', 'linq', 'email'])
     expect(() => assistantChannelNameSchema.parse('whatsapp')).toThrow()

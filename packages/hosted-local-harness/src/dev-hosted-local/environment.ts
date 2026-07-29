@@ -282,6 +282,9 @@ export function mergeCloudflareLocalEnv(input: {
   const hostedProviderEgressCredentialSigningSecret =
     normalizeOptionalString(resolvedExisting.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET)
     ?? createEnvelopeKey();
+  const hostedPrivateMediaCapabilitySecret =
+    normalizeOptionalString(resolvedExisting.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET)
+    ?? createEnvelopeKey();
   const webOrigin = `http://${input.config.webHost}:${input.config.webPort}`;
   const workerOrigin =
     `${input.config.workerProtocol}://${input.config.workerHost}:${input.config.workerPort}`;
@@ -345,6 +348,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...hostedLocalR2PresignEnv,
     HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
     HOSTED_LOG_FINGERPRINT_SECRET: hostedLogFingerprintSecret,
+    HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: hostedPrivateMediaCapabilitySecret,
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       hostedProviderEgressCredentialSigningSecret,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
@@ -988,6 +992,7 @@ export function buildHostedLocalStateEnvFileText(
       && (
         key.startsWith("HOSTED_CRYPTO_")
         || key === "HOSTED_LOG_FINGERPRINT_SECRET"
+        || key === "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET"
         || key === "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET"
         || key.startsWith("HOSTED_WEB_CALLBACK_SIGNING_")
       )
@@ -1087,6 +1092,10 @@ export function buildWranglerLocalDevConfig(
           class_name: "UserRunnerDurableObject",
         },
         {
+          name: "DATABASE_HEALTH_MONITOR",
+          class_name: "DatabaseHealthDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -1109,7 +1118,14 @@ export function buildWranglerLocalDevConfig(
         tag: "v3",
         new_sqlite_classes: ["DeploySmokeRunnerContainer"],
       },
+      {
+        tag: "v4",
+        new_sqlite_classes: ["DatabaseHealthDurableObject"],
+      },
     ],
+    triggers: {
+      crons: ["*/5 * * * *"],
+    },
     r2_buckets: [
       {
         binding: "BUNDLES",

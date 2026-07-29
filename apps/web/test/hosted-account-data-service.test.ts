@@ -88,6 +88,10 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  buildHostedLinqInviteSignupEffectId,
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
@@ -115,6 +119,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
   "prisma.hosted_member_billing_ref",
+  "prisma.hosted_member_subscription_checkout",
   "prisma.hosted_account_deletion_cleanup",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
@@ -146,6 +151,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_growth_aggregate",
   "prisma.hosted_usage_credit_entry",
+  "prisma.hosted_usage_credit_grant",
+  "prisma.hosted_usage_referral",
   "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
@@ -205,12 +212,19 @@ beforeEach(() => {
   serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
   serviceMocks.pendingHostedAccountDeletionCleanupResult.mockReset();
   serviceMocks.pendingHostedAccountDeletionCleanupResult.mockImplementation(
-    (errorCode: string) => makeCleanupRunResult({
+    (errorCode = "ACCOUNT_DELETION_CLEANUP_PENDING") => makeCleanupRunResult({
       cleanupPending: true,
       cloudflare: {
         ...makeCloudflareDeletionResult(),
+        alarmCleared: null,
+        configured: false,
+        deleteAllCompleted: null,
         deleted: false,
         errorCode,
+        r2DeletedObjectCount: null,
+        r2SkippedUserScopedPrefixes: null,
+        r2Supported: null,
+        runnerStateDeleted: null,
       },
       privyUser: { errorCode, status: "failed" },
       stripeCustomer: { errorCode, status: "failed" },
@@ -546,6 +560,163 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("preempts a pending dispatch instead of stranding the deletion", async () => {
+    // In-flight provider ownership is represented by delivery rows and crossed
+    // by the shared drain. The outreach row itself must not strand deletion.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
+      groupJoinOutreachRows: [{
+        id: "hgrpjoa_inflight",
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toBeDefined();
+
+    expect(deleteCalls.map((call) => call.model))
+      .toContain("hostedGroupJoinOutreach");
+  });
+
+  it("deletes an owned group's outreach correlation before the group cascade hides it", async () => {
+    // The delivery correlation is reachable only through the outreach id. If the
+    // group cascade removed the outreach row first, the correlation would survive
+    // both the group's deletion and the participant's later account deletion.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinOutreachOwnedGroupIds: ["hgrp_owned"],
+      groupJoinOutreachRows: [{
+        id: "hgrpjoa_owned",
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedLinqDelivery",
+        where: {
+          groupJoinOutreachId: { in: ["hgrpjoa_owned"] },
+        },
+      },
+      {
+        model: "hostedGroupJoinOutreach",
+        where: { id: { in: ["hgrpjoa_owned"] } },
+      },
+    ]));
+
+    const models = deleteCalls.map((call) => call.model);
+    const outreachDeliveryIndex = deleteCalls.findIndex((call) =>
+      call.model === "hostedLinqDelivery"
+      && typeof call.where === "object"
+      && call.where !== null
+      && "groupJoinOutreachId" in call.where
+    );
+    expect(outreachDeliveryIndex)
+      .toBeLessThan(models.indexOf("hostedGroupJoinOutreach"));
+    expect(models.indexOf("hostedGroupJoinOutreach"))
+      .toBeLessThan(models.indexOf("hostedGroup"));
+  });
+
+  it("locks an affected participant before the drain and reprojects its daily signup marker", async () => {
+    const participantMemberId = "member_group_participant";
+    const occurredAt = new Date("2026-07-27T14:00:00.000Z");
+    const outreachId = "hgrpjoa_owned_projection";
+    const sourceRef = buildHostedLinqInviteSignupEffectId({
+      memberId: participantMemberId,
+      occurredAt,
+      sourceEventDigest: "a".repeat(32),
+    });
+    const dailyStateUpdates: unknown[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      dailyStateUpdates,
+      groupJoinDeliveryRows: [{ sourceRef }],
+      groupJoinOutreachOwnedGroupIds: ["hgrp_owned_projection"],
+      groupJoinOutreachRows: [{
+        id: outreachId,
+      }],
+      liveSignupDeliveryRows: [],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
+      .toBeGreaterThanOrEqual(0);
+    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
+      .toBeLessThan(operationOrder.lastIndexOf("executeRaw"));
+    expect(dailyStateUpdates).toContainEqual({
+      data: { onboardingLinkSentAt: null },
+      where: {
+        dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+        memberId: participantMemberId,
+        onboardingLinkSentAt: { not: null },
+      },
+    });
+  });
+
+  it("deletes pre-member group-join outreach and its provider correlation", async () => {
+    // The account is keyed by member id but this outreach is keyed by the
+    // participant's phone blind index, so the deletion promise is only true if it
+    // resolves that identity before removing the identity rows.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
+      groupJoinOutreachRows: [{
+        id: "hgrpjoa_opaque",
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedGroupJoinOutreach",
+        where: { id: { in: ["hgrpjoa_opaque"] } },
+      },
+      {
+        model: "hostedLinqDelivery",
+        where: {
+          groupJoinOutreachId: { in: ["hgrpjoa_opaque"] },
+        },
+      },
+    ]));
+
+    const models = deleteCalls.map((call) => call.model);
+    expect(models.indexOf("hostedGroupJoinOutreach"))
+      .toBeLessThan(models.indexOf("hostedMemberIdentity"));
+    // The registry must also declare the store, or the deletion report and the
+    // Settings promise would omit data that was in fact removed.
+    expect(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((store) => store.slug))
+      .toEqual(expect.arrayContaining([
+        "prisma.hosted_group_join_outreach",
+        "prisma.hosted_group_join_outreach_delivery",
+      ]));
+  });
+
   it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -590,13 +761,15 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("deletes usage-credit entries before purchases and member rows", async () => {
+  it("deletes usage-credit entries and grants before source and member rows", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const updateCalls: HostedAccountDeletionPrismaUpdateCall[] = [];
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
+      updateCalls,
     });
 
     const result = await deleteHostedAccountData({
@@ -607,6 +780,8 @@ describe("deleteHostedAccountData", () => {
 
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_usage_credit_entry": 1,
+      "prisma.hosted_usage_credit_grant": 1,
+      "prisma.hosted_usage_referral": 2,
       "prisma.hosted_usage_credit_purchase": 1,
     });
     expect(deleteCalls).toEqual(expect.arrayContaining([
@@ -620,13 +795,85 @@ describe("deleteHostedAccountData", () => {
         },
       },
       {
+        model: "hostedUsageCreditGrant",
+        where: {
+          entry: {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              {
+                purchase: {
+                  beneficiaryMemberId: "member_123",
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
+        model: "hostedUsageReferral",
+        where: {
+          OR: [
+            { beneficiaryMemberId: "member_123" },
+            {
+              AND: [
+                {
+                  OR: [
+                    { beneficiaryMemberId: "member_123" },
+                    { introducedMemberId: "member_123" },
+                    { referrerMemberId: "member_123" },
+                    { targetContainerMemberId: "member_123" },
+                  ],
+                },
+                { status: { not: "rewarded" } },
+              ],
+            },
+          ],
+        },
+      },
+      {
         model: "hostedUsageCreditPurchase",
         where: {
           beneficiaryMemberId: "member_123",
         },
       },
     ]));
+    expect(updateCalls).toContainEqual({
+      data: {
+        firstHumanMessageAt: null,
+        humanMessageCount: 0,
+        introducedMemberId: null,
+        lastHumanMessageAt: null,
+        nonReferrerMessageCount: 0,
+        observedEventKeysJson: expect.anything(),
+        observedSpeakerKeysJson: expect.anything(),
+        referrerMemberId: null,
+        referrerSubjectKey: null,
+        sourceConversationJson: expect.anything(),
+        targetContainerMemberId: null,
+      },
+      model: "hostedUsageReferral",
+      where: {
+        AND: [
+          {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              { introducedMemberId: "member_123" },
+              { referrerMemberId: "member_123" },
+              { targetContainerMemberId: "member_123" },
+            ],
+          },
+          { NOT: { beneficiaryMemberId: "member_123" } },
+        ],
+        status: "rewarded",
+      },
+    });
+    expect(operationOrder.indexOf("delete:hostedUsageCreditGrant")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditEntry"),
+    );
     expect(operationOrder.indexOf("delete:hostedUsageCreditEntry")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageReferral"),
+    );
+    expect(operationOrder.indexOf("delete:hostedUsageReferral")).toBeLessThan(
       operationOrder.indexOf("delete:hostedUsageCreditPurchase"),
     );
     expect(operationOrder.indexOf("delete:hostedUsageCreditPurchase")).toBeLessThan(
@@ -758,15 +1005,20 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
+          groupJoinOutreachId: null,
           OR: [
             {
               sourceRef: {
-                startsWith: "linq-invite-signup:member_123:",
+                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
+                  "member_123",
+                ),
               },
             },
             {
               sourceRef: {
-                startsWith: "linq-invite-signup:member_thread_container_123:",
+                startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(
+                  "member_thread_container_123",
+                ),
               },
             },
           ],
@@ -997,6 +1249,186 @@ describe("deleteHostedAccountData", () => {
       stripeCustomer: { errorCode: null, status: "completed" },
       stripeSubscription: { errorCode: null, status: "completed" },
     });
+  });
+
+  it("expires every open direct and Family subscription Checkout before canonical deletion", async () => {
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(async () => ({
+            customer: "cus_delete_123",
+            status: "expired",
+            subscription: null,
+          })),
+          retrieve: vi.fn(async () => ({
+            customer: "cus_delete_123",
+            status: "open",
+            subscription: null,
+          })),
+        },
+      },
+      customers: { del: vi.fn() },
+      subscriptions: {
+        cancel: vi.fn(),
+        retrieve: vi.fn(),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      stripeCheckoutSessionId: "cs_delete_123",
+      stripeSubscriptionId: null,
+    });
+    const secondSessionIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-subscription-checkout.stripe-session-id",
+      memberId: "member_123",
+      value: "cs_delete_456",
+    });
+    if (!secondSessionIdEncrypted) {
+      throw new TypeError("Expected encrypted Checkout session fixture.");
+    }
+    vendorRows.checkoutSessionRecords.push({
+      memberId: "member_123",
+      stripeCheckoutSessionIdEncrypted: secondSessionIdEncrypted,
+    });
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCheckoutSessionId: "cs_family_delete_789",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_delete_123");
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_delete_456");
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_family_delete_789",
+    );
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: ["cus_delete_123"],
+      }),
+    );
+  });
+
+  it("captures and cancels direct and Family subscriptions that complete while deletion fences Checkout", async () => {
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async (sessionId: string) => sessionId === "cs_family_checkout_456"
+            ? {
+                customer: "cus_family_checkout_456",
+                status: "complete",
+                subscription: "sub_family_checkout_456",
+              }
+            : {
+                customer: "cus_checkout_123",
+                status: "complete",
+                subscription: "sub_checkout_123",
+              }),
+        },
+      },
+      customers: { del: vi.fn() },
+      subscriptions: {
+        cancel: vi.fn(async () => ({ status: "canceled" })),
+        retrieve: vi.fn(async () => ({ status: "active" })),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      stripeCheckoutSessionId: "cs_delete_123",
+      stripeSubscriptionId: null,
+    });
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCheckoutSessionId: "cs_family_checkout_456",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_checkout_123");
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_family_checkout_456",
+    );
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: [
+          "cus_delete_123",
+          "cus_checkout_123",
+          "cus_family_checkout_456",
+        ],
+        stripeSubscriptionIds: [
+          "sub_checkout_123",
+          "sub_family_checkout_456",
+        ],
+      }),
+    );
+  });
+
+  it("treats a confirmed-missing subscription Checkout as terminal", async () => {
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => {
+            throw Object.assign(new Error("No such checkout session"), {
+              code: "resource_missing",
+              type: "StripeInvalidRequestError",
+            });
+          }),
+        },
+      },
+      customers: { del: vi.fn() },
+      subscriptions: {
+        cancel: vi.fn(),
+        retrieve: vi.fn(),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      stripeCheckoutSessionId: "cs_missing_123",
+      stripeSubscriptionId: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      cleanupPending: false,
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
   });
 
   it("captures direct and owned Family customer IDs in one cleanup receipt", async () => {
@@ -1445,12 +1877,14 @@ describe("deleteHostedAccountData", () => {
 
     const firstLockIndex = operationOrder.indexOf("queryRaw");
     const suspensionIndex = operationOrder.indexOf("update:hostedMember");
+    const suspensionDrainIndex = operationOrder.indexOf("executeRaw");
     const runCleanupIndex = operationOrder.indexOf("find:hostedComputerRun");
     const finalLockIndex = operationOrder.lastIndexOf("queryRaw");
     const runDeleteIndex = operationOrder.indexOf("delete:hostedComputerRun");
     expect(firstLockIndex).toBeGreaterThanOrEqual(0);
     expect(suspensionIndex).toBeGreaterThan(firstLockIndex);
-    expect(runCleanupIndex).toBeGreaterThan(suspensionIndex);
+    expect(suspensionDrainIndex).toBeGreaterThan(suspensionIndex);
+    expect(runCleanupIndex).toBeGreaterThan(suspensionDrainIndex);
     expect(runCleanupIndex).toBeLessThan(finalLockIndex);
     expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
   });
@@ -1648,6 +2082,11 @@ describe("deleteHostedAccountData", () => {
     expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
+    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      attemptTimeoutMs: 5_000,
+      cleanupId: "cleanup_123",
+      prisma,
+    });
     expect(result.cleanupPending).toBe(true);
   });
 
@@ -2238,9 +2677,14 @@ describe("deleteHostedAccountData", () => {
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
+  checkoutSessionRecords?: Array<{
+    memberId: string;
+    stripeCheckoutSessionIdEncrypted: string;
+  }>;
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
   countResults?: Record<string, number>;
+  dailyStateUpdates?: unknown[];
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
     id: string;
@@ -2254,16 +2698,28 @@ function createHostedAccountDeletionPrismaForTest(input: {
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
+  groupJoinOutreachOwnedGroupIds?: readonly string[];
+  groupJoinOutreachPhoneLookupKeys?: readonly string[];
+  groupJoinDeliveryRows?: readonly { sourceRef: string | null }[];
+  groupJoinOutreachRows?: readonly {
+    id: string;
+  }[];
+  liveSignupDeliveryRows?: readonly { sourceRef: string | null }[];
   onTransaction: () => void;
   operationOrder?: string[];
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   transactionBillingRefRecord?: Record<string, unknown> | null;
+  transactionCheckoutSessionRecords?: Array<{
+    memberId: string;
+    stripeCheckoutSessionIdEncrypted: string;
+  }>;
   transactionDeviceConnections?: Array<{
     id: string;
     provider: string;
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  updateCalls?: HostedAccountDeletionPrismaUpdateCall[];
   transactionFamilyBillingRefRecords?: Record<string, unknown>[];
   transactionFamilyGroups?: Array<{ id: string }>;
   transactionIdentityRecord?: Record<string, unknown> | null;
@@ -2280,6 +2736,34 @@ function createHostedAccountDeletionPrismaForTest(input: {
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
+    findMany: async (args) => (
+      model === "hostedMemberIdentity"
+        ? (input.groupJoinOutreachPhoneLookupKeys ?? []).map((phoneLookupKey) => ({
+            phoneLookupKey,
+          }))
+        : model === "hostedGroup"
+          ? (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }))
+          : model === "hostedGroupJoinOutreach"
+            ? input.groupJoinOutreachRows ?? []
+            : model === "hostedLinqDelivery"
+              ? (
+                  args.where
+                  && typeof args.where === "object"
+                  && "status" in args.where
+                )
+                ? input.liveSignupDeliveryRows ?? []
+                : input.groupJoinDeliveryRows ?? []
+            : []
+    ),
+    updateMany: async (args) => {
+      input.operationOrder?.push(`update:${model}`);
+      input.updateCalls?.push({
+        data: args.data,
+        model,
+        where: args.where,
+      });
+      return { count: 1 };
+    },
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
     $executeRaw: async (...args: unknown[]) => {
@@ -2292,8 +2776,14 @@ function createHostedAccountDeletionPrismaForTest(input: {
       }
       return 1;
     },
-    $queryRaw: async () => {
+    $queryRaw: async (...args: unknown[]) => {
       input.operationOrder?.push("queryRaw");
+      const memberId = args.slice(1).find((value): value is string =>
+        typeof value === "string" && value.startsWith("member_")
+      );
+      if (memberId) {
+        input.operationOrder?.push(`queryRaw:${memberId}`);
+      }
       return [{ id: "member_123" }];
     },
     deviceConnection: {
@@ -2344,11 +2834,25 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return { count: 1 };
       },
     },
+    hostedLinqDailyState: {
+      ...makeDeleteDelegate("hostedLinqDailyState"),
+      updateMany: async (args: unknown) => {
+        input.dailyStateUpdates?.push(args);
+        return { count: 1 };
+      },
+    },
     hostedMemberBillingRef: {
       ...makeDeleteDelegate("hostedMemberBillingRef"),
       findUnique: async () => input.transactionBillingRefRecord
         ?? input.billingRefRecord
         ?? null,
+    },
+    hostedMemberSubscriptionCheckout: {
+      ...makeDeleteDelegate("hostedMemberSubscriptionCheckout"),
+      findMany: async () =>
+        input.transactionCheckoutSessionRecords
+        ?? input.checkoutSessionRecords
+        ?? [],
     },
     hostedMemberIdentity: {
       ...makeDeleteDelegate("hostedMemberIdentity"),
@@ -2384,8 +2888,26 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedMemberBillingRef: {
       findUnique: async () => input.billingRefRecord ?? null,
     },
+    hostedMemberSubscriptionCheckout: {
+      findMany: async () => input.checkoutSessionRecords ?? [],
+    },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
+      // Pre-member group-join outreach is resolved from the member's phone blind
+      // index before the identity rows are deleted.
+      findMany: async () => input.groupJoinOutreachPhoneLookupKeys
+        ? input.groupJoinOutreachPhoneLookupKeys.map((phoneLookupKey) => ({
+            phoneLookupKey,
+          }))
+        : [],
+    },
+    hostedGroupJoinOutreach: {
+      findMany: async () => input.groupJoinOutreachRows ?? [],
+    },
+    hostedGroup: {
+      findMany: async () => input.groupJoinOutreachOwnedGroupIds
+        ? input.groupJoinOutreachOwnedGroupIds.map((id) => ({ id }))
+        : [],
     },
     hostedConnectedAppsSession: {
       findUnique: async () => input.connectedAppsSession
@@ -2442,10 +2964,15 @@ function makeHostedComputerRunRowForDeletionTest(
 
 async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
   privyUserId?: string | null;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
 }): Promise<{
   billingRefRecord: Record<string, unknown>;
+  checkoutSessionRecords: Array<{
+    memberId: string;
+    stripeCheckoutSessionIdEncrypted: string;
+  }>;
   identityRecord: Record<string, unknown>;
 }> {
   const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
@@ -2468,9 +2995,23 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
+  const stripeCheckoutSessionId = overrides?.stripeCheckoutSessionId ?? null;
+  const stripeCheckoutSessionIdEncrypted = stripeCheckoutSessionId
+    ? await encryptHostedWebNullableString({
+        field: "hosted-member-subscription-checkout.stripe-session-id",
+        memberId,
+        value: stripeCheckoutSessionId,
+      })
+    : null;
 
   return {
     billingRefRecord: { memberId, ...billingPrivateColumns },
+    checkoutSessionRecords: stripeCheckoutSessionIdEncrypted
+      ? [{
+          memberId,
+          stripeCheckoutSessionIdEncrypted,
+        }]
+      : [],
     identityRecord: {
       memberId,
       walletAddressEncrypted: null,
@@ -2486,10 +3027,20 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
 async function makeFamilyBillingRefRowForTest(input: {
   groupId: string;
   ownerMemberId: string;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }): Promise<Record<string, unknown>> {
-  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+  const [
+    stripeCheckoutSessionIdEncrypted,
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
+  ] = await Promise.all([
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-checkout-session-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeCheckoutSessionId ?? null,
+    }),
     encryptHostedWebNullableString({
       field: "hosted-account-group-billing-ref.stripe-customer-id",
       memberId: input.ownerMemberId,
@@ -2515,12 +3066,19 @@ async function makeFamilyBillingRefRowForTest(input: {
     },
     groupId: input.groupId,
     lastStripeEventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    stripeCheckoutSessionIdEncrypted,
     stripeCustomerIdEncrypted,
     stripeSubscriptionIdEncrypted,
   };
 }
 
 type HostedAccountDeletionPrismaDeleteCall = {
+  model: string;
+  where: unknown;
+};
+
+type HostedAccountDeletionPrismaUpdateCall = {
+  data: unknown;
   model: string;
   where: unknown;
 };
@@ -2535,6 +3093,11 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 type HostedAccountDeletionPrismaDeleteDelegate = {
   count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
+  // Some deletion owners must read rows before removing them, such as resolving
+  // pre-member outreach from the member's phone blind index. Reading empty keeps
+  // those paths inert unless a test supplies rows.
+  findMany(args: { where?: unknown; select?: unknown }): Promise<readonly unknown[]>;
+  updateMany(args: { data?: unknown; where?: unknown }): Promise<{ count: number }>;
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {
@@ -2554,6 +3117,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };
+  hostedLinqDailyState: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+  };
   hostedThreadContainer: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{ memberId: string }>>;
   };
@@ -2568,6 +3134,12 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   hostedMemberBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
     findUnique: () => Promise<unknown>;
+  };
+  hostedMemberSubscriptionCheckout: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{
+      memberId: string;
+      stripeCheckoutSessionIdEncrypted: string;
+    }>>;
   };
   hostedMemberIdentity: HostedAccountDeletionPrismaDeleteDelegate & {
     findUnique: () => Promise<unknown>;

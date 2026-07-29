@@ -269,7 +269,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-challenge',
     name: 'group-challenge',
     triggerHint:
-      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns the challenge lifecycle: kickoff (metric negotiation, consent, introductions and photos, baselines, stakes), the durable challenge page that survives context resets, daily standings dispatches, rulings, confounders, and close-out. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns social-first formation grounded in the current room, metric and window selection, human-owned real-world stakes, challenge buy-in, room-native cast material and approved photos, baselines, consented scoring, the durable challenge page, daily dispatches, rulings, confounders, and close-out. A vague challenge request is not exercise programming. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
   },
   {
     slug: 'music-generation',

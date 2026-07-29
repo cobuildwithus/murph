@@ -17,6 +17,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -34,6 +35,7 @@ import type {
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
+  HostedExecutionAssistantNotificationPromptProfile,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -116,6 +118,7 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
+  parseHostedExecutionDeviceSyncExpectedConnectedAt,
   parseHostedExecutionDeviceSyncReason,
   parseHostedExecutionDeviceSyncWakeHint,
 } from "./parsers/device-sync.ts";
@@ -351,6 +354,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
               ),
             }),
         eventId,
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution wake device-sync.wake expectedConnectedAt",
+              ),
+            }),
         ...(record.hint === undefined
           ? {}
           : { hint: parseHostedExecutionDeviceSyncWakeHint(record.hint) }),
@@ -973,6 +984,22 @@ function parseHostedExecutionLinqConversationMessage(
       ? {}
       : { affirmativeReaction: true }),
     chatId: requireString(record.chatId, `${label} chatId`),
+    ...(record.editedTextPartIndex === undefined
+      ? {}
+      : {
+          editedTextPartIndex: parseHostedExecutionLinqEditedTextPartIndex(
+            record.editedTextPartIndex,
+            `${label} editedTextPartIndex`,
+          ),
+        }),
+    ...(record.editedSourceInputId === undefined
+      ? {}
+      : {
+          editedSourceInputId: parseHostedExecutionLinqEditedSourceInputId(
+            record.editedSourceInputId,
+            `${label} editedSourceInputId`,
+          ),
+        }),
     from: requireString(record.from, `${label} from`),
     isFromMe: requireBoolean(record.isFromMe, `${label} isFromMe`),
     messageId: requireString(record.messageId, `${label} messageId`),
@@ -1016,6 +1043,28 @@ function parseHostedExecutionLinqConversationMessage(
             : requireBoolean(record.threadIsDirect, `${label} threadIsDirect`),
         }),
   };
+}
+
+function parseHostedExecutionLinqEditedTextPartIndex(
+  value: unknown,
+  label: string,
+): number {
+  const index = requireNumber(value, label);
+  if (!Number.isSafeInteger(index) || index < 0 || index > 2_147_483_647) {
+    throw new TypeError(`${label} must be a non-negative int32.`);
+  }
+  return index;
+}
+
+function parseHostedExecutionLinqEditedSourceInputId(
+  value: unknown,
+  label: string,
+): string {
+  const inputId = requireString(value, label);
+  if (!/^ain_[0-9a-f]{32}$/u.test(inputId)) {
+    throw new TypeError(`${label} must be an opaque assistant input id.`);
+  }
+  return inputId;
 }
 
 function parseHostedExecutionLinqConversationMessagePart(
@@ -1219,6 +1268,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
                 "Hosted execution device-sync.wake connectionId",
               ),
             }),
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution device-sync.wake expectedConnectedAt",
+              ),
+            }),
         ...(record.hint === undefined
           ? {}
           : {
@@ -1353,6 +1410,16 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     instructions: requireString(record.instructions, `${label}.instructions`),
+    ...(record.notificationPromptProfile === undefined
+      ? {}
+      : {
+          notificationPromptProfile: record.notificationPromptProfile === null
+            ? null
+            : parseHostedExecutionAssistantNotificationPromptProfile(
+                record.notificationPromptProfile,
+                `${label}.notificationPromptProfile`,
+              ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1365,6 +1432,23 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
   };
+}
+
+function parseHostedExecutionAssistantNotificationPromptProfile(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationPromptProfile {
+  const profile = requireString(value, label);
+  if (
+    HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.includes(
+      profile as HostedExecutionAssistantNotificationPromptProfile,
+    )
+  ) {
+    return profile as HostedExecutionAssistantNotificationPromptProfile;
+  }
+  throw new TypeError(
+    `${label} must be one of ${HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.join(", ")}.`,
+  );
 }
 
 function parseHostedExecutionMemberActivationSignupWelcome(

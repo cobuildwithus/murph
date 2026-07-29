@@ -1,6 +1,9 @@
 import "server-only";
 
-import type { TelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
+import {
+  parseTelegramThreadTarget,
+  type TelegramThreadTarget,
+} from "@murphai/messaging-ingress/telegram-webhook";
 
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -8,6 +11,7 @@ import { normalizeNullableString } from "./shared";
 
 const HOSTED_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const HOSTED_TELEGRAM_REQUEST_TIMEOUT_MS = 10_000;
+const HOSTED_TELEGRAM_MAX_JSON_RESPONSE_BYTES = 64 * 1024;
 
 /**
  * Telegram caps `callback_data` at 64 bytes. Murph never needs a token there:
@@ -32,15 +36,15 @@ function requireHostedTelegramBotToken(): string {
 }
 
 /**
- * Issues one bounded Bot API request. Callers that need delivery proof only rely
- * on Telegram accepting the request; response bodies stay outside this small
- * transport boundary.
+ * Issues one bounded Bot API request. Delivery callers rely only on Telegram
+ * accepting the request; metadata reads may opt into bounded JSON parsing.
  */
 async function callHostedTelegramApi(input: {
   body: unknown;
   method: string;
+  readJson?: boolean;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<unknown | null> {
   const token = requireHostedTelegramBotToken();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HOSTED_TELEGRAM_REQUEST_TIMEOUT_MS);
@@ -66,17 +70,127 @@ async function callHostedTelegramApi(input: {
     }
 
     if (!response.ok) {
+      const retryAfterSeconds = readHostedTelegramRetryAfterSeconds(response);
       throw hostedOnboardingError({
-        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        details: {
+          status: response.status,
+          ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+        },
         httpStatus: 502,
         message: `Telegram ${input.method} failed with HTTP ${response.status}.`,
-        retryable: response.status === 429 || response.status >= 500,
+        retryable: response.status === 429,
       });
+    }
+
+    if (input.readJson !== true) {
+      return null;
+    }
+    try {
+      return await readHostedTelegramJsonResponse(response);
+    } catch {
+      throw buildHostedTelegramInvalidResponseError(input.method);
     }
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+async function readHostedTelegramJsonResponse(response: Response): Promise<unknown> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (
+    Number.isFinite(contentLength)
+    && contentLength > HOSTED_TELEGRAM_MAX_JSON_RESPONSE_BYTES
+  ) {
+    await response.body?.cancel();
+    throw new RangeError("Telegram response exceeded the allowed size.");
+  }
+  if (!response.body) {
+    throw new TypeError("Telegram returned an empty response.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > HOSTED_TELEGRAM_MAX_JSON_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new RangeError("Telegram response exceeded the allowed size.");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  return JSON.parse(text);
+}
+
+function buildHostedTelegramInvalidResponseError(method: string) {
+  return hostedOnboardingError({
+    code: "HOSTED_TELEGRAM_API_RESPONSE_INVALID",
+    httpStatus: 502,
+    message: `Telegram ${method} returned an invalid response.`,
+    retryable: true,
+  });
+}
+
+function readHostedTelegramRetryAfterSeconds(
+  response: Response,
+): number | undefined {
+  const retryAfterSeconds = Number(response.headers.get("retry-after"));
+  return Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds > 0
+    ? retryAfterSeconds
+    : undefined;
+}
+
+export async function getHostedTelegramGroupTitle(input: {
+  signal?: AbortSignal;
+  threadId: string;
+}): Promise<string | null> {
+  const target = parseTelegramThreadTarget(input.threadId);
+  if (!target) {
+    throw new TypeError("Hosted Telegram group read requires a valid thread id.");
+  }
+
+  const payload = await callHostedTelegramApi({
+    body: { chat_id: target.chatId },
+    method: "getChat",
+    readJson: true,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw buildHostedTelegramInvalidResponseError("getChat");
+  }
+  const record = payload as Record<string, unknown>;
+  const result = record.result;
+  if (
+    record.ok !== true
+    || !result
+    || typeof result !== "object"
+    || Array.isArray(result)
+  ) {
+    throw buildHostedTelegramInvalidResponseError("getChat");
+  }
+  const chat = result as Record<string, unknown>;
+  if (chat.type !== "group" && chat.type !== "supergroup") {
+    throw buildHostedTelegramInvalidResponseError("getChat");
+  }
+
+  return normalizeNullableString(chat.title);
 }
 
 export async function sendHostedTelegramTextMessage(input: {

@@ -64,6 +64,11 @@ export async function acceptHostedGroupOfferAffirmation(input: {
    * race the inbound Telegram message path already guards.
    */
   assertActorStillBound?: (tx: Prisma.TransactionClient) => Promise<void>;
+  /**
+   * Lets a provider adapter record terminal handling atomically with the grant
+   * it owns. Linq uses this for exact provider-event replay protection.
+   */
+  onAcceptedTx?: (tx: Prisma.TransactionClient) => Promise<void>;
   channel: HostedGroupOfferChannel;
   kinds: readonly HostedGroupOfferAffirmationKind[];
   memberId: string;
@@ -78,17 +83,25 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       ReturnType<typeof acceptHostedGroupDisclosurePermissionReactionTx>
     >;
     try {
-      disclosureResult = await input.prisma.$transaction(async (tx) =>
-      (await input.assertActorStillBound?.(tx),
-      acceptHostedGroupDisclosurePermissionReactionTx({
-        channel: input.channel,
-        memberId: input.memberId,
-        messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
-        now: input.now,
-        reactionEventId: input.affirmationEventId,
-        threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
-        tx,
-      })), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      disclosureResult = await input.prisma.$transaction(async (tx) => {
+        await input.assertActorStillBound?.(tx);
+        const accepted =
+          await acceptHostedGroupDisclosurePermissionReactionTx({
+            channel: input.channel,
+            memberId: input.memberId,
+            messageLookupKeyReadCandidates:
+              input.messageLookupKeyReadCandidates,
+            now: input.now,
+            reactionEventId: input.affirmationEventId,
+            threadIdentityLookupKeyReadCandidates:
+              input.threadIdentityLookupKeyReadCandidates,
+            tx,
+          });
+        if (accepted.kind === "accepted") {
+          await input.onAcceptedTx?.(tx);
+        }
+        return accepted;
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     } catch (error) {
       // Same normalization the join branch uses. Without it an authority
       // change throws out of the webhook, so the tap is never answered and the
@@ -121,17 +134,21 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
-    result = await input.prisma.$transaction(async (tx) =>
-      (await input.assertActorStillBound?.(tx),
-      acceptHostedGroupJoinOfferTx({
+    result = await input.prisma.$transaction(async (tx) => {
+      await input.assertActorStillBound?.(tx);
+      const accepted = await acceptHostedGroupJoinOfferTx({
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
         memberId: input.memberId,
         messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
         now: input.now,
-        threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
+        threadIdentityLookupKeyReadCandidates:
+          input.threadIdentityLookupKeyReadCandidates,
         tx,
-      })), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      });
+      await input.onAcceptedTx?.(tx);
+      return accepted;
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
     const reason = readHostedGroupOfferAffirmationSkipReason(error);
     if (!reason) {
@@ -141,45 +158,49 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   }
 
   const runPostCommitTail = async (): Promise<void> => {
-  const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
-  if (result.joinConfirmationSignal) {
-    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
-      ...result.joinConfirmationSignal,
+    const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+    if (result.joinConfirmationSignal) {
+      await signalHostedGroupJoinConfirmationRuntimeBestEffort({
+        ...result.joinConfirmationSignal,
+        prisma: input.prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
+        timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+      });
+    }
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: input.memberId,
+      membershipId: result.membershipId,
       prisma: input.prisma,
       ...(input.signal ? { signal: input.signal } : {}),
       timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
     });
-  }
-  await materializePendingHostedGroupJoinConfirmationsBestEffort({
-    memberId: input.memberId,
-    membershipId: result.membershipId,
-    prisma: input.prisma,
-    ...(input.signal ? { signal: input.signal } : {}),
-    timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
-  });
 
-  if (result.grantedVaultShareProjectionKinds.length > 0) {
-    await runHostedGroupOfferAffirmationPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
-        abortSignal,
-        userId: input.memberId,
-      }),
-      signal: input.signal,
-    });
-  }
+    if (result.grantedVaultShareProjectionKinds.length > 0) {
+      await runHostedGroupOfferAffirmationPostCommitBestEffort({
+        deadlineMs: postCommitDeadlineMs,
+        operation: (abortSignal) =>
+          signalHostedRuntimeMaintenanceRuntime({
+            abortSignal,
+            userId: input.memberId,
+          }),
+        signal: input.signal,
+      });
+    }
 
-  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-    await runHostedGroupOfferAffirmationPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-        groupId: result.groupId,
-        memberId: input.memberId,
-        prisma: input.prisma,
-      }),
-      signal: input.signal,
-    });
-  }
+    if (
+      result.grantedVaultShareProjectionKinds.includes("group-email.v0")
+    ) {
+      await runHostedGroupOfferAffirmationPostCommitBestEffort({
+        deadlineMs: postCommitDeadlineMs,
+        operation: () =>
+          enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+            groupId: result.groupId,
+            memberId: input.memberId,
+            prisma: input.prisma,
+          }),
+        signal: input.signal,
+      });
+    }
   };
 
   if (input.deferPostCommit) {

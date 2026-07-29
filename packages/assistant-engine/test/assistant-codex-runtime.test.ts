@@ -82,6 +82,9 @@ import {
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantProductFeedbackRecorder,
+} from '../src/assistant/turn-progress.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -1799,6 +1802,8 @@ describe('assistant codex runtime', () => {
 
   it('applies overlapping dynamic media tools in request order', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-order-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-order-vault-')
+    await initializeVault({ vaultRoot })
     const releaseImageFetch = createDeferred<void>()
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
@@ -1815,15 +1820,6 @@ describe('assistant codex runtime', () => {
         status: 200,
       })
     })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
-
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
@@ -1924,9 +1920,9 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'generate then clear media',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
+        vaultRoot,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -1936,7 +1932,6 @@ describe('assistant codex runtime', () => {
         { provider: 'openai-images' },
       ],
     })
-    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('applies overlapping assistant configuration updates in request order', async () => {
@@ -3168,12 +3163,6 @@ describe('assistant codex runtime', () => {
       )
       await initializeVault({ vaultRoot })
       const providerFetch = vi.fn(async () => new Response('{}'))
-      const uploadGeneratedImage = vi.fn(async () => ({
-        alt: 'Generated image',
-        kind: 'image' as const,
-        source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/generated/public',
-      }))
       const generateAndUpload = vi.fn(async () => ({
         attachmentId: 'attachment_should_not_exist',
         filename: 'media-should-not-exist.mp3',
@@ -3211,7 +3200,6 @@ describe('assistant codex runtime', () => {
               OPENAI_API_KEY: 'openai-test-key',
             },
             fetchImpl: providerFetch,
-            hostedGeneratedImageUploader: { uploadGeneratedImage },
             hostedToolContext: createHostedToolContext({
               beforeToolExecution,
               computerToolsAvailable: false,
@@ -3219,7 +3207,7 @@ describe('assistant codex runtime', () => {
             onFinishWithoutReplyAccepted,
             onFinishWithoutReplyRecorded,
             prompt: 'finish without replying, then generate media',
-            requireHostedGeneratedImageUploader: true,
+            requireHostedPrivateImageDelivery: true,
             vaultRoot,
             voiceMemoRuntime,
             workingDirectory,
@@ -3233,7 +3221,6 @@ describe('assistant codex runtime', () => {
       })
 
       expect(providerFetch).not.toHaveBeenCalled()
-      expect(uploadGeneratedImage).not.toHaveBeenCalled()
       expect(generateAndUpload).not.toHaveBeenCalled()
       expect(persistCanonicalWrite).not.toHaveBeenCalled()
       expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
@@ -3743,6 +3730,8 @@ describe('assistant codex runtime', () => {
 
   it('answers progress updates immediately while image generation is in flight', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-progress-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-progress-vault-')
+    await initializeVault({ vaultRoot })
     const releaseImageFetch = createDeferred<void>()
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
@@ -3759,14 +3748,6 @@ describe('assistant codex runtime', () => {
         status: 200,
       })
     })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
     const progressDelivery = {
       send: vi.fn(async (_text: string) => sentProgressResult()),
     }
@@ -3874,17 +3855,17 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         env: { OPENAI_API_KEY: 'openai-test-key' },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         progressDelivery,
         prompt: 'generate with progress',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
+        vaultRoot,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Progress and image complete',
       responseMedia: [
         {
-          url: 'https://imagedelivery.net/account/generated/public',
+          kind: 'vault_image',
         },
       ],
     })
@@ -3896,6 +3877,8 @@ describe('assistant codex runtime', () => {
 
   it('reports a structured failure when a generated image exceeds the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
+    const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
+    await initializeVault({ vaultRoot })
     const webpBytes = new Uint8Array([
       0x52, 0x49, 0x46, 0x46,
       0x00, 0x00, 0x00, 0x00,
@@ -3909,14 +3892,6 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-        alt: uploadInput.alt,
-        kind: 'image' as const,
-        source: uploadInput.source,
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
     const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
@@ -4030,9 +4005,9 @@ describe('assistant codex runtime', () => {
     const result = await executeCodexAppServerTurn({
       env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       prompt: 'attach media then exceed the limit',
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
+      vaultRoot,
       workingDirectory,
     })
 
@@ -6803,15 +6778,6 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async () => ({
-        alt: 'Generated image',
-        kind: 'image' as const,
-        source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/generated/public',
-      })),
-    }
-
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
@@ -6879,9 +6845,8 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'start the warm process',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
         vaultRoot,
         workingDirectory,
@@ -6900,9 +6865,8 @@ describe('assistant codex runtime', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'write from the current warm turn',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
         vaultRoot,
         workingDirectory,
@@ -6913,7 +6877,6 @@ describe('assistant codex runtime', () => {
 
     expect(firstPersistCanonicalWrite).not.toHaveBeenCalled()
     expect(secondPersistCanonicalWrite).toHaveBeenCalled()
-    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
@@ -8770,6 +8733,176 @@ describe('assistant codex runtime', () => {
     })
 
     expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+  })
+
+  it('discards feedback from a disconnected stream and keeps native retry safe', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-product-feedback-retry-',
+    )
+    const acceptProductFeedbackCandidate = vi.fn()
+    const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{
+        id: 'assistant_input_feedback_retry',
+        source: 'assistant-input',
+      }],
+      productFeedbackCandidateSink: {
+        acceptProductFeedbackCandidate,
+      },
+    })
+    if (!productFeedbackRecorder) {
+      throw new Error('Expected product feedback collection to be available.')
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: {
+                id: 'thread-product-feedback-retry',
+              },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: first disconnected candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-disconnected',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'error',
+            params: {
+              error: {
+                message: 'Reconnecting... 1/5',
+                additionalDetails:
+                  'stream disconnected before completion',
+              },
+              threadId: 'thread-product-feedback-retry',
+              turnId: 'turn-product-feedback-retry',
+              willRetry: true,
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 82,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                kind: 'feature_request',
+                summary: 'Speculative: recovered candidate.',
+              },
+              namespace: 'murph',
+              tool: 'submit_product_feedback',
+              turnId: 'turn-product-feedback-retry',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
+            result: {
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'feedback-recovered',
+                namespace: 'murph',
+                status: 'completed',
+                success: true,
+                tool: 'submit_product_feedback',
+                type: 'dynamicToolCall',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-product-feedback-retry',
+                message: 'Recovered response.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-product-feedback-retry',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        productFeedbackRecorder,
+        prompt: 'retry after collecting feedback',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Recovered response.',
+      providerActionCount: 0,
+    })
+    expect(productFeedbackRecorder.readProductFeedback()).toMatchObject({
+      kind: 'feature_request',
+      summary: 'Speculative: recovered candidate.',
+    })
+    expect(acceptProductFeedbackCandidate).not.toHaveBeenCalled()
   })
 
   it('emits terminal Codex transport diagnostics after provider actions', async () => {
@@ -17086,6 +17219,8 @@ describe('assistant codex event shaping', () => {
     it('continues subagent usage ordinals after dynamic tool usage drafts', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-ordinal-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-ordinal-home-')
+      const vaultRoot = await createTempDir('assistant-codex-subagent-ordinal-vault-')
+      await initializeVault({ vaultRoot })
       const spawnedChildren: MockChildProcess[] = []
       mockProcessGroupSignalsForChildren(spawnedChildren)
       const webpBytes = new Uint8Array([
@@ -17101,15 +17236,6 @@ describe('assistant codex event shaping', () => {
           headers: { 'content-type': 'application/json' },
           status: 200,
         }))
-      const uploader = {
-        uploadGeneratedImage: vi.fn(async (uploadInput: { alt: string | null; source: string | null }) => ({
-          alt: uploadInput.alt,
-          kind: 'image' as const,
-          source: uploadInput.source,
-          url: 'https://imagedelivery.net/account/generated/public',
-        })),
-      }
-
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
         child.pid = 31_600 + spawnedChildren.length
@@ -17205,10 +17331,10 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         fetchImpl,
-        hostedGeneratedImageUploader: uploader,
         prompt: 'generate an image while a child reports usage',
-        requireHostedGeneratedImageUploader: true,
+        requireHostedPrivateImageDelivery: true,
         sandbox: 'workspace-write',
+        vaultRoot,
         workingDirectory,
       })
 
@@ -17235,7 +17361,6 @@ describe('assistant codex event shaping', () => {
         reasoningOutputTokens: 0,
         totalTokens: 1_000,
       })
-      expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
     })
 
     it('tolerates subagent thread notifications between turns without poisoning the warm process', async () => {
@@ -18557,6 +18682,7 @@ describe('steered final segments', () => {
             { projectionKind: 'hrv-days.v0' as const },
           ],
           role: 'owner',
+          sponsorshipUrl: 'https://example.test/groups/fund/funding_locator',
         }],
         status: 'ok' as const,
         truncated: false,

@@ -23,12 +23,27 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
-import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
+} from "@/src/lib/hosted-groups/group-join-outreach-store";
+import {
+  hasHostedLinqInviteSignupLiveDeliveryTx,
+} from "../hosted-onboarding/linq-delivery-store";
+import {
+  releaseHostedLinqOnboardingLinkNoticeClaim,
+} from "../hosted-onboarding/linq-daily-state";
+import {
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
+  parseHostedLinqInviteSignupEffectId,
+} from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
+import { retrieveAndExpireHostedSubscriptionCheckout } from "../hosted-onboarding/subscription-checkout-lifecycle";
+import { listHostedMemberSubscriptionCheckoutSessionIds } from "../hosted-onboarding/subscription-checkout-store";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
@@ -70,6 +85,14 @@ export type HostedAccountStoreDeletionMode =
   | "best-effort-delete"
   | "local-reference-delete"
   | "documented-retention";
+
+const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  // Group-aware provider fences expire after fifteen seconds. Deletion gets a
+  // strictly larger callback budget so an admitted bounded send can commit its
+  // correlated consequence before suspension crosses the shared drain.
+  timeout: 20_000,
+} as const;
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -132,6 +155,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Local Stripe billing references",
     deletion: "local-reference-delete",
     note: "Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
+  },
+  {
+    slug: "prisma.hosted_member_subscription_checkout",
+    label: "Open Stripe subscription Checkout references",
+    deletion: "local-reference-delete",
+    note: "Keeps every direct subscription Checkout session encrypted until account deletion has made it terminal. Export reports counts only and omits session capabilities.",
   },
   {
     slug: "prisma.hosted_account_group",
@@ -281,7 +310,19 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_usage_credit_entry",
     label: "Hosted usage-credit ledger entries",
     deletion: "live-delete",
-    note: "Deletes member-scoped usage-credit ledger entries before their purchase and member owners. The deletion result reports row counts; browser-vault export omits semantic source keys, usage references, and allocation history.",
+    note: "Deletes member-scoped usage-credit ledger entries before their purchase, referral, and member owners. The deletion result reports row counts; browser-vault export omits semantic source keys and usage-allocation history.",
+  },
+  {
+    slug: "prisma.hosted_usage_credit_grant",
+    label: "Hosted usage-credit grant projections",
+    deletion: "live-delete",
+    note: "Deletes member-scoped mutable remaining-credit projections before their canonical ledger entries.",
+  },
+  {
+    slug: "prisma.hosted_usage_referral",
+    label: "Hosted usage referrals",
+    deletion: "live-delete",
+    note: "Deletes unearned member-scoped referral state. A rewarded grant retained for a surviving group keeps only an anonymized accounting receipt with referrer, introduced-member, target-chat, and observation evidence removed.",
   },
   {
     slug: "prisma.hosted_usage_credit_purchase",
@@ -294,6 +335,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted product feedback rows",
     deletion: "live-delete",
     note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach",
+    label: "Pre-member group-join outreach intent",
+    deletion: "live-delete",
+    note: "Deletes outreach rows this account can reach: those matching the member's phone blind index, and those whose canonical offer belongs to a group the account owns or runs. Rows are resolved by phone because the participant may never have become a member. The outreach row covers encrypted participant contact, scheduling, dedupe, and reaction convergence only; selected line, chat, provider lifecycle, and exact reply occurrence live on related delivery rows. Export omits this pre-member operational intent.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach_delivery",
+    label: "Group-join outreach provider correlation",
+    deletion: "live-delete",
+    note: "Deletes opener and group-aware signup-link deliveries through their direct outreach relation, so selected-line, chat, provider attempt, receipt, and exact reply-occurrence history does not outlive the account. The canonical offer supplies group ownership; no hashed source-reference reconstruction is required.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -650,6 +703,18 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const terminalCheckoutTargets = await closeHostedSubscriptionCheckoutsForAccountDeletion({
+    memberId: input.memberId,
+    sessionIds: deletionTargets.stripeCheckoutSessionIds,
+  });
+  const stripeCustomerIds = dedupeNullableStrings([
+    ...deletionTargets.stripeCustomerIds,
+    ...terminalCheckoutTargets.stripeCustomerIds,
+  ]);
+  const stripeSubscriptionIds = dedupeNullableStrings([
+    ...deletionTargets.stripeSubscriptionIds,
+    ...terminalCheckoutTargets.stripeSubscriptionIds,
+  ]);
 
   let preparedCleanup: PreparedHostedAccountDeletionCleanup;
   try {
@@ -657,8 +722,8 @@ export async function deleteHostedAccountData(input: {
       now: deletionStartedAt,
       privyUserId: deletionTargets.privyUserId,
       runtimeMemberIds: deletionMemberIds,
-      stripeCustomerIds: deletionTargets.stripeCustomerIds,
-      stripeSubscriptionIds: deletionTargets.stripeSubscriptionIds,
+      stripeCustomerIds,
+      stripeSubscriptionIds,
     });
   } catch (error) {
     throw hostedOnboardingError({
@@ -702,9 +767,8 @@ export async function deleteHostedAccountData(input: {
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
-    familyStripeSubscriptionIds: deletionTargets.familyStripeSubscriptionIds,
     memberId: input.memberId,
-    stripeSubscriptionId: deletionTargets.directStripeSubscriptionId,
+    stripeSubscriptionIds,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
     memberIds: deletionMemberIds,
@@ -729,12 +793,36 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
-
-    for (const memberId of transactionDeletionMemberIds.slice(1)) {
-      await lockHostedMemberForAccountDeletionTx({
-        memberId,
+    const transactionDeletionMemberIdFilter = buildStringInFilter(
+      transactionDeletionMemberIds,
+    );
+    const projectionSnapshot =
+      await readHostedGroupJoinOutreachDeletionSnapshot({
+        memberIdFilter: transactionDeletionMemberIdFilter,
         prisma: tx,
       });
+    const projectionMemberIds = uniqueStrings(
+      readHostedLinqSignupProjectionIdentities(
+        projectionSnapshot.deliveries,
+      ).map((identity) => identity.memberId),
+    );
+    const deletionMemberIdSet = new Set(transactionDeletionMemberIds);
+    const lockedProjectionMemberIds = new Set(
+      [...transactionDeletionMemberIds, ...projectionMemberIds].sort(),
+    );
+
+    for (const memberId of lockedProjectionMemberIds) {
+      if (memberId === input.memberId) {
+        continue;
+      }
+      if (deletionMemberIdSet.has(memberId)) {
+        await lockHostedMemberForAccountDeletionTx({
+          memberId,
+          prisma: tx,
+        });
+      } else {
+        await lockHostedMemberRow(tx, memberId);
+      }
     }
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
@@ -778,6 +866,7 @@ export async function deleteHostedAccountData(input: {
         ...transactionDeletionTargets,
         runtimeMemberIds: transactionDeletionMemberIds,
       },
+      expected: deletionTargets,
       prepared: preparedCleanup,
     });
     await persistHostedAccountDeletionCleanupTx({
@@ -935,6 +1024,7 @@ interface HostedAccountDeletionExternalTargets {
   directStripeSubscriptionId: string | null;
   familyStripeSubscriptionIds: string[];
   privyUserId: string | null;
+  stripeCheckoutSessionIds: string[];
   stripeCustomerIds: string[];
   stripeSubscriptionIds: string[];
 }
@@ -943,8 +1033,12 @@ async function readHostedAccountDeletionExternalTargets(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountDeletionExternalTargets> {
-  const [billingRef, identity, familyBillingRefs] = await Promise.all([
+  const [billingRef, directCheckoutSessionIds, identity, familyBillingRefs] = await Promise.all([
     readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    listHostedMemberSubscriptionCheckoutSessionIds({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
@@ -966,6 +1060,10 @@ async function readHostedAccountDeletionExternalTargets(input: {
     directStripeSubscriptionId,
     familyStripeSubscriptionIds,
     privyUserId: identity?.privyUserId ?? null,
+    stripeCheckoutSessionIds: dedupeNullableStrings([
+      ...directCheckoutSessionIds,
+      ...familyBillingRefs.map((billing) => billing.stripeCheckoutSessionId),
+    ]),
     stripeCustomerIds: dedupeNullableStrings([
       billingRef?.stripeCustomerId ?? null,
       ...familyBillingRefs.map((billing) => billing.stripeCustomerId),
@@ -1008,8 +1106,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         id: buildStringInFilter(memberIds),
       },
     });
+    // Suspension is the account-deletion authority fence for group replies.
+    // A group-aware provider effect that already owns the drain finishes before
+    // this commits. Every later preparation acquires it after commit and rejects
+    // the suspended group runtime.
+    await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
 }
 
 async function refreshHostedMembersAccountDeletionFenceTx(input: {
@@ -1040,6 +1143,7 @@ function assertHostedAccountDeletionTargetsUnchanged(input: {
   current: HostedAccountDeletionExternalTargets & {
     runtimeMemberIds: readonly string[];
   };
+  expected: HostedAccountDeletionExternalTargets;
   prepared: PreparedHostedAccountDeletionCleanup;
 }): void {
   if (!haveSameStrings(input.current.runtimeMemberIds, input.prepared.runtimeMemberIds)) {
@@ -1055,10 +1159,11 @@ function assertHostedAccountDeletionTargetsUnchanged(input: {
   );
   if (
     currentPrivyUserLookupKey !== input.prepared.privyUserLookupKey
-    || !haveSameStrings(input.current.stripeCustomerIds, input.prepared.stripeCustomerIds)
+    || !haveSameStrings(input.current.stripeCheckoutSessionIds, input.expected.stripeCheckoutSessionIds)
+    || !haveSameStrings(input.current.stripeCustomerIds, input.expected.stripeCustomerIds)
     || !haveSameStrings(
       input.current.stripeSubscriptionIds,
-      input.prepared.stripeSubscriptionIds,
+      input.expected.stripeSubscriptionIds,
     )
   ) {
     throw hostedOnboardingError({
@@ -1095,10 +1200,24 @@ function buildHostedUsageCreditPurchaseDeletionWhere(
   return { beneficiaryMemberId: memberIdFilter };
 }
 
+function buildHostedUsageReferralInvolvementWhere(
+  memberIdFilter: string | { in: string[] },
+): Prisma.HostedUsageReferralWhereInput {
+  return {
+    OR: [
+      { beneficiaryMemberId: memberIdFilter },
+      { introducedMemberId: memberIdFilter },
+      { referrerMemberId: memberIdFilter },
+      { targetContainerMemberId: memberIdFilter },
+    ],
+  };
+}
+
 function buildHostedLinqInviteSignupDeliveryWhere(
   memberIds: readonly string[],
 ): Prisma.HostedLinqDeliveryWhereInput {
   return {
+    groupJoinOutreachId: null,
     OR: uniqueStrings(memberIds).map((memberId) => ({
       sourceRef: {
         startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
@@ -1108,6 +1227,145 @@ function buildHostedLinqInviteSignupDeliveryWhere(
       in: ["invite_signup", "invite_signup_fallback"],
     },
   };
+}
+
+type HostedGroupJoinOutreachDeletionSnapshot = {
+  deliveries: Array<{ sourceRef: string | null }>;
+  deliveryWhere: Prisma.HostedLinqDeliveryWhereInput | null;
+  outreachIds: string[];
+};
+
+type HostedLinqSignupProjectionIdentity = {
+  dayUtc: string;
+  memberId: string;
+};
+
+async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
+  memberIdFilter: string | { in: string[] };
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOutreachDeletionSnapshot> {
+  const identities = await input.prisma.hostedMemberIdentity.findMany({
+    where: { memberId: input.memberIdFilter },
+    select: { phoneLookupKey: true },
+  });
+  const phoneLookupKeys = uniqueStrings(
+    identities
+      .map((identity) => identity.phoneLookupKey)
+      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
+  );
+  const ownedGroups = await input.prisma.hostedGroup.findMany({
+    where: {
+      OR: [
+        { ownerMemberId: input.memberIdFilter },
+        { runtimeMemberId: input.memberIdFilter },
+      ],
+    },
+    select: { id: true },
+  });
+  const ownedGroupIds = ownedGroups.map((group) => group.id);
+  if (phoneLookupKeys.length === 0 && ownedGroupIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const outreaches = await input.prisma.hostedGroupJoinOutreach.findMany({
+    where: {
+      OR: [
+        ...(phoneLookupKeys.length > 0
+          ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
+          : []),
+        ...(ownedGroupIds.length > 0
+          ? [{
+              offer: {
+                groupId: { in: ownedGroupIds },
+              },
+            }]
+          : []),
+      ],
+    },
+    select: { id: true },
+  });
+  const outreachIds = outreaches.map((outreach) => outreach.id);
+  if (outreachIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const deliveryWhere: Prisma.HostedLinqDeliveryWhereInput = {
+    groupJoinOutreachId: { in: outreachIds },
+  };
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    select: { sourceRef: true },
+    where: deliveryWhere,
+  });
+
+  return { deliveries, deliveryWhere, outreachIds };
+}
+
+function readHostedLinqSignupProjectionIdentities(
+  deliveries: readonly { sourceRef: string | null }[],
+): HostedLinqSignupProjectionIdentity[] {
+  const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
+  for (const delivery of deliveries) {
+    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
+    if (!attempt) {
+      continue;
+    }
+    const identity = {
+      dayUtc: attempt.dayUtc,
+      memberId: attempt.memberId,
+    };
+    identities.set(`${identity.memberId}\0${identity.dayUtc}`, identity);
+  }
+  return [...identities.values()];
+}
+
+async function deleteHostedGroupJoinOutreachRowsForMembers(
+  prisma: Prisma.TransactionClient,
+  memberIdFilter: string | { in: string[] },
+): Promise<{ deliveryCount: number; outreachCount: number }> {
+  // The outreach row and its delivery rows are one privacy record. Both the
+  // minute drain and group-reply delivery preparation cross this same drain, so
+  // no related delivery can appear after the delete and before the outreach row
+  // is gone.
+  await acquireHostedGroupJoinOutreachDrainLockTx(prisma);
+
+  const snapshot = await readHostedGroupJoinOutreachDeletionSnapshot({
+    memberIdFilter,
+    prisma,
+  });
+  if (!snapshot.deliveryWhere) {
+    return { deliveryCount: 0, outreachCount: 0 };
+  }
+  const projectionIdentities = readHostedLinqSignupProjectionIdentities(
+    snapshot.deliveries,
+  );
+
+  // The earlier suspension transaction crossed this same drain before commit.
+  // A provider effect admitted first therefore committed its correlation and
+  // projection before suspension, while every later preparation observes the
+  // suspended group runtime and stops before provider dispatch. No group-aware
+  // provider effect can still be in flight when these rows are removed.
+  const deliveries = await prisma.hostedLinqDelivery.deleteMany({
+    where: snapshot.deliveryWhere,
+  });
+  for (const identity of projectionIdentities) {
+    const hasLiveDelivery = await hasHostedLinqInviteSignupLiveDeliveryTx({
+      dayUtc: identity.dayUtc,
+      memberId: identity.memberId,
+      prisma,
+    });
+    if (!hasLiveDelivery) {
+      await releaseHostedLinqOnboardingLinkNoticeClaim({
+        memberId: identity.memberId,
+        occurredAt: identity.dayUtc,
+        prisma,
+      });
+    }
+  }
+  const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
+    where: { id: { in: snapshot.outreachIds } },
+  });
+
+  return { deliveryCount: deliveries.count, outreachCount: removed.count };
 }
 
 async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
@@ -1136,31 +1394,90 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   });
 }
 
-async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
-  familyStripeSubscriptionIds: readonly string[];
+async function closeHostedSubscriptionCheckoutsForAccountDeletion(input: {
   memberId: string;
-  stripeSubscriptionId: string | null;
-}): Promise<HostedAccountVendorDeletionResult> {
-  const directResult = await cancelHostedStripeSubscriptionForAccountDeletion({
-    memberId: input.memberId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
-  });
+  sessionIds: readonly string[];
+}): Promise<{
+  stripeCustomerIds: string[];
+  stripeSubscriptionIds: string[];
+}> {
+  if (input.sessionIds.length === 0) {
+    return {
+      stripeCustomerIds: [],
+      stripeSubscriptionIds: [],
+    };
+  }
 
-  let familyResult: HostedAccountVendorDeletionResult | null = null;
-  for (const familyStripeSubscriptionId of input.familyStripeSubscriptionIds) {
-    familyResult = await cancelHostedStripeSubscriptionForAccountDeletion({
-      memberId: input.memberId,
-      stripeSubscriptionId: familyStripeSubscriptionId,
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so your Checkout could not be closed. Contact support to delete your account.",
     });
   }
 
-  return input.stripeSubscriptionId ? directResult : familyResult ?? directResult;
+  const terminalCheckouts: Array<
+    Awaited<ReturnType<typeof retrieveAndExpireHostedSubscriptionCheckout>>
+  > = [];
+  for (const sessionId of input.sessionIds) {
+    try {
+      const terminal = await retrieveAndExpireHostedSubscriptionCheckout({
+        sessionId,
+        stripe,
+      });
+      if (terminal.status === "complete" && !terminal.subscriptionId) {
+        throw new TypeError(
+          "Completed Stripe subscription Checkout is missing its subscription.",
+        );
+      }
+      terminalCheckouts.push(terminal);
+    } catch (error) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED",
+        details: { cause: safeErrorCode(error) },
+        httpStatus: 502,
+        message: "We could not close your active billing Checkout. Retry account deletion, or contact support if it keeps failing.",
+        retryable: true,
+      });
+    }
+  }
+
+  return {
+    stripeCustomerIds: dedupeNullableStrings(
+      terminalCheckouts.map((checkout) => checkout.customerId),
+    ),
+    stripeSubscriptionIds: dedupeNullableStrings(
+      terminalCheckouts.map((checkout) => checkout.subscriptionId),
+    ),
+  };
+}
+
+async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
+  memberId: string;
+  stripeSubscriptionIds: readonly string[];
+}): Promise<HostedAccountVendorDeletionResult> {
+  let result: HostedAccountVendorDeletionResult = {
+    errorCode: null,
+    status: "skipped_no_record",
+  };
+  for (const stripeSubscriptionId of input.stripeSubscriptionIds) {
+    result = await cancelHostedStripeSubscriptionForAccountDeletion({
+      memberId: input.memberId,
+      stripeSubscriptionId,
+    });
+  }
+  return result;
 }
 
 async function listHostedFamilyBillingRefsOwnedByMember(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
-}): Promise<Array<{ stripeCustomerId: string | null; stripeSubscriptionId: string | null }>> {
+}): Promise<Array<{
+  stripeCheckoutSessionId: string | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}>> {
   const groups = await input.prisma.hostedAccountGroup.findMany({
     select: {
       id: true,
@@ -1182,6 +1499,7 @@ async function listHostedFamilyBillingRefsOwnedByMember(input: {
   return billingRefs
     .filter((billingRef): billingRef is NonNullable<typeof billingRef> => billingRef !== null)
     .map((billingRef) => ({
+      stripeCheckoutSessionId: billingRef.stripeCheckoutSessionId,
       stripeCustomerId: billingRef.stripeCustomerId,
       stripeSubscriptionId: billingRef.stripeSubscriptionId,
     }));
@@ -1282,9 +1600,56 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, input.memberIds));
   record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, input.memberIds));
-  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
-    where: buildHostedUsageCreditEntryDeletionWhere(memberIdFilter),
+  const usageCreditEntryDeletionWhere =
+    buildHostedUsageCreditEntryDeletionWhere(memberIdFilter);
+  record("prisma.hosted_usage_credit_grant", await input.prisma.hostedUsageCreditGrant.deleteMany({
+    where: { entry: usageCreditEntryDeletionWhere },
   }));
+  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
+    where: usageCreditEntryDeletionWhere,
+  }));
+  const referralInvolvementWhere =
+    buildHostedUsageReferralInvolvementWhere(memberIdFilter);
+  const anonymizedRewardedReferrals =
+    await input.prisma.hostedUsageReferral.updateMany({
+      data: {
+        firstHumanMessageAt: null,
+        humanMessageCount: 0,
+        introducedMemberId: null,
+        lastHumanMessageAt: null,
+        nonReferrerMessageCount: 0,
+        observedEventKeysJson: Prisma.DbNull,
+        observedSpeakerKeysJson: Prisma.DbNull,
+        referrerMemberId: null,
+        referrerSubjectKey: null,
+        sourceConversationJson: Prisma.DbNull,
+        targetContainerMemberId: null,
+      },
+      where: {
+        AND: [
+          referralInvolvementWhere,
+          { NOT: { beneficiaryMemberId: memberIdFilter } },
+        ],
+        status: "rewarded",
+      },
+    });
+  const deletedUsageReferrals = await input.prisma.hostedUsageReferral.deleteMany({
+    where: {
+      OR: [
+        { beneficiaryMemberId: memberIdFilter },
+        {
+          AND: [
+            referralInvolvementWhere,
+            { status: { not: "rewarded" } },
+          ],
+        },
+      ],
+    },
+  });
+  recordCount(
+    "prisma.hosted_usage_referral",
+    anonymizedRewardedReferrals.count + deletedUsageReferrals.count,
+  );
   record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
   }));
@@ -1296,6 +1661,24 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
   }));
+  // Pre-member group-join outreach is keyed by the participant's phone and by
+  // the group, not by a member id, so it is resolved before the identity rows
+  // and the owned groups are deleted below. Running after either one would strand
+  // the encrypted phone, its group association, or the provider correlation that
+  // only the outreach id can find.
+  const groupJoinOutreachDeletion =
+    await deleteHostedGroupJoinOutreachRowsForMembers(
+      input.prisma,
+      memberIdFilter,
+    );
+  recordCount(
+    "prisma.hosted_group_join_outreach",
+    groupJoinOutreachDeletion.outreachCount,
+  );
+  recordCount(
+    "prisma.hosted_group_join_outreach_delivery",
+    groupJoinOutreachDeletion.deliveryCount,
+  );
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));
@@ -1306,6 +1689,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({
     where: {

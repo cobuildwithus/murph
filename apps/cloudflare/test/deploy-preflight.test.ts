@@ -1,3 +1,6 @@
+import {
+  HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,14 +23,25 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
   return {
     CF_BUNDLES_BUCKET: "bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-    CF_PUBLIC_BASE_URL: "https://worker.example.test",
+    CF_PUBLIC_BASE_URL: HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
     CF_WORKER_NAME: "hosted-runner",
     CLOUDFLARE_ACCOUNT_ID: "r2-account",
+    HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+      "private-media-capability-secret-fixture",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"secret\",\"x\":\"public-x\",\"y\":\"public-y\"}",
     HOSTED_CRYPTO_ENV: "production",
+    HOSTED_DATABASE_ALERT_ENABLED: "1",
+    HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: "branch-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: "main",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: "database-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "metrics-token-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID:
+      "metrics-token-id-test",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
@@ -41,6 +55,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_ASSISTANT_REASONING_EFFORT: "low",
     HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+    LINQ_API_TOKEN: "linq-token-test",
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       "provider-egress-signing-secret",
     HOSTED_WEB_BASE_URL: "https://app.example.test",
@@ -61,6 +76,7 @@ function createRequiredPreviewWorkerDeployEnv(
     CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
     CF_WORKER_NAME: "hosted-runner-staging",
     HOSTED_CRYPTO_ENV: "preview",
+    HOSTED_DATABASE_ALERT_ENABLED: undefined,
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
@@ -98,6 +114,7 @@ describe("deploy preflight helpers", () => {
       "HOSTED_R2_PRESIGN_BUCKET_NAME",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_LOG_FINGERPRINT_SECRET",
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
       "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
       "HOSTED_R2_PRESIGN_ACCESS_KEY_ID",
       "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY",
@@ -134,7 +151,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
     );
   });
 
@@ -143,6 +160,62 @@ describe("deploy preflight helpers", () => {
       OPENAI_API_KEY: undefined,
       VERCEL_AI_API_KEY: "legacy-vercel-key",
     }), { deployWorker: true })).toContain("OPENAI_API_KEY");
+  });
+
+  it("requires the complete database-alert contract for production deploys", () => {
+    const missing = listMissingHostedDeployEnvironment(
+      createRequiredWorkerDeployEnv({
+        HOSTED_DATABASE_ALERT_ENABLED: undefined,
+        HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: undefined,
+        HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: undefined,
+        LINQ_API_TOKEN: undefined,
+      }),
+      { deployWorker: true },
+    );
+
+    expect(missing).toEqual([
+      "HOSTED_DATABASE_ALERT_ENABLED",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
+      "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
+      "LINQ_API_TOKEN",
+    ]);
+  });
+
+  it("enables database paging only for the production Worker", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({
+        HOSTED_DATABASE_ALERT_ENABLED: "0",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "HOSTED_DATABASE_ALERT_ENABLED must be 1 for production deploys.",
+    );
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_DATABASE_ALERT_ENABLED: "1",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
+    );
+  });
+
+  it("rejects a weak private-media capability secret", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "too-short",
+    }), { deployWorker: true })).toThrowError(
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET must contain at least 32 characters.",
+    );
   });
 
   it("allows production deploys only when the hosted web origin matches the explicit production origin", () => {
@@ -375,6 +448,14 @@ describe("deploy preflight helpers", () => {
       "CF_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
       "DEVICE_SYNC_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
     ]));
+  });
+
+  it("pins the production Worker origin used by private-media capabilities", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      CF_PUBLIC_BASE_URL: "https://worker.example.test",
+    }), { deployWorker: true })).toThrowError(
+      `CF_PUBLIC_BASE_URL=${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN}`,
+    );
   });
 
   it("keeps non-IP hostnames that start like IPv6 private ranges eligible for production", () => {
@@ -655,6 +736,7 @@ describe("deploy preflight helpers", () => {
         createRequiredWorkerDeployEnv({
           CF_PUBLIC_BASE_URL: "http://localhost:8787",
           HOSTED_CRYPTO_ENV: "development",
+          HOSTED_DATABASE_ALERT_ENABLED: undefined,
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
           HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
           HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
@@ -719,6 +801,7 @@ describe("deploy preflight helpers", () => {
     expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       CF_PUBLIC_BASE_URL: "http://localhost:8787",
       HOSTED_CRYPTO_ENV: "development",
+      HOSTED_DATABASE_ALERT_ENABLED: undefined,
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",

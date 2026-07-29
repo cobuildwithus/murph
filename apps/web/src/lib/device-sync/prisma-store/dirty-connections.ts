@@ -9,7 +9,9 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  isDeviceSyncCredentialIndependentImportJob,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
+  type DeviceSyncCredentialIndependentImportJobClassifier,
   type HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -83,6 +85,112 @@ const COMPANION_HRV_NIGHT_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
 export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
+
+export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
+  connectionId: string;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<{
+  retainedCredentialIndependentPayloadCount: number;
+  supersededPayloadCount: number;
+}> {
+  await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
+    SELECT connection_id AS "connectionId"
+    FROM device_sync_dirty_connection
+    WHERE connection_id = ${input.connectionId}
+    FOR UPDATE
+  `);
+  const existing = await input.tx.deviceSyncDirtyConnection.findFirst({
+    where: {
+      connectionId: input.connectionId,
+      userId: input.userId,
+    },
+  });
+  if (!existing) {
+    return {
+      retainedCredentialIndependentPayloadCount: 0,
+      supersededPayloadCount: 0,
+    };
+  }
+
+  const payloadRows = await input.tx.deviceSyncDirtyPayload.findMany({
+    select: {
+      connectionId: true,
+      dirtyRevision: true,
+      id: true,
+      provider: true,
+      resourceEncrypted: true,
+    },
+    where: {
+      connectionId: input.connectionId,
+      userId: input.userId,
+    },
+  });
+  const supersededPayloadIds: string[] = [];
+  let retainedCredentialIndependentPayloadCount = 0;
+  let classifyJunctionProviderJob: DeviceSyncCredentialIndependentImportJobClassifier | undefined;
+  for (const row of payloadRows) {
+    const resource = await readDirtyPayloadResourceJson({
+      row,
+      tx: input.tx,
+      userId: input.userId,
+    });
+    if (resource && row.provider === "junction" && !classifyJunctionProviderJob) {
+      ({
+        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
+      } = await import("@murphai/device-syncd/junction-inline-authority"));
+    }
+    if (resource && isDeviceSyncCredentialIndependentImportJob({
+      kind: resource.jobKind,
+      payload: resource.payload,
+      provider: row.provider,
+    }, row.provider === "junction"
+      ? classifyJunctionProviderJob
+      : undefined)) {
+      retainedCredentialIndependentPayloadCount += 1;
+    } else {
+      supersededPayloadIds.push(row.id);
+    }
+  }
+
+  const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
+    data: {
+      dirtyResourcesJson: toNullablePrismaJsonValue({}),
+      firstDirtyAt: existing.latestDirtyAt,
+      processedRevision: existing.dirtyRevision,
+      resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
+      sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+      windowEnd: null,
+      windowStart: null,
+    },
+    where: {
+      connectionId: input.connectionId,
+      dirtyRevision: existing.dirtyRevision,
+      processedRevision: existing.processedRevision,
+      userId: input.userId,
+    },
+  });
+  if (updated.count === 0) {
+    throw createDirtyStateContentionError("ack");
+  }
+
+  if (supersededPayloadIds.length > 0) {
+    await input.tx.deviceSyncDirtyPayload.deleteMany({
+      where: {
+        connectionId: input.connectionId,
+        id: {
+          in: supersededPayloadIds,
+        },
+        userId: input.userId,
+      },
+    });
+  }
+
+  return {
+    retainedCredentialIndependentPayloadCount,
+    supersededPayloadCount: supersededPayloadIds.length,
+  };
+}
 
 interface DirtyPayloadHydrationBudget {
   exhausted: boolean;

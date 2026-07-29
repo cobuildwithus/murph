@@ -15,6 +15,7 @@ import {
 
 export function HostedFamilySettings(props: {
   ownerSnapshot: HostedFamilyOwnerSnapshot;
+  payerMemberId: string;
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -52,6 +53,7 @@ export function HostedFamilySettings(props: {
         invites={invites}
         members={members}
         plans={snapshot.plans}
+        payerMemberId={props.payerMemberId}
         seats={snapshot.seats}
         tiers={HOSTED_FAMILY_PLAN_DISPLAY.plans.map((plan) => ({
           name: plan.displayName,

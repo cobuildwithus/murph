@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-16
+Last verified: 2026-07-26
 
 ## Goal
 
@@ -124,12 +124,13 @@ object requests only the re-authorized originating route. If delivery fails,
 later counted usage in the same exhausted period may retry the claim, while the
 delivery idempotency boundary permits at most one completed notice.
 
-Synthetic thread containers remain subject to the same web-owned usage block,
-but group funding is not implemented. Group notices must not expose a personal
-member's billing, plan, purchase, or receipt details. Temporal and the runner
-receive no billing or credit decision. Web blocks runtime reconciliation and
-mailbox fetch before exhausted usage-bearing work reaches the runner; Temporal
-owns only the resulting orchestration state.
+Synthetic thread containers remain subject to the same web-owned usage block.
+Authenticated contributors may fund a group through the separate fixed-pack
+usage-credit flow, but group notices must not expose a personal member's
+billing, plan, purchase, or receipt details. Temporal and the runner receive no
+billing or credit decision. Web blocks runtime reconciliation and mailbox fetch
+before exhausted usage-bearing work reaches the runner; Temporal owns only the
+resulting orchestration state.
 
 ### Deployment And Compatibility
 

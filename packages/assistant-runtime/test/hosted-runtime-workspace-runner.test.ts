@@ -99,6 +99,7 @@ import {
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
+  runHostedWorkspaceCanonicalWriteAtBoundary,
   type HostedWorkspaceRunnerAssistantInputBatch,
 } from "../src/hosted-runtime/workspace-runner.ts";
 import {
@@ -3194,6 +3195,90 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("rebases delayed canonical writes onto the latest workspace status", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Delayed Canonical Write Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedSystemMailboxHandledThroughSeq: "7",
+      },
+      version: "1",
+    });
+    const platform = createPlatform({
+      mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+    });
+
+    try {
+      const result = await runHostedWorkspaceCanonicalWriteAtBoundary({
+        previousRedactedStatus: workspace.redactedStatus ?? null,
+        runnerInput: {
+          checkpointRuntimeRedactedStatus:
+            createRuntimeRedactedStatusCheckpoint({
+              attemptId: "attempt_delayed_canonical_write",
+              checkpointRequests,
+              expectedWorkspaceVersion: "1",
+              leaseGeneration: "1",
+            }),
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_delayed_canonical_write",
+            expectedWorkspaceVersion: "1",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() {
+            throw new Error("Mailbox import is not used at a canonical boundary.");
+          },
+          limitPerLane: 10,
+          platform,
+          requestId: "request_delayed_canonical_write",
+          vaultRoot,
+          workspace,
+        },
+        async write() {
+          await applyCanonicalWriteBatch({
+            audit: {
+              action: "experiment_update",
+              commandName: "test.delayedCanonicalWrite",
+              summary: "Synthetic delayed canonical write.",
+            },
+            operationType: "delayed_canonical_write_test",
+            summary: "Synthetic delayed canonical write",
+            textWrites: [{
+              content: "delayed canonical write\n",
+              overwrite: true,
+              relativePath: "bank/delayed-canonical-write.md",
+            }],
+            vaultRoot,
+          });
+        },
+      });
+
+      assert.equal(result.workspace?.version, "2");
+      assert.equal(
+        result.workspace?.redactedStatus?.hostedSystemMailboxHandledThroughSeq,
+        "7",
+      );
+      assert.equal(
+        typeof result.workspace?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "1");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 

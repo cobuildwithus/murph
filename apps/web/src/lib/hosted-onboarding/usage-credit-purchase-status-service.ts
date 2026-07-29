@@ -14,7 +14,11 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import { cancelHostedUsageCreditDirectPayment } from
+  "./usage-credit-saved-card-payment";
 import {
+  hostedUsageCreditPolicySupportsSavedCardTarget,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedUsageCreditOfferCode,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
@@ -44,17 +48,24 @@ export const HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES = [
 export type HostedUsageCreditPublicPurchaseStatus =
   (typeof HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES)[number];
 
+export type HostedUsageCreditSelectionConflict = "offer" | "sponsorship";
+
 export interface HostedUsageCreditCheckoutResult {
+  cancelAllowed?: true;
   purchaseId: string;
   recovered?: true;
+  /** The returned purchase is durably bound to the submitted request key. */
+  requestKeyMatched?: true;
   restartAt?: string;
   retryAllowed?: true;
+  selectionConflict?: HostedUsageCreditSelectionConflict;
   status: HostedUsageCreditPublicPurchaseStatus;
   targetConflict?: true;
   url?: string;
 }
 
 export interface HostedUsageCreditPurchaseStatusResult {
+  cancelAllowed?: true;
   purchaseId: string;
   restartAt?: string;
   status: HostedUsageCreditPublicPurchaseStatus;
@@ -62,6 +73,7 @@ export interface HostedUsageCreditPurchaseStatusResult {
 
 export interface HostedActiveUsageCreditPurchaseProjection
   extends HostedUsageCreditPurchaseStatusResult {
+  cancelAllowed?: true;
   offerCode: HostedUsageCreditOfferCode;
   retryAllowed: boolean;
   target: HostedUsageCreditPurchaseTargetProjection;
@@ -69,6 +81,7 @@ export interface HostedActiveUsageCreditPurchaseProjection
 }
 
 export interface HostedUsageCreditCheckoutCapabilityProjection {
+  cancelAllowed: boolean;
   checkout: HostedUsageCreditCheckoutResult;
   payerAuthorized: boolean;
   retryAllowed: boolean;
@@ -108,6 +121,9 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
       checkoutExpiresAt: true,
       id: true,
       status: true,
+      stripeCheckoutSessionLookupKey: true,
+      stripePaymentIntentIdEncrypted: true,
+      stripePaymentIntentLookupKey: true,
     },
     where: {
       ...(input.beneficiaryMemberId
@@ -190,6 +206,7 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
 
   return {
     ...capability.checkout,
+    ...(capability.cancelAllowed ? { cancelAllowed: true as const } : {}),
     offerCode,
     retryAllowed: capability.retryAllowed,
     target: capability.target,
@@ -236,16 +253,22 @@ export async function projectHostedUsageCreditCheckoutCapability(input: {
         purchase: input.purchase,
       })
     : projectHostedUsageCreditPurchaseStatusResult(input.purchase);
+  const cancelAllowed =
+    canCancelHostedUsageCreditDirectPayment(input.purchase);
 
   return {
-    checkout,
+    cancelAllowed,
+    checkout: cancelAllowed ? { ...checkout, cancelAllowed: true } : checkout,
     payerAuthorized: authority.payerAuthorized,
     retryAllowed:
       mayExposePayableCapability &&
-      canRetryHostedUsageCreditCheckoutCreate({
-        now: input.now,
-        purchase: input.purchase,
-      }),
+      (
+        canRetryHostedUsageCreditCheckoutCreate({
+          now: input.now,
+          purchase: input.purchase,
+        }) ||
+        canRetryHostedUsageCreditSavedCardPayment(input.purchase)
+      ),
     target,
     targetAuthorized:
       input.targetApprovedByCaller && authority.targetAuthorized,
@@ -350,6 +373,24 @@ export async function expireHostedUsageCreditCheckout(input: {
     return projectHostedUsageCreditPurchaseStatusResult(purchase);
   }
 
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+  if (stripeLiveMode !== purchase.stripeLiveMode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
+      httpStatus: 500,
+      message: "Usage-credit checkout is temporarily unavailable.",
+    });
+  }
+  if (canCancelHostedUsageCreditDirectPayment(purchase)) {
+    const reconciled = await cancelHostedUsageCreditDirectPayment({
+      now,
+      prisma,
+      purchase,
+      stripe,
+    });
+    return projectHostedUsageCreditPurchaseStatusResult(reconciled);
+  }
+
   const sessionId = await decryptHostedUsageCreditPurchaseStripeField({
     field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.checkoutSessionId,
     payerMemberId: input.payerMemberId,
@@ -365,15 +406,6 @@ export async function expireHostedUsageCreditCheckout(input: {
     })
   ) {
     throw buildHostedUsageCreditInvariantError("checkout_session_identity_invalid");
-  }
-
-  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
-  if (stripeLiveMode !== purchase.stripeLiveMode) {
-    throw hostedOnboardingError({
-      code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
-      httpStatus: 500,
-      message: "Usage-credit checkout is temporarily unavailable.",
-    });
   }
 
   const session = await retrieveAndExpireHostedUsageCreditStripeSession({
@@ -459,6 +491,54 @@ export function canRetryHostedUsageCreditCheckoutCreate(input: {
         HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS;
 }
 
+export function canRetryHostedUsageCreditSavedCardPayment(
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    | "beneficiaryMemberId"
+    | "checkoutRequestPolicyVersion"
+    | "checkoutSuccessUrl"
+    | "id"
+    | "payerMemberId"
+    | "status"
+    | "stripeCheckoutSessionLookupKey"
+    | "stripePaymentIntentIdEncrypted"
+    | "stripePaymentIntentLookupKey"
+  >,
+): boolean {
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    purchase.checkoutRequestPolicyVersion,
+  );
+  const target = projectHostedUsageCreditPurchaseTarget(purchase);
+  return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    policyVersion !== null &&
+    hostedUsageCreditPolicySupportsSavedCardTarget({
+      policyVersion,
+      targetKind: target.kind,
+    }) &&
+    !purchase.stripeCheckoutSessionLookupKey &&
+    Boolean(
+      purchase.stripePaymentIntentIdEncrypted &&
+      purchase.stripePaymentIntentLookupKey,
+    );
+}
+
+export function canCancelHostedUsageCreditDirectPayment(
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    | "status"
+    | "stripeCheckoutSessionLookupKey"
+    | "stripePaymentIntentIdEncrypted"
+    | "stripePaymentIntentLookupKey"
+  >,
+): boolean {
+  return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    !purchase.stripeCheckoutSessionLookupKey &&
+    Boolean(
+      purchase.stripePaymentIntentIdEncrypted &&
+      purchase.stripePaymentIntentLookupKey,
+    );
+}
+
 export async function projectHostedUsageCreditCheckoutResult(input: {
   prisma: HostedOnboardingReadClient;
   purchase: HostedUsageCreditPurchase;
@@ -507,9 +587,24 @@ function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
 export function projectHostedUsageCreditPurchaseStatusResult(input: Pick<
   HostedUsageCreditPurchase,
   "checkoutExpiresAt" | "id" | "status"
->): HostedUsageCreditPurchaseStatusResult {
+> & Partial<Pick<
+  HostedUsageCreditPurchase,
+  | "stripeCheckoutSessionLookupKey"
+  | "stripePaymentIntentIdEncrypted"
+  | "stripePaymentIntentLookupKey"
+>>): HostedUsageCreditPurchaseStatusResult {
   const status = projectHostedUsageCreditPublicPurchaseStatus(input);
+  const cancelAllowed = canCancelHostedUsageCreditDirectPayment({
+    status: input.status,
+    stripeCheckoutSessionLookupKey:
+      input.stripeCheckoutSessionLookupKey ?? null,
+    stripePaymentIntentIdEncrypted:
+      input.stripePaymentIntentIdEncrypted ?? null,
+    stripePaymentIntentLookupKey:
+      input.stripePaymentIntentLookupKey ?? null,
+  });
   return {
+    ...(cancelAllowed ? { cancelAllowed: true as const } : {}),
     purchaseId: input.id,
     ...(status === "reconciling"
       ? { restartAt: input.checkoutExpiresAt.toISOString() }

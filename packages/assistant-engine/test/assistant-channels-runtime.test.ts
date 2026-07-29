@@ -257,6 +257,59 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
+  it('uploads private Telegram images as multipart bytes instead of a URL', async () => {
+    const imageBytes = new Uint8Array([0x52, 0x49, 0x46, 0x46])
+    const loadVaultImage = vi.fn().mockResolvedValue(imageBytes)
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 3002 },
+      }),
+    ])
+
+    await expect(sendTelegramImageMessage({
+      media: [{
+        alt: 'Private generated image',
+        contentType: 'image/webp',
+        filename: 'generated.webp',
+        kind: 'vault_image',
+        ref: 'raw/captures/generated.webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'Private image',
+      replyToMessageId: '42',
+      target: '123:topic:9',
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+      loadVaultImage,
+    })).resolves.toMatchObject({
+      providerMessageId: '3002',
+      target: '123:topic:9',
+    })
+
+    expect(loadVaultImage).toHaveBeenCalledTimes(1)
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body
+    expect(body).toBeInstanceOf(FormData)
+    const entries = Object.fromEntries((body as FormData).entries())
+    expect(entries).toMatchObject({
+      caption: 'Private image',
+      chat_id: '123',
+      message_thread_id: '9',
+      reply_to_message_id: '42',
+    })
+    expect(entries).not.toHaveProperty('url')
+    expect(entries.photo).toBeInstanceOf(File)
+    expect((entries.photo as File).name).toBe('generated.webp')
+    expect((entries.photo as File).type).toBe('image/webp')
+    expect(new Uint8Array(await (entries.photo as File).arrayBuffer())).toEqual(imageBytes)
+  })
+
   it('blocks an authority-bound Telegram text redirect before the migrated request', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1434,6 +1487,54 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
+  it('uploads private Linq image bytes and sends only the provider attachment id', async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const loadVaultImage = vi.fn().mockResolvedValue(bytes)
+    runtimeMocks.uploadLinqAttachment.mockResolvedValue({
+      attachmentId: 'attachment_private_image',
+    })
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'message_private_image' },
+    })
+
+    await expect(sendLinqMessage({
+      media: [{
+        alt: 'Private generated chart',
+        contentType: 'image/png',
+        filename: 'generated-chart.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/generated-chart.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: bytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'Generated chart',
+      target: 'chat_private_image',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      loadVaultImage,
+    })).resolves.toMatchObject({
+      providerMessageId: 'message_private_image',
+      target: 'chat_private_image',
+    })
+
+    expect(loadVaultImage).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.uploadLinqAttachment).toHaveBeenCalledWith({
+      bytes,
+      contentType: 'image/png',
+      filename: 'generated-chart.png',
+    }, expect.objectContaining({
+      env: { LINQ_API_TOKEN: 'linq-token' },
+    }))
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'chat_private_image',
+      idempotencyKey: null,
+      media: [{ attachmentId: 'attachment_private_image' }],
+      message: 'Generated chart',
+      replyToMessageId: null,
+    }, expect.any(Object))
+  })
+
   it('uploads trusted vault-file bytes and sends the attachment without a caption', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4])
     const loadVaultFile = vi.fn().mockResolvedValue(bytes)
@@ -2304,6 +2405,49 @@ describe('assistant channels runtime seam', () => {
       replyToMessageId: null,
       target: 'stale-chat',
       targetKind: 'thread',
+    })
+  })
+
+  it('keeps an explicit direct Linq target out of current-home fallback', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'source-chat-a',
+      target: 'source-chat-a',
+      targetKind: 'explicit',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: null,
+          explicitTarget: 'source-chat-a',
+          idempotencyKey: 'usage-referral-reward:referral-1',
+          identityId: null,
+          message: 'Mission complete.',
+          replyToMessageId: null,
+          threadIsDirect: true,
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'source-chat-a',
+      target: 'source-chat-a',
+    })
+
+    expect(sendLinq).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: 'usage-referral-reward:referral-1',
+      message: 'Mission complete.',
+      replyToMessageId: null,
+      target: 'source-chat-a',
+      targetKind: 'explicit',
     })
   })
 

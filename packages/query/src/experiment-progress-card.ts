@@ -25,17 +25,6 @@ import {
 import type { MetricPoint } from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 
-/**
- * Derive the shareable progress-card snapshot for one in-progress experiment.
- *
- * The card is a compact projection of machinery that already exists in this
- * package: day cells come from the adherence calendar, the session counts come
- * from the progress summary, and movers come from the same metric results that
- * outcome analysis reports. Anything that has to be dropped to fit the card
- * contract (weeks, movers, label lengths) is surfaced in `warnings` instead of
- * being truncated silently.
- */
-
 export interface ExperimentProgressCardConfounderInput {
   date: string;
   label: string;
@@ -161,9 +150,6 @@ function buildCardWeeks(input: {
     statusesByDate.set(cell.localDate, statuses);
   }
 
-  // The sessions strip is about logged intervention sessions, so the grid runs
-  // over the intervention window only — baseline is a measurement-only period
-  // with nothing to log, and showing it just adds dead cells.
   const gridStart = input.windows.interventionStart ?? input.runStart;
   const gridEnd = input.windowEnd ?? maxIsoDate(input.asOf, gridStart);
   const totalWeeks = Math.ceil(daysBetweenInclusive(gridStart, gridEnd) / 7);
@@ -284,7 +270,6 @@ function buildCardMovers(
       baselineMean: signal.baselineMean,
       deltaAbs: signal.deltaAbs,
       interventionMean: signal.interventionMean,
-      // |delta| / |baseline mean|; deltaPct is the same ratio when present.
       normalizedMove:
         signal.deltaPct !== null
           ? Math.abs(signal.deltaPct) / 100
@@ -407,31 +392,18 @@ function clampCardText(
   return trimmed.slice(0, maxLength).trimEnd();
 }
 
-/**
- * Round display numbers to the precision a reader actually wants: whole units
- * for typical magnitudes (47 bpm, 117 minutes), one decimal for small values
- * where the integer would lose meaningful resolution (1.7 kg). Two-decimal
- * trailing digits in a headline card just read as noise.
- */
 function formatCompactNumber(value: number): string {
   const decimals = Math.abs(value) >= 10 ? 0 : 1;
   const factor = 10 ** decimals;
   return String(Math.round(value * factor) / factor);
 }
 
-/**
- * Format the headline percent-change magnitude. `normalizedMove` is the
- * unsigned |delta| / |baseline| ratio; the card draws a directional arrow, so
- * the number itself stays unsigned. Whole percents read cleanest, but sub-1%
- * moves keep one decimal so a real change never shows as 0%.
- */
 function formatPercentMagnitude(normalizedMove: number): string {
   const magnitude = normalizedMove * 100;
   const rounded = magnitude >= 1 ? Math.round(magnitude) : Math.round(magnitude * 10) / 10;
   return `${rounded}%`;
 }
 
-/** Signed raw change with its unit, e.g. "+18 min" or "−1.2 bpm". */
 function formatSignedDelta(deltaAbs: number, unit: string | null): string {
   const sign = deltaAbs > 0 ? "+" : deltaAbs < 0 ? "−" : "";
   const magnitude = formatCompactNumber(Math.abs(deltaAbs));

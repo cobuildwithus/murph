@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantOutboxIntentMirrorState: vi.fn(),
   readAssistantVaultFileMedia: vi.fn(),
   readVerifiedAssistantVaultFileBytes: vi.fn(),
+  readVerifiedAssistantVaultImageBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   saveAssistantOutboxIntentIfUnchanged: vi.fn(),
   setLinqMessageReaction: vi.fn(),
@@ -106,6 +107,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
     readVerifiedAssistantVaultFileBytes:
       mocks.readVerifiedAssistantVaultFileBytes,
+    readVerifiedAssistantVaultImageBytes:
+      mocks.readVerifiedAssistantVaultImageBytes,
     resetAssistantOutboxPreparedDispatchById:
       mocks.resetAssistantOutboxPreparedDispatchById,
     saveAssistantOutboxIntentIfUnchanged:
@@ -451,6 +454,9 @@ beforeEach(() => {
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
     new Uint8Array([1, 2, 3]),
+  );
+  mocks.readVerifiedAssistantVaultImageBytes.mockResolvedValue(
+    new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
   );
   mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
     async ({ intent }) => intent,
@@ -7661,8 +7667,13 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("routes Telegram deliveries through the shared Telegram runtime with Telegram-only env", async () => {
-    const effect = createEffect();
+  it("preserves legacy Telegram group delivery without route authority", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_123",
+      threadId: "chat_123",
+      threadIsDirect: false,
+    });
     mocks.sendTelegramMessage.mockResolvedValueOnce({
       providerMessageId: "provider_123",
       target: "chat_123",
@@ -7684,6 +7695,7 @@ describe("hosted runtime callbacks", () => {
       });
     });
     const assertLiveness = vi.fn(async () => undefined);
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
     const providerFetch = vi.fn<typeof fetch>();
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
@@ -7699,12 +7711,15 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
@@ -7725,6 +7740,78 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+  });
+
+  it("verifies private Telegram image bytes before provider dispatch and sends multipart", async () => {
+    const image = {
+      alt: "Private generated chart",
+      contentType: "image/webp" as const,
+      filename: "generated-chart.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/generated-chart.webp",
+      sha256: "a".repeat(64),
+      sizeBytes: 12,
+      source: "gpt-image-2",
+    };
+    const effect = createEffect({ media: [image] });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const sendTelegramImage = dependencies.sendTelegramImage;
+      if (!sendTelegramImage) {
+        throw new Error("Expected hosted Telegram image transport.");
+      }
+      const delivery = await sendTelegramImage({
+        media: [image],
+        message: "Private chart",
+        target: "chat_123",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (_request, init) => {
+      expect(init?.body).toBeInstanceOf(FormData);
+      const entries = Object.fromEntries((init?.body as FormData).entries());
+      expect(entries).toMatchObject({
+        caption: "Private chart",
+        chat_id: "chat_123",
+      });
+      expect(entries.photo).toBeInstanceOf(File);
+      expect((entries.photo as File).name).toBe("generated-chart.webp");
+      expect((entries.photo as File).type).toBe("image/webp");
+      return Response.json({
+        ok: true,
+        result: { message_id: 301 },
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        providerMessageId: "301",
+      }),
+    ]);
+
+    expect(mocks.readVerifiedAssistantVaultImageBytes).toHaveBeenCalledWith({
+      image,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+    expect(
+      mocks.readVerifiedAssistantVaultImageBytes.mock.invocationCallOrder[0],
+    ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("fails a route-scoped Telegram group delivery before provider entry when live authority is unavailable", async () => {
@@ -7854,6 +7941,337 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("revalidates reviewed Assistant Ask authority at Telegram provider entry", async () => {
+    const completionId = "aask_done_telegram_provider_entry";
+    const expiresAt = "2099-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const reviewedAnswer = "Reviewed private answer.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      idempotencyKey,
+      message: reviewedAnswer,
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      bindingDelivery: {
+        kind: "thread",
+        target: routeAuthority.threadId,
+      },
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      externalThreadRouteAuthority: routeAuthority,
+      intentId: effect.effectId,
+      media: [],
+      message: reviewedAnswer,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "provider_123",
+      target: routeAuthority.threadId,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: reviewedAnswer,
+          replyToMessageId: null,
+          target: routeAuthority.threadId,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            idempotencyKey,
+            messageLength: reviewedAnswer.length,
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+    const assertExternalThreadRouteAuthority = vi.fn(async () => ({}));
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith(
+      routeAuthority,
+      {
+        assistantAskCompletion: {
+          answeredMailboxItemIds: [completionId],
+          assistantAskCompletionExpiresAt: expiresAt,
+          assistantAskFallback: false,
+          idempotencyKey,
+        },
+        signal: null,
+      },
+    );
+    expect(
+      assertExternalThreadRouteAuthority.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.sendTelegramMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      {
+        idempotencyKey,
+        message: reviewedAnswer,
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      },
+      expect.objectContaining({
+        authorityBoundTarget: routeAuthority.threadId,
+      }),
+    );
+  });
+
+  it("blocks a reviewed Telegram completion whose persisted route authority is missing", async () => {
+    const completionId = "aask_done_telegram_missing_authority";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const reviewedAnswer = "Reviewed private answer that must not be sent.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "telegram_group_123",
+      idempotencyKey,
+      message: reviewedAnswer,
+      threadId: "telegram_group_123",
+      threadIsDirect: false,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      bindingDelivery: {
+        kind: "thread",
+        target: "telegram_group_123",
+      },
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      externalThreadRouteAuthority: null,
+      intentId: effect.effectId,
+      media: [],
+      message: reviewedAnswer,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendTelegram({
+          idempotencyKey,
+          message: reviewedAnswer,
+          replyToMessageId: null,
+          target: "telegram_group_123",
+        });
+        throw new Error("unreachable without reviewed completion authority");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      context: expect.objectContaining({ retryable: false }),
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries a stale reviewed Telegram answer with the durable fixed fallback", async () => {
+    const completionId = "aask_done_telegram_stale_authority";
+    const expiresAt = "2099-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const reviewedAnswer = "Reviewed private answer that must not be sent.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      idempotencyKey,
+      message: reviewedAnswer,
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+    });
+    let storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      bindingDelivery: {
+        kind: "thread",
+        target: routeAuthority.threadId,
+      },
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      externalThreadRouteAuthority: routeAuthority,
+      intentId: effect.effectId,
+      media: [],
+      message: reviewedAnswer,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+    }) as AssistantOutboxIntent;
+    const mirrorReadMessages: string[] = [];
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async () => {
+      mirrorReadMessages.push(storedIntent.message);
+      return createMirrorState(storedIntent);
+    });
+    mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
+      async ({ intent }) => {
+        storedIntent = intent;
+        return intent;
+      },
+    );
+    mocks.sendTelegramMessage.mockResolvedValue({
+      providerMessageId: "provider_safe_fallback",
+      target: routeAuthority.threadId,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: storedIntent.message,
+          replyToMessageId: null,
+          target: routeAuthority.threadId,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            idempotencyKey,
+            messageLength: storedIntent.message.length,
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+    const assertExternalThreadRouteAuthority = vi.fn(
+      async (_authority: unknown, input?: {
+        assistantAskCompletion?: {
+          assistantAskFallback: boolean;
+        } | null;
+      }) => input?.assistantAskCompletion?.assistantAskFallback === true
+        ? {}
+        : { assistantAskFallbackRequired: true },
+    );
+    const drain = () => drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    await expect(drain()).rejects.toMatchObject({
+      code: "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+    });
+
+    expect(storedIntent).toMatchObject({
+      media: [],
+      message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+    });
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    storedIntent = {
+      ...storedIntent,
+      status: "retryable",
+      updatedAt: "2026-04-08T00:00:45.000Z",
+    };
+
+    await expect(drain()).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+    expect(mirrorReadMessages).toEqual([
+      reviewedAnswer,
+      HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+    ]);
+    expect(assertExternalThreadRouteAuthority.mock.calls.map(([, context]) =>
+      context?.assistantAskCompletion?.assistantAskFallback
+    )).toEqual([false, true]);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      {
+        idempotencyKey,
+        message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      },
+      expect.objectContaining({
+        authorityBoundTarget: routeAuthority.threadId,
+      }),
+    );
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: reviewedAnswer }),
+      expect.anything(),
+    );
+  });
+
   it("carries the exact Telegram group route into image and reaction transports", async () => {
     const routeAuthority = {
       channel: "telegram" as const,
@@ -7944,7 +8362,12 @@ describe("hosted runtime callbacks", () => {
     expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks Telegram provider entry when the live route owner revokes the composed target", async () => {
+  it.each([
+    { audience: "direct", threadIsDirect: true },
+    { audience: "group", threadIsDirect: false },
+  ])("blocks Telegram $audience provider entry when the live route owner revokes the composed target", async ({
+    threadIsDirect,
+  }) => {
     const routeAuthority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
@@ -7954,7 +8377,7 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: routeAuthority.threadId,
       threadId: routeAuthority.threadId,
-      threadIsDirect: false,
+      threadIsDirect,
     });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState({
@@ -9408,6 +9831,78 @@ describe("hosted runtime callbacks", () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it("fails a fixed-source Linq notification instead of moving it to the current home route", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: null,
+      bindingDeliveryTarget: null,
+      channel: "linq",
+      explicitTarget: "linq_source_chat_a",
+      idempotencyKey: "usage-referral-reward:referral_1",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const authorityError = new VaultCliError(
+      "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      "The fixed source conversation is no longer authorized.",
+      { retryable: false },
+    );
+    const assertRecentInbound = vi.fn(async () => {
+      throw authorityError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [],
+          homeRouteFallbackAllowed: false,
+          idempotencyKey: "usage-referral-reward:referral_1",
+          message: "Mission complete.",
+          replyToMessageId: null,
+          target: "linq_source_chat_a",
+          targetKind: "explicit",
+        });
+      } catch (error) {
+        return createDispatchResult({
+          delivery: null,
+          status: "failed",
+        }, {
+          code: error instanceof VaultCliError ? error.code : null,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw new Error("Expected fixed-source authority to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: false,
+        homeRouteFallbackAllowed: false,
+        target: "linq_source_chat_a",
+        targetKind: "explicit",
+      }),
+      { signal: null },
+    );
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(JSON.stringify(assertRecentInbound.mock.calls))
+      .not.toContain("linq_current_home_b");
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
   });
 
   it("keeps Linq sends successful when delivery outcome recording fails", async () => {

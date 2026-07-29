@@ -9,6 +9,9 @@ import {
 import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  readHostedRuntimeWriteFence,
+} from "@/src/lib/hosted-execution/runtime-write-fence";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   recordHostedIngressAssistantMilestone,
@@ -18,14 +21,16 @@ import {
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
-
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: authenticatedUserId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
   });
   const traceRequest = parseHostedRuntimeLatencyTraceRequest(payload);
-  const runtimeAttemptId = requireMatchingRuntimeAttemptId(request, traceRequest.event.runtimeAttemptId);
+  const writeFence = requireMatchingRuntimeWriteFence(
+    request,
+    traceRequest.event.runtimeAttemptId,
+  );
+  const runtimeAttemptId = writeFence.attemptId;
 
   const result = traceRequest.event.type === "assistant_input_staged"
     ? await recordHostedIngressAssistantInputStaged({
@@ -45,8 +50,15 @@ export const POST = withJsonError(async (request: Request) => {
           assistantInputIds: traceRequest.event.assistantInputIds,
           at: traceRequest.event.at,
           authenticatedUserId,
+          ...(traceRequest.event.checkpointPublicationExpectedBy === undefined
+            ? {}
+            : {
+                checkpointPublicationExpectedBy:
+                  traceRequest.event.checkpointPublicationExpectedBy,
+              }),
           milestone: traceRequest.event.milestone,
           runtimeAttemptId,
+          runtimeLeaseGeneration: writeFence.leaseGeneration,
           source: traceRequest.event.source,
         })
       : traceRequest.event.type === "provider_started"
@@ -64,6 +76,7 @@ export const POST = withJsonError(async (request: Request) => {
           authenticatedUserId,
           milestone: traceRequest.event.milestone,
           runtimeAttemptId,
+          runtimeLeaseGeneration: writeFence.leaseGeneration,
           source: traceRequest.event.source,
         });
 
@@ -81,14 +94,17 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
 });
 
-function requireMatchingRuntimeAttemptId(
+function requireMatchingRuntimeWriteFence(
   request: Request,
   eventRuntimeAttemptId: string | null | undefined,
-): string {
-  const headerRuntimeAttemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)?.trim() ?? "";
+): NonNullable<ReturnType<typeof readHostedRuntimeWriteFence>> {
+  const writeFence = readHostedRuntimeWriteFence(request);
   const normalizedEventRuntimeAttemptId = eventRuntimeAttemptId?.trim() ?? "";
 
-  if (!headerRuntimeAttemptId || normalizedEventRuntimeAttemptId !== headerRuntimeAttemptId) {
+  if (
+    !writeFence
+    || normalizedEventRuntimeAttemptId !== writeFence.attemptId
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_RUNTIME_LATENCY_TRACE_ATTEMPT_MISMATCH",
       httpStatus: 401,
@@ -96,5 +112,5 @@ function requireMatchingRuntimeAttemptId(
     });
   }
 
-  return headerRuntimeAttemptId;
+  return writeFence;
 }

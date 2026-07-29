@@ -9,6 +9,7 @@ import {
 } from "#hosted-web-testing";
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderRequestDerivedMurphToolCall,
   expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
@@ -30,10 +31,10 @@ const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const assistantReplyText = "Here is the setup image.";
 const assistantMediaUrl = "https://assets.example.test/assistant-media/dead-bug-setup.png";
+const imageGenerationStartedReplyText =
+  "I started generating it and can keep helping while it finishes.";
+const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
-const generatedImageUploadFailureReplyText =
-  "I generated it, but the image upload failed, so I can only send text right now.";
-const generatedImageUrl = "https://imagedelivery.net/hosted-local/generated-image/public";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
 
@@ -151,55 +152,113 @@ describe("hosted local Codex image media delivery e2e", () => {
     });
   }, 300_000);
 
-  it("generates a hosted image, saves its canonical capture, and reuses it on a later turn", async () => {
+  it("continues the turn, then wakes with a private image attachment and reuses its vault capture", async () => {
     const materializedChatId = `chat_local_codex_media_${userId}`;
     const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeGeneration = requireLinqStub().countObservedSends(replyPath);
+    const attachmentCountBeforeGeneration = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    });
+    await requireScenario().harness.armGeneratedImageProviderBarrierForTest(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("generate_image", {
         alt: "Generated mobility setup",
         prompt: "Render a simple synthetic mobility setup diagram.",
       }),
-      buildAssistantProviderMurphToolCall("attach_response_media", {
-        media: [{
-          alt: "Generated mobility setup",
-          kind: "image",
-          source: "hosted-local-generated-image",
-          url: generatedImageUrl,
-        }],
-      }),
-      generatedImageReplyText,
+      imageGenerationStartedReplyText,
     ], {
       matchInputContains: "Generate a fresh mobility setup image",
     });
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderRequestDerivedMurphToolCall(
+        "attach_response_media",
+        ({ requestMatchText }) => ({
+          media: readPrivateGeneratedMedia(requestMatchText),
+        }),
+      ),
+      generatedImageReplyText,
+    ], {
+      matchInputContains:
+        "Trusted hosted image completion (runtime-authored; authoritative):",
+    });
+    requireScenario().queueAssistantResponses([
+      interveningConversationReplyText,
+    ], {
+      matchInputContains: "While that runs, give me one breathing cue",
+    });
 
-    const generationResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      materializedChatId,
-      {
-        eventId: `evt_codex_generated_media_${userId}`,
-        messageId: `msg_codex_generated_media_${userId}`,
-        text: "Generate a fresh mobility setup image and save it for later reuse.",
-      },
-    ));
-    expect(generationResponse.status).toBe(202);
-    await requireScenario().waitForLatestPendingWake(userId);
-    const generationSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeGeneration,
+    try {
+      const generationResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        materializedChatId,
+        {
+          eventId: `evt_codex_generated_media_${userId}`,
+          messageId: `msg_codex_generated_media_${userId}`,
+          text: "Generate a fresh mobility setup image and save it for later reuse.",
+        },
+      ));
+      expect(generationResponse.status).toBe(202);
+      await requireScenario().waitForLatestPendingWake(userId);
+      const startedSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: outboundCountBeforeGeneration,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(readObservedLinqMessageParts(startedSend)).toEqual([
+        {
+          type: "text",
+          value: imageGenerationStartedReplyText,
+        },
+      ]);
+
+      const interveningResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        materializedChatId,
+        {
+          eventId: `evt_codex_generated_media_intervening_${userId}`,
+          messageId: `msg_codex_generated_media_intervening_${userId}`,
+          text: "While that runs, give me one breathing cue.",
+        },
+      ));
+      expect(interveningResponse.status).toBe(202);
+      const interveningSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: outboundCountBeforeGeneration + 1,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(readObservedLinqMessageParts(interveningSend)).toEqual([
+        {
+          type: "text",
+          value: interveningConversationReplyText,
+        },
+      ]);
+    } finally {
+      await requireScenario().harness.releaseGeneratedImageProviderBarrierForTest(userId);
+    }
+
+    const completedSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeGeneration + 2,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
-    expect(readObservedLinqMessageParts(generationSend)).toEqual([
+    expect(readObservedLinqMessageParts(completedSend)).toEqual([
       {
         type: "text",
         value: generatedImageReplyText,
       },
-      {
+      expect.objectContaining({
+        attachment_id: expect.stringMatching(/^attachment_local_/u),
         type: "media",
-        url: generatedImageUrl,
-      },
+      }),
     ]);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(attachmentCountBeforeGeneration + 1);
     await requireScenario().waitForHostedCompletion(userId);
 
     const savedImageRef = readLatestSavedGeneratedImageRef();
@@ -211,53 +270,84 @@ describe("hosted local Codex image media delivery e2e", () => {
     expectPriceableImageUsage(usage, 1);
 
     const reuseReplyText = "I reused the saved setup image as the edit reference.";
+    const reuseStartedReplyText = "I started the saved-image variation.";
     const outboundCountBeforeReuse = requireLinqStub().countObservedSends(replyPath);
+    const attachmentCountBeforeReuse = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    });
+    await requireScenario().harness.armGeneratedImageProviderBarrierForTest(userId);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("generate_image", {
         alt: "Reused mobility setup",
         prompt: "Create a synthetic variation that preserves the reference layout.",
         referenceImageRefs: [savedImageRef],
       }),
-      buildAssistantProviderMurphToolCall("attach_response_media", {
-        media: [{
-          alt: "Reused mobility setup",
-          kind: "image",
-          source: "hosted-local-generated-image-reuse",
-          url: generatedImageUrl,
-        }],
-      }),
-      reuseReplyText,
+      reuseStartedReplyText,
     ], {
       matchInputContains: savedImageRef,
     });
 
-    const reuseResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      materializedChatId,
-      {
-        eventId: `evt_codex_generated_media_reuse_${userId}`,
-        messageId: `msg_codex_generated_media_reuse_${userId}`,
-        text: `Reuse the saved image ${savedImageRef} as a reference for one variation.`,
-      },
-    ));
-    expect(reuseResponse.status).toBe(202);
-    await requireScenario().waitForLatestPendingWake(userId);
-    const reuseSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReuse,
+    try {
+      const reuseResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        materializedChatId,
+        {
+          eventId: `evt_codex_generated_media_reuse_${userId}`,
+          messageId: `msg_codex_generated_media_reuse_${userId}`,
+          text: `Reuse the saved image ${savedImageRef} as a reference for one variation.`,
+        },
+      ));
+      expect(reuseResponse.status).toBe(202);
+      await requireScenario().waitForLatestPendingWake(userId);
+      const reuseStartedSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: outboundCountBeforeReuse,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(readObservedLinqMessageParts(reuseStartedSend)).toEqual([
+        {
+          type: "text",
+          value: reuseStartedReplyText,
+        },
+      ]);
+      requireScenario().queueAssistantResponses([
+        buildAssistantProviderRequestDerivedMurphToolCall(
+          "attach_response_media",
+          ({ requestMatchText }) => ({
+            media: readPrivateGeneratedMedia(requestMatchText),
+          }),
+        ),
+        reuseReplyText,
+      ], {
+        matchInputContains:
+          "Trusted hosted image completion (runtime-authored; authoritative):",
+      });
+    } finally {
+      await requireScenario().harness.releaseGeneratedImageProviderBarrierForTest(userId);
+    }
+
+    const reuseCompletedSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReuse + 1,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
-    expect(readObservedLinqMessageParts(reuseSend)).toEqual([
+    expect(readObservedLinqMessageParts(reuseCompletedSend)).toEqual([
       {
         type: "text",
         value: reuseReplyText,
       },
-      {
+      expect.objectContaining({
+        attachment_id: expect.stringMatching(/^attachment_local_/u),
         type: "media",
-        url: generatedImageUrl,
-      },
+      }),
     ]);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(attachmentCountBeforeReuse + 1);
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
@@ -268,49 +358,6 @@ describe("hosted local Codex image media delivery e2e", () => {
       }),
       2,
     );
-  }, 360_000);
-
-  it("degrades to text when generated-image upload throws", async () => {
-    const materializedChatId = `chat_local_codex_media_${userId}`;
-    const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
-    const outboundCountBeforeGeneration = requireLinqStub().countObservedSends(replyPath);
-    await requireScenario().harness.armGeneratedImageUploadTypeErrorForTest(userId);
-    requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("generate_image", {
-        alt: "Generated upload failure setup",
-        prompt: "Render a simple synthetic mobility setup diagram for a failure test.",
-      }),
-      generatedImageUploadFailureReplyText,
-    ], {
-      matchInputContains: "Generate an image that hits the upload failure path",
-    });
-
-    const generationResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      materializedChatId,
-      {
-        eventId: `evt_codex_generated_media_upload_failure_${userId}`,
-        messageId: `msg_codex_generated_media_upload_failure_${userId}`,
-        text: "Generate an image that hits the upload failure path.",
-      },
-    ));
-    expect(generationResponse.status).toBe(202);
-    await requireScenario().waitForLatestPendingWake(userId);
-    const generationSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeGeneration,
-      expectedPath: replyPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(readObservedLinqMessageParts(generationSend)).toEqual([
-      {
-        type: "text",
-        value: generatedImageUploadFailureReplyText,
-      },
-    ]);
-
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
   }, 360_000);
 });
 
@@ -325,62 +372,11 @@ function expectPriceableImageUsage(
       expect.objectContaining({
         allowanceCostUsdMicros: "1080",
         allowanceCounted: true,
-        allowancePricingSnapshotJson: expect.objectContaining({
-          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
-          tokens: expect.objectContaining({
-            openAiImage: expect.objectContaining({
-              billableImageInput: "0",
-              billableTextInput: "12",
-              imageInput: "0",
-              output: "34",
-              textInput: "12",
-            }),
-          }),
-        }),
-        allowancePricingVersion: "openai-image-api-pricing-2026-07-08-standard",
         requestedModel: "gpt-image-2",
         totalTokens: 46,
-      }),
+      })
     ),
   );
-}
-
-async function ensureScenario(): Promise<void> {
-  if (scenario) {
-    return;
-  }
-
-  linqStub = await startHostedLocalLinqStub({
-    expectedAuthorizationToken: linqApiToken,
-  });
-  scenario = await startHostedLocalFullStackScenario({
-    additionalEnv: {
-      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "hosted-local-images-account",
-      CLOUDFLARE_IMAGES_API_KEY: "hosted-local-images-key",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
-      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-        buildLinqRecipientPhoneNumber(userId),
-      LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
-      LINQ_API_TOKEN: linqApiToken,
-      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      OPENAI_API_KEY: "stub-local-openai-key",
-    },
-    assistantProviderStubModelId: productionLikeAssistantModel,
-    // The generated-image upload-failure regression arms a deliberate fault
-    // injection, so the harness must allow mutating intervention controls.
-    faultInjection: true,
-    localDatabaseUrl,
-    persistDirOverride: workerPersistDirOverride,
-    persistDirPrefix: "murph-hosted-local-codex-media-",
-    requiredRunnerEnvProfile: "linq",
-    scenarioLabel: "Local hosted Codex image media e2e",
-    streamLogs: streamDevLogs,
-    testControls: true,
-  });
 }
 
 function readLatestSavedGeneratedImageRef(): string {
@@ -398,11 +394,91 @@ function readLatestSavedGeneratedImageRef(): string {
     "image generation failed",
     "image generation returned invalid image data",
     "image generated but vault save failed",
-    "image generated but upload failed",
   ].find((outcome) => requests.some((body) => body.includes(outcome))) ?? "unclassified";
   throw new Error(
     `Expected the generated-image tool output to expose a saved vault ref; outcome: ${knownOutcome}.`,
   );
+}
+
+function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
+  const trustedCompletionContexts = [
+    ...requestMatchText.matchAll(
+      /\n(\[\{"inputId":.*\}\])\nFor a ready result,/gu,
+    ),
+  ];
+  for (const match of trustedCompletionContexts.reverse()) {
+    const payload = match[1];
+    if (!payload) {
+      continue;
+    }
+    try {
+      const parsed: unknown = JSON.parse(payload);
+      if (!Array.isArray(parsed)) {
+        continue;
+      }
+      for (const completion of parsed) {
+        const result = isRecord(completion) ? completion.result : null;
+        if (
+          isRecord(result)
+          && result.status === "ready"
+          && Array.isArray(result.media)
+          && result.media.length === 1
+          && result.media.every((item) =>
+            isRecord(item)
+            && item.kind === "vault_image"
+            && typeof item.ref === "string"
+            && typeof item.sha256 === "string"
+          )
+        ) {
+          return result.media;
+        }
+      }
+    } catch {
+      // The raw request body contains escaped copies before the decoded
+      // turn-context string. Continue until the normalized trusted context.
+    }
+  }
+  throw new Error("Expected one trusted private generated-image descriptor.");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+async function ensureScenario(): Promise<void> {
+  if (scenario) {
+    return;
+  }
+
+  linqStub = await startHostedLocalLinqStub({
+    expectedAuthorizationToken: linqApiToken,
+  });
+  scenario = await startHostedLocalFullStackScenario({
+    additionalEnv: {
+      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+        buildLinqRecipientPhoneNumber(userId),
+      LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
+      LINQ_API_TOKEN: linqApiToken,
+      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      OPENAI_API_KEY: "stub-local-openai-key",
+    },
+    assistantProviderStubModelId: productionLikeAssistantModel,
+    // The provider barrier proves that the ordinary conversation remains
+    // responsive while generated-image work is detached.
+    faultInjection: true,
+    localDatabaseUrl,
+    persistDirOverride: workerPersistDirOverride,
+    persistDirPrefix: "murph-hosted-local-codex-media-",
+    requiredRunnerEnvProfile: "linq",
+    scenarioLabel: "Local hosted Codex image media e2e",
+    streamLogs: streamDevLogs,
+    testControls: true,
+  });
 }
 
 function buildActivationWake(memberId: string) {

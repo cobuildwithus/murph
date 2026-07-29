@@ -6,6 +6,7 @@ import type {
   HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeProductFeedbackRecord,
   HostedWorkspaceInvocationRequest,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -135,6 +136,7 @@ export interface HostedAssistantDeliveryOutcome {
 
 export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
+  deliveryIntentIds?: readonly string[] | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
@@ -199,6 +201,8 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
+  assistantAutomationProductFeedbackCandidates?:
+    readonly HostedRuntimeProductFeedbackRecord[] | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;

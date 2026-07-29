@@ -26,6 +26,10 @@ const CONTRACT_MIGRATION_TABLE = '"_hosted_web_contract_migration"';
 const CONTRACT_MIGRATION_LOCK_NAME = "hosted_web_contract_migrations";
 const CONTRACT_MIGRATION_LOCK_TIMEOUT = "5s";
 const CONTRACT_MIGRATION_STATEMENT_TIMEOUT = "30s";
+const SUPERSEDED_CONTRACT_MIGRATION_IDS = new Set([
+  "20260720233000_hosted_group_usage_funding_invariants",
+  "20260726123000_allow_hosted_usage_referral_credit_entries",
+]);
 
 export interface HostedWebContractMigration {
   checksum: string;
@@ -122,7 +126,11 @@ export async function listHostedWebContractMigrations(
 
   const entries = await readdir(migrationsDir, { withFileTypes: true });
   const migrationDirs = entries
-    .filter((entry) => entry.isDirectory())
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        !SUPERSEDED_CONTRACT_MIGRATION_IDS.has(entry.name),
+    )
     .map((entry) => entry.name)
     .sort((a, b) => a.localeCompare(b));
   const migrations: HostedWebContractMigration[] = [];

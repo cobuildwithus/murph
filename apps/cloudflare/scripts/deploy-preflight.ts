@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 
 import {
   HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
+  HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   isHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -53,7 +54,9 @@ const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_BASE_URL",
   "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
-  ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
+  ...HOSTED_WORKER_REQUIRED_VAR_NAMES.filter((name) =>
+    name !== "CF_PUBLIC_BASE_URL"
+  ),
 ] as const;
 
 const REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
@@ -66,6 +69,15 @@ const REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES = [
 
 const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_PRODUCTION_BASE_URL",
+  "HOSTED_DATABASE_ALERT_ENABLED",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
+  "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
+  "LINQ_API_TOKEN",
 ] as const;
 
 const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
@@ -224,6 +236,38 @@ export function listHostedDeployEnvironmentInvariantErrors(
     return errors;
   }
 
+  const databaseAlertEnabled = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_ENABLED,
+  );
+  if (
+    deployContext === "production"
+    && databaseAlertEnabled
+    && databaseAlertEnabled !== "1"
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be 1 for production deploys.",
+    );
+  } else if (
+    deployContext !== "production"
+    && databaseAlertEnabled
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
+    );
+  }
+
+  const privateMediaCapabilitySecret = normalizeOptionalString(
+    source.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
+  );
+  if (
+    privateMediaCapabilitySecret
+    && privateMediaCapabilitySecret.length < 32
+  ) {
+    errors.push(
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET must contain at least 32 characters.",
+    );
+  }
+
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
@@ -365,6 +409,16 @@ export function listHostedDeployEnvironmentInvariantErrors(
     if (result) {
       productionUrls.set(label, result);
     }
+  }
+
+  const publicWorkerOrigin = productionUrls.get("CF_PUBLIC_BASE_URL")?.normalized;
+  if (
+    publicWorkerOrigin
+    && publicWorkerOrigin !== HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN
+  ) {
+    errors.push(
+      `production deploys must set CF_PUBLIC_BASE_URL=${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN} for private-media capability delivery.`,
+    );
   }
 
   const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;

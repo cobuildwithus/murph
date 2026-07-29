@@ -5,6 +5,21 @@
     "changelogPath": "packages/cli/CHANGELOG.md",
     "releaseNotesDir": "packages/cli/release-notes"
   },
+  "publicApiReleaseBoundary": {
+    "minimumMajor": 2,
+    "reason": "Private-media hardening removes the public experiment progress-card URL codec from @murphai/contracts; publishing that removal below 2.0.0 would break the released 1.2.x root API.",
+    "removals": [
+      {
+        "package": "@murphai/contracts",
+        "rootExports": [
+          "EXPERIMENT_PROGRESS_CARD_MAX_ENCODED_LENGTH",
+          "encodeExperimentProgressCard",
+          "decodeExperimentProgressCard",
+          "buildExperimentProgressCardPath"
+        ]
+      }
+    ]
+  },
   "packages": [
     {
       "name": "@murphai/contracts",
