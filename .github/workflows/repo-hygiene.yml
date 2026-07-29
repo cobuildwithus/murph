@@ -13,58 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  repair-pr1117-explicit-setup:
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1117 }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Preserve explicit setup during room-model maintenance
-        run: |
-          python <<'PY'
-          from pathlib import Path
-
-          source_path = Path('packages/assistant-engine/src/assistant/managed-automations.ts')
-          source = source_path.read_text()
-          anchor = "      'Maintain exactly one page by calling `murph.group_room_model` with `action=\"upsert\"`, the complete Markdown `body`, and the exact `expectedDigest` returned by show. Rewrite the complete page only when the evidence supports a material improvement; otherwise do not write. Use `action=\"delete\"` with that digest only when the room explicitly asked Murph to forget all room-model context.',\n"
-          addition = "      'If the existing page contains a `## Explicit setup` section, preserve that section verbatim unless current group evidence contains an explicit request to revise or forget it. Silence, ordinary banter, or inferred preference never removes it.',\n"
-          if addition not in source:
-              if anchor not in source:
-                  raise SystemExit('managed automation insertion anchor not found')
-              source = source.replace(anchor, anchor + addition, 1)
-          source_path.write_text(source)
-
-          test_path = Path('packages/assistant-engine/test/managed-automations.test.ts')
-          tests = test_path.read_text()
-          anchor = "    expect(seed.instructions).toContain('exact `expectedDigest` returned by show')\n"
-          addition = "    expect(seed.instructions).toContain('`## Explicit setup` section')\n    expect(seed.instructions).toContain('preserve that section verbatim')\n    expect(seed.instructions).toContain('explicit request to revise or forget it')\n"
-          if "preserve that section verbatim" not in tests:
-              if anchor not in tests:
-                  raise SystemExit('managed automation test insertion anchor not found')
-              tests = tests.replace(anchor, anchor + addition, 1)
-          test_path.write_text(tests)
-          PY
-
-      - name: Commit clean repair
-        run: |
-          git fetch origin "${{ github.event.pull_request.base.ref }}"
-          git checkout "origin/${{ github.event.pull_request.base.ref }}" -- .github/workflows/repo-hygiene.yml
-          git config user.name "Codex"
-          git config user.email "codex@openai.com"
-          git add packages/assistant-engine/src/assistant/managed-automations.ts \
-            packages/assistant-engine/test/managed-automations.test.ts \
-            .github/workflows/repo-hygiene.yml
-          git diff --check
-          git commit -m "fix(group): preserve explicit prepared room setup"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
   tracked-artifacts:
     name: Tracked private/build artifacts
     runs-on: ubuntu-24.04
