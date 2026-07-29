@@ -11,6 +11,9 @@ import {
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
+const HOSTED_PRODUCT_FEEDBACK_RECORD_TIMEOUT_MS = 2_000;
+const HOSTED_PRODUCT_FEEDBACK_RESPONSE_MAX_BYTES = 4 * 1024;
+
 export function createHostedRuntimeProductFeedbackPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -19,13 +22,21 @@ export function createHostedRuntimeProductFeedbackPort(input: {
 }): NonNullable<HostedRuntimePlatform["productFeedbackPort"]> {
   return {
     async recordProductFeedback(feedback) {
+      const timeoutMs = Math.min(
+        input.timeoutMs,
+        HOSTED_PRODUCT_FEEDBACK_RECORD_TIMEOUT_MS,
+      );
       const payload = await fetchHostedWebControlPlaneJson({
         body: { feedback },
         boundUserId: input.boundUserId,
         description: "Hosted product feedback recording",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
-        timeoutMs: input.timeoutMs,
+        sensitiveResponseBody: {
+          maxBytes: HOSTED_PRODUCT_FEEDBACK_RESPONSE_MAX_BYTES,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+        timeoutMs,
         transport: input.transport,
       });
 

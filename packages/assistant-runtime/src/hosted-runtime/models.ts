@@ -6,6 +6,7 @@ import type {
   HostedExecutionRedactedLogEntry,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeProductFeedbackRecord,
   HostedWorkspaceInvocationRequest,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -200,6 +201,8 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
+  assistantAutomationProductFeedbackCandidates?:
+    readonly HostedRuntimeProductFeedbackRecord[] | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;
