@@ -8,12 +8,6 @@ import {
   resolveExperimentStartContactChannels,
 } from "@/src/lib/experiments/start-experiment-contact";
 
-const TEST_PROTOCOL_REF = {
-  key: "protocol_variant:dry-sauna/murph-standard-3x-week",
-  pageRevisionId: `sha256:${"1".repeat(64)}`,
-  runSpecRevisionId: `sha256:${"2".repeat(64)}`,
-};
-
 describe("experiment start contact resolver", () => {
   it("offers every connected Murph channel without placing user identifiers in hrefs", () => {
     const action = resolveExperimentStartContactAction({
@@ -37,7 +31,6 @@ describe("experiment start contact resolver", () => {
         ],
       },
       murphPhoneNumber: "+15550100001",
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Finnish Dry Sauna",
     });
 
@@ -60,11 +53,12 @@ describe("experiment start contact resolver", () => {
       .toContain(`mailto:${MURPH_EXPERIMENT_CONTACT_EMAIL}`);
     for (const option of action.options) {
       expect(decodeURIComponent(option.href.replaceAll("+", "%20")))
-        .toContain(TEST_PROTOCOL_REF.runSpecRevisionId);
+        .toContain("I want to start the Finnish Dry Sauna experiment.");
+      expect(option.href).not.toContain("sha256");
     }
 
     const outboundText = action.options
-      .flatMap((option) => [option.description, option.href, option.meta])
+      .flatMap((option) => [option.description, option.href])
       .join("\n");
     expect(outboundText).not.toContain("+14045550123");
     expect(outboundText).not.toContain("member@example.test");
@@ -83,7 +77,6 @@ describe("experiment start contact resolver", () => {
           },
         ],
       },
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Norwegian 4x4",
     });
 
@@ -105,7 +98,6 @@ describe("experiment start contact resolver", () => {
           },
         ],
       },
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Norwegian 4x4",
     });
 
@@ -125,7 +117,6 @@ describe("experiment start contact resolver", () => {
         telegram: true,
         text: false,
       },
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Norwegian 4x4",
     });
 
@@ -170,7 +161,6 @@ describe("experiment start contact resolver", () => {
           },
         ],
       },
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -189,7 +179,6 @@ describe("experiment start contact resolver", () => {
         linkedAccounts: [],
       },
       murphPhoneNumber: "+15550100001?body=Injected",
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -207,7 +196,6 @@ describe("experiment start contact resolver", () => {
       accountContainer: {
         linkedAccounts: [],
       },
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -226,7 +214,6 @@ describe("experiment start contact resolver", () => {
         linkedAccounts: [],
       },
       murphPhoneNumber: "+15550100001",
-      protocolRef: TEST_PROTOCOL_REF,
       protocolTitle: "Red Light Glasses Before Bed",
     });
 
@@ -239,25 +226,15 @@ describe("experiment start contact resolver", () => {
     });
   });
 
-  it("carries exact protocol lineage in a concise parseable draft", () => {
-    expect(buildExperimentStartMessage("Finnish Dry Sauna", TEST_PROTOCOL_REF)).toBe([
-      "I want to start the Finnish Dry Sauna experiment.",
-      "",
-      "Protocol reference:",
-      `key: ${TEST_PROTOCOL_REF.key}`,
-      `pageRevisionId: ${TEST_PROTOCOL_REF.pageRevisionId}`,
-      `runSpecRevisionId: ${TEST_PROTOCOL_REF.runSpecRevisionId}`,
-    ].join("\n"));
-  });
+  it("keeps the public draft to the human-readable experiment name", () => {
+    const message = buildExperimentStartMessage(
+      "Standard, Tiny, And Fallback Bedtime Transition",
+    );
 
-  it("rejects malformed protocol lineage instead of drafting an ambiguous start", () => {
-    expect(() => buildExperimentStartMessage("Finnish Dry Sauna", {
-      ...TEST_PROTOCOL_REF,
-      runSpecRevisionId: "latest",
-    })).toThrow("Invalid experiment start protocol reference.");
-    expect(() => buildExperimentStartMessage("Finnish Dry Sauna", {
-      ...TEST_PROTOCOL_REF,
-      key: "Finnish Dry Sauna",
-    })).toThrow("Invalid experiment start protocol reference.");
+    expect(message).toBe(
+      "I want to start the Standard, Tiny, And Fallback Bedtime Transition experiment.",
+    );
+    expect(message).not.toContain("Protocol reference");
+    expect(message).not.toContain("sha256");
   });
 });
