@@ -3,11 +3,15 @@ import "server-only";
 import {
   assistantPersonaIdSchema,
   assistantPersonalityScoreSchema,
+  assistantPersonalitySettingIds,
   assistantTonePreferenceSchema,
   assistantVoiceOptionIdSchema,
+  type AssistantPersonaId,
+  type AssistantPersonalitySettingId,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { z } from "zod";
 
 import {
   openHostedUserSecureBoxString,
@@ -30,58 +34,21 @@ const HOSTED_PENDING_GROUP_SETUP_CHANNEL = "linq" as const;
 const HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE =
   "hosted-pending-group-setup:payload:v1";
 
-const hostedPendingGroupSetupPersonalitySchema = z.object({
-  detail: assistantPersonalityScoreSchema.nullable().optional(),
-  humor: assistantPersonalityScoreSchema.nullable().optional(),
-  push: assistantPersonalityScoreSchema.nullable().optional(),
-  unhinged: assistantPersonalityScoreSchema.nullable().optional(),
-}).strict().refine(
-  (value) => Object.keys(value).length > 0,
-  { message: "Pending group setup personality requires at least one setting." },
-);
-
-const hostedPendingGroupSetupStyleSchema = z.object({
-  persona: assistantPersonaIdSchema.optional(),
-  personality: hostedPendingGroupSetupPersonalitySchema.optional(),
-  tone: assistantTonePreferenceSchema.optional(),
-  voice: assistantVoiceOptionIdSchema.optional(),
-}).strict().refine(
-  (value) => Object.keys(value).length > 0,
-  { message: "Pending group setup style requires at least one setting." },
-);
-
-const hostedPendingGroupSetupRoomContextSchema = z.string().trim().min(
-  1,
-  "Pending group setup room context must not be empty.",
-).superRefine((value, context) => {
-  if (
-    new TextEncoder().encode(value).byteLength
-      > HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Pending group setup room context is too large.",
-    });
-  }
-});
-
-const hostedPendingGroupSetupPayloadSchema = z.object({
-  roomContextMarkdown: hostedPendingGroupSetupRoomContextSchema.optional(),
-  schemaVersion: z.literal(HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION),
-  style: hostedPendingGroupSetupStyleSchema.optional(),
-}).strict().refine(
-  (value) => value.roomContextMarkdown !== undefined || value.style !== undefined,
-  { message: "Pending group setup requires style or room context." },
-);
-
 export type HostedPendingGroupSetupChannel =
   typeof HOSTED_PENDING_GROUP_SETUP_CHANNEL;
-export type HostedPendingGroupSetupStyle = z.infer<
-  typeof hostedPendingGroupSetupStyleSchema
->;
-export type HostedPendingGroupSetupPayloadV1 = z.infer<
-  typeof hostedPendingGroupSetupPayloadSchema
->;
+
+export interface HostedPendingGroupSetupStyle {
+  persona?: AssistantPersonaId;
+  personality?: Partial<Record<AssistantPersonalitySettingId, number | null>>;
+  tone?: AssistantTonePreference;
+  voice?: AssistantVoiceOptionId;
+}
+
+export interface HostedPendingGroupSetupPayloadV1 {
+  roomContextMarkdown?: string;
+  schemaVersion: typeof HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION;
+  style?: HostedPendingGroupSetupStyle;
+}
 
 export interface HostedPendingGroupSetupSnapshot {
   armedAt: Date;
@@ -348,10 +315,15 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   const now = requireValidDate(input.now ?? new Date(), "pending group setup claim time");
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const candidates = await readCandidateRowsTx({
+    const candidateRows = await readCandidateRowsTx({
       now,
       ownerMemberIds: participantMemberIds,
       recipientPhoneLookupKey,
+      tx: input.tx,
+    });
+    const candidates = await filterCurrentlyEligibleCandidateRows({
+      candidates: candidateRows,
+      now,
       tx: input.tx,
     });
     const selection = selectHostedPendingGroupSetupCandidate({
@@ -424,13 +396,139 @@ export async function restoreHostedPendingGroupSetupClaimTx(input: {
 export function normalizeHostedPendingGroupSetupPayload(
   value: unknown,
 ): HostedPendingGroupSetupPayloadV1 {
-  const parsed = hostedPendingGroupSetupPayloadSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new TypeError(
-      parsed.error.issues[0]?.message ?? "Pending group setup payload is invalid.",
+  const record = requireStrictObject(value, "Pending group setup payload");
+  assertOnlyKeys(record, ["roomContextMarkdown", "schemaVersion", "style"]);
+  if (record.schemaVersion !== HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION) {
+    throw new TypeError("Pending group setup schema version is invalid.");
+  }
+
+  const roomContextMarkdown = Object.hasOwn(record, "roomContextMarkdown")
+    ? normalizeHostedPendingGroupSetupRoomContext(record.roomContextMarkdown)
+    : undefined;
+  const style = Object.hasOwn(record, "style")
+    ? normalizeHostedPendingGroupSetupStyle(record.style)
+    : undefined;
+  if (roomContextMarkdown === undefined && style === undefined) {
+    throw new TypeError("Pending group setup requires style or room context.");
+  }
+
+  return {
+    ...(roomContextMarkdown === undefined ? {} : { roomContextMarkdown }),
+    schemaVersion: HOSTED_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+    ...(style === undefined ? {} : { style }),
+  };
+}
+
+function normalizeHostedPendingGroupSetupStyle(
+  value: unknown,
+): HostedPendingGroupSetupStyle {
+  const record = requireStrictObject(value, "Pending group setup style");
+  assertOnlyKeys(record, ["persona", "personality", "tone", "voice"]);
+  const style: HostedPendingGroupSetupStyle = {};
+
+  if (Object.hasOwn(record, "persona")) {
+    style.persona = parseContractValue(
+      assistantPersonaIdSchema,
+      record.persona,
+      "Pending group setup persona is invalid.",
     );
   }
+  if (Object.hasOwn(record, "tone")) {
+    style.tone = parseContractValue(
+      assistantTonePreferenceSchema,
+      record.tone,
+      "Pending group setup tone is invalid.",
+    );
+  }
+  if (Object.hasOwn(record, "voice")) {
+    style.voice = parseContractValue(
+      assistantVoiceOptionIdSchema,
+      record.voice,
+      "Pending group setup voice is invalid.",
+    );
+  }
+  if (Object.hasOwn(record, "personality")) {
+    const personalityRecord = requireStrictObject(
+      record.personality,
+      "Pending group setup personality",
+    );
+    assertOnlyKeys(personalityRecord, assistantPersonalitySettingIds);
+    if (Object.keys(personalityRecord).length === 0) {
+      throw new TypeError(
+        "Pending group setup personality requires at least one setting.",
+      );
+    }
+    const personality: HostedPendingGroupSetupStyle["personality"] = {};
+    for (const setting of assistantPersonalitySettingIds) {
+      if (!Object.hasOwn(personalityRecord, setting)) {
+        continue;
+      }
+      const settingValue = personalityRecord[setting];
+      personality[setting] = settingValue === null
+        ? null
+        : parseContractValue(
+            assistantPersonalityScoreSchema,
+            settingValue,
+            `Pending group setup ${setting} is invalid.`,
+          );
+    }
+    style.personality = personality;
+  }
+
+  if (Object.keys(style).length === 0) {
+    throw new TypeError("Pending group setup style requires at least one setting.");
+  }
+  return style;
+}
+
+function normalizeHostedPendingGroupSetupRoomContext(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError("Pending group setup room context must be text.");
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new TypeError("Pending group setup room context must not be empty.");
+  }
+  if (
+    new TextEncoder().encode(normalized).byteLength
+      > HOSTED_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES
+  ) {
+    throw new TypeError("Pending group setup room context is too large.");
+  }
+  return normalized;
+}
+
+function parseContractValue<T>(
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+  value: unknown,
+  message: string,
+): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new TypeError(message);
+  }
   return parsed.data;
+}
+
+function requireStrictObject(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertOnlyKeys(
+  record: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): void {
+  const allowed = new Set(allowedKeys);
+  const unknown = Object.keys(record).find((key) => !allowed.has(key));
+  if (unknown) {
+    throw new TypeError(`Pending group setup field ${unknown} is not supported.`);
+  }
 }
 
 async function readCandidateRowsTx(input: {
@@ -456,6 +554,24 @@ async function readCandidateRowsTx(input: {
       AND owner."suspended_at" IS NULL
     ORDER BY setup."owner_member_id" ASC
   `);
+}
+
+async function filterCurrentlyEligibleCandidateRows(input: {
+  candidates: readonly HostedPendingGroupSetupRow[];
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedPendingGroupSetupRow[]> {
+  const decisions = await Promise.all(input.candidates.map(async (candidate) => ({
+    candidate,
+    decision: await readHostedRuntimeAiAccessDecision({
+      memberId: candidate.ownerMemberId,
+      now: input.now,
+      prisma: input.tx,
+    }),
+  })));
+  return decisions.flatMap(({ candidate, decision }) =>
+    decision.allowed ? [candidate] : []
+  );
 }
 
 async function openHostedPendingGroupSetupPayload(input: {
