@@ -12,9 +12,13 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { hasHostedMemberOwnActiveBilling } from "./entitlement";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import {
+  hasHostedAccountGroupAccess,
+  readHostedAccountGroupStripeBillingRef,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
   type HostedFamilyUsageCreditCheckoutTarget,
 } from "./family-plan";
@@ -51,6 +55,7 @@ import {
   projectHostedUsageCreditPurchaseStatusResult,
   projectHostedUsageCreditPurchaseTarget,
   type HostedUsageCreditCheckoutResult,
+  type HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
@@ -67,8 +72,10 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
-import { tryChargeHostedUsageCreditSavedCard } from
-  "./usage-credit-saved-card-payment";
+import {
+  tryChargeHostedUsageCreditSavedCard,
+  type HostedUsageCreditSavedCardBillingAuthority,
+} from "./usage-credit-saved-card-payment";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
@@ -893,9 +900,27 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     stripe,
   });
+  const stripeCustomerId = typeof checkoutRequest.customer === "string"
+    ? checkoutRequest.customer
+    : null;
+  if (!stripeCustomerId) {
+    throw buildHostedUsageCreditInvariantError("purchase_customer_missing");
+  }
+  const billingAuthority =
+    canStartSavedCardPayment &&
+      !purchase.stripePaymentIntentLookupKey &&
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      ? await resolveHostedUsageCreditSavedCardBillingAuthority({
+          payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
+          prisma: input.prisma,
+          stripeCustomerId,
+          target,
+        })
+      : { kind: "group" as const };
   let checkoutPurchase = purchase;
   if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
+      billingAuthority,
       checkoutRequest,
       now: input.now,
       policyVersion,
@@ -963,6 +988,58 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase: attached,
   });
   return finalProjection.checkout;
+}
+
+async function resolveHostedUsageCreditSavedCardBillingAuthority(input: {
+  payerMemberId: string;
+  prisma: PrismaClient;
+  stripeCustomerId: string;
+  target: HostedUsageCreditPurchaseTargetProjection;
+}): Promise<HostedUsageCreditSavedCardBillingAuthority> {
+  if (input.target.kind === "group") {
+    return { kind: "group" };
+  }
+  if (input.target.kind === "family") {
+    const billingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: input.target.familyGroupId,
+      prisma: input.prisma,
+    });
+    return {
+      familyGroupId: input.target.familyGroupId,
+      kind: "family",
+      subscription:
+        billingRef?.stripeCustomerId === input.stripeCustomerId &&
+        billingRef.stripeSubscriptionId &&
+        hasHostedAccountGroupAccess(billingRef.group)
+          ? {
+              billingStatus: billingRef.group.billingStatus,
+              lastStripeEventCreatedAt:
+                billingRef.lastStripeEventCreatedAt ?? null,
+              stripeSubscriptionId: billingRef.stripeSubscriptionId,
+              suspendedAt: billingRef.group.suspendedAt,
+            }
+          : null,
+    };
+  }
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.payerMemberId,
+    prisma: input.prisma,
+  });
+  return {
+    kind: "personal",
+    subscription:
+      member?.billingRef?.stripeCustomerId === input.stripeCustomerId &&
+      member.billingRef.stripeSubscriptionId &&
+      hasHostedMemberOwnActiveBilling(member.core)
+        ? {
+            billingStatus: member.core.billingStatus,
+            lastStripeEventCreatedAt:
+              member.billingRef.lastStripeEventCreatedAt ?? null,
+            stripeSubscriptionId: member.billingRef.stripeSubscriptionId,
+            suspendedAt: member.core.suspendedAt,
+          }
+        : null,
+  };
 }
 
 async function projectHostedUsageCreditCheckoutForCurrentTarget(input: {
