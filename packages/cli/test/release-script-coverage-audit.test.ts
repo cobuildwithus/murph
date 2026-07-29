@@ -1500,14 +1500,34 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
       'utf8',
     )
-    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
-    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    const coverageAdmissionRule =
+      /diff changes executable behavior or changes\s+the tests,\s+fixtures,\s+configuration,\s+or direct-proof scaffolding that\s+establishes its proof/u
+    expect(agentsGuide).toContain(
+      'do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance`',
+    )
+    expect(completionWorkflow).toContain(
+      'exact-head GitHub\n   Actions own the broad suite',
+    )
+    expect(verificationAndRuntime).toContain(
+      '## Verification Ownership By Delivery Path',
+    )
+    expect(verificationAndRuntime).toMatch(
+      /run\s+`pnpm verify:acceptance` before pushing/u,
+    )
+    expect(completionSpecialistsPrompt).toMatch(
+      /Applicability does not depend on a local coverage\s+umbrella command/u,
+    )
+    expect(completionSpecialistsPrompt).toMatch(coverageAdmissionRule)
+    expect(prReviewGptLoop).toMatch(coverageAdmissionRule)
+    expect(completionWorkflow).toMatch(coverageAdmissionRule)
+    expect(completionSpecialistsPrompt).toContain(
+      'push\nit through required exact-head CI',
+    )
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
     expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'does not require a ten-minute local admission wait',
     )
-    expect(agentsGuide).toContain('required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
@@ -1560,6 +1580,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
     expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
     expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
     expect(
       existsSync(
         path.join(
@@ -1704,8 +1725,8 @@ describe('monorepo release flow coverage audit', () => {
       '`product-experience-review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
-    expect(completionWorkflow).toContain(
-      'repo code/test/config changes whose verification lane includes owner-level coverage',
+    expect(completionWorkflow).toMatch(
+      /coverage lens applies when the diff changes executable behavior/u,
     )
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',

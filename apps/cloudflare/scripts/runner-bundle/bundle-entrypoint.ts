@@ -66,7 +66,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // measured 9,798,967B total on 2026-07-29. No forbidden subsystem entered the
 // boot graph. Advance only the measured total baseline and retain the existing
 // allowance and independent entry/static-closure caps.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_798_967 + 32_768;
+//
+// After merging the current hosted iMessage-contact and runtime-control graph,
+// the combined exact graph measured 9,836,081B total on 2026-07-29. No
+// forbidden subsystem entered the boot graph; advance only the total baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_836_081 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_009_225;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

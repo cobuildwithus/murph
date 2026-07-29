@@ -96,17 +96,15 @@ export function ClubPhoneDemo({
   const stage = STAGES[stageIndex] ?? STAGES[FINAL_STAGE_INDEX];
 
   return (
-    <div aria-label="Illustrative Murph club challenge conversation" aria-live="off">
+    <div aria-label="Murph club challenge conversation in iMessage" aria-live="off">
       <PhoneMock
         key={stageIndex}
         conversationHeight={480}
         messages={CONVERSATION.slice(0, stage.messageCount)}
         murphHeadshotSrc={murphHeadshotSrc}
         result={stage.showResult ? CHALLENGE_RESULT : undefined}
+        resultPlacement="after"
       />
-      <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.15em] text-[#f5f0e8]/60">
-        Illustrative early-access flow
-      </p>
     </div>
   );
 }

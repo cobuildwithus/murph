@@ -26,6 +26,8 @@ import type {
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
   HostedRuntimeIssueExportResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
@@ -288,6 +290,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 }
 
 export interface HostedRuntimeLinqTargetOverride {
+  conversationThreadId?: string | null;
   target: string;
   targetKind: "thread";
 }
@@ -462,6 +465,12 @@ export interface HostedRuntimeFamilyPlanToolPort {
 
 export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
+}
+
+export interface HostedRuntimeIMessageContactToolPort {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>;
 }
 
 export interface HostedRuntimeLabsToolPort {
@@ -645,6 +654,7 @@ export interface HostedRuntimePlatform {
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  imessageContactToolPort?: HostedRuntimeIMessageContactToolPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;

@@ -19,6 +19,7 @@ import {
   sealHostedThreadDeliveryRoute,
 } from "../src/lib/hosted-routing/thread-delivery-route";
 import {
+  appendHostedLinqThreadRouteParticipantContextTx,
   appendHostedLinqThreadRouteReactionContextTx,
   consumeHostedLinqThreadRoutePendingContextTx,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -2790,6 +2791,78 @@ describe("Linq explicit external-thread routing", () => {
       groupParticipantAdded: false,
       groupReactionContext: reactionContext,
     });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
+  it("stores participant-event context on the routed chat and releases it only to the matching account", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const participantContext =
+      "Participant +15551234567 (unverified owner contact label: Taylor R.) was removed from the group.";
+    await expect(
+      prisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteParticipantContextTx({
+          containerMemberId: "member_thread_container_123",
+          excludedAccountLookupKeys: createHostedPhoneLookupKeyReadCandidates(
+            "+15551234567",
+          ),
+          prisma: transaction as never,
+          text: participantContext,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toBe("appended");
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15559999999"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: null,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: participantContext,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
+  it("does not stage the routed Linq account as a changed participant", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteParticipantContextTx({
+          containerMemberId: "member_thread_container_123",
+          excludedAccountLookupKeys: createHostedPhoneLookupKeyReadCandidates(
+            "+15550000000",
+          ),
+          prisma: transaction as never,
+          text: "Participant +15550000000 was added to the group.",
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toBe("route_unavailable");
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 

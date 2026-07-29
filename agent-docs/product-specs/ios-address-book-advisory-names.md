@@ -103,7 +103,7 @@ provider handle with a decrypted label. KMS IAM, provider/session retention,
 and application compromise remain security boundaries and must not be
 described otherwise.
 
-The only consumer is the existing route-authorized
+There are two route-authorized consumers. The primary consumer is the existing
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
@@ -125,6 +125,21 @@ sponsored billing access.
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
+
+The second consumer is an exact provider-authenticated Linq
+`participant.added` or `participant.removed` event for an existing active routed
+group. Web normalizes the event's phone handle, first proves that the matching
+hosted identity does not have active Murph activation evidence, and then may
+consult the human group owner's projection. A successful label is included
+with the canonical handle and change action in the route's bounded encrypted
+transient group-event buffer. The participant transaction takes the chat lock
+before ledger insertion and staging, and the locked route rejects the Linq
+account's own lookup key when `is_me` is absent. The next ordinary admitted
+group message consumes that buffer and presents it to the model as weak
+context, never as a message authored by the participant. Provider-event ledger
+rows retain no handle or label. Lookup or crypto failure leaves additions with
+their existing anonymous fallback hint and leaves removals without detailed
+context; neither event wakes Murph or sends anything.
 For a registered participant, the label remains only the owner's private
 presentation hint: it does not replace or modify that participant's Murph
 identity, and `hasOwnMurph` remains a separate durable-activation fact.
@@ -146,16 +161,18 @@ claiming that a card was shared. Display-name and avatar changes, join offers,
 disclosure requests, contact-card sharing, and every other chat effect remain
 iMessage-only.
 
-The advisory-name lookup itself does not write a canonical profile, mailbox
-item, runtime log, workspace record, participant authority, or separate
-advisory-name state. The roster operation's existing participant reconciliation
-is independent of the optional label overlay. Once the model includes a label
-in generated content, that content can exist in the App Server provider thread,
-Murph session/workspace artifacts, the delivered provider message, recipient
-devices, and backups under those surfaces' normal retention rules. Stop,
-permission-loss cleanup, and account deletion prevent future lookups and delete
-the live projection; they cannot recall content already emitted to those
-surfaces.
+The advisory-name lookup itself does not write a canonical profile, participant
+authority, or separate advisory-name state. The roster operation's existing
+participant reconciliation is independent of the optional label overlay. The
+participant-change consumer may write the label only inside the existing
+encrypted, bounded, one-shot route buffer; it creates no mailbox item or wake.
+Once the model includes a label in generated content, that content can exist in
+the App Server provider thread, Murph session/workspace artifacts, the delivered
+provider message, recipient devices, and backups under those surfaces' normal
+retention rules. Stop, permission-loss cleanup, replacement, and account
+deletion take the same owner lock as event-label staging and clear unconsumed
+encrypted group-event buffers for that owner's routes. They cannot recall a
+transient buffer already consumed or content already emitted to those surfaces.
 
 ## Lifecycle
 

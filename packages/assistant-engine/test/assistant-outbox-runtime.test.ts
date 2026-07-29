@@ -35,6 +35,14 @@ import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
+import {
+  completeAssistantOnboarding,
+  reopenAssistantOnboarding,
+  resolveAssistantOnboardingStatePath,
+} from '../src/assistant/onboarding-state.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
@@ -2927,6 +2935,170 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
     })
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('revalidates answered onboarding when a queued goal check-in reaches provider entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-onboarding-goal-checkin-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T17:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      activeUntil: '2026-07-27T17:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Offer one low-pressure health direction choice.',
+      now: new Date('2026-07-20T17:29:00.000Z'),
+      schedule: {
+        at: '2026-07-20T17:30:00.000Z',
+        kind: 'at',
+      },
+      slug: 'onboarding-goal-choice-point',
+      status: 'active',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Onboarding goal choice point',
+      vaultRoot,
+    })
+    const eligible = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Eligible onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-eligible',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-eligible',
+      vault: vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: eligible.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-onboarding-goal-checkin',
+        sentAt: '2026-07-20T17:31:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: eligible.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sent.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    const temporarilyUnavailable = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Retryable onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-unavailable',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-unavailable',
+      vault: vaultRoot,
+    })
+    await writeFile(
+      resolveAssistantOnboardingStatePath(vaultRoot),
+      '{not valid json',
+      'utf8',
+    )
+
+    const retryable = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: temporarilyUnavailable.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(retryable.intent.status).toBe('retryable')
+    expect(retryable.deliveryError).toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T17:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey:
+          temporarilyUnavailable.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-onboarding-goal-checkin-retry',
+        sentAt: '2026-07-20T17:32:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const sentAfterRestore = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: temporarilyUnavailable.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sentAfterRestore.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+
+    const revoked = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Revoked onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-revoked',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-revoked',
+      vault: vaultRoot,
+    })
+    await reopenAssistantOnboarding({
+      reopenedAt: '2026-07-20T17:31:30.000Z',
+      vault: vaultRoot,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'active',
+      updatedAt: automation.record.updatedAt,
+    })
+
+    const blocked = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: revoked.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(blocked.intent.status).toBe('failed')
+    expect(blocked.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
   })
 
   it.each([

@@ -96,6 +96,9 @@ import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './shared.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from './onboarding-goal-checkin-automation.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -139,6 +142,14 @@ const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
 > = {
   nativeResumePolicy: 'disabled',
   promptProfile: 'creative-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'provider-turn',
+}
+const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
@@ -1440,6 +1451,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
 }): AssistantProviderResumeStateAction {
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    isAssistantOnboardingGoalCheckinNotification(input.input) ||
     !isAssistantNotificationScheduledOccurrence(input.input)
   ) {
     return 'preserve-existing'
@@ -1525,9 +1537,19 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
+  if (isAssistantOnboardingGoalCheckinNotification(input)) {
+    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+  }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
+}
+
+function isAssistantOnboardingGoalCheckinNotification(
+  input: Pick<AssistantNotificationInput, 'scheduledInvocationAuthority'>,
+): boolean {
+  return input.scheduledInvocationAuthority?.automationId ===
+    MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run

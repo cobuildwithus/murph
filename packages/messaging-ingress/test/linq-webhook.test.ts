@@ -12,6 +12,7 @@ import {
   minimizeLinqWebhookEvent,
   parseLinqMessageEditedEvent,
   parseLinqMessageReceivedEvent,
+  parseLinqParticipantChangedEvent,
   parseLinqWebhookEvent,
   readLinqRecipientLineHandle,
   readLinqWebhookHeader,
@@ -605,6 +606,83 @@ test("parseLinqMessageReceivedEvent exposes summaries and minimizers", () => {
     partner_id: null,
     trace_id: null,
   });
+});
+
+test("parseLinqParticipantChangedEvent normalizes full and deprecated participant handles", () => {
+  const added = parseLinqParticipantChangedEvent({
+    api_version: "v3",
+    created_at: "2026-07-29T01:00:00.000Z",
+    event_id: "evt_participant_added",
+    event_type: "participant.added",
+    data: {
+      added_at: "2026-07-29T00:59:59.000Z",
+      chat_id: "chat_group",
+      participant: {
+        handle: "+15551234567",
+        id: "handle_participant",
+        joined_at: "2026-07-29T00:59:59.000Z",
+        service: "iMessage",
+        status: "active",
+      },
+    },
+  });
+  const removed = parseLinqParticipantChangedEvent({
+    api_version: "v3",
+    created_at: "2026-07-29T01:05:00.000Z",
+    event_id: "evt_participant_removed",
+    event_type: "participant.removed",
+    data: {
+      chat_id: "chat_group",
+      handle: "person@example.test",
+      removed_at: "2026-07-29T01:04:59.000Z",
+      service: "SMS",
+    },
+  });
+
+  assert.deepEqual(added.data, {
+    added_at: "2026-07-29T00:59:59.000Z",
+    chat_id: "chat_group",
+    participant: {
+      handle: "+15551234567",
+      id: "handle_participant",
+      is_me: undefined,
+      joined_at: "2026-07-29T00:59:59.000Z",
+      left_at: undefined,
+      service: "iMessage",
+      status: "active",
+    },
+  });
+  assert.deepEqual(removed.data, {
+    chat_id: "chat_group",
+    participant: {
+      handle: "person@example.test",
+      service: "SMS",
+    },
+    removed_at: "2026-07-29T01:04:59.000Z",
+  });
+});
+
+test("parseLinqParticipantChangedEvent rejects missing or conflicting event shapes", () => {
+  assert.throws(
+    () => parseLinqParticipantChangedEvent({
+      api_version: "v3",
+      created_at: "2026-07-29T01:00:00.000Z",
+      event_id: "evt_missing_participant",
+      event_type: "participant.added",
+      data: { chat_id: "chat_group" },
+    }),
+    /participant or deprecated handle is required/u,
+  );
+  assert.throws(
+    () => parseLinqParticipantChangedEvent({
+      api_version: "v3",
+      created_at: "2026-07-29T01:00:00.000Z",
+      event_id: "evt_wrong_type",
+      event_type: "message.received",
+      data: {},
+    }),
+    /participant change payload/u,
+  );
 });
 
 test("minimizeLinqMessageReceivedEvent sanitizes allowlisted message fields", () => {

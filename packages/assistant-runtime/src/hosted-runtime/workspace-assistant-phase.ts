@@ -1530,6 +1530,9 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.planUsageToolPort
           ? { planUsageTool: input.runtime.platform.planUsageToolPort }
           : {}),
+        ...(input.runtime.platform.imessageContactToolPort
+          ? { imessageContactTool: input.runtime.platform.imessageContactToolPort }
+          : {}),
         ...(input.runtime.platform.privateImageUrlPublisher
           ? {
               privateImageUrlPublisher:
@@ -1620,7 +1623,10 @@ export async function runHostedWorkspaceAssistantPhase(
               { retryable: true },
             );
           }
+          const conversationThreadId =
+            authority.targetOverride?.conversationThreadId?.trim() ?? "";
           return {
+            ...(conversationThreadId ? { conversationThreadId } : {}),
             target: authority.targetOverride?.target ?? target,
             threadIsDirect: authority.threadIsDirect,
           };

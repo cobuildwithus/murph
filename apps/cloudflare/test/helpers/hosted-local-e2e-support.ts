@@ -207,6 +207,7 @@ export function expectAdvertisedMurphDynamicTools(
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
+    imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
     phoneCallsAvailable?: boolean;
@@ -248,6 +249,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.groupRoomModelAvailable !== true
         && name === "murph.group_room_model"
+      ) {
+        return false;
+      }
+
+      if (
+        options.imessageContactAvailable !== true
+        && name === "murph.imessage_contact"
       ) {
         return false;
       }

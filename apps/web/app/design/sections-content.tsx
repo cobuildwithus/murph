@@ -6,6 +6,7 @@ import {
   BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
+import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -56,6 +57,27 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage solo-first hero">
+        <div
+          id="homepage-solo-first-hero"
+          data-design-section="homepage-solo-first-hero"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <HeroClocksIn
+            authenticated={false}
+            contactInfo={{
+              phone: "+15555550100",
+              telegram: "murph_test_bot",
+            }}
+            messengerChannel="imessage"
+            murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage security and privacy">
         <SecurityTeaserSection />
       </StudySection>
@@ -88,7 +110,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Clubs early-access marketing page">
+      <StudySection title="Clubs iMessage and wearables marketing page">
         <ClubsPageStudy />
       </StudySection>
 

@@ -8,6 +8,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
 const providerMocks = vi.hoisted(() => ({
@@ -128,6 +129,9 @@ import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/g
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantProviderTurnAttemptResult,
@@ -1028,6 +1032,153 @@ describe('Codex model catalog', () => {
       providerThreadEphemeral: true,
       runtimeWorkspaceRoots: ['/vaults/group'],
     }))
+  })
+
+  it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      prompt: 'Review current goals without changing them.',
+      scheduledInvocationAuthority: {
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        occurrenceAt: '2026-07-25T08:00:00.000Z',
+      },
+      vault: '/vaults/member',
+    }
+    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-goal-checkin',
+          providerFetch: hostedProviderFetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        automationTool: { request: vi.fn() },
+        computerToolsAvailable: true,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+        vaultFileSendAvailable: true,
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-onboarding-goal-checkin',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: 'Murph CLI Contract: read current vault state.',
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: 'Immutable read-only goal check-in policy.',
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: {
+          binding: session.binding,
+        },
+        systemPrompt: 'Ordinary Murph prompt plus immutable read-only policy.',
+        turnContextPrompt: null,
+        workingDirectory: '/vaults/member',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-25T08:00:00.000Z',
+      turnId: 'turn-onboarding-goal-checkin',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual(
+      expect.arrayContaining([
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ]),
+    )
+    expect(providerInput?.codexConfigOverrides).not.toContain(
+      'features.shell_tool=false',
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [],
+      environments: [],
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: null,
+      providerThreadEphemeral: true,
+      publicInternetFetch: null,
+      requireHostedPrivateImageDelivery: false,
+      resume: null,
+      runtimeWorkspaceRoots: ['/vaults/member'],
+      sessionContext: {
+        binding: session.binding,
+      },
+    })
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })
 
   it('keeps group-email replies but removes ambient filesystem execution', async () => {
