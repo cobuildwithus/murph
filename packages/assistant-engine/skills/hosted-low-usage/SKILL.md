@@ -327,8 +327,7 @@ less AI usage." Never switch it automatically.
   counters or anti-abuse rules.
 - Before `start_pulse_now` or `upgrade_edge`, require a matching current quote,
   state its label, and get explicit confirmation of that exact choice.
-- A bare yes after multiple options is ambiguous. Ask which option they mean;
-  an explicit "both" or "all" names every exact option just presented.
+- A bare yes after multiple options is ambiguous. Ask which option they mean.
 - For personal `add_usage`, send only the authorized first-party Settings
   handoff after a current paid-access read. Never choose an amount, start
   Checkout, or claim usage was added.

@@ -141,6 +141,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('still `armed` when the group is created')
     expect(normalizedSkill).toContain('language respectful and person-first')
     expect(normalizedSkill).toContain('use dehumanizing labels')
+    expect(normalizedSkill).not.toContain(
+      'names every exact option just presented',
+    )
     expect(normalizedSkill).toContain(
       'Canceling one policy never cancels or replaces another',
     )

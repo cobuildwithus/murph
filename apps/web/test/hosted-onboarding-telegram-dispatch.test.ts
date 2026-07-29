@@ -597,7 +597,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
-      qualificationCandidateReferralIds: ["usage_referral_1"],
+      qualificationCandidateReferralIds: [
+        "usage_referral_1",
+        "usage_referral_2",
+      ],
     });
     const participantUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
@@ -642,11 +645,21 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         senderSubjectKey: createHostedTelegramUserLookupKey("789"),
         tx: prisma,
       });
-    expect(mocks.reconcileHostedUsageReferralRewardAfterCommit)
-      .toHaveBeenCalledExactlyOnceWith({
-        prisma,
-        referralId: "usage_referral_1",
-      });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(1, {
+      prisma,
+      referralId: "usage_referral_1",
+    });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(2, {
+      prisma,
+      referralId: "usage_referral_2",
+    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
     expect(participantUpsert).not.toHaveBeenCalled();

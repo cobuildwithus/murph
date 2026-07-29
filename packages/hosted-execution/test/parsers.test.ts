@@ -2642,6 +2642,29 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const pluralResponse = {
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            {
+              destinationKind: "group" as const,
+              expiresAt: "2026-08-03T12:00:00.000Z",
+              policyCode: "new_person_activation_v1" as const,
+              rewardLabel: "$2 of Murph usage",
+              state: "target_bound" as const,
+            },
+          ],
+          availablePolicies: [],
+        },
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(pluralResponse)).toEqual(
+      pluralResponse,
+    );
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {

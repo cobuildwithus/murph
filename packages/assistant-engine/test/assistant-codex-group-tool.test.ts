@@ -118,6 +118,8 @@ describe("murph.group dynamic tool", () => {
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.policyCode.description)
+      .toContain('state="armed"');
     expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)

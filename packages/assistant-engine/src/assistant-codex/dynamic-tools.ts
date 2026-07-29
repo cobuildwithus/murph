@@ -852,7 +852,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
         description:
-          'Required for action="arm_usage_referral" or action="cancel_usage_referral". Arm only an exact available policy the current sender explicitly chose; cancel only an exact policy from activeMissions.',
+          'Required for action="arm_usage_referral" or action="cancel_usage_referral". Arm only an exact available policy the current sender explicitly chose; cancel only an exact mission with state="armed" from activeMissions.',
       },
       groupLabel: {
         type: 'string',

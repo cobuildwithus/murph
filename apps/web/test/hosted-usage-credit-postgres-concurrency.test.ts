@@ -1350,6 +1350,161 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("enforces policy-scoped referral uniqueness in PostgreSQL", async () => {
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_usage_referral_policy_${fixtureId}`;
+      const targetContainerMemberId =
+        `member_usage_referral_policy_target_${fixtureId}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000);
+      const activeGroupReferralId =
+        `hur_usage_referral_policy_group_${fixtureId}`;
+      const newPersonReferralId =
+        `hur_usage_referral_policy_person_${fixtureId}`;
+
+      try {
+        await prisma.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              id: referrerMemberId,
+            },
+            {
+              billingStatus: "not_started",
+              id: targetContainerMemberId,
+            },
+          ],
+        });
+        await prisma.hostedThreadContainer.create({
+          data: {
+            memberId: targetContainerMemberId,
+            ownerMemberId: referrerMemberId,
+          },
+        });
+        await prisma.hostedUsageReferral.createMany({
+          data: [
+            {
+              armedAt: now,
+              beneficiaryMemberId: referrerMemberId,
+              expiresAt,
+              id: activeGroupReferralId,
+              policyCode: "active_group_v1",
+              policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+              referrerMemberId,
+              referrerSubjectKey: "authenticated-member",
+              rewardUsdMicros:
+                HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+              status: "armed",
+            },
+            {
+              armedAt: now,
+              beneficiaryMemberId: referrerMemberId,
+              expiresAt,
+              id: newPersonReferralId,
+              policyCode: "new_person_activation_v1",
+              policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+              referrerMemberId,
+              referrerSubjectKey: "authenticated-member",
+              rewardUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+              status: "armed",
+            },
+          ],
+        });
+        await expect(prisma.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: referrerMemberId,
+            expiresAt,
+            id: `hur_usage_referral_policy_duplicate_${fixtureId}`,
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "armed",
+          },
+        })).rejects.toMatchObject({ code: "P2002" });
+
+        await expect(prisma.hostedUsageReferral.updateMany({
+          data: {
+            status: "target_bound",
+            targetBoundAt: now,
+            targetContainerMemberId,
+          },
+          where: {
+            id: {
+              in: [activeGroupReferralId, newPersonReferralId],
+            },
+          },
+        })).resolves.toMatchObject({ count: 2 });
+        await expect(prisma.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: referrerMemberId,
+            expiresAt,
+            id: `hur_usage_referral_target_duplicate_${fixtureId}`,
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt: now,
+            targetContainerMemberId,
+          },
+        })).rejects.toMatchObject({ code: "P2002" });
+
+        const indexes = await prisma.$queryRaw<Array<{
+          indexDefinition: string;
+          indexName: string;
+        }>>`
+          SELECT
+            indexdef AS "indexDefinition",
+            indexname AS "indexName"
+          FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'hosted_usage_referral'
+            AND indexname IN (
+              'hosted_usage_referral_one_armed_policy_per_destination',
+              'hosted_usage_referral_target_policy_key',
+              'hosted_usage_referral_one_armed_per_referrer',
+              'hosted_usage_referral_target_container_key'
+            )
+          ORDER BY indexname
+        `;
+        expect(indexes.map(({ indexName }) => indexName)).toEqual([
+          "hosted_usage_referral_one_armed_policy_per_destination",
+          "hosted_usage_referral_target_policy_key",
+        ]);
+        expect(indexes[0]?.indexDefinition).toContain(
+          "(referrer_member_id, beneficiary_member_id, policy_code)",
+        );
+        expect(indexes[0]?.indexDefinition).toContain(
+          "WHERE (status = 'armed'",
+        );
+        expect(indexes[1]?.indexDefinition).toContain(
+          "(target_container_member_id, policy_code)",
+        );
+      } finally {
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { referrerMemberId },
+        });
+        await prisma.hostedThreadContainer.deleteMany({
+          where: { memberId: targetContainerMemberId },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: {
+            id: { in: [referrerMemberId, targetContainerMemberId] },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
     it("completes the direct-personal referral read-arm-read-cancel flow on one PostgreSQL pool connection", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_usage_referral_direct_${fixtureId}`;
