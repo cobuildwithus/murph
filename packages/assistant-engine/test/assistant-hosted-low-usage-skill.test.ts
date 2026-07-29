@@ -17,7 +17,7 @@ async function readLowUsageSkill(): Promise<string> {
 }
 
 describe('assistant hosted low-usage skill', () => {
-  it('registers the trusted low-usage and follow-up trigger', () => {
+  it('registers low-usage, explicit options, and follow-up triggers', () => {
     const skill = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'hosted-low-usage',
     )
@@ -25,8 +25,29 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill?.triggerHint).toContain('trusted hosted turn context')
     expect(skill?.triggerHint).toContain('Family-sponsored Murph')
     expect(skill?.triggerHint).toContain('hosted group conversation')
+    expect(skill?.triggerHint).toContain(
+      'available ways to add or earn more usage',
+    )
     expect(buildAssistantSkillFileRef('hosted-low-usage')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
+    )
+  })
+
+  it('treats broad get-more-usage questions as all-options requests', async () => {
+    const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+
+    expect(normalizedSkill).toContain(
+      'adding usage, or ways to get or earn more usage',
+    )
+    expect(normalizedSkill).toContain(
+      'how to get more usage, what options exist, how to earn usage, or about a mission',
+    )
+    expect(normalizedSkill).toContain(
+      'Do this even when current usage is `healthy`',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not answer with only the paid or funding path or make the sender ask again',
     )
   })
 

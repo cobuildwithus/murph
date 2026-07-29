@@ -10,9 +10,14 @@ must call that same boundary; it does not justify speculative channel code.
 ## Product behavior
 
 When trusted usage context says a personal or group Murph is running low, Murph
-may offer the exact current sender an earned-continuity mission. Describing a
-mission is not consent. Murph arms one only after that person explicitly chooses
-one exact server-returned policy.
+may offer the exact current sender an earned-continuity mission. When the current
+sender explicitly asks how to get more usage or what options exist, Murph treats
+that as an all-options request: it checks referral availability even when current
+usage is healthy and presents any returned earned path beside the separately
+authorized plan, top-up, or group-funding path. The sender does not need to know
+the feature name or explicitly ask for a mission. Describing a mission is not
+consent. Murph arms one only after that person explicitly chooses one exact
+server-returned policy.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |
