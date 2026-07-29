@@ -243,6 +243,9 @@ beforeEach(() => {
     mailboxConsumedAt: null,
   });
   vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockReset();
+  vi.mocked(
+    memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+  ).mockReset();
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
     handles: [],
     isGroup: null,
@@ -4252,6 +4255,39 @@ describe("Linq group chat auto-provision", () => {
       threadLookupKey,
     });
   }
+
+  it("retries an eligible first message while authoritative owner evidence is required", async () => {
+    const previous =
+      process.env.HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED;
+    process.env.HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED = "1";
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(senderCore);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    try {
+      await expect(planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({}),
+        prisma: prisma as never,
+      })).rejects.toMatchObject({
+        code: "HOSTED_LINQ_GROUP_OWNER_EVIDENCE_PENDING",
+        httpStatus: 503,
+        retryable: true,
+      });
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvValue(
+        "HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED",
+        previous,
+      );
+    }
+  });
 
   function mockSuccessfulGroupProvision(input: {
     prisma: ReturnType<typeof createStatefulThreadRoutePrisma>;

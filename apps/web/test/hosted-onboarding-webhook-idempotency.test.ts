@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   readHostedLinqDailyState: vi.fn(),
   readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
+  hasHostedLinqParticipantAddedOwnerCandidate: vi.fn(),
+  provisionHostedLinqParticipantAddedOwnerTx: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqReadReceipt: vi.fn(),
@@ -196,6 +198,13 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-participant-context",
     mocks.stageHostedLinqGroupParticipantContext,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-participant-added-owner", () => ({
+  hasHostedLinqParticipantAddedOwnerCandidate:
+    mocks.hasHostedLinqParticipantAddedOwnerCandidate,
+  provisionHostedLinqParticipantAddedOwnerTx:
+    mocks.provisionHostedLinqParticipantAddedOwnerTx,
+}));
+
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedLinqChatLookupKey,
@@ -236,6 +245,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       status: "accepted",
     });
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(null);
+    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(false);
+    mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
+      "owner_evidence_missing",
+    );
     mocks.stageHostedLinqGroupParticipantContext.mockResolvedValue(false);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
@@ -485,6 +498,98 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit add-actor evidence once, after the provider duplicate fence", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(true);
+    mocks.provisionHostedLinqParticipantAddedOwnerTx.mockResolvedValue(
+      "owner_bound",
+    );
+    const rawBody = buildLinqProviderWebhookBody({
+      data: {
+        added_at: "2026-03-26T12:00:00.000Z",
+        added_by_handle: {
+          handle: "+15551234567",
+          service: "iMessage",
+        },
+        chat_id: "chat_group_1",
+        participant: {
+          handle: "+15550000000",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      eventId: "evt_murph_added",
+      eventType: "participant.added",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      reason: "recorded-linq-provider-event:participant.added",
+    });
+
+    expect(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx,
+    ).toHaveBeenCalledOnce();
+    expect(
+      prisma.hostedLinqProviderEvent.createMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx.mock
+        .invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(prisma.$executeRaw.mock.invocationCallOrder[0]!);
+    expect(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx,
+    ).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        data: expect.objectContaining({
+          added_by_handle: expect.objectContaining({
+            handle: "+15551234567",
+          }),
+          participant: expect.objectContaining({
+            handle: "+15550000000",
+          }),
+        }),
+        event_type: "participant.added",
+      }),
+      prisma,
+    });
+    const persistedProviderEvent = JSON.stringify(
+      prisma.hostedLinqProviderEvent.createMany.mock.calls[0]?.[0]?.data,
+    );
+    expect(persistedProviderEvent).not.toContain("+15551234567");
+    expect(persistedProviderEvent).not.toContain("+15550000000");
+
+    vi.clearAllMocks();
+    prisma.hostedLinqProviderEvent.createMany.mockResolvedValueOnce({
+      count: 0,
+    });
+    prisma.hostedLinqProviderEvent.findUnique.mockResolvedValueOnce(null);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.hasHostedLinqParticipantAddedOwnerCandidate.mockResolvedValue(true);
+    mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation(
+      (input: { rawBody: string }) => JSON.parse(input.rawBody),
+    );
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      reason: "duplicate-linq-provider-event",
+    });
+    expect(
+      mocks.provisionHostedLinqParticipantAddedOwnerTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("stages removals but does not re-stage duplicate additions", async () => {

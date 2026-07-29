@@ -106,6 +106,9 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   hasActiveHostedLinqManagedLine,
 } from "./linq-line-store";
+import {
+  isHostedLinqGroupOwnerFromAdderRequired,
+} from "./linq-participant-added-owner";
 import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import {
   createHostedEmailLookupKey,
@@ -2517,6 +2520,16 @@ async function planHostedLinqGroupChatWebhook(input: {
     prisma: input.prisma,
   }))) {
     return ignored("recipient-line-unmanaged", senderIdentityMatch);
+  }
+
+  if (isHostedLinqGroupOwnerFromAdderRequired()) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_GROUP_OWNER_EVIDENCE_PENDING",
+      httpStatus: 503,
+      message:
+        "The group owner cannot be established until the participant add event arrives.",
+      retryable: true,
+    });
   }
 
   let createdContainerMemberId: string | null = null;

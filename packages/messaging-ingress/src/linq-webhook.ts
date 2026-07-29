@@ -45,6 +45,7 @@ export type LinqParticipantChangedEvent =
   | LinqParticipantRemovedEvent;
 
 export interface LinqParticipantAddedData {
+  added_by_handle?: LinqChatHandle | null;
   added_at?: string;
   chat_id?: string;
   participant: LinqChatHandle;
@@ -482,6 +483,7 @@ export function parseLinqParticipantChangedEvent(
   ) ?? undefined;
 
   if (event.event_type === "participant.added") {
+    const addedByHandle = parseOptionalChatHandle(data.added_by_handle);
     return {
       ...event,
       created_at: normalizeRequiredTimestamp(
@@ -492,6 +494,7 @@ export function parseLinqParticipantChangedEvent(
       trace_id: normalizeNullableString(event.trace_id ?? null),
       partner_id: normalizeNullableString(event.partner_id ?? null),
       data: {
+        ...(addedByHandle ? { added_by_handle: addedByHandle } : {}),
         ...(changedAt ? { added_at: changedAt } : {}),
         ...(chatId ? { chat_id: chatId } : {}),
         participant,

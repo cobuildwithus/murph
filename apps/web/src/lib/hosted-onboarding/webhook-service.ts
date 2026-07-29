@@ -120,6 +120,10 @@ import {
   stageHostedLinqGroupParticipantContextTx,
 } from "./webhook-provider-linq-participant-context";
 import {
+  hasHostedLinqParticipantAddedOwnerCandidate,
+  provisionHostedLinqParticipantAddedOwnerTx,
+} from "./linq-participant-added-owner";
+import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
 import type {
@@ -1074,11 +1078,16 @@ async function ingestHostedLinqParticipantEventDirect(input: {
   participantChange: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
   prisma: PrismaClient;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
+  const ownerCandidate =
+    await hasHostedLinqParticipantAddedOwnerCandidate({
+      event: input.participantChange,
+      prisma: input.prisma,
+    });
   return runHostedOnboardingWebhookTransaction(
     input.prisma,
     async (transaction) => {
       const chatId = input.participantChange.data.chat_id;
-      if (chatId) {
+      if (chatId && !ownerCandidate) {
         await acquireHostedLinqChatOwnershipLockTx({
           chatId,
           tx: transaction,
@@ -1094,6 +1103,18 @@ async function ingestHostedLinqParticipantEventDirect(input: {
 
       if (!chatId) {
         return providerResult;
+      }
+
+      await provisionHostedLinqParticipantAddedOwnerTx({
+        event: input.participantChange,
+        prisma: transaction,
+      });
+
+      if (ownerCandidate) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId,
+          tx: transaction,
+        });
       }
 
       const route = await readHostedThreadRouteByThreadIdentity({

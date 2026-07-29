@@ -157,6 +157,20 @@ Last verified: 2026-07-28
   and ordinary message ingress adds no query. Route-account lookup keys also
   reject Murph's own line when `is_me` is absent. Append and consume retain the
   existing 500 ms context-crypto bound.
+- A signed `participant.added` event that names a managed Murph line plus an
+  explicit `added_by_handle` is the ownership authority for a newly joined
+  Linq group. A read-only managed-line preflight selects the established
+  route-to-chat lock order but grants no authority; the unique provider-ledger
+  insertion then fences actor resolution and managed-line revalidation before
+  the route mutation in the same transaction. This avoids a participant-chat
+  versus new-route lock cycle. The authoritative ensure may correct only the
+  same account-scoped route's existing `ownerMemberId`, so reversed
+  participant/message delivery converges without a second owner field. Set
+  `HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED=1` only after Linq is delivering
+  that field: eligible unbound first messages then fail retryably until the
+  participant event establishes the route instead of assigning the speaker.
+  Keep the gate off during the compatibility deploy; actor-bearing events still
+  establish or correct ownership while the old fallback remains available.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at

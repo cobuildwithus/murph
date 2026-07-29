@@ -1,10 +1,13 @@
-import type { Prisma } from "@prisma/client";
+import type {
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
 
 import {
   bindArmedHostedUsageReferralToNewContainerTx,
 } from "../hosted-growth/usage-referral";
 import {
-  ensureHostedThreadContainerRouteTx,
+  ensureHostedLinqThreadContainerRouteFromParticipantAddTx,
 } from "../hosted-routing/thread-container-service";
 import {
   createHostedPhoneLookupKey,
@@ -19,6 +22,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  type HostedLinqParticipantChangedEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
 import {
@@ -30,9 +34,10 @@ import {
 import {
   readHostedRuntimeAiAccessDecision,
 } from "./member-access";
-import type {
-  HostedLinqParticipantAddedOwnerEvidence,
-} from "./linq-provider-events";
+import { normalizePhoneNumber } from "./phone";
+
+export const HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED_ENV =
+  "HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED";
 
 export type HostedLinqParticipantAddedOwnerProvisionOutcome =
   | "actor_inactive"
@@ -41,32 +46,65 @@ export type HostedLinqParticipantAddedOwnerProvisionOutcome =
   | "line_unmanaged"
   | "local_inbound_not_allowlisted"
   | "owner_bound"
-  | "route_already_bound";
+  | "owner_evidence_missing"
+  | "route_authority_conflict";
+
+type HostedLinqParticipantAddedEvent = Extract<
+  HostedLinqParticipantChangedEvent,
+  { event_type: "participant.added" }
+>;
+
+type HostedLinqParticipantAddedOwnerEvidence = {
+  accountLookupKey: string;
+  accountLookupKeys: string[];
+  actorHandle: NonNullable<
+    HostedLinqParticipantAddedEvent["data"]["added_by_handle"]
+  >;
+  chatId: string;
+  occurredAt: string;
+};
+
+export function isHostedLinqGroupOwnerFromAdderRequired(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  return source[HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED_ENV] === "1";
+}
 
 /**
- * Binds a new Linq group route to the human who added Murph when the provider
- * supplies explicit actor evidence. Missing actor evidence is handled by the
- * caller by doing nothing; this function never guesses from roster order or a
- * later speaker.
+ * Selects the lock-safe participant path without granting authority. The
+ * transaction revalidates the managed line before mutating anything.
+ */
+export async function hasHostedLinqParticipantAddedOwnerCandidate(input: {
+  event: HostedLinqParticipantChangedEvent;
+  prisma: PrismaClient;
+}): Promise<boolean> {
+  const evidence = readHostedLinqParticipantAddedOwnerEvidence(input.event);
+  return evidence !== null
+    && await hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: evidence.accountLookupKeys,
+      prisma: input.prisma,
+    });
+}
+
+/**
+ * Consumes only the normalized, signature-authenticated participant event.
+ * The caller has inserted the unique provider-event ledger row. Managed-line
+ * additions intentionally reach this function before the caller takes the
+ * chat lock so route provisioning retains its established route-then-chat lock
+ * order; the caller takes the chat lock before staging participant context.
  */
 export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
-  chatId: string;
-  evidence: HostedLinqParticipantAddedOwnerEvidence;
-  eventId: string;
-  occurredAt: Date;
+  event: HostedLinqParticipantChangedEvent;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqParticipantAddedOwnerProvisionOutcome> {
-  const accountLookupKey = createHostedPhoneLookupKey(
-    input.evidence.linePhoneNumber,
-  );
-  const accountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
-    input.evidence.linePhoneNumber,
-  );
+  const evidence = readHostedLinqParticipantAddedOwnerEvidence(input.event);
+  if (!evidence) {
+    return "owner_evidence_missing";
+  }
+
   if (
-    !accountLookupKey
-    || accountLookupKeys.length === 0
-    || !(await hasActiveHostedLinqManagedLine({
-      phoneNumberLookupKeys: accountLookupKeys,
+    !(await hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: evidence.accountLookupKeys,
       prisma: input.prisma,
     }))
   ) {
@@ -75,10 +113,10 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
 
   const actorContact = createHostedLinqParticipantContact({
     kind: "phone",
-    value: input.evidence.addedByHandle,
+    value: evidence.actorHandle.handle,
   }) ?? createHostedLinqParticipantContact({
     kind: "email",
-    value: input.evidence.addedByHandle,
+    value: evidence.actorHandle.handle,
   });
   if (!actorContact) {
     return "actor_unresolved";
@@ -116,19 +154,22 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
   }
 
   try {
-    const ensured = await ensureHostedThreadContainerRouteTx({
-      accountLookupKey,
-      accountLookupKeys,
-      channel: "linq",
-      mailboxDedupeKey: input.eventId,
-      occurredAt: input.occurredAt,
-      ownerMemberId: actor.id,
-      prisma: input.prisma,
-      threadId: input.chatId,
-    });
+    const occurredAt = new Date(
+      evidence.occurredAt,
+    );
+    const ensured =
+      await ensureHostedLinqThreadContainerRouteFromParticipantAddTx({
+        accountLookupKey: evidence.accountLookupKey,
+        accountLookupKeys: evidence.accountLookupKeys,
+        mailboxDedupeKey: input.event.event_id,
+        occurredAt,
+        ownerMemberId: actor.id,
+        prisma: input.prisma,
+        threadId: evidence.chatId,
+      });
     if (ensured.created) {
       await bindArmedHostedUsageReferralToNewContainerTx({
-        occurredAt: input.occurredAt,
+        occurredAt,
         ownerMemberId: actor.id,
         targetContainerMemberId: ensured.containerMemberId,
         tx: input.prisma,
@@ -140,7 +181,7 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
       throw error;
     }
     if (error.code === "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
-      return "route_already_bound";
+      return "route_authority_conflict";
     }
     if (error.code === "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED") {
       return "actor_inactive";
@@ -150,4 +191,40 @@ export async function provisionHostedLinqParticipantAddedOwnerTx(input: {
     }
     throw error;
   }
+}
+
+function readHostedLinqParticipantAddedOwnerEvidence(
+  event: HostedLinqParticipantChangedEvent,
+): HostedLinqParticipantAddedOwnerEvidence | null {
+  if (event.event_type !== "participant.added") {
+    return null;
+  }
+
+  const actorHandle = event.data.added_by_handle;
+  const chatId = event.data.chat_id;
+  const linePhoneNumber = normalizePhoneNumber(event.data.participant.handle);
+  if (
+    !actorHandle
+    || actorHandle.is_me === true
+    || event.data.participant.is_me === false
+    || !chatId
+    || !linePhoneNumber
+    || normalizePhoneNumber(actorHandle.handle) === linePhoneNumber
+  ) {
+    return null;
+  }
+
+  const accountLookupKey = createHostedPhoneLookupKey(linePhoneNumber);
+  const accountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    linePhoneNumber,
+  );
+  return accountLookupKey && accountLookupKeys.length > 0
+    ? {
+        accountLookupKey,
+        accountLookupKeys,
+        actorHandle,
+        chatId,
+        occurredAt: event.data.added_at ?? event.created_at,
+      }
+    : null;
 }

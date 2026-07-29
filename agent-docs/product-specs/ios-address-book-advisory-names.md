@@ -122,6 +122,13 @@ replacement: the route-authorized live group read is the access boundary for an
 already-enabled projection, regardless of the owner's current personal or
 sponsored billing access.
 
+For a newly joined Linq group, the human group owner is the active Murph member
+identified by the signed `participant.added.data.added_by_handle` when the
+added participant is an active managed Murph line. That event establishes or
+corrects the existing canonical thread-container owner before this projection
+is consulted. Neither the first later speaker nor provider roster order is
+contact-label authority.
+
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.

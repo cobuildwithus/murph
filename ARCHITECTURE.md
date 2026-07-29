@@ -1329,11 +1329,19 @@ unbounded subscription capability.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not standalone runtime work. The shared ingress contract normalizes the
-documented full participant handle (or Linq's deprecated handle fallback), but
-the diagnostic ledger still stores no participant id, handle, phone, email, or
-label. For a routed group, Web takes the canonical chat-ownership lock before
-provider-event insertion, then locks the group owner before mutating the route
-or reading optional context. A unique event may then append one bounded
+documented full participant handle (or Linq's deprecated handle fallback) and
+the optional full handle that performed an addition, but the diagnostic ledger
+still stores no participant id, handle, phone, email, or label. Ordinary
+participant changes take the canonical chat-ownership lock before
+provider-event insertion. A managed-line add candidate instead inserts the
+unique provider-event fence first, then retains the existing route-to-chat lock
+order while establishing the canonical route for the active Murph member named
+by `added_by_handle`, or correcting that same route when the legacy
+first-speaker fallback committed first. The preflight that selects this lock
+order grants no authority; the transaction revalidates the active managed line.
+The route retains one `ownerMemberId`; no actor evidence is persisted. For a
+routed group, Web then locks the current group owner before mutating the route
+or reading optional context. A unique event may append one bounded
 participant-attributed item to the route's existing encrypted transient
 group-event buffer in that same transaction. The item says which canonical
 handle was added or removed and may include the human group owner's unverified
@@ -1344,9 +1352,10 @@ lookup key that belongs to its own Linq account, even when the provider omits
 evidence of the change, while the existing live roster tool remains the sole
 decision-time source for current membership and join-offer decisions.
 
-Participant events still create no mailbox item, wake, route, membership,
-invite, consent, share, or outbound message. A unique addition also sets the
-existing nullable coalescing bit in the same transaction as ledger insertion;
+Except for that exact managed-line owner binding, participant events create no
+mailbox item, wake, membership, invite, consent, share, or outbound message. A
+unique addition also sets the existing nullable coalescing bit in the same
+transaction as ledger insertion;
 that anonymous hint is the durable fallback when optional contact lookup,
 encryption, or detailed staging fails. Removals have no automatic reply or
 generic fallback: their detailed item is intentionally optional context. The

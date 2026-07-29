@@ -15,9 +15,6 @@ import {
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
-import {
-  provisionHostedLinqParticipantAddedOwnerTx,
-} from "./linq-participant-added-owner";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -26,7 +23,7 @@ type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
-  prisma: Prisma.TransactionClient;
+  prisma: HostedLinqProviderEventClient;
   receivedAt?: Date;
 }): Promise<{
   alertIds: string[];
@@ -37,40 +34,38 @@ export async function ingestHostedLinqProviderEventTx(input: {
   >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
-  const ownerEvidence = input.event.participantAddedOwnerEvidence ?? null;
-  const event = withoutHostedLinqParticipantAddedOwnerEvidence(input.event);
-  const eventLookupKey = createHostedLinqProviderEventLookupKey(event.eventId);
+  const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
   const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
-    event,
+    event: input.event,
     prisma: input.prisma,
   });
   const created = await input.prisma.hostedLinqProviderEvent.createMany({
     data: {
-      apiVersion: event.apiVersion,
-      deliveryStatus: event.deliveryStatus,
-      direction: event.direction,
+      apiVersion: input.event.apiVersion,
+      deliveryStatus: input.event.deliveryStatus,
+      direction: input.event.direction,
       eventId: eventLookupKey,
-      eventType: event.eventType,
-      extractionJson: event.extractionJson,
+      eventType: input.event.eventType,
+      extractionJson: input.event.extractionJson,
       extractionVersion: 1,
-      failureCode: event.failureCode,
-      failureReason: event.failureReason,
-      linqChatLookupKey: event.linqChatLookupKey,
-      messageIdSuffix: event.messageIdSuffix,
-      messageLookupKey: event.messageLookupKey,
-      payloadHash: event.payloadHash,
-      payloadSanitizedJson: event.payloadSanitizedJson,
-      payloadShapeJson: event.payloadShapeJson,
-      phoneNumberHint: event.phoneNumberHint,
+      failureCode: input.event.failureCode,
+      failureReason: input.event.failureReason,
+      linqChatLookupKey: input.event.linqChatLookupKey,
+      messageIdSuffix: input.event.messageIdSuffix,
+      messageLookupKey: input.event.messageLookupKey,
+      payloadHash: input.event.payloadHash,
+      payloadSanitizedJson: input.event.payloadSanitizedJson,
+      payloadShapeJson: input.event.payloadShapeJson,
+      phoneNumberHint: input.event.phoneNumberHint,
       phoneNumberLookupKey: lineLookupKey,
-      phoneNumberRole: event.phoneNumberRole,
-      providerCreatedAt: event.providerCreatedAt,
-      providerReason: event.providerReason,
-      providerStatus: event.providerStatus,
+      phoneNumberRole: input.event.phoneNumberRole,
+      providerCreatedAt: input.event.providerCreatedAt,
+      providerReason: input.event.providerReason,
+      providerStatus: input.event.providerStatus,
       receivedAt,
-      service: event.service,
-      traceIdSuffix: event.traceIdSuffix,
-      webhookVersion: event.webhookVersion,
+      service: input.event.service,
+      traceIdSuffix: input.event.traceIdSuffix,
+      webhookVersion: input.event.webhookVersion,
     },
     skipDuplicates: true,
   });
@@ -89,22 +84,8 @@ export async function ingestHostedLinqProviderEventTx(input: {
     };
   }
 
-  if (
-    event.eventType === "participant.added"
-    && event.linqChatId
-    && ownerEvidence
-  ) {
-    await provisionHostedLinqParticipantAddedOwnerTx({
-      chatId: event.linqChatId,
-      evidence: ownerEvidence,
-      eventId: event.eventId,
-      occurredAt: event.providerCreatedAt,
-      prisma: input.prisma,
-    });
-  }
-
   const deliveryReceipt = await applyHostedLinqDeliveryReceiptTx({
-    event,
+    event: input.event,
     prisma: input.prisma,
   });
   if (deliveryReceipt.reopenOnboardingLink) {
@@ -128,10 +109,10 @@ export async function ingestHostedLinqProviderEventTx(input: {
       prisma: input.prisma,
     });
   }
-  const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(event)
+  const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
     ? await readHostedLinqDeliveryForProviderMessageTx({
-        messageLookupKey: event.messageLookupKey,
-        messageLookupKeyCandidates: event.messageLookupKeyReadCandidates,
+        messageLookupKey: input.event.messageLookupKey,
+        messageLookupKeyCandidates: input.event.messageLookupKeyReadCandidates,
         prisma: input.prisma,
       })
     : null;
@@ -144,7 +125,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   // ledger remains the duplicate gate for event-scoped alerting below.
   if (!staleDeliveryReceipt && !outboundEchoDelivery?.runtimeOwned) {
     await projectHostedLinqLineForProviderEventTx({
-      event,
+      event: input.event,
       lineLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
     });
@@ -152,7 +133,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
 
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
     deliveryId: deliveryReceipt.deliveryId ?? outboundEchoDelivery?.deliveryId ?? null,
-    event,
+    event: input.event,
     eventLookupKey,
     lineLookupKey: projectionLineLookupKey,
     prisma: input.prisma,
@@ -165,14 +146,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
       ? { restoreOnboardingLink: deliveryReceipt.restoreOnboardingLink }
       : {}),
   };
-}
-
-function withoutHostedLinqParticipantAddedOwnerEvidence(
-  event: ParsedHostedLinqProviderEvent,
-): ParsedHostedLinqProviderEvent {
-  const operationalEvent = { ...event };
-  delete operationalEvent.participantAddedOwnerEvidence;
-  return operationalEvent;
 }
 
 export async function markHostedLinqGroupJoinOfferHandledTx(input: {

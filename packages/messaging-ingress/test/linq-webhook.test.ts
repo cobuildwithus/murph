@@ -615,6 +615,11 @@ test("parseLinqParticipantChangedEvent normalizes full and deprecated participan
     event_id: "evt_participant_added",
     event_type: "participant.added",
     data: {
+      added_by_handle: {
+        handle: "+15557654321",
+        id: "handle_adder",
+        service: "iMessage",
+      },
       added_at: "2026-07-29T00:59:59.000Z",
       chat_id: "chat_group",
       participant: {
@@ -640,6 +645,15 @@ test("parseLinqParticipantChangedEvent normalizes full and deprecated participan
   });
 
   assert.deepEqual(added.data, {
+    added_by_handle: {
+      handle: "+15557654321",
+      id: "handle_adder",
+      is_me: undefined,
+      joined_at: undefined,
+      left_at: undefined,
+      service: "iMessage",
+      status: undefined,
+    },
     added_at: "2026-07-29T00:59:59.000Z",
     chat_id: "chat_group",
     participant: {

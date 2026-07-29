@@ -64,6 +64,19 @@ export interface HostedThreadContainerRouteEnsureResult {
   demotedMailboxConsumedAt: Date | null;
 }
 
+export interface HostedThreadContainerRouteEnsureInput {
+  accountLookupKey: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
+  channel: HostedThreadDeliveryRouteChannel;
+  containerMemberId?: string | null;
+  mailboxDedupeKey?: string | null;
+  monthlyUsageLimitUsdMicros?: bigint | null;
+  occurredAt: Date;
+  ownerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string | number;
+}
+
 export interface HostedThreadContainerDeliveryRouteRefreshResult {
   deliveryRoute: HostedThreadDeliveryRouteV1 | null;
   demotedMailboxConsumedAt: Date | null;
@@ -246,18 +259,36 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
   };
 }
 
-export async function ensureHostedThreadContainerRouteTx(input: {
-  accountLookupKey: string | null | undefined;
-  accountLookupKeys?: readonly (string | null | undefined)[];
-  channel: HostedThreadDeliveryRouteChannel;
-  containerMemberId?: string | null;
-  mailboxDedupeKey?: string | null;
-  monthlyUsageLimitUsdMicros?: bigint | null;
-  occurredAt: Date;
-  ownerMemberId: string;
-  prisma: Prisma.TransactionClient;
-  threadId: string | number;
-}): Promise<HostedThreadContainerRouteEnsureResult> {
+export async function ensureHostedThreadContainerRouteTx(
+  input: HostedThreadContainerRouteEnsureInput,
+): Promise<HostedThreadContainerRouteEnsureResult> {
+  return ensureHostedThreadContainerRouteInternalTx(input);
+}
+
+/**
+ * The signed event that says Murph itself was added is stronger ownership
+ * authority than the legacy first-speaker fallback. Reusing the ordinary
+ * route owner keeps one canonical field while allowing either webhook delivery
+ * order to converge on the attributed adder.
+ */
+export async function ensureHostedLinqThreadContainerRouteFromParticipantAddTx(
+  input: Omit<HostedThreadContainerRouteEnsureInput, "channel">,
+): Promise<HostedThreadContainerRouteEnsureResult> {
+  return ensureHostedThreadContainerRouteInternalTx(
+    {
+      ...input,
+      channel: "linq",
+    },
+    { allowExistingOwnerCorrection: true },
+  );
+}
+
+async function ensureHostedThreadContainerRouteInternalTx(
+  input: HostedThreadContainerRouteEnsureInput,
+  options: {
+    allowExistingOwnerCorrection?: boolean;
+  } = {},
+): Promise<HostedThreadContainerRouteEnsureResult> {
   await lockHostedMemberRow(input.prisma, input.ownerMemberId);
   const owner = await readHostedMemberCoreState({
     memberId: input.ownerMemberId,
@@ -382,16 +413,17 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       threadLookupKeys.includes(row.threadLookupKey)
     );
     const existing = existingRows[0]!;
+    const ownerChanged =
+      existing.container.ownerMemberId !== input.ownerMemberId;
     if (
       distinctContainerIds.size > 1
       ||
       !authorityMatched
-      ||
-      existing.container.ownerMemberId !== input.ownerMemberId
       || (
         requestedContainerMemberId !== null
         && existing.containerMemberId !== requestedContainerMemberId
       )
+      || (ownerChanged && options.allowExistingOwnerCorrection !== true)
     ) {
       throw hostedOnboardingError({
         code: "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
@@ -399,6 +431,26 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         message: "This external thread is already routed to another container.",
         retryable: false,
       });
+    }
+
+    if (ownerChanged) {
+      const corrected = await input.prisma.hostedThreadContainer.updateMany({
+        data: {
+          ownerMemberId: input.ownerMemberId,
+        },
+        where: {
+          memberId: existing.containerMemberId,
+          ownerMemberId: existing.container.ownerMemberId,
+        },
+      });
+      if (corrected.count !== 1) {
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+          httpStatus: 409,
+          message: "This external thread route was updated concurrently.",
+          retryable: true,
+        });
+      }
     }
 
     const demotion = input.channel === "linq"

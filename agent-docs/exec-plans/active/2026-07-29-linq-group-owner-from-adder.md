@@ -1,72 +1,65 @@
 # Bind Linq group ownership to the member who added Murph
 
-Status: WIP — provider actor field required for full rollout
+Status: active
 Created: 2026-07-29
 Updated: 2026-07-29
 
 ## Goal
 
 When Murph is added to an existing iMessage group, bind the canonical hosted
-thread-container owner to the human who performed that add instead of whichever
-active Murph member happens to send the first later message.
+thread-container owner to the active Murph member who performed that add, not
+the first eligible member who later sends a message.
 
-## Verified current behavior
+## Verified boundary
 
-- An unbound Linq group is provisioned by the first eligible inbound group
-  message, and that sender becomes `HostedThreadContainer.ownerMemberId`.
-- `participant.added` already passes through the synchronous, duplicate-fenced
-  provider-event transaction, but it only marks roster refresh for a route that
-  already exists.
-- Linq's documented `participant.added` payload identifies the added participant
-  and timestamp, not the human actor who added them.
-- The existing thread-container owner is already the canonical authority for
-  owner-only group actions and the owner's optional address-book labels. A
-  second ownership field would create split-brain state.
+- The current Murph fallback provisions an unbound Linq group from its first
+  eligible message and uses that sender as `HostedThreadContainer.ownerMemberId`.
+- Linq's current public `participant.added` schema identifies the chat, added
+  participant, and time, but does not yet publish the human actor.
+- Linq webhooks are signature-authenticated, versioned, delivered at least once,
+  and deduplicated by `event_id`; the public docs give no ordering guarantee
+  between participant and message events.
+- The thread-container owner is already the sole authority for owner-backed
+  access and optional address-book labels. A second owner field would create
+  split-brain state.
 
 ## Design
 
-1. Keep the existing operational normalizer unchanged behind the public
-   provider-event module, and add one request-local authority evidence value
-   when the signed payload explicitly supplies `added_by_handle` and the added
-   participant is the Murph line (`participant.is_me === true`).
-2. Keep the raw actor and line handles out of every persisted provider-event
-   projection and log field.
-3. After the existing provider-event duplicate fence, resolve the actor through
-   the existing phone or verified-email member identity lookup and active-access
-   gate.
-4. Prove the added number is an active managed Linq line, then call the existing
-   `ensureHostedThreadContainerRouteTx` primitive with the actor as
-   `ownerMemberId` and reuse the existing usage-referral binding.
-5. Never guess from roster order, the first speaker, or participant timing. Never
-   reassign an already-bound route.
+1. Extend the shared typed Linq participant-add ingress contract with the
+   provider's planned optional `added_by_handle` full handle.
+2. After the existing provider-event duplicate fence, accept that actor only
+   when the added participant is an active managed Murph line and the actor
+   resolves to an active existing Murph member.
+3. Reuse the canonical route ensure. Its participant-add-only entrypoint may
+   correct the same account-scoped route's existing `ownerMemberId` when the
+   legacy first-speaker fallback committed first.
+4. Keep actor and line handles request-local. Persist no new ownership,
+   provenance, queue, or pending-event state.
+5. Ship compatibly with
+   `HOSTED_LINQ_GROUP_OWNER_FROM_ADDER_REQUIRED=0`. Once Linq confirms the
+   actor-bearing webhook is live, set it to `1`; eligible unbound messages then
+   fail retryably until the participant event establishes the route.
 
-This adds no table, migration, queue, ownership model, or contact-data surface.
+## Required proof
 
-## Current limitation
+- typed ingress preserves a valid actor handle and ignores actor-less payloads;
+- raw actor and line handles never enter the provider-event ledger;
+- duplicate participant events cannot provision or correct twice;
+- unmanaged lines, unresolved/inactive actors, and cross-account routes fail
+  closed;
+- participant-first and message-first delivery converge on the attributed
+  actor, while ordinary route ensures cannot replace an owner;
+- required-mode first messages create no route, mailbox work, or wake before
+  actor evidence arrives;
+- existing routed-group participant context and ordinary actor-less fallback
+  behavior remain intact while the rollout gate is off.
 
-The public Linq schema does not currently include `added_by_handle`, so the new
-path is intentionally dormant for today's documented payload. The current
-first-message fallback remains for compatibility. Full product correctness
-requires Linq to expose or confirm a signed add-actor field; after that is live,
-we should separately remove or fence the first-speaker fallback so event-ordering
-races cannot choose a different owner.
+## Progress
 
-## Verification
-
-```bash
-pnpm --dir apps/web vitest run \
-  test/hosted-onboarding-linq-participant-owner-evidence.test.ts \
-  test/hosted-onboarding-linq-participant-added-owner.test.ts \
-  test/hosted-onboarding-linq-participant-owner-ingest.test.ts
-pnpm typecheck
-pnpm test:diff apps/web agent-docs
-```
-
-Required coverage:
-
-- explicit actor evidence binds the existing canonical route primitive;
-- the documented actor-less payload remains non-authoritative;
-- duplicate provider events cannot provision twice;
-- raw actor and line handles are not persisted in provider-event projections;
-- unmanaged lines, unresolved or inactive actors, and already-bound routes fail
-  closed without ownership reassignment.
+- [x] Recover the exact PR head and merge current `main`.
+- [x] Recheck Linq's official API reference, webhook guide, and current
+  TypeScript SDK contract.
+- [x] Replace the draft normalizer split with the typed ingress boundary.
+- [ ] Complete focused and concurrency coverage.
+- [ ] Run product, preliminary specialist, parent, and final ReviewGPT gates.
+- [ ] Close the plan, push the exact reviewed head, and make the PR merge-ready.
