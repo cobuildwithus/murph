@@ -1224,6 +1224,41 @@ mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. There is no other
 Web-to-Cloudflare prewarm or nudge path.
 
+Hosted Linq message edits are immutable correction inputs, not mutations of an
+accepted mailbox item or transcript. Each accepted inbound Linq conversation
+message stores a private versioned blind lookup key for its provider-global
+message id. A verified `message.edited` webhook locks that source lineage,
+finds the already-accepted original, and revalidates its exact sender, chat,
+direction, direct home route or same group route, and container access before
+appending a structured correction through the ordinary mailbox and wake
+handoff. The lock is edit-only: ordinary accepted messages write the blind
+source index without an additional source-lock query. An edit that races an
+uncommitted original receives the existing bounded retryable missing-source
+outcome and resolves after provider retry; simultaneous edits serialize from
+lineage read through correction append. Optional group `senderMemberId`
+attribution and personal entitlement
+never grant or remove owner-backed room authority: an absent participant
+projection remains eligible, while an existing projection that positively
+records removal or a different handle fails closed. The
+replacement text stays user-authored data; only the separate part index,
+deterministic opaque reference to the original accepted assistant input, and
+correction framing are trusted runtime metadata. That reference distinguishes
+corrections to different originals without exposing provider identifiers.
+Corrections accepted before planning may join the current turn, corrections
+accepted during an active turn may steer it only when their opaque original
+reference names an input already accepted into that same turn, and corrections
+to older inputs remain ordinary pending conversation work. The owner keeps at
+most the provider-supported five corrections, rejects conflicting replay,
+ignores stale or ambiguous ordering, and retries a missing original only within
+the provider delivery window. If the referenced input already received a
+completed answer,
+the assistant sends one concise follow-up only when the correction materially
+changes that answer or action; immaterial wording changes end with the existing
+durable `finish_without_reply` policy. It
+does not rewrite history, cancel a turn, rerun onboarding, fetch the message
+from Linq, create a second queue, or use the provider diagnostic ledger as
+correctness state. Outbound edit events are diagnostic only.
+
 Participant-derived thread-container authority is a seven-day lease over an
 authoritative provider observation, reused by ordinary access, AI admission,
 usage allowance, and newsletter projection. A non-direct Linq inbound may

@@ -3,7 +3,13 @@ import {
   type HostedExecutionLinqConversationMessage,
   type HostedExecutionLinqConversationMessagePart,
   buildHostedExecutionLinqConversationMessageWake,
+  isHostedLinqConversationMessageWake,
+  readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
@@ -54,6 +60,7 @@ import {
   readHostedLinqDailyState,
 } from "./linq-daily-state";
 import {
+  type HostedLinqMessageEditedEvent,
   type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
@@ -63,8 +70,9 @@ import {
   type HostedLinqChatHandleSummary,
 } from "./linq-client";
 import {
-  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithSourceMessageTx,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxSourceConversationEntriesTx,
 } from "../hosted-mailbox/store";
 import {
   renewHostedThreadContainerParticipantAccessTx,
@@ -104,6 +112,7 @@ import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -400,6 +409,360 @@ async function isHostedLinqMailboxRootPrewarmEligible(input: {
       tx: input.prisma,
       userId: input.memberId,
     });
+}
+
+const HOSTED_LINQ_MESSAGE_EDIT_RETRY_WINDOW_MS = 25 * 60_000;
+const HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS = 6;
+
+export async function planHostedLinqMessageEditedWebhook(input: {
+  event: HostedLinqMessageEditedEvent;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  const event = input.event;
+  if (event.data.direction === "outbound") {
+    return buildIgnoredHostedLinqMessageEditPlan("outbound-message-edit");
+  }
+
+  const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
+    event.data.id,
+  );
+  const sourceMessageLookupKeyReadCandidates =
+    createHostedLinqMessageLookupKeyReadCandidates(event.data.id);
+  const sourceEntries = await readHostedMailboxSourceConversationEntriesTx({
+    sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+    tx: input.prisma,
+  });
+  if (sourceEntries.length > HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-lineage-ambiguous");
+  }
+  if (sourceEntries.length === 0) {
+    const now = input.now ?? new Date();
+    const eventAgeMs = Math.max(0, now.getTime() - Date.parse(event.created_at));
+    if (eventAgeMs <= HOSTED_LINQ_MESSAGE_EDIT_RETRY_WINDOW_MS) {
+      throw hostedOnboardingError({
+        code: "LINQ_MESSAGE_EDIT_SOURCE_PENDING",
+        httpStatus: 503,
+        message: "The original Linq message has not reached the mailbox yet.",
+        retryable: true,
+      });
+    }
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-source-missing");
+  }
+
+  const sourceUserIds = new Set(sourceEntries.map((entry) => entry.userId));
+  if (sourceUserIds.size !== 1) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-source-ambiguous");
+  }
+  const sourceUserId = sourceEntries[0]?.userId;
+  if (!sourceUserId) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-source-missing");
+  }
+
+  const linqEntries = sourceEntries.filter((entry) =>
+    entry.wake && isHostedLinqConversationMessageWake(entry.wake)
+  );
+  const originalEntries = linqEntries.filter((entry) =>
+    entry.wake
+    && isHostedLinqConversationMessageWake(entry.wake)
+    && entry.wake.message.linqMessage.messageId === event.data.id
+    && entry.wake.message.linqMessage.editedTextPartIndex === undefined
+  );
+  if (originalEntries.length !== 1) {
+    return buildIgnoredHostedLinqMessageEditPlan(
+      sourceEntries.some((entry) => !entry.contentAvailable)
+        ? "message-edit-source-retired"
+        : "message-edit-source-invalid",
+    );
+  }
+  const originalWake = originalEntries[0]?.wake;
+  if (!originalWake || !isHostedLinqConversationMessageWake(originalWake)) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-source-invalid");
+  }
+  const correctionWake = buildHostedLinqMessageEditedWake({
+    event,
+    originalWake,
+  });
+  const replayEntry = linqEntries.find((entry) =>
+    entry.wake?.eventId === event.event_id
+  );
+  if (replayEntry) {
+    const replayMatches = replayEntry.wake
+      && isHostedLinqConversationMessageWake(replayEntry.wake)
+      && hasSameHostedLinqMessageEdit(replayEntry.wake, correctionWake);
+    return {
+      desiredSideEffects: [],
+      response: {
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: replayMatches
+          ? "duplicate-message-edit"
+          : "message-edit-event-conflict",
+      },
+      wakeHandoffs: [{
+        eventId: event.event_id,
+        linqChatId: event.data.chat.id,
+        mailboxItemId: replayEntry.itemId,
+        source: "linq",
+        userId: sourceUserId,
+      }],
+    };
+  }
+  if (sourceEntries.length >= HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-limit-reached");
+  }
+
+  const participantContact = createHostedLinqParticipantContact({
+    kind: "phone",
+    value: event.data.sender_handle.handle,
+  }) ?? createHostedLinqParticipantContact({
+    kind: "email",
+    value: event.data.sender_handle.handle,
+  });
+  if (!participantContact) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-sender-invalid");
+  }
+  const sourceContact = readHostedLinqConversationMessageContact(
+    originalWake.message,
+  );
+  const participantLookupKeyCandidates =
+    createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: participantContact.kind,
+      value: participantContact.value,
+    });
+  if (
+    sourceContact.kind !== participantContact.kind
+    || !participantLookupKeyCandidates.includes(sourceContact.lookupKey)
+    || originalWake.message.linqMessage.chatId !== event.data.chat.id
+    || originalWake.message.linqMessage.isFromMe
+  ) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-authority-mismatch");
+  }
+
+  const originalIsDirect =
+    originalWake.message.linqMessage.threadIsDirect !== false;
+  if (originalIsDirect) {
+    const [routing, accessDecision] = await Promise.all([
+      readHostedMemberRoutingState({
+        memberId: sourceUserId,
+        prisma: input.prisma,
+      }),
+      readHostedRuntimeAiAccessDecision({
+        memberId: sourceUserId,
+        now: input.now ?? new Date(),
+        prisma: input.prisma,
+      }),
+    ]);
+    if (
+      !accessDecision.allowed
+      || routing?.linqChatId !== event.data.chat.id
+      || routing.linqParticipantContact?.kind !== participantContact.kind
+      || !participantLookupKeyCandidates.includes(
+        routing.linqParticipantContact.lookupKey,
+      )
+    ) {
+      return buildIgnoredHostedLinqMessageEditPlan(
+        "message-edit-direct-route-inactive",
+      );
+    }
+  } else {
+    const authorityNow = input.now ?? new Date();
+    const senderMemberId = originalWake.message.senderMemberId;
+    const [route, participant, containerAccess] =
+      await Promise.all([
+        readHostedThreadRouteByThreadIdentity({
+          channel: "linq",
+          prisma: input.prisma,
+          threadId: event.data.chat.id,
+        }),
+        senderMemberId
+          ? input.prisma.hostedThreadContainerParticipant.findUnique({
+              select: {
+                handleLookupKey: true,
+                removedAt: true,
+              },
+              where: {
+                containerMemberId_participantMemberId: {
+                  containerMemberId: sourceUserId,
+                  participantMemberId: senderMemberId,
+                },
+              },
+            })
+          : null,
+        readHostedRuntimeAiAccessDecision({
+          memberId: sourceUserId,
+          now: authorityNow,
+          prisma: input.prisma,
+        }),
+      ]);
+    if (
+      route?.containerMemberId !== sourceUserId
+      || !containerAccess.allowed
+      || (
+        participant !== null
+        && (
+          participant.removedAt !== null
+          || !participantLookupKeyCandidates.includes(participant.handleLookupKey)
+        )
+      )
+    ) {
+      return buildIgnoredHostedLinqMessageEditPlan(
+        "message-edit-group-route-inactive",
+      );
+    }
+  }
+
+  const editedAtMs = Date.parse(event.data.edited_at);
+  const latestSamePartEditAtMs = linqEntries.reduce((latest, entry) => {
+    const wake = entry.wake;
+    if (
+      !wake
+      || !isHostedLinqConversationMessageWake(wake)
+      || wake.message.linqMessage.editedTextPartIndex !== event.data.part.index
+    ) {
+      return latest;
+    }
+    return Math.max(latest, Date.parse(wake.occurredAt));
+  }, Date.parse(originalWake.occurredAt));
+  if (latestSamePartEditAtMs >= editedAtMs) {
+    return buildIgnoredHostedLinqMessageEditPlan(
+      latestSamePartEditAtMs === editedAtMs
+        ? "message-edit-revision-ambiguous"
+        : "message-edit-revision-stale",
+    );
+  }
+
+  const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
+    envelope: correctionWake,
+    sourceMessageLookupKey,
+    tx: input.prisma,
+  });
+  if (mailboxAppend.dedupeConflict) {
+    return buildIgnoredHostedLinqMessageEditPlan("message-edit-event-conflict");
+  }
+
+  return {
+    desiredSideEffects: [],
+    response: {
+      ...(mailboxAppend.duplicate ? { duplicate: true } : {}),
+      ignored: false,
+      ok: true,
+      reason: mailboxAppend.duplicate
+        ? "duplicate-message-edit"
+        : "wake-appended-message-edit",
+    },
+    wakeHandoffs: [{
+      eventId: event.event_id,
+      linqChatId: event.data.chat.id,
+      mailboxItemId: mailboxAppend.item.id,
+      source: "linq",
+      userId: sourceUserId,
+      wakeMailboxCheckpoint: {
+        lane: mailboxAppend.item.lane,
+        laneSeq: mailboxAppend.item.laneSeq,
+      },
+    }],
+  };
+}
+
+function buildIgnoredHostedLinqMessageEditPlan(
+  reason: string,
+): HostedOnboardingLinqDirectPlan {
+  return {
+    desiredSideEffects: [],
+    response: {
+      ignored: true,
+      ok: true,
+      reason,
+    },
+  };
+}
+
+function buildHostedLinqMessageEditedWake(input: {
+  event: HostedLinqMessageEditedEvent;
+  originalWake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>;
+}): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
+  const originalMessage = input.originalWake.message;
+  if (originalMessage.channel !== "linq") {
+    throw new TypeError("Hosted Linq message edit source must be a Linq wake.");
+  }
+  const originalContact = readHostedLinqConversationMessageContact(
+    originalMessage,
+  );
+  const originalLinqMessage = originalMessage.linqMessage;
+  return buildHostedExecutionLinqConversationMessageWake({
+    ...(originalMessage.accountLookupKey === undefined
+      ? {}
+      : { accountLookupKey: originalMessage.accountLookupKey }),
+    contactKind: originalContact.kind,
+    contactLookupKey: originalContact.lookupKey,
+    eventId: input.event.event_id,
+    linqMessage: {
+      chatId: originalLinqMessage.chatId,
+      editedSourceInputId: createHostedMailboxAssistantInputId({
+        dedupeKey: input.originalWake.eventId,
+        eventId: input.originalWake.eventId,
+        lane: "conversation",
+        secret: readHostedConversationAssistantIdentifierSecret(
+          input.originalWake,
+        ),
+        userId: input.originalWake.userId,
+      }),
+      editedTextPartIndex: input.event.data.part.index,
+      from: originalLinqMessage.from,
+      isFromMe: false,
+      messageId: originalLinqMessage.messageId,
+      parts: [{
+        type: "text",
+        value: input.event.data.part.text,
+      }],
+      reactionEligible: false,
+      ...(originalLinqMessage.replyToMessageId === undefined
+        ? {}
+        : { replyToMessageId: originalLinqMessage.replyToMessageId }),
+      ...(originalLinqMessage.replyToPartIndex === undefined
+        ? {}
+        : { replyToPartIndex: originalLinqMessage.replyToPartIndex }),
+      ...(originalLinqMessage.service === undefined
+        ? {}
+        : { service: originalLinqMessage.service }),
+      ...(originalLinqMessage.threadIsDirect === undefined
+        ? {}
+        : { threadIsDirect: originalLinqMessage.threadIsDirect }),
+    },
+    occurredAt: input.event.data.edited_at,
+    ...(originalMessage.phoneLookupKey === undefined
+      ? {}
+      : { phoneLookupKey: originalMessage.phoneLookupKey }),
+    ...(originalMessage.routeAuthority === undefined
+      ? {}
+      : { routeAuthority: originalMessage.routeAuthority }),
+    ...(originalMessage.senderMemberId === undefined
+      ? {}
+      : { senderMemberId: originalMessage.senderMemberId }),
+    userId: input.originalWake.userId,
+  });
+}
+
+function hasSameHostedLinqMessageEdit(
+  existingWake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
+  requestedWake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
+): boolean {
+  const existing = existingWake.message.linqMessage;
+  const requested = requestedWake.message.linqMessage;
+  return existingWake.eventId === requestedWake.eventId
+    && existingWake.userId === requestedWake.userId
+    && existingWake.occurredAt === requestedWake.occurredAt
+    && existing.chatId === requested.chatId
+    && existing.messageId === requested.messageId
+    && existing.editedSourceInputId === requested.editedSourceInputId
+    && existing.editedTextPartIndex === requested.editedTextPartIndex
+    && existing.parts.length === 1
+    && requested.parts.length === 1
+    && existing.parts[0]?.type === "text"
+    && requested.parts[0]?.type === "text"
+    && existing.parts[0].value === requested.parts[0].value;
 }
 
 export async function planHostedOnboardingLinqWebhook(input: {
@@ -1103,8 +1466,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
       userId: existingMember.id,
     });
 
-    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+    const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
+      summary.messageId,
+    );
+    const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
       envelope: mailboxWake,
+      sourceMessageLookupKey,
       tx: input.prisma,
     });
 
@@ -1849,8 +2216,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   });
 
   if (input.sourceMailboxConsumedAt) {
-    const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeTx({
+    const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
+      summary.messageId,
+    );
+    const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeWithSourceMessageTx({
       envelope: buildMailboxWake(),
+      sourceMessageLookupKey,
       tx: input.prisma,
     })).item;
     await input.prisma.hostedMailboxItem.updateMany({
@@ -1969,8 +2340,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       : {}),
   });
 
-  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+  const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
+    summary.messageId,
+  );
+  const mailboxAppend = await appendHostedMailboxEnvelopeWithSourceMessageTx({
     envelope: mailboxEnvelope,
+    sourceMessageLookupKey,
     tx: input.prisma,
   });
   if (mailboxAppend.duplicate) {
@@ -2441,6 +2816,14 @@ function sanitizeHostedOnboardingPlannerLogValue(
   value: string | null | undefined,
 ): HostedOnboardingStructuredLogValue {
   return value ?? null;
+}
+
+function requireHostedLinqSourceMessageLookupKey(messageId: string): string {
+  const lookupKey = createHostedLinqMessageLookupKey(messageId);
+  if (!lookupKey) {
+    throw new TypeError("Hosted Linq message id must produce a source lookup key.");
+  }
+  return lookupKey;
 }
 
 function buildHostedLinqConversationWakeForMailbox(input: {
