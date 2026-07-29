@@ -739,6 +739,54 @@ describe("selectProjectableDailyMetricDays", () => {
     ).toEqual(selected);
   });
 
+  it.each([
+    {
+      label: "UTC+14 Monday",
+      nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
+    },
+    {
+      label: "UTC-12 Monday",
+      nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
+    },
+  ])("retains the open date plus seven completed dates on $label", ({
+    nowMs: boundaryNowMs,
+  }) => {
+    const dates = [
+      "2026-07-19",
+      "2026-07-20",
+      "2026-07-21",
+      "2026-07-22",
+      "2026-07-23",
+      "2026-07-24",
+      "2026-07-25",
+      "2026-07-26",
+      "2026-07-27",
+    ];
+    const selected = selectProjectableDailyMetricDays(
+      dates.map((date, index) => ({
+        date,
+        grain: "day",
+        metricKey: "steps",
+        statistic: "value",
+        unit: "count",
+        value: 1_000 + index,
+      })),
+      stepsSpec,
+      boundaryNowMs,
+    );
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-27",
+      "2026-07-26",
+      "2026-07-25",
+      "2026-07-24",
+      "2026-07-23",
+      "2026-07-22",
+      "2026-07-21",
+      "2026-07-20",
+    ]);
+  });
+
   it("shares selected day-grain activity-minutes rows through the scalar activity spec", () => {
     const dailyActivitySummary = activityMetricPoint({
       date: ACTIVITY_DAY.date,
@@ -928,13 +976,13 @@ describe("selectProjectableMealNutritionDays", () => {
     ], proteinSpec, nowMs)).toEqual([]);
   });
 
-  it("skips protein days older than the seven-day cutoff", () => {
+  it("skips protein days older than the eight-date cutoff", () => {
     expect(selectProjectableMealNutritionDays([
-      mealNutritionDay({ date: "2026-06-26", proteinTotal: 55 }),
+      mealNutritionDay({ date: "2026-06-25", proteinTotal: 55 }),
     ], proteinSpec, nowMs)).toEqual([]);
   });
 
-  it("keeps at most the seven newest complete protein days", () => {
+  it("keeps at most the eight newest complete protein days", () => {
     const selected = selectProjectableMealNutritionDays([
       "2026-07-04",
       "2026-06-30",
@@ -949,7 +997,7 @@ describe("selectProjectableMealNutritionDays", () => {
       proteinTotal: 40 + index,
     })), proteinSpec, nowMs);
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(selected.map((record) => record.recordKey)).toEqual([
       "2026-07-04",
       "2026-07-03",
@@ -958,6 +1006,7 @@ describe("selectProjectableMealNutritionDays", () => {
       "2026-06-30",
       "2026-06-29",
       "2026-06-28",
+      "2026-06-27",
     ]);
   });
 
@@ -1263,7 +1312,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
         calendarClosedThroughDate: "2026-07-03",
@@ -1595,7 +1644,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
       .toHaveLength(1);
     expect(findWorkoutsRecord(selected, "2026-07-05")).toBeUndefined();
@@ -1888,7 +1937,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
       calendarClosedThroughDate: "2026-07-03",
       date: "2026-07-03",
@@ -1932,7 +1981,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
     expect(scoreSettledWorkoutsDate(
       selected,
-      "2026-06-27",
+      "2026-06-26",
       18 * 60 * 60 * 1_000,
     )).toEqual({ status: "missing" });
   });
@@ -2243,8 +2292,9 @@ describe("selectProjectableWorkoutsDays", () => {
         "2026-07-05",
         "2026-07-04",
         "2026-07-03",
+        "2026-07-02",
       ]);
-      expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeUndefined();
+      expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeDefined();
       expect(advanced.every((record) =>
         "calendarClosedThroughDate" in record.data
         && record.data.calendarClosedThroughDate === "2026-07-08"

@@ -90,6 +90,7 @@ const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
   "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
   "LINQ_API_TOKEN",
@@ -276,6 +277,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
     );
+  }
+  const primaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
+  );
+  const secondaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
+  );
+  if (
+    primaryDatabaseAlertChatId
+    && secondaryDatabaseAlertChatId
+    && primaryDatabaseAlertChatId === secondaryDatabaseAlertChatId
+  ) {
+    errors.push("Database health alert chat IDs must be distinct.");
   }
 
   const privateMediaCapabilitySecret = normalizeOptionalString(

@@ -40,8 +40,9 @@ Before deploying the Worker version that introduces
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
   token with only the organization-level `read_metrics_endpoints` permission;
-- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for the existing operator chat;
-  and
+- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
+  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
+  direct operator chats whose sole external recipients are different; and
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
@@ -53,6 +54,10 @@ do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
 codes. Rollback may leave the unused v4 namespace and samples in place; an older
 Worker does not schedule or address it, and no Web compatibility window exists.
+After the two-recipient Worker has admitted a pending page, do not roll back to
+the former single-recipient implementation: it can clear that page after only
+the primary provider operation. The two-recipient Worker is the rollback floor
+until alerts are disabled or the pending page has cleared.
 
 ## Device-Sync Wake Epoch Rollout
 
@@ -453,6 +458,7 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`

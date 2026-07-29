@@ -2998,7 +2998,7 @@ describe("murph.newsletter dynamic tool", () => {
       "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "current-week shared facts",
+      "shared facts from the seven completed local days",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
       "exact live email and health-share grants",
@@ -3277,16 +3277,25 @@ describe("murph.newsletter dynamic tool", () => {
                   grantStatus: "granted",
                   projectionScope: { projectionKind: "steps-days.v0" },
                   projectionScopeKey: "steps-days.v0",
-                  records: [{
+                  records: [
+                    "2026-06-30",
+                    "2026-07-01",
+                    "2026-07-02",
+                    "2026-07-03",
+                    "2026-07-04",
+                    "2026-07-05",
+                    "2026-07-06",
+                    "2026-07-07",
+                  ].map((date, index) => ({
                     data: {
-                      date: "2026-07-06",
+                      date,
                       metricKey: "steps",
                       unit: "count",
-                      value: 7_000,
+                      value: (index + 1) * 1_000,
                     },
-                    occurredAt: "2026-07-06T00:00:00.000Z",
-                    recordKey: "2026-07-06",
-                  }],
+                    occurredAt: `${date}T00:00:00.000Z`,
+                    recordKey: date,
+                  })),
                 }],
               },
               {
@@ -3359,9 +3368,17 @@ describe("murph.newsletter dynamic tool", () => {
             displayName: "Ada",
             memberId: "member_a",
             weeklyStats: [{
-              currentWeekAvg: 7_000,
-              observedDayCount: 1,
-              observedDates: ["2026-07-06"],
+              completedDaysAvg: 4_000,
+              observedDayCount: 7,
+              observedDates: [
+                "2026-06-30",
+                "2026-07-01",
+                "2026-07-02",
+                "2026-07-03",
+                "2026-07-04",
+                "2026-07-05",
+                "2026-07-06",
+              ],
               stream: "steps",
               throughDate: "2026-07-06",
               unit: "count",
