@@ -420,25 +420,62 @@ export class DatabaseHealthMonitor {
 
     this.store.recordAlertAttempt(attemptedAtMs);
     try {
-      const results = await Promise.allSettled(
-        this.config.linqChatIds.map((chatId, index) =>
-          sendDatabaseHealthLinqAlert({
+      const destinationResults = await Promise.allSettled(
+        this.config.linqChatIds.map((chatId) =>
+          resolveDatabaseHealthLinqDestination({
             apiBaseUrl: this.config.linqApiBaseUrl,
             apiToken: this.config.linqApiToken,
             chatId,
             fetchImplementation: this.fetchImplementation,
-            idempotencyKey: buildDatabaseAlertRecipientIdempotencyKey(
-              idempotencyKey,
-              index,
-            ),
-            message,
           })
         ),
       );
-      for (const result of results) {
+      const failures: unknown[] = [];
+      const seenRecipients = new Set<string>();
+      const destinations: Array<{
+        idempotencyKey: string;
+        recipient: string;
+      }> = [];
+      for (const [index, result] of destinationResults.entries()) {
         if (result.status === "rejected") {
-          throw result.reason;
+          failures.push(result.reason);
+          continue;
         }
+        if (seenRecipients.has(result.value.recipient)) {
+          failures.push(
+            new LinqDatabaseAlertError("linq_duplicate_recipient"),
+          );
+          continue;
+        }
+        seenRecipients.add(result.value.recipient);
+        destinations.push({
+          idempotencyKey: buildDatabaseAlertRecipientIdempotencyKey(
+            idempotencyKey,
+            index,
+          ),
+          recipient: result.value.recipient,
+        });
+      }
+      const sendResults = await Promise.allSettled(
+        destinations.map((destination) =>
+          sendDatabaseHealthLinqAlert({
+            apiBaseUrl: this.config.linqApiBaseUrl,
+            apiToken: this.config.linqApiToken,
+            fetchImplementation: this.fetchImplementation,
+            idempotencyKey: destination.idempotencyKey,
+            message,
+            recipient: destination.recipient,
+          })
+        ),
+      );
+      for (const result of sendResults) {
+        if (result.status === "rejected") {
+          failures.push(result.reason);
+        }
+      }
+      const failure = failures[0];
+      if (failure !== undefined) {
+        throw failure;
       }
       this.store.recordAlertSuccess();
       const stateAfterSuccess = this.store.readAlertState();
@@ -652,14 +689,12 @@ function resolvePlanetScaleBranchMetricsUrl(
   return targetUrl;
 }
 
-async function sendDatabaseHealthLinqAlert(input: {
+async function resolveDatabaseHealthLinqDestination(input: {
   apiBaseUrl: string;
   apiToken: string;
   chatId: string;
   fetchImplementation: DatabaseHealthFetch;
-  idempotencyKey: string;
-  message: string;
-}): Promise<void> {
+}): Promise<{ recipient: string }> {
   const authorization = `Bearer ${input.apiToken}`;
   const chatUrl = new URL(
     `chats/${encodeURIComponent(input.chatId)}`,
@@ -707,7 +742,18 @@ async function sendDatabaseHealthLinqAlert(input: {
     chatBody,
     phoneNumbersBody,
   });
+  return destination;
+}
 
+async function sendDatabaseHealthLinqAlert(input: {
+  apiBaseUrl: string;
+  apiToken: string;
+  fetchImplementation: DatabaseHealthFetch;
+  idempotencyKey: string;
+  message: string;
+  recipient: string;
+}): Promise<void> {
+  const authorization = `Bearer ${input.apiToken}`;
   const url = new URL("messages", ensureTrailingSlash(input.apiBaseUrl));
   const response = await fetchWithTimeout(
     input.fetchImplementation,
@@ -723,7 +769,7 @@ async function sendDatabaseHealthLinqAlert(input: {
             },
           ],
         },
-        to: [destination.recipient],
+        to: [input.recipient],
       }),
       headers: {
         authorization,
@@ -1102,6 +1148,7 @@ class LinqDatabaseAlertError extends Error {
     readonly code:
       | "linq_health_suppressed"
       | "linq_health_unavailable"
+      | "linq_duplicate_recipient"
       | "linq_rejected_response"
       | "linq_retryable_response",
   ) {

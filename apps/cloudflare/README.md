@@ -197,9 +197,12 @@ Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
 to be `HEALTHY`. It derives that chat's sole external phone recipient in memory,
-never persists or logs it, and sends through Linq's no-`from` auto-selection
-endpoint so a newly flagged line can fail over. Unhealthy or indeterminate
-delivery health suppresses the POST and leaves the alert pending for the next
+never persists or logs it, and requires the two resolved recipients to differ
+before the secondary operation can enter Linq. A duplicate resolved recipient
+allows the primary operation only and leaves the alert pending. Distinct healthy
+recipients are sent through Linq's no-`from` auto-selection endpoint so a newly
+flagged line can fail over. Unhealthy or indeterminate delivery health
+suppresses that destination's POST and leaves the alert pending for the next
 paced attempt. This path does not share state or fallback behavior with the
 Resend-only hosted reply-latency monitor.
 

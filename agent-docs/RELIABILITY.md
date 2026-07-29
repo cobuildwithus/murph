@@ -90,13 +90,18 @@ Last verified: 2026-07-29
   direct chats and current line reputation; unhealthy or indeterminate health
   suppresses that destination's message POST without blocking the other
   destination, and retains the pending alert for the next paced cycle. Healthy
-  delivery uses Linq's no-`from` auto-selection route separately for each chat.
-  The primary retains the persisted Linq idempotency key and the secondary uses
-  a stable derived key. A transport-ambiguous or rejected send keeps the exact
-  persisted body and both destination keys for the next eligible cycle; only
-  acknowledged entry to both chats clears the pending alert. An idempotent
-  replay of a destination that already succeeded cannot produce another
-  recipient-visible message. Acknowledged recurrences advance the alert
+  destinations are compared before provider entry. Distinct chat ids that
+  resolve to the same external recipient admit only the primary POST and keep
+  the page pending; after configuration is corrected, stable provider
+  idempotency deduplicates that primary replay while the actual secondary
+  receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
+  route separately for each chat. The primary retains the persisted Linq
+  idempotency key and the secondary uses a stable derived key. A
+  transport-ambiguous or rejected send keeps the exact persisted body and both
+  destination keys for the next eligible cycle; only acknowledged entry to both
+  distinct recipients clears the pending alert. An idempotent replay of a
+  destination that already succeeded cannot produce another recipient-visible
+  message. Acknowledged recurrences advance the alert
   sequence and choose another fixed opening from current metric evidence.
   Message variation must remain contextual and deterministic, never random
   padding. Database pages intentionally have no quiet hours.

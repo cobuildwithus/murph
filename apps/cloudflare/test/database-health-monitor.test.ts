@@ -179,6 +179,54 @@ describe("database health monitor", () => {
       .toBe("murph-db-1-1-recipient-2");
   });
 
+  it("keeps the cycle pending when distinct chats resolve to the same recipient", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqRecipient: "+12025550123",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    const pendingAlert = harness.monitor.readAlertState();
+    const initialPrimaryBody = await readLinqRequestBody(
+      harness.allLinqRequests[0],
+    );
+    expect(initialPrimaryBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(initialPrimaryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
+
+    harness.setSecondaryLinqRecipient("+12025550124");
+    harness.restartMonitor();
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.allLinqRequests).toHaveLength(3);
+    const replayBodies = await Promise.all(
+      harness.allLinqRequests.slice(1).map(readLinqRequestBody),
+    );
+    expect(replayBodies.map((body) => body.message.idempotency_key))
+      .toEqual([
+        pendingAlert.pendingAlertIdempotencyKey,
+        `${pendingAlert.pendingAlertIdempotencyKey}-recipient-2`,
+      ]);
+    expect(
+      replayBodies.every(
+        (body) =>
+          body.message.parts[0]?.value === pendingAlert.pendingAlertMessage,
+      ),
+    ).toBe(true);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+  });
+
   it("retries a partially failed fan-out only after the global fence", async () => {
     const harness = createMonitorHarness({
       linqResponses: [
@@ -1318,6 +1366,7 @@ function createMonitorHarness(input: {
     | "HEALTHY"
     | "OPTED_OUT";
   secondaryLinqChatId?: string;
+  secondaryLinqRecipient?: string;
   secondaryLinqResponses?: Array<() => Response | Promise<Response>>;
   serviceDiscoveryResponses?: Array<() => Response | Promise<Response>>;
 } = {}) {
@@ -1351,6 +1400,8 @@ function createMonitorHarness(input: {
   const serviceDiscoveryResponses = [
     ...(input.serviceDiscoveryResponses ?? []),
   ];
+  let secondaryLinqRecipient =
+    input.secondaryLinqRecipient ?? "+12025550124";
   const fetchImplementation = vi.fn(async (
     requestInput: RequestInfo | URL,
     init?: RequestInit,
@@ -1390,7 +1441,7 @@ function createMonitorHarness(input: {
           }
           return Response.json({
             ...createLinqChatResponseBody({
-              recipients: ["+12025550124"],
+              recipients: [secondaryLinqRecipient],
             }),
             health_status: {
               status: input.secondaryLinqChatHealthStatus ?? "HEALTHY",
@@ -1469,6 +1520,9 @@ function createMonitorHarness(input: {
     restartMonitor() {
       monitor = createMonitor();
       return monitor;
+    },
+    setSecondaryLinqRecipient(recipient: string) {
+      secondaryLinqRecipient = recipient;
     },
     runScheduledCheck(
       scheduledAtMs: number,

@@ -59,10 +59,13 @@ Last verified: 2026-07-29
   only the documented phone-number formatting,
   accepts the current nested reputation status plus the documented deprecated
   top-level health-status alias, derives each chat's sole external phone
-  recipient in memory, and persists or logs none of that provider response. It
-  then uses Linq's no-`from` auto-selection endpoint separately for each direct
-  chat so a line that becomes flagged after preflight can fail over; no model,
-  runner, request, or stored state can select another recipient.
+  recipient in memory, requires the two resolved recipients to be distinct, and
+  persists or logs none of that provider response. When distinct chat ids
+  resolve to the same external recipient, only the primary operation may enter
+  Linq and the pending page remains unresolved. It otherwise uses Linq's
+  no-`from` auto-selection endpoint separately for each direct chat so a line
+  that becomes flagged after preflight can fail over; no model, runner, request,
+  or stored state can select another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - A hosted member's OpenAI or Venice choice controls only core assistant
   inference. The selected provider receives the information required to produce
