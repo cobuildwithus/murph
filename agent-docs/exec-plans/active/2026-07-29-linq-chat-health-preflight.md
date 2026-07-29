@@ -53,30 +53,39 @@ Updated: 2026-07-29
 
 ## Evidence
 
-- Current inventory parsing stores `reputation.status` in generic
+- Legacy inventory parsing stored `reputation.status` in generic
   `providerStatus`.
-- Current provider status handling merges `new_status` and `new_reputation` by
+- Legacy provider status handling merged `new_status` and `new_reputation` by
   severity before projecting one `healthStatus`.
-- Delivery receipts mutate the same `healthStatus`, so provider reputation and
-  Murph delivery evidence overwrite one another.
+- Delivery receipts mutated the same `healthStatus`, so provider reputation and
+  Murph delivery evidence could overwrite one another.
 - Scheduled Linq turns already resolve route authority before model work and
   reassert it at provider entry before the existing dispatch claim.
 
 ## Tasks
 
-1. [ ] Add independent provider line fields and the latest chat-health
+1. [x] Add independent provider line fields and the latest chat-health
    projection through an expand migration.
-2. [ ] Replace severity merging with narrow provider-status parsers and dual
+2. [x] Replace severity merging with narrow provider-status parsers and dual
    writes during the compatibility window.
-3. [ ] Add webhook chat-health projection and bounded global chat
+3. [x] Add webhook chat-health projection and bounded global chat
    reconciliation.
-4. [ ] Update line selection and implement one pure final-target egress policy.
-5. [ ] Propagate typed scheduled-delivery posture through existing runtime
+4. [x] Update line selection and implement one pure final-target egress policy.
+5. [x] Propagate typed scheduled-delivery posture through existing runtime
    contracts and dynamic context.
-6. [ ] Add focused parsing, projection, routing, race, and compatibility tests.
-7. [ ] Correct durable deliverability guidance and document rollout/deployment.
-8. [ ] Run focused proof, review gates, exact-head CI, and close the migration.
+6. [x] Add focused parsing, projection, routing, race, and compatibility tests.
+7. [x] Correct durable deliverability guidance and document rollout/deployment.
+8. [ ] Run focused proof, review gates, exact-head CI, reconcile current `main`,
+   and close the migration.
 
 ## Verification log
 
-- Pending implementation.
+- The implementation patch was applied atomically to PR #1118 at commit
+  `a87010da4d1d5e86d268295e2220e8324ba70688`; temporary patch/export workflow
+  files were removed in the same commit and the ordinary repository hygiene
+  workflow was restored from `main`.
+- `git diff --check` passed on the prepared implementation patch.
+- Every changed TypeScript file passed syntax transpilation with TypeScript 5.9
+  before publication.
+- Focused package tests, generated Prisma validation, exact-head CI, review gates,
+  and merge-base reconciliation are pending on the published implementation.
