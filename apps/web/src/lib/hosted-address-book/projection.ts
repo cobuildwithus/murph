@@ -46,6 +46,7 @@ const KMS_KEY_VERSION_PATTERN =
 const ADVISORY_NAME_COMPONENT_PATTERN =
   /^[\p{L}\p{M}]+(?:[.'\u2019-][\p{L}\p{M}]+)*(?: [\p{L}\p{M}]\p{M}*\.)?$/u;
 const ADVISORY_NAME_ALIAS_SEPARATOR = " / ";
+const ADVISORY_NAME_ALIAS_LIMIT = 4;
 const RELATIONSHIP_OR_ROLE_WORDS = new Set([
   "aunt",
   "boss",
@@ -779,7 +780,7 @@ function requireSafeAdvisoryName(value: unknown): string {
     advisoryNames.map((name) => name.toLocaleLowerCase("en-US")),
   );
   if (
-    advisoryNames.length > 2
+    advisoryNames.length > ADVISORY_NAME_ALIAS_LIMIT
     || distinctAdvisoryNames.size !== advisoryNames.length
     || advisoryNames.some((name) => !ADVISORY_NAME_COMPONENT_PATTERN.test(name))
   ) {
