@@ -1,6 +1,6 @@
 # Use the static SSH worker's 10 cores efficiently
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -93,3 +93,21 @@ Updated: 2026-07-28
 - Expected outcomes: focused schedule contracts pass, local diff verification
   passes, the remote resource line reports the bounded 10-core plan, acceptance
   passes, and total remote wall time is lower than 13m18s.
+
+## Results
+
+- The focused scheduler suite passed 32 tests, including the behavioral
+  protected-phase/refill interlock for both CLI success and failure.
+- Canonical local diff verification passed 461 tests across 30 repo-tool files
+  plus the dependency-policy check.
+- Preliminary ReviewGPT returned one accepted coverage finding. The landed
+  test proves that the third package lane stays blocked before CLI terminal
+  state, both refill slots start afterward, a fourth peer remains capped, and
+  app release plus failure propagation remain intact.
+- The production-faithful static SSH acceptance run passed on the 10-core,
+  32 GiB worker in 503 seconds end to end, down from 798 seconds: 295 seconds
+  faster, or approximately 37%. The canonical verifier completed in
+  approximately 393 seconds while package coverage and app verification
+  overlapped.
+- No paid Blacksmith verification ran.
+Completed: 2026-07-28
