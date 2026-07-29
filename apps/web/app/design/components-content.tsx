@@ -9,7 +9,9 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -87,6 +89,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
@@ -95,10 +98,14 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
-import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import {
+  DESIGN_GROUP_SPONSORSHIP_OFFERS,
+  DESIGN_USAGE_OFFERS,
+} from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -298,6 +305,129 @@ const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   { label: "Telegram", value: "telegram" },
 ];
 
+const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
+  {
+    category: "Nutrition",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-earlier-evening-meals",
+    image: "/design-assets/hero-01.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Jun 2 – Jun 22",
+      day: 21,
+      metrics: [
+        {
+          current: "54.7 bpm",
+          delta: "-2.1 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "93.8 percent",
+          delta: "+1.4 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+      ],
+    },
+    searchText: "design earlier evening meals",
+    startedOn: "2026-06-02",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Earlier Evening Meals",
+  },
+  {
+    category: "Recovery",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-consistent-wake-time",
+    image: "/design-assets/hero-02.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "May 8 – May 28",
+      day: 21,
+      metrics: [
+        {
+          current: "91.3 percent",
+          delta: "+2.3 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+        {
+          current: "105 min",
+          delta: "+14 min",
+          label: "Deep sleep",
+          sentiment: "positive",
+        },
+        {
+          current: "57.9 ms",
+          delta: "+0.8 ms",
+          label: "HRV RMSSD",
+          sentiment: "neutral",
+        },
+        {
+          current: "57 min",
+          delta: "+9 min",
+          label: "Sleep latency",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design consistent wake time",
+    startedOn: "2026-05-08",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Consistent Wake Time",
+  },
+  {
+    category: "Movement",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-easy-aerobic-base",
+    image: "/design-assets/hero-03.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Apr 12 – May 3",
+      day: 22,
+      metrics: [
+        {
+          current: "49.8 bpm",
+          delta: "-3.2 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "61.4 ms",
+          delta: "+4.6 ms",
+          label: "HRV RMSSD",
+          sentiment: "positive",
+        },
+        {
+          current: "89.1 percent",
+          delta: "-0.5 percent",
+          label: "Blood oxygen saturation (SpO₂)",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design easy aerobic base",
+    startedOn: "2026-04-12",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Easy Aerobic Base",
+  },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -332,6 +462,20 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Home experiment history cards">
+          <div
+            className="grid items-start gap-5 lg:grid-cols-3"
+            data-design-home-experiment-history-cards
+            inert
+          >
+            {DESIGN_HOME_HISTORY_CARDS.map((card) => (
+              <HomeExperimentCard key={card.id} card={card} variant="history" />
+            ))}
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Pulse billing return confirmation">
           <div inert>
             <PulseTrialBillingContinuationView
@@ -352,7 +496,7 @@ export function ComponentsContent() {
             data-design-dashboard-legal-composition="true"
           >
             <HostedLegalConsentCard
-              acceptedPendingLabel="Refreshing your dashboard"
+              acceptedPendingLabel="Refreshing..."
               acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
               launchDescription="We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
@@ -765,6 +909,12 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Private experiment results share">
+          <ExperimentResultsShareStudy />
+        </Section>
+
+        <Separator />
+
         <div id="whoop-completion-dialog" className="scroll-mt-24">
           <Section title="WHOOP Completion Dialog">
             <p className="max-w-2xl text-sm text-muted-foreground">
@@ -810,23 +960,48 @@ export function ComponentsContent() {
 
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Group funding uses a saved card when available and sends card entry
-            or verification to Stripe only when needed. Family owners reuse the
-            standard amount dialog with an exact member label and status-only
-            recovery when another target owns the active checkout. Credit is
-            added only after Stripe confirms payment.
+            Personal, Family, and group funding use a saved card when available
+            and send card entry or verification to Stripe only when needed.
+            Family owners reuse the standard amount dialog with an exact member
+            label and status-only recovery when another target owns the active
+            checkout. Credit is added only after Stripe confirms payment.
           </p>
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div
+              className="rounded-3xl border border-border bg-card p-6"
+              data-design-component="personal-usage-top-up"
+              id="personal-usage-top-up-component"
+            >
+              <p className="text-sm font-medium text-muted-foreground">
+                Personal usage
+              </p>
+              <p className="mt-1 font-serif text-2xl font-semibold tracking-normal text-foreground">
+                Keep the conversation going
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Add one-time usage with a saved card or continue securely in
+                Stripe when needed.
+              </p>
+              <div className="mt-6">
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
+                  scope="personal"
+                />
+              </div>
+            </div>
             <div
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
               <GroupUsageFundingCard
                 action={
-                  <HostedUsageTopUpDialog
+                  <GroupSponsorshipDialog
                     checkoutUrl="/api/design/usage-credit-preview"
-                    offers={DESIGN_USAGE_OFFERS}
-                    scope="group"
+                    customizationAllowed
+                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                    payerMemberId="design_usage_top_up_payer"
                   />
                 }
                 groupName="Sunday sleep crew"
@@ -851,6 +1026,7 @@ export function ComponentsContent() {
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={DESIGN_USAGE_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -864,6 +1040,7 @@ export function ComponentsContent() {
                   }}
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={[]}
+                  payerMemberId="design_usage_top_up_payer"
                   scope="family"
                   targetLabel="Alex"
                 />
@@ -987,6 +1164,7 @@ export function ComponentsContent() {
           >
             <HostedFamilyManager
               billingActive
+              payerMemberId="design_usage_top_up_payer"
               invites={[
                 {
                   acceptUrl: "/family/accept/design-preview",

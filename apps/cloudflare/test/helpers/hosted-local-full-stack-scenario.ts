@@ -309,7 +309,10 @@ export async function startHostedLocalFullStackScenario(input: {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: testControls ? "1" : "0",
       MURPH_HOSTED_LOCAL_PROFILE: assistantProviderMode === "live" ? "e2e:live" : "e2e:stub",
       MURPH_DEV_FORCE_RESET_LOCAL_DB: input.resetLocalDatabase === false ? "0" : "1",
-      MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
+      // CI streams child-process output. Wrangler debug includes every
+      // inspector-protocol message, which can backpressure request-heavy E2E
+      // scenarios; info retains the structured runtime diagnostics.
+      MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "info",
       ...(usePreparedRunnerBundle ? { MURPH_DEV_SKIP_RUNNER_BUNDLE: "1" } : {}),
       MURPH_DEV_WEB_PORT: String(webPort),
       MURPH_DEV_WORKER_HOST: "0.0.0.0",

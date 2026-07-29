@@ -149,11 +149,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   maintenance, retention, cleanup, projection, and scheduled wakes must not
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground
-  work inside that window without publishing a snapshot. Inherited, committed,
-  durability-gated, and shutdown-time wakes do not use this exception. If the
-  hot pass dirties state, the full quiet window starts again. An actual host
-  termination may use the separate last-chance durability path, but durably
-  staged foreground work still wins.
+  work inside that window without publishing a snapshot. The only other
+  exception is a server-identified, fixed-destination, transport-idempotent
+  phone-call-result or usage-referral-reward notification: after fresh
+  conversation work has priority, the runtime may select that exact durable
+  mailbox family, compose it queue-only, persist its causal outbox intent, and
+  drain it before the idle floor. Generic notifications and unrelated pending
+  outbox work remain excluded. Inherited, committed, durability-gated, and
+  shutdown-time wakes do not otherwise use this exception. If the hot pass
+  dirties state, the full quiet window starts again. An actual host termination
+  may use the separate last-chance durability path, but durably staged
+  foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox
@@ -196,6 +202,14 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
   fails.
+- A pre-member group-join reaction accepted for proactive outreach is Web-owned
+  durable work. Its stable offer-and-participant identity collapses webhook
+  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
+  and durable: line health and capacity defer with a bounded next attempt, and a
+  condition whose inputs cannot change terminates instead of deferring, so no row
+  retries forever and none is dropped unrecorded. Pre-member contact data that a
+  reaction creates participates in the existing account-deletion and
+  group-deletion owners rather than outliving them.
 
 ## Authority, Ownership, And State
 
@@ -206,6 +220,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
+- Participant-target phone egress is denied unless its exact send kind has a
+  narrow durable authority binding the idempotency key, participant identity,
+  and source line. Adding one allowed first-contact kind must not widen another
+  kind's assertion or create a generic participant-target bypass.
 - Match state lifetime to scope. User-facing or queryable product truth is
   never assistant runtime state and never begins in process, request, turn,
   wake, orchestration, or other operational state. Durable obligations must be
@@ -388,6 +406,20 @@ it has been explicitly elevated to a cross-cutting invariant.
   cross-owner purchases may detach the payer only while invalidating in-flight
   payer-era reconciliation, clearing payer-bound ciphertext, and retaining the
   non-secret lookup evidence required to reconcile later refunds or disputes.
+- Earned hosted referral credit also belongs to its frozen beneficiary and has
+  no clawback path. If a referrer or introduced member deletes their account
+  after a surviving group was rewarded, deletion anonymizes the rewarded
+  accounting receipt instead of deleting the group's grant. Unrewarded
+  referral state and all referral state whose beneficiary is deleted are
+  removed.
+- Hosted referral rolling caps reserve armed and bound commitments under the
+  same beneficiary serialization boundary as grants. Armed rows reserve through
+  their seven-day occurrence window; bound rows remain reserved through the
+  product-owned 25-hour late-evidence grace, after which
+  referrer-serialized expiry is authoritative finality. A qualification
+  timestamp committed inside the provider-ingress transaction freezes a
+  pre-expiry success; delayed reconciliation may revalidate its stored evidence
+  but must not revoke it because wall-clock expiry or later commitments moved.
 - The company-wide tracked fulfilled usage-top-up total seeds from retained
   fulfilled rows at an atomic tracker cutover and does not claim complete
   pre-cutover lifetime history. It then increments from the first successful

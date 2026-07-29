@@ -202,7 +202,11 @@ cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
 deliberate binary target exception because the standard sienna warning token
 reads brown rather than the explicitly required red; always pair either color
 with `10% target hit` or `Below 10% target` text. A missing comparison stays
-neutral and must not claim that a snapshot exists.
+neutral and must not claim that a snapshot exists. Active-user windows must not
+present intentionally retired group-sender evidence as an exact count: prefix
+an affected WAU or MAU with `At least`, explain the private evidence retirement
+in the supporting copy, and withhold a week-over-week rate when either compared
+window is incomplete.
 
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
@@ -362,12 +366,14 @@ credit. Lead with the group name, one concise sentence explaining that the
 credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
-Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary **Add messages · $10** action and a plain
-cancel action. Explain once that Murph uses a saved card when available and
-that Stripe handles card entry or verification when needed. Do not imply that
-selecting an amount charges the card; only the explicit primary action
-authorizes that one-time contribution. Stack amount cards and actions on
+Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
+large choice cards, then one primary **Sponsor ~200 messages · $10** action and
+a plain cancel action. Explain once that the contribution is one-time, Murph
+uses a saved card when available, and Stripe handles card entry or verification
+when needed. Do not imply that selecting an amount charges the card; only the
+explicit primary action authorizes the contribution. Keep the alias, note, and
+eligible temporary running bit behind one optional disclosure, and state the
+server-owned bit duration beside that field. Stack amount cards and actions on
 narrow screens, preserve visible focus and selection states, and render the
 production components on both the Components and Sections tabs of `/design`
 for review.

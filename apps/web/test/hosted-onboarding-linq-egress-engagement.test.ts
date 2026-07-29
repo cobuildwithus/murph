@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedAssistantConversationIdentifierBlind,
+  hashHostedAssistantConversationIdentifier,
+} from "@murphai/hosted-execution/assistant-identifiers";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
@@ -57,6 +61,10 @@ import {
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import {
+  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberMessagingState,
+} from "@/src/lib/hosted-onboarding/messaging-state";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
@@ -293,8 +301,27 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
+    const homeLinePhone = "+15550100099";
+    const memberPhone = "+15550100001";
+    const memberPhoneLookupKey = createRequiredPhoneLookupKey(memberPhone);
+    if (!memberPhoneLookupKey) {
+      throw new Error("Expected a member phone lookup key.");
+    }
+    const expectedRoute = resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat-current-home",
+      memberId: "member-1",
+      messaging: resolveHostedMemberMessagingState({
+        identity: { phoneLookupKey: memberPhoneLookupKey },
+        routing: { linqChatId: "chat-current-home" },
+      }),
+    });
+    if (!expectedRoute?.threadId) {
+      throw new Error("Expected a canonical direct conversation locator.");
+    }
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
+      homeLinePhone,
+      identityPhone: memberPhone,
     });
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
       linqChatId: "chat-current-home",
@@ -315,6 +342,7 @@ describe("hosted Linq egress authority", () => {
       targetKind: "explicit",
     })).resolves.toEqual({
       targetOverride: {
+        conversationThreadId: expectedRoute.threadId,
         target: "chat-current-home",
         targetKind: "thread",
       },
@@ -322,6 +350,64 @@ describe("hosted Linq egress authority", () => {
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      identityPhone: undefined,
+      label: "email-only",
+    },
+    {
+      identityPhone: "+15550100001",
+      label: "dual-identity",
+    },
+  ])("uses the canonical email participant for a $label home route", async ({
+    identityPhone,
+  }) => {
+    const contactLookupKey = "hbidx:email:v1:current-home";
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: contactLookupKey,
+      userId: "member-1",
+    });
+    const expectedConversationThreadId =
+      hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        "chat-current-email-home",
+      );
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-email-home",
+      homeParticipantContactKind: "email",
+      homeParticipantContactLookupKey: contactLookupKey,
+      ...(identityPhone ? { identityPhone } : {}),
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-email-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-stale-home",
+      targetKind: "explicit",
+    })).resolves.toEqual({
+      targetOverride: {
+        conversationThreadId: expectedConversationThreadId,
+        target: "chat-current-email-home",
+        targetKind: "thread",
+      },
+      threadIsDirect: true,
+    });
+
+    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
   });
 
   it("does not retarget a stale bare Linq target at provider entry", async () => {
@@ -339,6 +425,28 @@ describe("hosted Linq egress authority", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a fixed referral source with the current Linq home route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "linq_current_home_b",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false,
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: "usage-referral-reward:referral_1",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "linq_source_chat_a",
+      targetKind: "explicit",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      retryable: false,
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
@@ -563,7 +671,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMailboxItem.findMany).toHaveBeenNthCalledWith(1, {
       select: expect.any(Object),
       where: {
-        createdAt: { gte: expect.any(Date) },
+        createdAt: { gt: expect.any(Date) },
         id: { in: answeredMailboxItemIds },
         OR: [
           { expiresAt: null },
@@ -576,7 +684,7 @@ describe("hosted Linq egress authority", () => {
       select: expect.any(Object),
       take: 100,
       where: {
-        createdAt: { gte: expect.any(Date) },
+        createdAt: { gt: expect.any(Date) },
         kind: "conversation.message",
         lane: "conversation",
         OR: [
@@ -593,7 +701,7 @@ describe("hosted Linq egress authority", () => {
       },
       where: {
         mailboxItem: {
-          createdAt: { gte: expect.any(Date) },
+          createdAt: { gt: expect.any(Date) },
           OR: [
             { expiresAt: null },
             { expiresAt: { gt: expect.any(Date) } },
@@ -616,8 +724,8 @@ describe("hosted Linq egress authority", () => {
     const answeredQuery = prisma.hostedMailboxItem.findMany.mock.calls[0][0];
     const recentQuery = prisma.hostedMailboxItem.findMany.mock.calls[1][0];
     const payloadQuery = prisma.hostedMailboxPayload.findMany.mock.calls[0][0];
-    expect(answeredQuery.where.createdAt.gte).toEqual(
-      recentQuery.where.createdAt.gte,
+    expect(answeredQuery.where.createdAt.gt).toEqual(
+      recentQuery.where.createdAt.gt,
     );
     expect(answeredQuery.where.OR[1].expiresAt.gt).toBe(
       recentQuery.where.OR[1].expiresAt.gt,
@@ -626,10 +734,13 @@ describe("hosted Linq egress authority", () => {
       createdAt: answeredQuery.where.createdAt,
       OR: answeredQuery.where.OR,
     });
+    // Pinned independently of the source constant: this scan must never reach
+    // past the mailbox retention window, or it would look for rows the
+    // retention sweep has already deleted.
     expect(
       answeredQuery.where.OR[1].expiresAt.gt.getTime()
-      - answeredQuery.where.createdAt.gte.getTime(),
-    ).toBe(30 * 24 * 60 * 60 * 1000);
+      - answeredQuery.where.createdAt.gt.getTime(),
+    ).toBe(14 * 24 * 60 * 60 * 1000);
   });
 
   it("keeps malformed refs outside payload reads and foreign rows outside decrypts", async () => {
@@ -1190,8 +1301,27 @@ describe("hosted Linq egress authority", () => {
   });
 
   it("returns direct audience authority with a current home-route override", async () => {
+    const homeLinePhone = "+15550100099";
+    const memberPhone = "+15550100001";
+    const memberPhoneLookupKey = createRequiredPhoneLookupKey(memberPhone);
+    if (!memberPhoneLookupKey) {
+      throw new Error("Expected a member phone lookup key.");
+    }
+    const expectedRoute = resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: "chat-current-home",
+      memberId: "member-1",
+      messaging: resolveHostedMemberMessagingState({
+        identity: { phoneLookupKey: memberPhoneLookupKey },
+        routing: { linqChatId: "chat-current-home" },
+      }),
+    });
+    if (!expectedRoute?.threadId) {
+      throw new Error("Expected a canonical direct conversation locator.");
+    }
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
+      homeLinePhone,
+      identityPhone: memberPhone,
     });
     mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
       linqChatId: "chat-current-home",
@@ -1223,6 +1353,7 @@ describe("hosted Linq egress authority", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       targetOverride: {
+        conversationThreadId: expectedRoute.threadId,
         target: "chat-current-home",
         targetKind: "thread",
       },
@@ -1325,6 +1456,8 @@ function createPrismaStub(input: {
   activeMemberAccess?: boolean;
   homeChatId?: string;
   homeLinePhone?: string;
+  homeParticipantContactKind?: "email" | "phone" | null;
+  homeParticipantContactLookupKey?: string | null;
   identityPhone?: string;
   pendingChatId?: string;
   threadRouteContainerMemberId?: string;
@@ -1350,6 +1483,10 @@ function createPrismaStub(input: {
       findUnique: vi.fn().mockResolvedValue({
         linqChatIdEncrypted: input.homeChatId ? "encrypted-home-chat" : null,
         linqChatLookupKey: createRequiredLinqChatLookupKey(input.homeChatId),
+        linqParticipantContactKind:
+          input.homeParticipantContactKind ?? null,
+        linqParticipantContactLookupKey:
+          input.homeParticipantContactLookupKey ?? null,
         linqRecipientPhoneEncrypted: input.homeLinePhone ? "encrypted-home-line" : null,
         linqRecipientPhoneLookupKey: createRequiredPhoneLookupKey(input.homeLinePhone),
         memberId: "member-1",

@@ -844,41 +844,6 @@ function readWorkspaceDiffScope(...changedFiles: string[]) {
   }
 }
 
-function parseCoordinationLedgerRows(ledgerText: string) {
-  const lines = ledgerText.split(/\r?\n/u)
-  const headerIndex = lines.findIndex((line) => line.startsWith('| Agent |'))
-
-  if (headerIndex === -1) {
-    throw new Error('Coordination ledger header not found.')
-  }
-
-  const headerColumns = lines[headerIndex]
-    .split('|')
-    .slice(1, -1)
-    .map((part) => part.trim())
-  const planColumnIndex = headerColumns.indexOf('Plan')
-  const statusColumnIndex = headerColumns.indexOf('Status')
-
-  if (planColumnIndex === -1 || statusColumnIndex === -1) {
-    throw new Error('Coordination ledger is missing the Plan or Status column.')
-  }
-
-  return lines
-    .slice(headerIndex + 2)
-    .filter((line) => line.startsWith('|') && !line.startsWith('| ---'))
-    .map((line) => {
-      const columns = line
-        .split('|')
-        .slice(1, -1)
-        .map((part) => part.trim().replace(/^`([^`]+)`$/u, '$1'))
-
-      return {
-        plan: columns[planColumnIndex] ?? '',
-        status: columns[statusColumnIndex] ?? '',
-      }
-    })
-}
-
 function writeHarnessFile(
   harnessRoot: string,
   relativePath: string,
@@ -1212,7 +1177,12 @@ describe('monorepo release flow coverage audit', () => {
         '  }',
       ].join('\n'),
     )
-    expect(reviewGptDriver).toContain(
+    const unsentDraftStart = reviewGptDriver.indexOf('  if (!shouldSend) {')
+    const unsentDraftEnd = reviewGptDriver.indexOf('\n  if (shouldSend) {', unsentDraftStart)
+    const unsentDraft = reviewGptDriver.slice(unsentDraftStart, unsentDraftEnd)
+    expect(unsentDraftStart).toBeGreaterThan(-1)
+    expect(unsentDraftEnd).toBeGreaterThan(unsentDraftStart)
+    expect(unsentDraft).toContain(
       [
         '  if (!shouldSend) {',
         '    if (shouldAttachFiles) {',
@@ -1225,6 +1195,8 @@ describe('monorepo release flow coverage audit', () => {
         "    ownedTargetId = '';",
       ].join('\n'),
     )
+    expect(unsentDraft).not.toContain('cleanupConfirmedDraftAttachments')
+    expect(unsentDraft).toContain("    ownedTargetId = '';")
     expect(reviewGptDriver).toContain(
       [
         '      if (!shouldWaitForResponse) {',
@@ -1528,14 +1500,34 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
       'utf8',
     )
-    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
-    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    const coverageAdmissionRule =
+      /diff changes executable behavior or changes\s+the tests,\s+fixtures,\s+configuration,\s+or direct-proof scaffolding that\s+establishes its proof/u
+    expect(agentsGuide).toContain(
+      'do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance`',
+    )
+    expect(completionWorkflow).toContain(
+      'exact-head GitHub\n   Actions own the broad suite',
+    )
+    expect(verificationAndRuntime).toContain(
+      '## Verification Ownership By Delivery Path',
+    )
+    expect(verificationAndRuntime).toMatch(
+      /run\s+`pnpm verify:acceptance` before pushing/u,
+    )
+    expect(completionSpecialistsPrompt).toMatch(
+      /Applicability does not depend on a local coverage\s+umbrella command/u,
+    )
+    expect(completionSpecialistsPrompt).toMatch(coverageAdmissionRule)
+    expect(prReviewGptLoop).toMatch(coverageAdmissionRule)
+    expect(completionWorkflow).toMatch(coverageAdmissionRule)
+    expect(completionSpecialistsPrompt).toContain(
+      'push\nit through required exact-head CI',
+    )
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
     expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'does not require a ten-minute local admission wait',
     )
-    expect(agentsGuide).toContain('required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
@@ -1588,6 +1580,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
     expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
     expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
     expect(
       existsSync(
         path.join(
@@ -1732,8 +1725,8 @@ describe('monorepo release flow coverage audit', () => {
       '`product-experience-review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
-    expect(completionWorkflow).toContain(
-      'repo code/test/config changes whose verification lane includes owner-level coverage',
+    expect(completionWorkflow).toMatch(
+      /coverage lens applies when the diff changes executable behavior/u,
     )
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',
@@ -2548,54 +2541,21 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.runRepoToolsTests).toBe(true)
   })
 
-  it('keeps active execution plans aligned with live coordination-ledger state', () => {
-    const activePlansDir = path.join(repoRoot, 'agent-docs', 'exec-plans', 'active')
-    const ledgerRows = parseCoordinationLedgerRows(
-      readFileSync(path.join(activePlansDir, 'COORDINATION_LEDGER.md'), 'utf8'),
-    )
-    const activePlans = new Set(
-      readdirSync(activePlansDir)
-        .filter((entry) => entry.endsWith('.md'))
-        .filter((entry) => entry !== 'README.md' && entry !== 'COORDINATION_LEDGER.md'),
-    )
-    const livePlanRows = ledgerRows.filter((row) =>
-      row.plan.startsWith('agent-docs/exec-plans/active/'),
-    )
-
-    for (const row of livePlanRows) {
-      const planName = path.basename(row.plan)
-      const relativePlanPath = row.plan
-      const matchingRows = livePlanRows.filter(
-        (candidate) => candidate.plan === relativePlanPath,
-      )
-
-      if (!activePlans.has(planName)) {
-        continue
-      }
-
-      const planText = readFileSync(path.join(activePlansDir, planName), 'utf8')
-      const planStatus = planText.match(/^Status:\s*(.+)$/mu)?.[1].trim().toLowerCase() ?? ''
-
-      expect(
-        matchingRows,
-        `${relativePlanPath} must have exactly one live coordination-ledger row.`,
-      ).toHaveLength(1)
-      expect(
-        row.status.toLowerCase(),
-        `${relativePlanPath} must not keep a completed ledger row under active/.`,
-      ).not.toBe('completed')
-      expect(
-        planStatus.includes('completed'),
-        `${relativePlanPath} must not remain under active/ once its plan status is completed.`,
-      ).toBe(false)
-      expect(
-        planStatus.includes('implementation complete'),
-        `${relativePlanPath} must not remain under active/ once implementation is complete.`,
-      ).toBe(false)
-    }
+  it('keeps the removed coordination ledger path absent', () => {
+    expect(
+      existsSync(
+        path.join(
+          repoRoot,
+          'agent-docs',
+          'exec-plans',
+          'active',
+          'COORDINATION_LEDGER.md',
+        ),
+      ),
+    ).toBe(false)
   })
 
-  it('archives the active plan and clears the matching ledger row before invoking committer', () => {
+  it('archives the active plan before invoking committer', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
 
     try {
@@ -2668,22 +2628,8 @@ printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
         `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$@" > .fake-tools/committer.args
-if [[ -f agent-docs/exec-plans/active/COORDINATION_LEDGER.md ]]; then
-  cp agent-docs/exec-plans/active/COORDINATION_LEDGER.md .fake-tools/committer-ledger.md
-fi
 `,
         true,
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
-        `# Coordination Ledger
-
-| Agent | Scope | Plan | Files | Symbols | Status | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Codex | Harness | \`agent-docs/exec-plans/active/2026-04-24-harness.md\` | \`docs/touched.md\` | finish-task harness | in_progress | Harness row |
-| Codex | Stable | \`agent-docs/exec-plans/active/stable.md\` | \`docs/stable.md\` | stable row | active | Existing row |
-`,
       )
       writeHarnessFile(
         harnessRoot,
@@ -2719,18 +2665,6 @@ Updated: 2026-04-24
       }
 
       writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n\nAfter\n')
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
-        `# Coordination Ledger
-
-| Agent | Scope | Plan | Files | Symbols | Status | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Codex | Harness | \`agent-docs/exec-plans/active/2026-04-24-harness.md\` | \`docs/touched.md\` | finish-task harness | in_progress | Harness row |
-| Codex | Stable | \`agent-docs/exec-plans/active/stable.md\` | \`docs/stable.md\` | stable row | active | Existing row |
-| Codex | Unrelated | \`agent-docs/exec-plans/active/unrelated.md\` | \`docs/unrelated.md\` | unrelated row | active | Concurrent dirty row |
-`,
-      )
 
       const result = spawnSync(
         'bash',
@@ -2761,14 +2695,8 @@ Updated: 2026-04-24
       expect(
         existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/completed/2026-04-24-harness.md')),
       ).toBe(true)
-      expect(
-        readFileSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/COORDINATION_LEDGER.md'), 'utf8'),
-      ).not.toContain('agent-docs/exec-plans/active/2026-04-24-harness.md')
-      expect(
-        readFileSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/COORDINATION_LEDGER.md'), 'utf8'),
-      ).toContain('agent-docs/exec-plans/active/unrelated.md')
       expect(result.stdout).toContain(
-        'finish-task: commit includes only this task\'s ledger-row removal',
+        'finish-task: commit includes closed plan plus 1 resolved task path(s)',
       )
 
       const closeArgs = readFileSync(
@@ -2793,17 +2721,12 @@ Updated: 2026-04-24
           'close harness plan',
           'agent-docs/exec-plans/active/2026-04-24-harness.md',
           'agent-docs/exec-plans/completed/2026-04-24-harness.md',
-          'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
           'docs/touched.md',
         ]),
       )
-      const committedLedger = readFileSync(
-        path.join(harnessRoot, '.fake-tools', 'committer-ledger.md'),
-        'utf8',
+      expect(commitArgs).not.toContain(
+        'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
       )
-      expect(committedLedger).not.toContain('agent-docs/exec-plans/active/2026-04-24-harness.md')
-      expect(committedLedger).not.toContain('agent-docs/exec-plans/active/unrelated.md')
-      expect(committedLedger).toContain('agent-docs/exec-plans/active/stable.md')
     } finally {
       rmSync(harnessRoot, { recursive: true, force: true })
     }
@@ -3812,8 +3735,9 @@ exit 1
     expect(verifyResult.status).not.toBe(0)
     expect(verifyResult.stdout).toBe('')
     expect(verifyResult.stderr).toContain(
-      `Expected release version --json, but manifest packages are on ${cliPackageJson.version}.`,
+      'Expected release version must match',
     )
+    expect(verifyResult.stderr).toContain('Received: --json')
 
     const packMissingValue = runNodeScript(
       'scripts/pack-publishables.mjs',

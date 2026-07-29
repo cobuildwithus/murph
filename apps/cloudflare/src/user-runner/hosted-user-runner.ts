@@ -20,11 +20,23 @@ import {
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
+import {
+  readHostedPrivateMediaCapabilitySecret,
+  readHostedPrivateMediaDeliveryOrigin,
+  stageHostedPrivateMedia,
+  type HostedPrivateMediaPublishInput,
+  type HostedPrivateMediaPublishResult,
+} from "../private-media.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import { withSerializedLock } from "../serialized-lock.js";
 import type {
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../worker-contracts.js";
+import {
+  readHostedR2CutoverStatus,
+  type HostedR2CutoverContext,
+} from "../r2-cutover.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../web-control-plane.ts";
@@ -69,6 +81,15 @@ export class HostedUserRunner {
   private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
   private readonly runnerStoreCache: RunnerStoreCache;
+  private readonly privateMediaBucket: R2BucketLike;
+  private readonly privateMediaCapabilitySecret: string | null;
+  private readonly privateMediaDeliveryOrigin: string;
+  private privateMediaMutationLock: Promise<void> | null = null;
+  private readonly r2CutoverStatus: {
+    coexisting: boolean;
+    phase: "destination_active" | "source_active";
+    protocolVersion: string;
+  };
 
   constructor(
     state: DurableObjectStateLike,
@@ -80,8 +101,14 @@ export class HostedUserRunner {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
       }
     ).runnerContainerNamespace ?? null,
+    r2CutoverContext: HostedR2CutoverContext | null = null,
   ) {
     this.stateStore = new RunnerStateStore(state);
+    this.privateMediaBucket = bucket;
+    this.privateMediaCapabilitySecret =
+      readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
+    this.privateMediaDeliveryOrigin =
+      readHostedPrivateMediaDeliveryOrigin(runnerRuntimeEnvSource);
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -109,8 +136,20 @@ export class HostedUserRunner {
       stateStore: this.stateStore,
     });
     this.runtimeProcessing = runtimeProcessing;
+    this.r2CutoverStatus = r2CutoverContext
+      ? readHostedR2CutoverStatus(r2CutoverContext)
+      : {
+          coexisting: false,
+          phase: "source_active",
+          protocolVersion: "legacy-single-bucket",
+        };
     this.userDataDeletionInput = {
-      bucket,
+      buckets: r2CutoverContext
+        ? {
+            destination: r2CutoverContext.destinationBucket,
+            source: r2CutoverContext.sourceBucket,
+          }
+        : { destination: bucket, source: bucket },
       runnerContainerNamespace,
       runnerRuntimeEnvSource,
       state,
@@ -153,10 +192,12 @@ export class HostedUserRunner {
 
     const status: HostedRunnerStatusResponse & {
       activeWriteFence: RunnerWriteFenceToken | null;
+      r2Cutover: ReturnType<typeof readHostedR2CutoverStatus>;
     } = {
       ...webStatus,
       activeWriteFence,
       inFlight: record.writeFence !== null,
+      r2Cutover: this.r2CutoverStatus,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
@@ -169,10 +210,52 @@ export class HostedUserRunner {
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    this.runnerStoreCache.clearIfUser(userId);
-    return await deleteHostedRunnerUserData({
-      ...this.userDataDeletionInput,
-      userId,
+    return this.withPrivateMediaMutationLock(async () => {
+      this.runnerStoreCache.clearIfUser(userId);
+      return await deleteHostedRunnerUserData({
+        ...this.userDataDeletionInput,
+        userId,
+      });
+    });
+  }
+
+  async publishHostedPrivateMedia(
+    input: HostedPrivateMediaPublishInput,
+  ): Promise<HostedPrivateMediaPublishResult> {
+    return this.withPrivateMediaMutationLock(async () => {
+      const ownsWriteFence = await this.validateRuntimeWriteFence(input);
+      if (!ownsWriteFence) {
+        return {
+          ok: false,
+          reason: "write-fence-rejected",
+        };
+      }
+      if (!this.privateMediaCapabilitySecret) {
+        return {
+          ok: false,
+          reason: "not-configured",
+        };
+      }
+      try {
+        const staged = await stageHostedPrivateMedia({
+          bucket: this.privateMediaBucket,
+          bytes: input.bytes,
+          capabilitySecret: this.privateMediaCapabilitySecret,
+          contentType: input.contentType,
+          deliveryOrigin: this.privateMediaDeliveryOrigin,
+          userId: input.userId,
+        });
+        return {
+          expiresAt: staged.expiresAt,
+          ok: true,
+          url: staged.url,
+        };
+      } catch {
+        return {
+          ok: false,
+          reason: "stage-failed",
+        };
+      }
     });
   }
 
@@ -204,6 +287,20 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  private async withPrivateMediaMutationLock<T>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    return withSerializedLock(
+      {
+        get: () => this.privateMediaMutationLock,
+        set: (value) => {
+          this.privateMediaMutationLock = value;
+        },
+      },
+      run,
+    );
   }
 
   async validateRuntimeProviderEgressToken(input: {
@@ -289,6 +386,14 @@ export class HostedUserRunner {
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
   }): Promise<boolean> {
     return await this.workspaceSnapshotSessions.rememberReplacedSnapshotRef(input);
+  }
+
+  async rememberHostedWorkspaceSnapshotPresignedPut(input: {
+    drainUntil: string;
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    expiresAt: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
+    return await this.workspaceSnapshotSessions.rememberPresignedPut(input);
   }
 
   async recordHostedWorkspaceSnapshotOrphanCandidate(

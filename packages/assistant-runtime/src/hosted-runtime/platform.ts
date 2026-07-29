@@ -26,6 +26,8 @@ import type {
   HostedRuntimeLogRequest,
   HostedRuntimeLogResponse,
   HostedRuntimeIssueExportResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
@@ -106,7 +108,7 @@ import type {
 } from "../hosted-email.ts";
 import type {
   AssistantConnectedAppsPort,
-  AssistantHostedGeneratedImageUploader,
+  AssistantHostedPrivateImageUrlPublisher,
 } from "@murphai/assistant-engine";
 import type {
   RuntimeLivenessPort,
@@ -283,6 +285,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 }
 
 export interface HostedRuntimeLinqTargetOverride {
+  conversationThreadId?: string | null;
   target: string;
   targetKind: "thread";
 }
@@ -292,6 +295,17 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;
+}
+
+export interface HostedRuntimeAssistantAskCompletionAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  assistantAskFallback: boolean;
+  idempotencyKey: string;
+}
+
+export interface HostedRuntimeExternalThreadRouteAuthorityResult {
+  assistantAskFallbackRequired?: boolean | null;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
@@ -351,8 +365,11 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<HostedRuntimeLinqRecentInboundEngagementResult | void>;
   assertExternalThreadRouteAuthority?(
     authority: HostedExecutionExternalThreadRouteAuthority,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+    context?: {
+      assistantAskCompletion?: HostedRuntimeAssistantAskCompletionAuthority | null;
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;
@@ -443,6 +460,12 @@ export interface HostedRuntimeFamilyPlanToolPort {
 
 export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
+}
+
+export interface HostedRuntimeIMessageContactToolPort {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>;
 }
 
 export interface HostedRuntimeLabsToolPort {
@@ -623,16 +646,17 @@ export interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
   groupToolPort?: HostedRuntimeGroupToolPort | null;
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  imessageContactToolPort?: HostedRuntimeIMessageContactToolPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;

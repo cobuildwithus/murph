@@ -10,9 +10,13 @@ import { Prisma, type HostedLinqAlert, type PrismaClient } from "@prisma/client"
 
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import {
-  sendHostedLinqChatMessage,
-  type HostedLinqSendResult,
-} from "../hosted-onboarding/linq-client";
+  readHostedOperationalAlertEmailConfig,
+  type HostedOperationalAlertEmailConfig,
+} from "../hosted-onboarding/operational-alert-email-config";
+import {
+  HostedResendPlainTextEmailError,
+  sendHostedResendPlainTextEmail,
+} from "../hosted-onboarding/resend-plain-text-email";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -46,17 +50,14 @@ type HostedRuntimeLatencyPrismaClient = Pick<
   "hostedIngressLatencyTrace" | "hostedLinqAlert"
 >;
 
-type HostedRuntimeLatencySend = (input: {
-  chatId: string;
-  idempotencyKey?: string | null;
-  message: string;
-  signal?: AbortSignal;
-}) => Promise<HostedLinqSendResult>;
+type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
 
 export interface HostedRuntimeLatencyHealthRow {
   acceptedAt: Date;
+  checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
+  terminalNonReplyCommittedAt: Date | null;
 }
 
 export interface HostedRuntimeLatencyHealth {
@@ -91,7 +92,7 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
   env?: Readonly<Record<string, string | undefined>>;
   now?: Date;
   prisma?: HostedRuntimeLatencyPrismaClient;
-  sendLinqMessage?: HostedRuntimeLatencySend;
+  sendAlert?: HostedRuntimeLatencySend;
   signal?: AbortSignal;
 } = {}): Promise<HostedRuntimeLatencyAlertMonitorResult> {
   const now = input.now ?? new Date();
@@ -147,29 +148,30 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
     };
   }
 
-  const sendLinqMessage = input.sendLinqMessage ?? sendHostedLinqChatMessage;
+  const sendAlert = input.sendAlert ?? sendHostedResendPlainTextEmail;
   const action = admission.action;
   try {
-    const sent = await sendLinqMessage({
-      chatId: alertConfig.chatId,
+    const sent = await sendAlert({
+      config: alertConfig.email.resend,
       idempotencyKey: buildHostedRuntimeLatencyAlertIdempotencyKey(action),
-      message: action.message,
       signal: input.signal,
+      subject: HOSTED_RUNTIME_LATENCY_MONITOR_SUBJECT,
+      text: action.message,
+      to: alertConfig.email.recipients,
     });
     await completeHostedRuntimeLatencyAlertTransition({
-      action,
       attemptedAt: action.attemptedAt,
       completedAt: input.now ?? new Date(),
       prisma,
-      providerMessageId: sent.messageId,
+      providerMessageId: sent.providerMessageId,
     });
   } catch (error) {
-    const errorCode = readHostedRuntimeLatencyAlertErrorCode(error);
+    const failure = readHostedRuntimeLatencyAlertFailure(error);
     await failHostedRuntimeLatencyAlertTransition({
-      action,
       attemptedAt: action.attemptedAt,
-      errorCode,
+      errorCode: failure.errorCode,
       prisma,
+      providerStatus: failure.providerStatus,
     });
     throw hostedOnboardingError({
       code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
@@ -211,6 +213,7 @@ export async function readHostedRuntimeLatencyHealth(input: {
           consumedAt: true,
         },
       },
+      phaseBreakdownJson: true,
     },
     take: HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1,
     where: {
@@ -230,8 +233,12 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
+      checkpointPublicationExpectedBy:
+        readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.mailboxItem.consumedAt,
       deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
+      terminalNonReplyCommittedAt:
+        readHostedRuntimeTerminalNonReplyCommittedAt(row.phaseBreakdownJson),
     })),
     scanTruncated,
   });
@@ -253,7 +260,11 @@ export function summarizeHostedRuntimeLatencyRows(input: {
 
   for (const row of input.rows) {
     const acceptedAtMs = row.acceptedAt.getTime();
+    const checkpointPublicationExpectedByMs =
+      row.checkpointPublicationExpectedBy?.getTime() ?? null;
     const deliveryAcceptedAtMs = row.deliveryAcceptedAt?.getTime() ?? null;
+    const terminalNonReplyCommittedAtMs =
+      row.terminalNonReplyCommittedAt?.getTime() ?? null;
 
     if (deliveryAcceptedAtMs !== null) {
       if (deliveryAcceptedAtMs < acceptedAtMs || deliveryAcceptedAtMs > nowMs) {
@@ -274,6 +285,30 @@ export function summarizeHostedRuntimeLatencyRows(input: {
         );
       }
       continue;
+    }
+
+    if (terminalNonReplyCommittedAtMs !== null) {
+      if (
+        terminalNonReplyCommittedAtMs < acceptedAtMs
+        || terminalNonReplyCommittedAtMs > nowMs
+      ) {
+        invalidChronologyCount += 1;
+      } else if (
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs >= terminalNonReplyCommittedAtMs
+        && nowMs <= checkpointPublicationExpectedByMs
+      ) {
+        // The runtime refreshes this expectation whenever later dirty work
+        // restarts the idle checkpoint window. A crashed runtime stops
+        // refreshing it, so the row becomes unresolved after the last
+        // published expectation instead of being hidden indefinitely.
+        continue;
+      } else if (
+        checkpointPublicationExpectedByMs !== null
+        && checkpointPublicationExpectedByMs < terminalNonReplyCommittedAtMs
+      ) {
+        invalidChronologyCount += 1;
+      }
     }
 
     const ageMs = nowMs - acceptedAtMs;
@@ -299,6 +334,53 @@ export function summarizeHostedRuntimeLatencyRows(input: {
     unresolvedReplyCount,
     windowMinutes: HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS / 60_000,
   };
+}
+
+function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "terminalNonReplyCommittedAtEpochMs",
+  );
+}
+
+function readHostedRuntimeCheckpointPublicationExpectedBy(
+  value: unknown,
+): Date | null {
+  return readHostedRuntimeAssistantEpochDate(
+    value,
+    "checkpointPublicationExpectedByEpochMs",
+  );
+}
+
+function readHostedRuntimeAssistantEpochDate(
+  value: unknown,
+  leaf:
+    | "checkpointPublicationExpectedByEpochMs"
+    | "terminalNonReplyCommittedAtEpochMs",
+): Date | null {
+  if (!isHostedRuntimeLatencyPhaseRecord(value)) {
+    return null;
+  }
+  const assistant = value.assistant;
+  if (!isHostedRuntimeLatencyPhaseRecord(assistant)) {
+    return null;
+  }
+  const epochMs = assistant[leaf];
+  if (
+    typeof epochMs !== "number"
+    || !Number.isSafeInteger(epochMs)
+    || epochMs < 0
+  ) {
+    return null;
+  }
+  const recordedAt = new Date(epochMs);
+  return Number.isFinite(recordedAt.getTime()) ? recordedAt : null;
+}
+
+function isHostedRuntimeLatencyPhaseRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function ensureHostedRuntimeLatencyMonitorState(input: {
@@ -520,7 +602,6 @@ interface HostedRuntimeLatencyClaimedAction {
 }
 
 async function completeHostedRuntimeLatencyAlertTransition(input: {
-  action: HostedRuntimeLatencyClaimedAction;
   attemptedAt: Date;
   completedAt: Date;
   prisma: HostedRuntimeLatencyPrismaClient;
@@ -543,10 +624,10 @@ async function completeHostedRuntimeLatencyAlertTransition(input: {
 }
 
 async function failHostedRuntimeLatencyAlertTransition(input: {
-  action: HostedRuntimeLatencyClaimedAction;
   attemptedAt: Date;
   errorCode: string;
   prisma: HostedRuntimeLatencyPrismaClient;
+  providerStatus: number | null;
 }): Promise<void> {
   await input.prisma.hostedLinqAlert.updateMany({
     where: {
@@ -556,6 +637,7 @@ async function failHostedRuntimeLatencyAlertTransition(input: {
     },
     data: {
       lastErrorCode: input.errorCode,
+      lastProviderStatus: input.providerStatus,
       status: MONITOR_STATUS.alertFailed,
     },
   });
@@ -636,17 +718,15 @@ function buildHostedRuntimeLatencyAlertIdempotencyKey(
 
 function readHostedRuntimeLatencyAlertConfig(
   env: Readonly<Record<string, string | undefined>>,
-): { chatId: string; timeZone: string } | null {
-  const chatId = normalizeNullableString(
-    env.HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID,
-  );
+): { email: HostedOperationalAlertEmailConfig; timeZone: string } | null {
   const configuredTimeZone = normalizeNullableString(
     env.HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE,
   );
-  if (!chatId && !configuredTimeZone) {
+  if (!configuredTimeZone) {
     return null;
   }
-  if (!chatId || !configuredTimeZone) {
+  const email = readHostedOperationalAlertEmailConfig(env);
+  if (!email) {
     throw hostedOnboardingError({
       code: "HOSTED_RUNTIME_LATENCY_ALERT_CONFIG_INCOMPLETE",
       httpStatus: 500,
@@ -661,7 +741,7 @@ function readHostedRuntimeLatencyAlertConfig(
       message: "Hosted runtime latency alert time zone is invalid.",
     });
   }
-  return { chatId, timeZone };
+  return { email, timeZone };
 }
 
 function readHostedRuntimeLatencyIncidentId(state: HostedLinqAlert): string | null {
@@ -674,13 +754,23 @@ function readHostedRuntimeLatencyAlertMessage(state: HostedLinqAlert): string | 
   return details ? normalizeNullableString(readJsonString(details.message)) : null;
 }
 
-function readHostedRuntimeLatencyAlertErrorCode(error: unknown): string {
-  const value = isHostedOnboardingError(error)
+function readHostedRuntimeLatencyAlertFailure(error: unknown): {
+  errorCode: string;
+  providerStatus: number | null;
+} {
+  const value = error instanceof HostedResendPlainTextEmailError
     ? error.code
-    : error instanceof Error
-      ? error.name
-      : "UNKNOWN_LATENCY_ALERT_ERROR";
-  return value.slice(0, 128);
+    : isHostedOnboardingError(error)
+      ? error.code
+      : error instanceof Error
+        ? error.name
+        : "UNKNOWN_LATENCY_ALERT_ERROR";
+  return {
+    errorCode: value.slice(0, 128),
+    providerStatus: error instanceof HostedResendPlainTextEmailError
+      ? error.providerStatus
+      : null,
+  };
 }
 
 function isHostedRuntimeLatencySendLeaseExpired(

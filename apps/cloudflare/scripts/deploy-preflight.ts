@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 
 import {
   HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
+  HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   isHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -18,6 +19,13 @@ import {
   normalizeOptionalString,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
+import {
+  assertR2FixedBucketPair,
+  buildWranglerMigrationChildEnvironment,
+  createR2BundlesMigrationCommandRunner,
+  readR2BucketInfoWithWrangler,
+  type R2BucketInfo,
+} from "./r2-bundles-migration.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type HostedDeployContext = "development" | "preview" | "production";
@@ -25,6 +33,12 @@ type ProductionDeployRequiredUrlLabel = (typeof PRODUCTION_DEPLOY_URL_INVARIANT_
 type ProductionDeployOptionalUrlLabel = (typeof PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS)[number];
 type ProductionDeployUrlLabel = ProductionDeployRequiredUrlLabel | ProductionDeployOptionalUrlLabel;
 type HostnameAddressResolver = (hostname: string) => Promise<readonly string[]>;
+type R2BucketInfoReader = (bucketName: string) => Promise<R2BucketInfo>;
+
+interface HostedDeployAsyncDependencies {
+  readR2BucketInfo?: R2BucketInfoReader;
+  resolveHostnameAddresses?: HostnameAddressResolver;
+}
 
 interface ProductionDeployUrlValidation {
   hostname: string;
@@ -44,7 +58,9 @@ const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 const REQUIRED_DEPLOY_ENV_NAMES = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
+  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
+  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
@@ -53,7 +69,9 @@ const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_BASE_URL",
   "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
-  ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
+  ...HOSTED_WORKER_REQUIRED_VAR_NAMES.filter((name) =>
+    name !== "CF_PUBLIC_BASE_URL"
+  ),
 ] as const;
 
 const REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
@@ -66,6 +84,15 @@ const REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES = [
 
 const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_PRODUCTION_BASE_URL",
+  "HOSTED_DATABASE_ALERT_ENABLED",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
+  "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
+  "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
+  "LINQ_API_TOKEN",
 ] as const;
 
 const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
@@ -93,7 +120,9 @@ const PREVIEW_DEPLOY_URL_INVARIANT_LABELS = [
 const PREVIEW_DEPLOY_RESOURCE_LABELS = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
+  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
+  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
@@ -162,9 +191,7 @@ export async function assertHostedDeployEnvironmentAsync(
   input: {
     deployWorker: boolean;
   },
-  dependencies: {
-    resolveHostnameAddresses?: HostnameAddressResolver;
-  } = {},
+  dependencies: HostedDeployAsyncDependencies = {},
 ): Promise<void> {
   const missing = listMissingHostedDeployEnvironment(source, input);
 
@@ -224,10 +251,71 @@ export function listHostedDeployEnvironmentInvariantErrors(
     return errors;
   }
 
+  const databaseAlertEnabled = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_ENABLED,
+  );
+  if (
+    deployContext === "production"
+    && databaseAlertEnabled
+    && databaseAlertEnabled !== "1"
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be 1 for production deploys.",
+    );
+  } else if (
+    deployContext !== "production"
+    && databaseAlertEnabled
+  ) {
+    errors.push(
+      "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
+    );
+  }
+
+  const privateMediaCapabilitySecret = normalizeOptionalString(
+    source.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
+  );
+  if (
+    privateMediaCapabilitySecret
+    && privateMediaCapabilitySecret.length < 32
+  ) {
+    errors.push(
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET must contain at least 32 characters.",
+    );
+  }
+
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
+  const bundlesEnamBucket = normalizeOptionalString(source.CF_BUNDLES_ENAM_BUCKET);
+  const bundlesPreviewBucket = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
+  const bundlesEnamPreviewBucket =
+    normalizeOptionalString(source.CF_BUNDLES_ENAM_PREVIEW_BUCKET);
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
     errors.push("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.");
+  }
+  const presignEnamBucket =
+    normalizeOptionalString(source.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME);
+  if (bundlesEnamBucket && presignEnamBucket && presignEnamBucket !== bundlesEnamBucket) {
+    errors.push("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET.");
+  }
+  if (bundlesBucket && bundlesEnamBucket && bundlesBucket === bundlesEnamBucket) {
+    errors.push("CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.");
+  }
+  if (
+    bundlesPreviewBucket
+    && bundlesEnamPreviewBucket
+    && bundlesPreviewBucket === bundlesEnamPreviewBucket
+  ) {
+    errors.push(
+      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
+    );
+  }
+  const r2CutoverPhase = normalizeOptionalString(source.HOSTED_R2_CUTOVER_PHASE);
+  if (
+    r2CutoverPhase
+    && r2CutoverPhase !== "source_active"
+    && r2CutoverPhase !== "destination_active"
+  ) {
+    errors.push("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
   }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
@@ -367,6 +455,16 @@ export function listHostedDeployEnvironmentInvariantErrors(
     }
   }
 
+  const publicWorkerOrigin = productionUrls.get("CF_PUBLIC_BASE_URL")?.normalized;
+  if (
+    publicWorkerOrigin
+    && publicWorkerOrigin !== HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN
+  ) {
+    errors.push(
+      `production deploys must set CF_PUBLIC_BASE_URL=${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN} for private-media capability delivery.`,
+    );
+  }
+
   const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;
   const productionWebBaseUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL")?.normalized;
   if (hostedWebBaseUrl && productionWebBaseUrl && hostedWebBaseUrl !== productionWebBaseUrl) {
@@ -411,9 +509,7 @@ export async function listHostedDeployEnvironmentInvariantErrorsAsync(
   input: {
     deployWorker: boolean;
   },
-  dependencies: {
-    resolveHostnameAddresses?: HostnameAddressResolver;
-  } = {},
+  dependencies: HostedDeployAsyncDependencies = {},
 ): Promise<string[]> {
   const errors = listHostedDeployEnvironmentInvariantErrors(source, input);
 
@@ -422,23 +518,108 @@ export async function listHostedDeployEnvironmentInvariantErrorsAsync(
   }
 
   const deployContext = normalizeHostedDeployContext(source.HOSTED_EXECUTION_DEPLOY_CONTEXT);
+  if (!deployContext) {
+    return errors;
+  }
+  const r2Errors = await listHostedDeployR2BucketInvariantErrors(
+    source,
+    dependencies.readR2BucketInfo ?? createDefaultR2BucketInfoReader(source),
+  );
   if (deployContext === "preview") {
     const dnsErrors = await listPreviewDeployDnsInvariantErrors(
       source,
       dependencies.resolveHostnameAddresses ?? resolveHostnameAddresses,
     );
-    return [...errors, ...dnsErrors];
+    return [...errors, ...r2Errors, ...dnsErrors];
   }
 
   if (deployContext !== "production") {
-    return errors;
+    return [...errors, ...r2Errors];
   }
 
   const dnsErrors = await listProductionDeployDnsInvariantErrors(
     source,
     dependencies.resolveHostnameAddresses ?? resolveHostnameAddresses,
   );
-  return [...errors, ...dnsErrors];
+  return [...errors, ...r2Errors, ...dnsErrors];
+}
+
+async function listHostedDeployR2BucketInvariantErrors(
+  source: EnvSource,
+  readR2BucketInfo: R2BucketInfoReader,
+): Promise<string[]> {
+  const runtimeSourceName = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
+  const runtimeDestinationName = normalizeOptionalString(source.CF_BUNDLES_ENAM_BUCKET);
+  const previewSourceName = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
+  const previewDestinationName = normalizeOptionalString(
+    source.CF_BUNDLES_ENAM_PREVIEW_BUCKET,
+  );
+  if (
+    !runtimeSourceName
+    || !runtimeDestinationName
+    || !previewSourceName
+    || !previewDestinationName
+  ) {
+    return [];
+  }
+
+  const pairs = [
+    {
+      destinationName: runtimeDestinationName,
+      label: "Runtime R2",
+      sourceName: runtimeSourceName,
+    },
+    {
+      destinationName: previewDestinationName,
+      label: "Preview R2",
+      sourceName: previewSourceName,
+    },
+  ] as const;
+  const bucketInfoByName = new Map<string, Promise<R2BucketInfo>>();
+  const readBucketInfo = (bucketName: string): Promise<R2BucketInfo> => {
+    const existing = bucketInfoByName.get(bucketName);
+    if (existing) {
+      return existing;
+    }
+    const pending = readR2BucketInfo(bucketName);
+    bucketInfoByName.set(bucketName, pending);
+    return pending;
+  };
+
+  try {
+    await Promise.all(pairs.map(async (pair) => {
+      const [sourceInfo, destinationInfo] = await Promise.all([
+        readBucketInfo(pair.sourceName),
+        readBucketInfo(pair.destinationName),
+      ]);
+      assertR2FixedBucketPair({
+        destination: destinationInfo,
+        destinationName: pair.destinationName,
+        label: pair.label,
+        source: sourceInfo,
+        sourceName: pair.sourceName,
+      });
+    }));
+    return [];
+  } catch (error) {
+    return [
+      `R2 fixed-role bucket metadata validation failed: ${
+        error instanceof Error ? error.message : "unknown bucket metadata error"
+      }`,
+    ];
+  }
+}
+
+function createDefaultR2BucketInfoReader(source: EnvSource): R2BucketInfoReader {
+  const runner = createR2BundlesMigrationCommandRunner();
+  const environment = buildWranglerMigrationChildEnvironment(source);
+  return async (bucketName) =>
+    await readR2BucketInfoWithWrangler({
+      bucketName,
+      environment,
+      label: "Hosted deploy R2 bucket-info check",
+      runner,
+    });
 }
 
 function listMissingRequiredEnvNames(

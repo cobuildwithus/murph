@@ -45,6 +45,13 @@ export {
   type RunInboxMediaRetentionInput,
 } from "./indexing/retention.ts";
 export {
+  INBOX_TEXT_RETENTION_DAYS,
+  INBOX_TEXT_RETENTION_WINDOW_MS,
+  runInboxTextRetention,
+  type InboxTextRetentionResult,
+  type RunInboxTextRetentionInput,
+} from "./indexing/text-retention.ts";
+export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";

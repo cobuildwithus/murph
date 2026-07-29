@@ -46,6 +46,7 @@ export type ProtocolRef = ContractProtocolRef;
 export interface ProtocolEffectiveSpec {
   doseSignature: string;
   modality?: string;
+  activitySessionEvidence?: ContractProtocolFrontmatter["effectiveSpec"]["activitySessionEvidence"];
   frequency?: {
     sessionsPerDay?: number;
     sessionsPerWeek?: number;

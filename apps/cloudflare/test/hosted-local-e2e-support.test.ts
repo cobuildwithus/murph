@@ -6,6 +6,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
@@ -160,6 +161,46 @@ describe("startAssistantProviderStubServer", () => {
 
       expect(followupResponse.status).toBe(200);
       expect(followupBody).toContain("follow-up text reply");
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("streams a scripted custom_tool_call item for Terra dynamic tools", async () => {
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [
+          buildAssistantProviderMurphToolCall("automation", {
+            action: "save",
+            title: "Morning reminder",
+          }),
+        ],
+      },
+    });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("response.completed");
+      expect(body).toContain('"type":"custom_tool_call"');
+      expect(body).toContain('"name":"exec"');
+      expect(body).toContain("tools.murph__automation");
+      expect(body).toContain("Morning reminder");
     } finally {
       await stopHttpStubServer(server);
     }
@@ -468,6 +509,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && name !== "murph.group_room_model"
+      && name !== "murph.imessage_contact"
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
@@ -484,6 +526,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
     expect(allToolNames).toContain("murph.group_room_model");
+    expect(allToolNames).toContain("murph.imessage_contact");
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
 
@@ -494,6 +537,9 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     // namespace into an additional_tools input item; it must still be read.
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "additional-tools"),
+    ]);
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
@@ -508,6 +554,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
         groupRoomModelAvailable: true,
+        imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
         phoneCallsAvailable: true,
@@ -516,6 +563,23 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         askGrokAvailable: true,
       },
     );
+  });
+});
+
+describe("buildAssistantProviderMurphToolCall", () => {
+  it("scripts Terra dynamic tools through canonical Codex code mode", () => {
+    const response = buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      title: "Morning reminder",
+    });
+
+    expect(response).toMatchObject({
+      customToolCall: {
+        name: "exec",
+      },
+    });
+    expect(JSON.stringify(response)).toContain("tools.murph__automation");
+    expect(JSON.stringify(response)).toContain("Morning reminder");
   });
 });
 
@@ -669,7 +733,7 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "top-level" = "top-level",
+  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -692,6 +756,20 @@ function buildResponsesRequest(
                 type: "additional_tools",
               },
             ],
+          }
+        : toolLocation === "code-mode"
+        ? {
+            tools: [{
+              description: namespacedToolNames
+                .filter((name) =>
+                  name !== "murph.automation" && name !== "murph.group"
+                )
+                .map((name) => name.replace(/^murph\./u, "murph__"))
+                .concat("ALL_TOOLS")
+                .join("\n"),
+              name: "exec",
+              type: "custom",
+            }],
           }
         : { tools },
     ),

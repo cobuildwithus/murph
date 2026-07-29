@@ -75,6 +75,8 @@ import {
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,
+  parseHostedRuntimeIMessageContactToolRequest,
+  parseHostedRuntimeIMessageContactToolResponse,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeLatencyTraceRequest,
@@ -423,6 +425,50 @@ describe("hosted runtime control contracts", () => {
       approval: {},
       reasoningEffort: "medium",
     })).toThrow(/not allowed/u);
+
+    expect(parseHostedRuntimeIMessageContactToolRequest({
+      assistantInputId,
+    })).toEqual({ assistantInputId });
+    expect(() => parseHostedRuntimeIMessageContactToolRequest({
+      assistantInputId: `ain_${"c".repeat(31)}`,
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
+    })).toEqual({
+      phoneNumber: "+15550100001",
+      status: "assigned",
+      verifiedSenderPhoneHint: "*** 0009",
+    });
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: null,
+      status: "unavailable",
+      verifiedSenderPhoneHint: null,
+    })).toEqual({
+      phoneNumber: null,
+      status: "unavailable",
+      verifiedSenderPhoneHint: null,
+    });
+    expect(parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: null,
+      status: "identity_required",
+      verifiedSenderPhoneHint: null,
+    })).toEqual({
+      phoneNumber: null,
+      status: "identity_required",
+      verifiedSenderPhoneHint: null,
+    });
+    expect(() => parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "unavailable",
+      verifiedSenderPhoneHint: null,
+    })).toThrow(/requires null phoneNumber/u);
+    expect(() => parseHostedRuntimeIMessageContactToolResponse({
+      phoneNumber: "+15550100001",
+      status: "existing",
+      verifiedSenderPhoneHint: "+15550100009",
+    })).toThrow(/verifiedSenderPhoneHint is invalid/u);
 
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
@@ -906,6 +952,8 @@ describe("hosted runtime control contracts", () => {
 
   it("delegates device-sync bridge envelopes to the device-sync runtime owner", () => {
     expect(parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: {
         jobs: [
           {
@@ -920,6 +968,8 @@ describe("hosted runtime control contracts", () => {
       provider: "oura",
       requestId: "device-sync-wake-1",
     })).toEqual({
+      connectionId: "conn_123",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: {
         jobs: [
           {
@@ -1236,6 +1286,44 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.750Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:15:00.000Z",
+        milestone: "terminal_non_reply_committed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.750Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:15:00.000Z",
+        milestone: "terminal_non_reply_committed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    })).toEqual({
+      event: {
+        at: "2026-04-26T00:00:02.000Z",
+        milestone: "checkpoint_publication_expected_by",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "runtime_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
         at: "2026-04-26T00:00:02.000Z",
         milestone: "mailbox_import_done",
         runtimeAttemptId: "attempt_1",
@@ -1413,6 +1501,10 @@ describe("hosted runtime control contracts", () => {
         receiptScanLockWaitMs: 3,
         receiptScanPerformed: false,
       },
+      assistant: {
+        runtimeLeaseGeneration: "18446744073709551615",
+        terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
+      },
       provider: {
         codexAppServerInitializeMs: 7,
         codexAppServerPreProviderMs: 17,
@@ -1465,6 +1557,26 @@ describe("hosted runtime control contracts", () => {
           assistantInputIds: ["input_1"],
           at: "2026-04-26T00:00:01.000Z",
           phaseBreakdown: { schemaVersion: 1, provider: unsafeProvider },
+          providerRequestOrdinal: 0,
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    for (const unsafeAssistant of [
+      { runtimeLeaseGeneration: 1 }, // generation must stay a string
+      { runtimeLeaseGeneration: "01" }, // generation must be canonical
+      { runtimeLeaseGeneration: "1".repeat(21) }, // header-compatible bound
+      { runtimeLeaseGeneration: "1", callbackToken: 1 }, // unknown sub key
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-26T00:00:01.000Z",
+          phaseBreakdown: { schemaVersion: 1, assistant: unsafeAssistant },
           providerRequestOrdinal: 0,
           source: "linq",
           type: "provider_started",

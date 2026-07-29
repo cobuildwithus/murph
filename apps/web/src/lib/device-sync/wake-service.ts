@@ -264,6 +264,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
     const wake = buildHostedDeviceSyncWake({
       connectionId: input.connectionId,
+      expectedConnectedAt: freshExisting.connectedAt,
       hint,
       occurredAt: now,
       provider: freshExisting.provider,
@@ -419,6 +420,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   const hint = {
     jobs: normalizeHostedDeviceSyncJobHints({
       connectionId: input.account.id,
+      expectedConnectedAt: input.account.connectedAt,
       jobs: input.connection.initialJobs ?? [],
       occurredAt: input.now,
       provider: input.account.provider,
@@ -430,6 +432,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
   } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
   const wake = buildHostedDeviceSyncWake({
     connectionId: input.account.id,
+    expectedConnectedAt: input.account.connectedAt,
     hint,
     occurredAt: input.now,
     provider: input.account.provider,
@@ -524,6 +527,7 @@ function resolveHostedJunctionLinkedSource(input: {
 
 export async function handleHostedDeviceSyncWebhookAccepted(input: {
   account: {
+    connectedAt: string;
     id: string;
     provider: string;
   };
@@ -552,18 +556,23 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   }
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
+  const dirtyResources = buildHostedWebhookDirtyResources({
+    jobs: input.webhook.jobs ?? [],
+    provider: input.account.provider,
+  });
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
-    dirtyResources: buildHostedWebhookDirtyResources({
-      jobs: input.webhook.jobs ?? [],
-      provider: input.account.provider,
-    }),
+    expectedConnectedAt: input.account.connectedAt,
+    dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
+    sourceProviderSlug: normalizeJunctionProviderSlug(
+      input.webhook.dataSourceProviderSlug,
+    ),
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -723,9 +732,11 @@ async function persistHostedDeviceSyncCompanionResource(input: {
         eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
           connectionId: connection.id,
           dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+          expectedConnectedAt: connection.connectedAt,
           provider: connection.provider,
           userId: input.userId,
         }),
+        expectedConnectedAt: connection.connectedAt,
         hint: {
           eventType: input.eventType,
           occurredAt: input.occurredAt,
@@ -770,6 +781,7 @@ export interface HostedDeviceSyncReconcileWakeResult {
 
 export async function appendHostedDeviceSyncManualReconcileWake(input: {
   connectionId: string;
+  expectedConnectedAt: string;
   occurredAt: string;
   provider: string;
   userId: string;
@@ -779,6 +791,7 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
   });
   const wake = buildHostedDeviceSyncWake({
     connectionId: input.connectionId,
+    expectedConnectedAt: input.expectedConnectedAt,
     hint: {
       occurredAt: input.occurredAt,
       reason: "manual_reconcile",
@@ -809,6 +822,7 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   connectionId: string;
   createdAt: string;
   eventId: string;
+  expectedConnectedAt: string;
   nextReconcileAt: string;
   provider: string;
   traceId?: string | null;
@@ -829,6 +843,7 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   const wake = buildHostedDeviceSyncWake({
     connectionId: input.connectionId,
     eventId: input.eventId,
+    expectedConnectedAt: input.expectedConnectedAt,
     hint,
     occurredAt: input.nextReconcileAt,
     provider: input.provider,
@@ -872,6 +887,7 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
 
 export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   connectionId: string;
+  expectedConnectedAt: string;
   nextReconcileAt: string;
 }): string {
   return [
@@ -879,6 +895,7 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
     "scheduled-reconcile",
     HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
     input.connectionId,
+    input.expectedConnectedAt,
     input.nextReconcileAt,
   ].join(":");
 }
@@ -999,16 +1016,35 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   connectionId: string;
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
+  expectedConnectedAt: string;
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
+  sourceProviderSlug: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   claimToken: string;
   traceId: string | null;
   userId: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.prisma.$transaction(async (tx) => {
+    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const current = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (
+        !current
+        || current.provider !== input.provider
+        || current.status !== "active"
+        || current.connectedAt !== input.expectedConnectedAt
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+
       // Level webhooks may be coalesced only after committed dirty state exists.
       // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
       // Dirty state dedupes work; only the clean-to-dirty transition appends a durable runtime handoff.
@@ -1042,9 +1078,11 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
             connectionId: input.connectionId,
             dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+            expectedConnectedAt: input.expectedConnectedAt,
             provider: input.provider,
             userId: input.userId,
           }),
+          expectedConnectedAt: input.expectedConnectedAt,
           hint: buildHostedDeviceSyncSignalPayload({
             hint: {
               eventType: input.eventType,
@@ -1084,6 +1122,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         traceId: input.traceId,
         eventType: input.eventType,
         resourceCategory: input.resourceCategory ?? null,
+        sourceProviderSlug: input.sourceProviderSlug,
         createdAt: input.acceptedAt,
         tx,
       });
@@ -1103,6 +1142,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
 function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   connectionId: string;
   dirtyRevision: bigint;
+  expectedConnectedAt: string;
   provider: string;
   userId: string;
 }): string {
@@ -1113,6 +1153,7 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
     input.userId,
     input.provider,
     input.connectionId,
+    input.expectedConnectedAt,
     input.dirtyRevision.toString(),
   ].join(":");
 }
@@ -1194,6 +1235,7 @@ function buildHostedDeviceSyncSignalPayload(input: {
 
 function normalizeHostedDeviceSyncJobHints(input: {
   connectionId: string;
+  expectedConnectedAt: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string | null;
   provider: string;
@@ -1204,9 +1246,14 @@ function normalizeHostedDeviceSyncJobHints(input: {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
     const stableSeed = JSON.stringify({
       connectionId: input.connectionId,
-      index,
-      kind: job.kind,
-      payload,
+      expectedConnectedAt: input.expectedConnectedAt,
+      ...(typeof job.dedupeKey === "string"
+        ? { providerDedupeKey: job.dedupeKey }
+        : {
+            index,
+            kind: job.kind,
+            payload,
+          }),
       reason: input.reason,
       traceId: input.traceId ?? null,
     });
@@ -1214,7 +1261,7 @@ function normalizeHostedDeviceSyncJobHints(input: {
     return {
       kind: job.kind,
       ...(job.availableAt ? { availableAt: job.availableAt } : {}),
-      dedupeKey: job.dedupeKey ?? `hosted-device-sync:${sha256Hex(stableSeed)}`,
+      dedupeKey: `hosted-device-sync:${sha256Hex(stableSeed)}`,
       ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
       payload,
       ...(typeof job.priority === "number" ? { priority: job.priority } : {}),

@@ -19,6 +19,7 @@ import {
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -233,10 +234,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     ),
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
-  assert.match(
-    config,
-    /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
-  );
+  assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
@@ -1419,14 +1417,26 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
+      "# Read-only scheduled member reflection using the current private vault.",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "read"',
+      '".runtime" = "deny"',
+      '".codex" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      "",
+      `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
       "memories = true",
-      "",
-      "[features.code_mode]",
-      'direct_only_tool_namespaces = ["murph"]',
       "",
       "# This table owns enablement and the proactive per-turn mode/tool hints.",
       "# A CLI boolean override would replace the table and silently drop them.",

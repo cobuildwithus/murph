@@ -30,6 +30,14 @@ import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
+import {
+  completeAssistantOnboarding,
+  reopenAssistantOnboarding,
+  resolveAssistantOnboardingStatePath,
+} from '../src/assistant/onboarding-state.ts'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
@@ -472,6 +480,218 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-too-many-answered-mailbox',
       }),
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
+  })
+
+  it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-upgrade-',
+    )
+    const deliveryInput = {
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-effect-anchor',
+      deliveryIdempotencyKey: 'grouped-reply-effect-anchor',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the grouped burst',
+      sessionId: 'session-grouped-answered-upgrade',
+      threadId: 'linq-thread-grouped-answered-upgrade',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-answered-upgrade',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+
+    const first = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+    })
+    const upgraded = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_older',
+        'mailbox_item_newest',
+      ],
+      turnId: 'turn-grouped-answered-rebatch',
+    })
+    const preserved = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+      turnId: 'turn-grouped-answered-replay',
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(upgraded.kind).toBe('queued')
+    expect(upgraded.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: upgraded.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-grouped-answered-upgrade',
+        providerThreadId: 'linq-thread-grouped-answered-upgrade',
+        sentAt: '2026-04-08T03:02:00.000Z',
+        target: 'linq-thread-grouped-answered-upgrade',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: preserved.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      }),
+      undefined,
+    )
+
+    const terminalReplay = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_newest',
+        'mailbox_item_older',
+        'mailbox_item_after_send',
+      ],
+      turnId: 'turn-grouped-answered-terminal-replay',
+    })
+
+    expect(terminalReplay.kind).toBe('failed')
+    expect(terminalReplay.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
+    expect(terminalReplay.intent.intentId).toBe(first.intent.intentId)
+    expect(terminalReplay.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+        status: 'sent',
+      })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('freezes grouped answered mailbox ids when provider dispatch starts', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-dispatch-fence-',
+    )
+    const deliveryInput = {
+      answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-dispatch-fence',
+      deliveryIdempotencyKey: 'grouped-reply-dispatch-fence',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the frozen grouped burst',
+      sessionId: 'session-grouped-dispatch-fence',
+      threadId: 'linq-thread-grouped-dispatch-fence',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-dispatch-fence',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+    const queued = await deliverAssistantOutboxMessage(deliveryInput)
+
+    let markProviderEntered: (() => void) | undefined
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve
+    })
+    let releaseProvider: (() => void) | undefined
+    const providerReleased = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(
+      async () => {
+        markProviderEntered?.()
+        await providerReleased
+        return {
+          delivery: createDelivery({
+            channel: 'linq',
+            idempotencyKey: queued.intent.deliveryIdempotencyKey,
+            providerMessageId: 'provider-grouped-dispatch-fence',
+            providerThreadId: deliveryInput.threadId,
+            sentAt: '2026-04-08T03:03:00.000Z',
+            target: deliveryInput.threadId,
+            targetKind: 'thread',
+          }),
+          deliveryDeduplicated: false,
+          deliveryTransportIdempotent: true,
+          outboxIntentId: null,
+          session: undefined,
+        }
+      },
+    )
+
+    const dispatch = dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+    await providerEntered
+
+    const lateRebatch = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_before_dispatch',
+        'mailbox_item_after_dispatch',
+      ],
+      turnId: 'turn-grouped-dispatch-fence-late',
+    })
+    releaseProvider?.()
+    const dispatched = await dispatch
+
+    expect(lateRebatch.kind).toBe('failed')
+    expect(lateRebatch.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
+    expect(lateRebatch.intent.status).toBe('sending')
+    expect(lateRebatch.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      }),
+      undefined,
+    )
+    await expect(readAssistantOutboxIntent(vaultRoot, queued.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+        status: 'sent',
+      })
   })
 
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
@@ -2529,6 +2749,170 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
     })
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('revalidates answered onboarding when a queued goal check-in reaches provider entry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-onboarding-goal-checkin-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T17:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      activeUntil: '2026-07-27T17:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Offer one low-pressure health direction choice.',
+      now: new Date('2026-07-20T17:29:00.000Z'),
+      schedule: {
+        at: '2026-07-20T17:30:00.000Z',
+        kind: 'at',
+      },
+      slug: 'onboarding-goal-choice-point',
+      status: 'active',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Onboarding goal choice point',
+      vaultRoot,
+    })
+    const eligible = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Eligible onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-eligible',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-eligible',
+      vault: vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: eligible.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-onboarding-goal-checkin',
+        sentAt: '2026-07-20T17:31:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: eligible.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sent.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    const temporarilyUnavailable = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Retryable onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-unavailable',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-unavailable',
+      vault: vaultRoot,
+    })
+    await writeFile(
+      resolveAssistantOnboardingStatePath(vaultRoot),
+      '{not valid json',
+      'utf8',
+    )
+
+    const retryable = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: temporarilyUnavailable.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(retryable.intent.status).toBe('retryable')
+    expect(retryable.deliveryError).toMatchObject({
+      code: 'ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T17:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey:
+          temporarilyUnavailable.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-onboarding-goal-checkin-retry',
+        sentAt: '2026-07-20T17:32:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const sentAfterRestore = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: temporarilyUnavailable.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sentAfterRestore.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
+
+    const revoked = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-chat',
+      message: 'Revoked onboarding goal check-in.',
+      sessionId: 'session-outbox-onboarding-revoked',
+      threadId: 'telegram-chat',
+      threadIsDirect: true,
+      turnId: 'turn-outbox-onboarding-revoked',
+      vault: vaultRoot,
+    })
+    await reopenAssistantOnboarding({
+      reopenedAt: '2026-07-20T17:31:30.000Z',
+      vault: vaultRoot,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'active',
+      updatedAt: automation.record.updatedAt,
+    })
+
+    const blocked = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: revoked.intent.intentId,
+      vault: vaultRoot,
+    })
+    expect(blocked.intent.status).toBe('failed')
+    expect(blocked.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(2)
   })
 
   it.each([

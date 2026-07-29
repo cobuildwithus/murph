@@ -1,9 +1,15 @@
 import type { R2BucketLike } from "./bundle-store.ts";
+import type {
+  HostedPrivateMediaPublishInput,
+  HostedPrivateMediaPublishResult,
+} from "./private-media.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
 } from "./workspace-snapshot-store.ts";
+import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
+import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -99,6 +105,9 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  publishHostedPrivateMedia?(
+    input: HostedPrivateMediaPublishInput,
+  ): Promise<HostedPrivateMediaPublishResult>;
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
@@ -106,6 +115,11 @@ export interface WorkerUserRunnerStubLike {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
   }): Promise<boolean>;
+  rememberHostedWorkspaceSnapshotPresignedPut?(input: {
+    drainUntil: string;
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    expiresAt: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
   deleteHostedWorkspaceSnapshotUploadSession?(input: {
     snapshotId: string;
     userId: string;
@@ -143,16 +157,43 @@ export interface WorkerUserRunnerNamespaceLike<
   getByName(name: string): TStub;
 }
 
+export interface WorkerDatabaseHealthStubLike {
+  readRecentSamples?(input?: {
+    limit?: number;
+  }): Promise<DatabaseHealthStoredSample[]> | DatabaseHealthStoredSample[];
+  runScheduledCheck(input?: {
+    scheduledAtMs?: number;
+  }): Promise<DatabaseHealthMonitorResult>;
+}
+
+export interface WorkerDatabaseHealthNamespaceLike<
+  TStub extends WorkerDatabaseHealthStubLike = WorkerDatabaseHealthStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
+  BUNDLES_ENAM?: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;
     timestamp?: string;
   };
+  CF_PUBLIC_BASE_URL?: string;
+  DATABASE_HEALTH_MONITOR?: WorkerDatabaseHealthNamespaceLike;
+  HOSTED_DATABASE_ALERT_ENABLED?: string;
+  HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
+  HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
@@ -161,9 +202,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_PROVIDER?: string;
   HOSTED_ASSISTANT_REASONING_EFFORT?: string;
   HOSTED_ASSISTANT_SANDBOX?: string;
-  CLOUDFLARE_IMAGES_ACCOUNT_ID?: string;
-  CLOUDFLARE_IMAGES_API_KEY?: string;
-  CLOUDFLARE_IMAGES_VARIANT?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
@@ -176,7 +214,9 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
   HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?: string;
+  HOSTED_R2_CUTOVER_PHASE?: string;
   HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
+  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;

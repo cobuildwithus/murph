@@ -92,6 +92,9 @@ import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './shared.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from './onboarding-goal-checkin-automation.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -130,6 +133,22 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
+const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'creative-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'provider-turn',
+}
+const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'provider-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -144,6 +163,8 @@ export type AssistantNotificationTurnPolicy = {
   maintenanceProfile: AssistantMaintenanceProfile
   privateSummary: string
 }
+
+export type AssistantNotificationPromptProfile = 'creative-response'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -216,6 +237,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
 }
@@ -1411,6 +1433,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
 }): AssistantProviderResumeStateAction {
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    isAssistantOnboardingGoalCheckinNotification(input.input) ||
     !isAssistantNotificationScheduledOccurrence(input.input)
   ) {
     return 'preserve-existing'
@@ -1493,9 +1516,22 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
+  if (input.notificationPromptProfile === 'creative-response') {
+    return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
+  }
+  if (isAssistantOnboardingGoalCheckinNotification(input)) {
+    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+  }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
+}
+
+function isAssistantOnboardingGoalCheckinNotification(
+  input: Pick<AssistantNotificationInput, 'scheduledInvocationAuthority'>,
+): boolean {
+  return input.scheduledInvocationAuthority?.automationId ===
+    MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run

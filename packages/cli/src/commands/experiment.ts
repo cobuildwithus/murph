@@ -6,8 +6,6 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
-  MURPH_PRODUCT_ORIGIN,
-  buildExperimentProgressCardPath,
   commonsProtocolRefSchema,
   effectiveProtocolSnapshotSchema,
   experimentAnalysisPlanSchema,
@@ -18,8 +16,8 @@ import {
   experimentProgressSnapshotSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
-  isStrictIsoDate,
   jsonObjectSchema,
+  isStrictIsoDate,
   type ExperimentRunScheduleIntent,
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
@@ -57,6 +55,9 @@ import {
   normalizeRepeatableTextFlagOption,
 } from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  renderAndSaveExperimentProgressCard,
+} from './experiment-progress-card-image.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
@@ -450,7 +451,7 @@ function truncateBoundedText(
   return value.slice(0, maxLength - 3).trimEnd() + '...'
 }
 
-function buildEffectiveSnapshotFromCommonsProtocol(
+export function buildEffectiveSnapshotFromCommonsProtocol(
   entity: ProtocolVariantEntity,
 ) {
   if (!entity.protocol) {
@@ -473,6 +474,7 @@ function buildEffectiveSnapshotFromCommonsProtocol(
       effectiveSpecHash,
       doseSignature: truncateBoundedText(entity.protocol.doseSignature, 240),
       modality: truncateBoundedText(entity.protocol.target, 160),
+      activitySessionEvidence: entity.protocol.activitySessionEvidence,
       frequency: entity.protocol.frequency,
       durationMinutes: entity.protocol.durationMinutes,
       temperatureC: entity.protocol.temperatureC,
@@ -1288,12 +1290,18 @@ const experimentProgressResultSchema = z.object({
 const experimentProgressCardResultSchema = z.object({
   experimentId: z.string().min(1),
   slug: slugSchema,
+  asOf: localDateSchema,
   card: experimentProgressCardSchema,
-  path: z.string().min(1),
-  // The url is never null at runtime since MURPH_PRODUCT_ORIGIN became the
-  // resolver fallback; nullable stays only to avoid a generated CLI schema
-  // change. Safe to tighten alongside the next intentional regeneration.
-  url: z.string().url().nullable(),
+  media: z.object({
+    kind: z.literal('vault_image'),
+    ref: z.string().min(1).max(1024),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    filename: z.string().min(1).max(255),
+    contentType: z.literal('image/png'),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    alt: z.string().min(1).max(500).nullable(),
+    source: z.string().min(1).max(200).nullable(),
+  }).strict(),
   warnings: z.array(z.string().min(1)),
 })
 
@@ -1321,42 +1329,6 @@ function parseExperimentProgressCardConfounderOptions(
 
     return { date, label }
   })
-}
-
-/**
- * Resolve the public product base URL for progress-card links. Mirrors the
- * assistant-engine product base URL resolution (HOSTED_ONBOARDING_PUBLIC_BASE_URL,
- * then HOSTED_WEB_BASE_URL, then VERCEL_PROJECT_PRODUCTION_URL with an implied
- * https scheme) without importing assistant-engine from the CLI. Falls back to
- * the canonical production origin so environments without a configured base
- * URL (e.g. hosted runners) still emit shareable links.
- */
-function resolveExperimentProgressCardBaseUrl(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): string {
-  const candidates = [
-    env.HOSTED_ONBOARDING_PUBLIC_BASE_URL,
-    env.HOSTED_WEB_BASE_URL,
-    env.VERCEL_PROJECT_PRODUCTION_URL,
-  ]
-
-  for (const candidate of candidates) {
-    const trimmed = candidate?.trim()
-    if (!trimmed) {
-      continue
-    }
-
-    const withScheme = /^[a-z][a-z\d+.-]*:\/\//iu.test(trimmed)
-      ? trimmed
-      : `https://${trimmed}`
-    try {
-      return new URL(withScheme).origin
-    } catch {
-      continue
-    }
-  }
-
-  return MURPH_PRODUCT_ORIGIN
 }
 
 const experimentFollowupDueDecisionSchema = z.object({
@@ -2135,7 +2107,7 @@ export function registerExperimentCommands(
 
   experiment.command('progress-card', {
     description:
-      'Build the shareable progress-card snapshot for one experiment and emit its image URL.',
+      'Render one experiment progress card into a private vault image attachment.',
     args: experimentLookupArgSchema,
     options: withBaseOptions({
       asOf: localDateSchema.optional().describe('Optional analysis date in YYYY-MM-DD form.'),
@@ -2148,22 +2120,26 @@ export function registerExperimentCommands(
     }),
     output: experimentProgressCardResultSchema,
     async run({ args, options }) {
-      const confounders = parseExperimentProgressCardConfounderOptions(options.confounder)
       const result = await services.query.showExperimentProgressCard({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         lookup: args.id,
         asOf: options.asOf,
-        confounders,
+        confounders: parseExperimentProgressCardConfounderOptions(
+          options.confounder,
+        ),
       })
-      const cardPath = buildExperimentProgressCardPath(result.experimentId, result.card)
-
+      const media = await renderAndSaveExperimentProgressCard({
+        card: result.card,
+        experimentId: result.experimentId,
+        vaultRoot: options.vault,
+      })
       return {
         experimentId: result.experimentId,
         slug: result.slug,
+        asOf: result.asOf,
         card: result.card,
-        path: cardPath,
-        url: `${resolveExperimentProgressCardBaseUrl()}${cardPath}`,
+        media,
         warnings: [...result.warnings],
       }
     },

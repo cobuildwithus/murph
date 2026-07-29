@@ -6,6 +6,7 @@ import {
   BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
+import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -15,6 +16,7 @@ import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -27,6 +29,7 @@ import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function StudySection({
   children,
@@ -51,6 +54,27 @@ export function SectionsContent() {
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
+
+      <Separator />
+
+      <StudySection title="Homepage solo-first hero">
+        <div
+          id="homepage-solo-first-hero"
+          data-design-section="homepage-solo-first-hero"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <HeroClocksIn
+            authenticated={false}
+            contactInfo={{
+              phone: "+15555550100",
+              telegram: "murph_test_bot",
+            }}
+            messengerChannel="imessage"
+            murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
+          />
+        </div>
+      </StudySection>
 
       <Separator />
 
@@ -82,6 +106,12 @@ export function SectionsContent() {
           <TogetherSection />
           <AsksGridSection />
         </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Clubs profiles, iMessage, and wearables">
+        <ClubsPageStudy />
       </StudySection>
 
       <Separator />
@@ -140,7 +170,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join actions and nutrition sharing consents">
+      <StudySection title="Group join message invites, actions, and sharing consents">
         <GroupJoinStudy />
       </StudySection>
 
@@ -152,13 +182,19 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Personal usage credit states">
+      <StudySection title="Overall AI usage and fulfilled top-up">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sender WAU and MAU">
+      <StudySection title="Private experiment results share">
+        <ExperimentResultsShareStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass with complete and retention-limited sender evidence">
         <GrowthScorecardStudy />
       </StudySection>
 

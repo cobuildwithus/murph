@@ -97,6 +97,8 @@ export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
 }
 
 export function AuthDialog({
+  inviteCode,
+  methods = ["phone", "telegram", "email"],
   open,
   onOpenChange,
   title = "Log in or sign up",
@@ -105,6 +107,8 @@ export function AuthDialog({
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
+  inviteCode?: string | null;
+  methods?: readonly ("phone" | "telegram" | "email")[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title?: string;
@@ -193,7 +197,8 @@ export function AuthDialog({
         </DialogHeader>
         {AuthPanelIsland ? (
           <AuthPanelIsland
-            methods={["phone", "telegram", "email"]}
+            inviteCode={inviteCode}
+            methods={methods}
             onCompleted={onCompleted}
             onViewChange={setPanelView}
             requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}

@@ -4,14 +4,29 @@ import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
 } from "@murphai/messaging-ingress/telegram-webhook";
+import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { isHostedOnboardingError } from "./errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
+import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "./hosted-member-store";
 import {
   parseHostedLinqWebhookEvent,
   sendHostedLinqChatMessage,
 } from "./linq";
+import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  normalizeHostedLinqParticipantContactValue,
+  type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
+import { normalizePhoneNumber } from "./phone";
+import {
+  buildHostedGroupChatAccessRecoveryMessage,
+  resolveHostedRecognizedInboundAccess,
+} from "./recognized-inbound-access";
 import { requireHostedOnboardingPublicBaseUrl } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
@@ -29,10 +44,13 @@ export type HostedOnboardingLinqWebhookHandler = typeof handleHostedOnboardingLi
 export type HostedOnboardingTelegramWebhookHandler = typeof handleHostedOnboardingTelegramWebhook;
 
 export type HostedVisibleSecondaryLinqDependencies = {
+  getHostedLinqChatSummary?: typeof getHostedLinqChatSummary;
   getPrisma: typeof getPrisma;
   lookupHostedMemberByVerifiedEmailAddress: typeof lookupHostedMemberByVerifiedEmailAddress;
   lookupHostedMemberIdentityByPhoneNumber: typeof lookupHostedMemberIdentityByPhoneNumber;
   parseHostedLinqWebhookEvent: typeof parseHostedLinqWebhookEvent;
+  readHostedMemberRoutingState?: typeof readHostedMemberRoutingState;
+  resolveHostedRecognizedInboundAccess?: typeof resolveHostedRecognizedInboundAccess;
   sendHostedLinqChatMessage: typeof sendHostedLinqChatMessage;
 };
 
@@ -44,10 +62,13 @@ export type HostedVisibleSecondaryTelegramDependencies = {
 };
 
 const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
+  getHostedLinqChatSummary,
   getPrisma,
   lookupHostedMemberByVerifiedEmailAddress,
   lookupHostedMemberIdentityByPhoneNumber,
   parseHostedLinqWebhookEvent,
+  readHostedMemberRoutingState,
+  resolveHostedRecognizedInboundAccess,
   sendHostedLinqChatMessage,
 };
 
@@ -60,8 +81,8 @@ const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = 
 
 const HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY =
   "That Family invite isn't usable anymore. Ask the person who invited you for a fresh link.";
-const HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY =
-  "I couldn't connect this group chat to Murph. An active Murph member should message me from their usual account, then try again.";
+const HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY =
+  "I couldn't connect this group chat to Murph. Message me privately first, then make sure this group includes that same Murph number and try again.";
 const HOSTED_LINQ_CHAT_UNAVAILABLE_REPLY =
   "I couldn't connect this chat to Murph right now. Try again shortly. If it keeps happening, open Murph Settings.";
 const HOSTED_LINQ_CHAT_UNVERIFIED_REPLY =
@@ -72,6 +93,8 @@ const HOSTED_TELEGRAM_BINDING_REPAIR_REPLY =
   "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.";
 const HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY =
   "I can't finish that account setup in a group. Message me privately and I'll help you connect Murph.";
+const HOSTED_TELEGRAM_GROUP_CHAT_UNAVAILABLE_REPLY =
+  "I couldn't connect this group chat to Murph. Message me privately, then try again here.";
 
 const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
   "family-invite-not-accepted",
@@ -87,9 +110,15 @@ const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
 const HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER = new Set([
   "group-chat",
   "home-line-capacity-exhausted",
+  "thread-container-inactive",
   "unassignable-home-line",
   "unattested-direct-chat",
   "unknown-home-line",
+]);
+
+const HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS = new Set([
+  "group-chat",
+  "thread-container-inactive",
 ]);
 
 const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
@@ -99,6 +128,23 @@ const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "telegram-binding-changed",
   "unlinked-telegram",
 ]);
+
+type HostedVisibleSecondaryLinqSender = Pick<
+  HostedMember,
+  "id" | "suspendedAt"
+>;
+
+type HostedVisibleSecondaryLinqPrivateRecovery = {
+  chatId: string;
+  message: string;
+};
+
+type HostedVisibleSecondaryLinqPrivateRoute = {
+  chatId: string;
+  kind: "committed" | "pending";
+  participantContact: HostedLinqParticipantIdentity;
+  recipientPhone: string | null;
+};
 
 export function withHostedVisibleSecondaryLinqOutcomes(
   handler: HostedOnboardingLinqWebhookHandler,
@@ -123,16 +169,52 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       return response;
     }
 
+    const prisma = input.prisma ?? dependencies.getPrisma();
     const recognizedSender = HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
-      ? await readHostedLinqSenderRecognized({
+      ? await readHostedLinqSender({
           participantContact: context.participantContact,
-          prisma: input.prisma ?? dependencies.getPrisma(),
+          prisma,
           dependencies,
         })
-      : false;
+      : null;
+    const privateRecovery =
+      recognizedSender && HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS.has(reason)
+        ? await resolveHostedLinqPrivateGroupRecovery({
+            currentChatId: context.summary.chatId,
+            eventId: event.event_id,
+            incomingRecipientPhone: context.recipientPhoneNumber,
+            participantContact: context.participantContact,
+            prisma,
+            reason,
+            sender: recognizedSender,
+            dependencies,
+            ...(input.signal ? { signal: input.signal } : {}),
+          })
+        : null;
+    if (privateRecovery) {
+      try {
+        await dependencies.sendHostedLinqChatMessage({
+          chatId: privateRecovery.chatId,
+          idempotencyKey: `visible-secondary-private:${event.event_id}`,
+          message: privateRecovery.message,
+          replyToMessageId: null,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+
+        return buildVisibleSecondaryResponse(response, reason);
+      } catch (error) {
+        if (!isHostedOnboardingError(error) || error.retryable) {
+          throw error;
+        }
+        // A provider-confirmed permanent rejection means the private message
+        // did not land. Continue to the neutral room response instead of
+        // retrying a stale private route forever.
+      }
+    }
+
     const message = resolveHostedLinqVisibleSecondaryReply({
       reason,
-      recognizedSender,
+      recognizedSender: Boolean(recognizedSender),
     });
     if (!message) {
       return response;
@@ -209,9 +291,11 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
     case "unknown-home-line":
       return input.recognizedSender ? HOSTED_LINQ_CHAT_UNVERIFIED_REPLY : null;
     case "thread-container-inactive":
-      return HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
+      return HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY;
     case "group-chat":
-      return input.recognizedSender ? HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY : null;
+      return input.recognizedSender
+        ? HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY
+        : null;
     default:
       return null;
   }
@@ -238,35 +322,256 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
         ? HOSTED_TELEGRAM_BINDING_REPAIR_REPLY
         : HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
     case "group-chat-provision-unavailable":
-      return input.isDirect ? null : HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
+      return input.isDirect
+        ? null
+        : HOSTED_TELEGRAM_GROUP_CHAT_UNAVAILABLE_REPLY;
     default:
       return null;
   }
 }
 
-async function readHostedLinqSenderRecognized(input: {
+async function readHostedLinqSender(input: {
   participantContact: ReturnType<
     typeof resolveHostedOnboardingLinqMessageContext
   >["participantContact"];
   prisma: HostedOnboardingReadClient;
   dependencies: HostedVisibleSecondaryLinqDependencies;
+}): Promise<HostedVisibleSecondaryLinqSender | null> {
+  const participantContact = input.participantContact;
+  if (!participantContact) {
+    return null;
+  }
+
+  const memberLookup = participantContact.kind === "phone"
+    ? await input.dependencies.lookupHostedMemberIdentityByPhoneNumber({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await input.dependencies.lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  if (!memberLookup) {
+    return null;
+  }
+
+  return {
+    id: memberLookup.core.id,
+    suspendedAt: memberLookup.core.suspendedAt,
+  };
+}
+
+async function resolveHostedLinqPrivateGroupRecovery(input: {
+  currentChatId: string;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  eventId: string;
+  incomingRecipientPhone: string | null;
+  participantContact: HostedLinqParticipantContact | null;
+  prisma: PrismaClient;
+  reason: string;
+  sender: HostedVisibleSecondaryLinqSender;
+  signal?: AbortSignal;
+}): Promise<HostedVisibleSecondaryLinqPrivateRecovery | null> {
+  const readRoutingState =
+    input.dependencies.readHostedMemberRoutingState
+    ?? readHostedMemberRoutingState;
+  const initialRouting = await readRoutingState({
+    memberId: input.sender.id,
+    prisma: input.prisma,
+  });
+  const privateRoute = resolveHostedLinqPrivateGroupRecoveryRoute({
+    incomingRecipientPhone: input.incomingRecipientPhone,
+    participantContact: input.participantContact,
+    reason: input.reason,
+    routing: initialRouting,
+  });
+  if (!privateRoute || privateRoute.chatId === input.currentChatId.trim()) {
+    return null;
+  }
+
+  if (!await isHostedLinqPrivateRecoveryChatAttested({
+    chatId: privateRoute.chatId,
+    dependencies: input.dependencies,
+    participantContact: input.participantContact,
+    ...(input.signal ? { signal: input.signal } : {}),
+  })) {
+    // Never disclose account state to a route whose direct audience cannot be
+    // re-attested. The ordinary privacy-safe group response remains available.
+    return null;
+  }
+
+  const resolveAccess =
+    input.dependencies.resolveHostedRecognizedInboundAccess
+    ?? resolveHostedRecognizedInboundAccess;
+  const access = await resolveAccess({
+    allowSignupFallback: true,
+    inviteChannel: "linq",
+    member: input.sender,
+    noticeSeed: input.eventId,
+    prisma: input.prisma,
+  });
+  if (access.kind === "allowed" || access.kind === "silent") {
+    return null;
+  }
+
+  const currentRouting = await readRoutingState({
+    memberId: input.sender.id,
+    prisma: input.prisma,
+  });
+  if (
+    !isSameHostedLinqPrivateRecoveryRoute(
+      resolveHostedLinqPrivateGroupRecoveryRoute({
+        incomingRecipientPhone: input.incomingRecipientPhone,
+        participantContact: input.participantContact,
+        reason: input.reason,
+        routing: currentRouting,
+      }),
+      privateRoute,
+    )
+  ) {
+    return null;
+  }
+  if (!await isHostedLinqPrivateRecoveryChatAttested({
+    chatId: privateRoute.chatId,
+    dependencies: input.dependencies,
+    participantContact: input.participantContact,
+    ...(input.signal ? { signal: input.signal } : {}),
+  })) {
+    return null;
+  }
+
+  return {
+    chatId: privateRoute.chatId,
+    message: buildHostedGroupChatAccessRecoveryMessage(access.message),
+  };
+}
+
+function resolveHostedLinqPrivateGroupRecoveryRoute(input: {
+  incomingRecipientPhone: string | null;
+  participantContact: HostedLinqParticipantContact | null;
+  reason: string;
+  routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
+}): HostedVisibleSecondaryLinqPrivateRoute | null {
+  const routing = input.routing;
+  const participantContact = input.participantContact;
+  if (!routing || !participantContact) {
+    return null;
+  }
+
+  const participantLookupKeyCandidates =
+    createHostedLinqParticipantContactLookupKeyReadCandidates(
+      participantContact,
+    );
+  const committedRoute =
+    routing.linqChatId?.trim()
+    && routing.linqParticipantContact?.kind === participantContact.kind
+    && participantLookupKeyCandidates.includes(
+      routing.linqParticipantContact.lookupKey,
+    )
+      ? {
+          chatId: routing.linqChatId.trim(),
+          kind: "committed" as const,
+          participantContact: routing.linqParticipantContact,
+          recipientPhone: routing.linqRecipientPhone,
+        }
+      : null;
+  const pendingRoute =
+    routing.pendingLinqChatId?.trim()
+    && routing.pendingLinqParticipantContact?.kind === participantContact.kind
+    && participantLookupKeyCandidates.includes(
+      routing.pendingLinqParticipantContact.lookupKey,
+    )
+      ? {
+          chatId: routing.pendingLinqChatId.trim(),
+          kind: "pending" as const,
+          participantContact: routing.pendingLinqParticipantContact,
+          recipientPhone: routing.pendingLinqRecipientPhone,
+        }
+      : null;
+  const route = committedRoute ?? pendingRoute;
+  if (!route) {
+    return null;
+  }
+
+  if (input.reason === "group-chat") {
+    const incomingRecipientPhone = normalizePhoneNumber(
+      input.incomingRecipientPhone,
+    );
+    const privateRouteRecipientPhone = normalizePhoneNumber(
+      route.recipientPhone,
+    );
+    if (
+      !incomingRecipientPhone
+      || !privateRouteRecipientPhone
+      || incomingRecipientPhone !== privateRouteRecipientPhone
+    ) {
+      return null;
+    }
+  }
+
+  return route;
+}
+
+function isSameHostedLinqPrivateRecoveryRoute(
+  currentRoute: HostedVisibleSecondaryLinqPrivateRoute | null,
+  initialRoute: HostedVisibleSecondaryLinqPrivateRoute,
+): boolean {
+  return Boolean(
+    currentRoute
+    && currentRoute.chatId === initialRoute.chatId
+    && currentRoute.kind === initialRoute.kind
+    && currentRoute.participantContact.kind
+      === initialRoute.participantContact.kind
+    && currentRoute.participantContact.lookupKey
+      === initialRoute.participantContact.lookupKey
+    && normalizePhoneNumber(currentRoute.recipientPhone)
+      === normalizePhoneNumber(initialRoute.recipientPhone),
+  );
+}
+
+async function isHostedLinqPrivateRecoveryChatAttested(input: {
+  chatId: string;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  participantContact: HostedLinqParticipantContact | null;
+  signal?: AbortSignal;
 }): Promise<boolean> {
   const participantContact = input.participantContact;
   if (!participantContact) {
     return false;
   }
 
-  if (participantContact.kind === "phone") {
-    return Boolean(await input.dependencies.lookupHostedMemberIdentityByPhoneNumber({
-      phoneNumber: participantContact.value,
-      prisma: input.prisma,
-    }));
-  }
+  const readChatSummary =
+    input.dependencies.getHostedLinqChatSummary
+    ?? getHostedLinqChatSummary;
+  try {
+    const privateChat = await readChatSummary({
+      chatId: input.chatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    const expectedParticipantValue =
+      normalizeHostedLinqParticipantContactValue(participantContact);
+    if (privateChat.isGroup !== false || !expectedParticipantValue) {
+      return false;
+    }
 
-  return Boolean(await input.dependencies.lookupHostedMemberByVerifiedEmailAddress({
-    address: participantContact.value,
-    prisma: input.prisma,
-  }));
+    const participantHandles = privateChat.handles
+      .filter((handle) =>
+        !handle.isMe
+        && (!handle.status || handle.status.trim().toLowerCase() === "active")
+      )
+      .map((handle) => normalizeHostedLinqParticipantContactValue({
+        kind: participantContact.kind,
+        value: handle.handle,
+      }));
+    return (
+      participantHandles.length > 0
+      && participantHandles.every(
+        (handle) => handle === expectedParticipantValue,
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function buildHostedSignupUrl(publicBaseUrl: string): string {

@@ -3,6 +3,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/client";
 import {
   parseTelegramThreadTarget,
+  type TelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import type { PrismaClient } from "@prisma/client";
 
@@ -15,6 +16,8 @@ import {
   lockHostedMemberRoutingStateTx,
   readHostedMemberRoutingState,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { sendHostedTelegramTextMessage } from "../hosted-onboarding/telegram-client";
 import { sha256Hex } from "../primitives";
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 
@@ -26,32 +29,60 @@ const HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS = 30_000;
 const HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
 const HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE = "access_notice";
+const HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE =
+  "telegram_access_notice_definite_failure";
+const HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE =
+  "HOSTED_TELEGRAM_API_RESPONSE_REJECTED";
 
 export type HostedTelegramAccessNoticeDeliveryResult =
   | { status: "already_notified" }
+  | { status: "definite_failure" }
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" }
   | { status: "sent" };
 
 type HostedTelegramAccessNoticeDispatchClaim =
-  | { attemptedAt: Date; status: "claimed" }
+  | {
+      attemptedAt: Date;
+      status: "claimed";
+      target: TelegramThreadTarget;
+    }
   | { status: "already_notified" }
+  | { status: "definite_failure" }
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" };
 
-export async function sendHostedTelegramAccessNotice(input: {
+type HostedTelegramAccessNoticeInput = {
   authorizedTelegramUserId?: string;
   memberId: string;
   message: string;
   noticeCode: string;
   prisma: PrismaClient;
-  replyToMessageId: string;
+  replyToMessageId: string | null;
   sentAt?: Date;
   sourceEventId: string;
   target: string;
-}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
-  if (!parseTelegramThreadTarget(input.target)) {
+};
+
+export async function sendHostedTelegramAccessNotice(
+  input: HostedTelegramAccessNoticeInput,
+): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const target = parseTelegramThreadTarget(input.target);
+  if (!target) {
     return { status: "not_applicable" };
+  }
+
+  const idempotencyKey = buildHostedTelegramAccessNoticeIdempotencyKey(input);
+  if (input.replyToMessageId === null) {
+    // A group-origin recovery targets the sender's private chat, where the
+    // group's message id is not a valid reply anchor. Keep the existing durable
+    // claim and use Web's established unanchored Telegram text transport rather
+    // than creating a second delivery owner or weakening target authorization.
+    return await sendHostedTelegramUnanchoredAccessNotice({
+      idempotencyKey,
+      input,
+      target,
+    });
   }
 
   const controlClient = readHostedExecutionControlClientIfConfigured(
@@ -67,7 +98,6 @@ export async function sendHostedTelegramAccessNotice(input: {
     };
   }
 
-  const idempotencyKey = buildHostedTelegramAccessNoticeIdempotencyKey(input);
   const dispatch: {
     claim: HostedTelegramAccessNoticeDispatchClaim | null;
   } = { claim: null };
@@ -84,6 +114,7 @@ export async function sendHostedTelegramAccessNotice(input: {
         dispatch.claim = await claimHostedTelegramAccessNoticeDispatch({
           idempotencyKey,
           input,
+          target,
         });
         if (dispatch.claim.status !== "claimed") {
           throw new Error(
@@ -104,6 +135,9 @@ export async function sendHostedTelegramAccessNotice(input: {
       return claim;
     }
     if (claim?.status === "already_notified") {
+      return claim;
+    }
+    if (claim?.status === "definite_failure") {
       return claim;
     }
     if (claim?.status === "in_flight") {
@@ -196,16 +230,100 @@ export function buildHostedTelegramAccessNoticeIdempotencyKey(input: {
   })).slice(0, 32)}`;
 }
 
+async function sendHostedTelegramUnanchoredAccessNotice(input: {
+  idempotencyKey: string;
+  input: HostedTelegramAccessNoticeInput;
+  target: TelegramThreadTarget;
+}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const claim = await claimHostedTelegramAccessNoticeDispatch({
+    idempotencyKey: input.idempotencyKey,
+    input: input.input,
+    target: input.target,
+  });
+  if (claim.status !== "claimed") {
+    return claim;
+  }
+
+  try {
+    await sendHostedTelegramTextMessage({
+      message: input.input.message,
+      replyToMessageId: null,
+      target: claim.target,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_TELEGRAM_BOT_TOKEN_NOT_CONFIGURED"
+    ) {
+      return await markHostedTelegramAccessNoticeRetryable({
+        attemptedAt: claim.attemptedAt,
+        failureCode: error.code,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+      });
+    }
+
+    if (
+      isHostedOnboardingError(error)
+      && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
+      && readHostedTelegramResponseStatus(error) === 429
+    ) {
+      return await markHostedTelegramAccessNoticeRetryable({
+        attemptedAt: claim.attemptedAt,
+        failureCode: error.code,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+        retryAfterSeconds: readHostedTelegramRetryAfterSeconds(error),
+      });
+    }
+
+    if (
+      isHostedOnboardingError(error)
+      && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
+      && isHostedTelegramPermanentResponseRejection(error)
+    ) {
+      // Telegram permanently rejected the request, so the private message
+      // definitely did not land. Preserve the terminal provider-effect record
+      // and let the webhook adapter use its account-neutral room fallback.
+      await markHostedLinqDeliverySendFailedTx({
+        expectedAttemptedAt: claim.attemptedAt,
+        failedAt: claim.attemptedAt,
+        failureCode: HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+      });
+      return { status: "definite_failure" };
+    }
+
+    // A direct Bot API request that throws after dispatch may already have
+    // reached Telegram. Terminalize the exact event instead of risking a second
+    // private recovery message on webhook replay.
+    await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: claim.attemptedAt,
+      failedAt: claim.attemptedAt,
+      failureCode: readHostedTelegramAccessNoticeFailureCode(error),
+      failureReason: error instanceof Error ? error.message : null,
+      idempotencyKey: input.idempotencyKey,
+      prisma: input.input.prisma,
+    });
+    return { status: "already_notified" };
+  }
+
+  await markHostedLinqDeliveryAcceptedTx({
+    acceptedAt: claim.attemptedAt,
+    idempotencyKey: input.idempotencyKey,
+    prisma: input.input.prisma,
+  });
+  return { status: "sent" };
+}
+
 async function claimHostedTelegramAccessNoticeDispatch(input: {
   idempotencyKey: string;
-  input: {
-    authorizedTelegramUserId?: string;
-    memberId: string;
-    prisma: PrismaClient;
-    sentAt?: Date;
-    sourceEventId: string;
-    target: string;
-  };
+  input: HostedTelegramAccessNoticeInput;
+  target: TelegramThreadTarget;
 }): Promise<HostedTelegramAccessNoticeDispatchClaim> {
   const attemptedAt = input.input.sentAt ?? new Date();
   return await input.input.prisma.$transaction(
@@ -233,6 +351,7 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         idempotencyKey: input.idempotencyKey,
         prisma: tx,
         reclaimStalePreProviderAttempt: true,
+        returnExistingFailureCode: true,
         source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
         sourceRef: input.input.sourceEventId,
         status: "provider_dispatch_started",
@@ -240,7 +359,17 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
       });
       if (delivery.claimed) {
-        return { attemptedAt, status: "claimed" };
+        return {
+          attemptedAt,
+          status: "claimed",
+          target: resolveHostedTelegramAccessNoticeDispatchTarget({
+            authorizedTelegramUserId: input.input.authorizedTelegramUserId,
+            currentInboundSenderStillAuthorized,
+            fallbackTarget: input.target,
+            replyToMessageId: input.input.replyToMessageId,
+            routingTelegramThreadId: routing?.telegramThreadId ?? null,
+          }),
+        };
       }
       if (delivery.retryAt) {
         return {
@@ -248,9 +377,38 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
           status: "in_flight",
         };
       }
+      if (
+        delivery.failureCode
+        === HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE
+      ) {
+        return { status: "definite_failure" };
+      }
       return { status: "already_notified" };
     },
   );
+}
+
+function resolveHostedTelegramAccessNoticeDispatchTarget(input: {
+  authorizedTelegramUserId?: string;
+  currentInboundSenderStillAuthorized: boolean;
+  fallbackTarget: TelegramThreadTarget;
+  replyToMessageId: string | null;
+  routingTelegramThreadId: string | null;
+}): TelegramThreadTarget {
+  if (
+    input.replyToMessageId !== null
+    || !input.currentInboundSenderStillAuthorized
+    || !input.authorizedTelegramUserId
+  ) {
+    return input.fallbackTarget;
+  }
+
+  const storedTarget = input.routingTelegramThreadId
+    ? parseTelegramThreadTarget(input.routingTelegramThreadId)
+    : null;
+  return storedTarget?.chatId === input.authorizedTelegramUserId
+    ? storedTarget
+    : input.fallbackTarget;
 }
 
 async function markHostedTelegramAccessNoticeRetryable(input: {
@@ -259,10 +417,14 @@ async function markHostedTelegramAccessNoticeRetryable(input: {
   failureReason?: string | null;
   idempotencyKey: string;
   prisma: PrismaClient;
+  retryAfterSeconds?: number;
 }): Promise<HostedTelegramAccessNoticeDeliveryResult> {
-  const retryAt = new Date(
-    input.attemptedAt.getTime() + HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS,
-  );
+  const retryAt = resolveHostedTelegramAccessNoticeRetryAt({
+    ...(input.retryAfterSeconds === undefined
+      ? {}
+      : { retryAfterSeconds: input.retryAfterSeconds }),
+    sentAt: input.attemptedAt,
+  });
   await markHostedLinqDeliverySendFailedTx({
     expectedAttemptedAt: input.attemptedAt,
     failedAt: input.attemptedAt,
@@ -273,6 +435,36 @@ async function markHostedTelegramAccessNoticeRetryable(input: {
     retryAfterAt: retryAt,
   });
   return { retryAt, status: "in_flight" };
+}
+
+function readHostedTelegramRetryAfterSeconds(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): number | undefined {
+  const retryAfterSeconds = error.details?.retryAfterSeconds;
+  return typeof retryAfterSeconds === "number"
+    && Number.isSafeInteger(retryAfterSeconds)
+    && retryAfterSeconds > 0
+    ? retryAfterSeconds
+    : undefined;
+}
+
+function readHostedTelegramResponseStatus(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): number | undefined {
+  const status = error.details?.status;
+  return typeof status === "number"
+    && Number.isSafeInteger(status)
+    && status >= 100
+    && status <= 599
+    ? status
+    : undefined;
+}
+
+function isHostedTelegramPermanentResponseRejection(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): boolean {
+  const status = readHostedTelegramResponseStatus(error);
+  return status !== undefined && status >= 400 && status < 500 && status !== 429;
 }
 
 function isHostedTelegramControlPreProviderFailure(
@@ -294,4 +486,17 @@ function resolveHostedTelegramAccessNoticeRetryAt(input: {
     ? retryAfterSeconds * 1_000
     : HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS;
   return new Date(input.sentAt.getTime() + retryMs);
+}
+
+function readHostedTelegramAccessNoticeFailureCode(error: unknown): string {
+  const code = error && typeof error === "object" && "code" in error
+    && typeof error.code === "string"
+    ? error.code.trim()
+    : "";
+  if (code) {
+    return code;
+  }
+  return error instanceof Error && error.name
+    ? error.name
+    : "telegram_access_notice_dispatch_unconfirmed";
 }

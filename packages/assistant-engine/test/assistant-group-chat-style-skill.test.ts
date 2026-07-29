@@ -44,7 +44,13 @@ describe('assistant group-chat style guidance', () => {
       'Murph is the visible recipient, but the room is often the real audience.',
     )
     expect(normalized).toContain(
+      'When the person actually routes the bid through Murph',
+    )
+    expect(normalized).toContain(
       'a low-risk reason to share a photo, admit something, ask for attention, or make an ordinary life moment replyable',
+    )
+    expect(normalized).toContain(
+      'Do not manufacture this social alibi after the person addressed the humans directly.',
     )
     expect(normalized).toContain('social alibi')
     expect(normalized).toContain('shared third object')
@@ -54,6 +60,82 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'The handoff is beat-local, not a permanent exit',
+    )
+  })
+
+  it('gives human-source social questions first refusal without muting answerable requests', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Collective human ownership')
+    expect(normalized).toContain(
+      'belongs to the humans collectively on its first beat',
+    )
+    expect(normalized).toContain(
+      '"Y\'all remember this place?" is human-owned, not an open ensemble invitation to Murph.',
+    )
+    expect(normalized).toContain(
+      'Give the humans first refusal. Send no text or reaction on that initial bid',
+    )
+    expect(normalized).toContain(
+      'Read the whole beat, not only the newest bubble.',
+    )
+    expect(normalized).toContain(
+      "An immediate same-purpose same-sender elaboration, statistic, or caption inherits the setup's audience",
+    )
+    expect(normalized).toContain(
+      'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, call `finish_without_reply` immediately and do not react.',
+    )
+    expect(normalized).toContain(
+      "Do not sleep or watch for a follow-up: native replies and other participants' responses belong to later causal turns",
+    )
+    expect(normalized).toContain(
+      'A later same-purpose caption stays human-owned; a later clear factual or task request or direct Murph address is a new decision unit.',
+    )
+    expect(normalized).toContain(
+      'A new factual or task request or a direct Murph address is evaluated under rule 4 or rule 3',
+    )
+    expect(normalized).toContain(
+      'even when it came from the same sender seconds later or arrived inside the same accepted provider turn',
+    )
+    expect(normalized).toContain('### Floor follows authority, not punctuation')
+    expect(normalized).toContain(
+      'Before treating a room-wide question as open, ask who can truthfully supply the answer.',
+    )
+    expect(normalized).toContain(
+      'Apply this gate before any live-volley watch.',
+    )
+    expect(normalized).toContain(
+      "private relationships, personal conduct, shared social history, recognition, or recollection",
+    )
+    expect(normalized).toContain(
+      'A question mark, tag question, or room-wide "does anyone know?" does not change that owner.',
+    )
+    expect(normalized).toContain(
+      'If the exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool, the request can be open.',
+    )
+    expect(normalized).toContain(
+      'use `finish_without_reply` immediately: do not reply, react, sleep, or watch',
+    )
+    expect(normalized).toContain(
+      'A comic abstention still interrupts the humans; it is not silence.',
+    )
+    expect(normalized).toContain(
+      'If Murph is directly asked about an unverified private fact about a person, answer with one plain uncertainty sentence and stop.',
+    )
+    expect(normalized).toContain(
+      'Question form does not reopen the floor.',
+    )
+    expect(normalized).toContain(
+      'This rule is evaluated before the room-wide human-private branch in rule 2.',
+    )
+    expect(normalized).toContain(
+      'Private facts about people whose truthful source is only the humans do not enter this rule.',
+    )
+    expect(normalized).toContain(
+      'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat, and an audience-unclear unaddressed personal artifact is not genuinely unowned.',
+    )
+    expect(normalized).not.toContain(
+      'Use the existing short foreground watch',
     )
   })
 
@@ -74,6 +156,43 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'A reply that drew no reaction but started a ten-message human exchange succeeded',
+    )
+  })
+
+  it('brings a point of view without forcing agreement or novelty', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Bring a point of view')
+    expect(normalized).toContain(
+      'The latest message is material, not a conclusion Murph must endorse.',
+    )
+    expect(normalized).toContain(
+      'Agreement-and-heightening is one option, not the policy.',
+    )
+    expect(normalized).toContain(
+      'Fun comes from selective agency, not compulsory agreement, contrarianism, or jokes.',
+    )
+    expect(normalized).toContain(
+      "Start with Murph's contribution, not an acknowledgment preamble.",
+    )
+    expect(normalized).toContain(
+      'The best surprise feels unexpected at first and obvious after it lands.',
+    )
+    expect(normalized).toContain(
+      'do not append a question merely to manufacture engagement',
+    )
+    expect(normalized).toContain(
+      '"Correct, [the setup] has begun" is still an echo.',
+    )
+    expect(normalized).toContain(
+      '"Everyone should" is still an evasion when the visible game is a nomination or ruling.',
+    )
+    expect(normalized).toContain('Not every turn needs surprise.')
+    expect(normalized).toContain(
+      'Never contradict merely to seem interesting.',
+    )
+    expect(normalized).toContain(
+      'Obvious shared fiction may stay inside the play frame',
     )
   })
 
@@ -99,7 +218,7 @@ describe('assistant group-chat style guidance', () => {
   it('protects human-owned turns while preserving open ensemble banter', async () => {
     const normalized = await readNormalizedGroupChatSkill()
     const boundary = normalized.indexOf('1. **A participation boundary applies.**')
-    const human = normalized.indexOf('2. **Another human owns this turn.**')
+    const human = normalized.indexOf('2. **One or more humans own this turn.**')
     const addressed = normalized.indexOf('3. **Murph was addressed.**')
     const banter = normalized.indexOf('5. **An open ensemble banter beat.**')
 
@@ -111,7 +230,7 @@ describe('assistant group-chat style guidance', () => {
       'A question was addressed to a specific human.',
     )
     expect(normalized).toContain(
-      'This is a current-turn floor rule, not a ban on a later open beat.',
+      'This is a beat-local floor rule, not a ban on a later open beat.',
     )
     expect(normalized).toContain(
       'Direct address is not required.',
@@ -132,6 +251,9 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'do not apologize, acknowledge, react, or make compliance a bit',
+    )
+    expect(normalized).toContain(
+      'A correction that Murph inserted itself is not a new comic premise, even when playful or exasperated.',
     )
     expect(normalized).toContain(
       'continue to rule 3 for the actual ask',
@@ -255,6 +377,9 @@ describe('assistant group-chat style guidance', () => {
 
     expect(normalized).toContain(
       'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+    )
+    expect(normalized).toContain(
+      'A direct ask, an open request with an exact authorized answer, and an unaddressed human-private question are already resolved and must not watch.',
     )
     // Waiting must never become an excuse to override the ladder's silence,
     // closed-room, and not-for-you rules.

@@ -11,6 +11,10 @@ import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
 } from '../experiment-support-automations.js'
 import { isRetiredMurphManagedAutomationId } from '../managed-automations.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+  runOnboardingGoalCheckinAuthorityPrecondition,
+} from '../onboarding-goal-checkin-automation.js'
 
 export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   intent: AssistantOutboxIntent
@@ -31,6 +35,24 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   })
   if (!current) {
     return createAssistantOutboxAutomationAuthorityStaleError()
+  }
+
+  if (
+    current.record.automationId ===
+    MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+  ) {
+    if (current.record.schedule.kind !== 'at') {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
+    const onboardingAuthority =
+      await runOnboardingGoalCheckinAuthorityPrecondition({
+        automationId: current.record.automationId,
+        occurrenceAt: current.record.schedule.at,
+        vault: input.vault,
+      })
+    if (onboardingAuthority.kind === 'skip') {
+      return createAssistantOutboxAutomationAuthorityStaleError()
+    }
   }
 
   const lifecycleAuthority =

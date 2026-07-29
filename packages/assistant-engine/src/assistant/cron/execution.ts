@@ -39,12 +39,14 @@ import {
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
-  resolveMurphManagedAutomationSeed,
+  resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
-  type MurphManagedAutomationSeed,
   type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
+import {
+  runOnboardingGoalCheckinAuthorityPrecondition,
+} from '../onboarding-goal-checkin-automation.js'
 import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
@@ -133,6 +135,8 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR =
   'Managed automation owner no longer matches the live delivery route.'
+const HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH =
+  'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH'
 const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
   'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
@@ -149,6 +153,8 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
+  'murph-managed:monthly-improvement-coach',
+  // Legacy tag retained while existing records reconcile to the monthly seed.
   'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])
@@ -617,12 +623,24 @@ export async function executeClaimedAssistantCronJob(
     ) {
       // Route on the immutable automationId so a user-edited slug cannot
       // silently bypass the precondition.
-      const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
-        automationId: input.job.source.automationId,
-        tags: input.job.source.tags,
-        vault: input.vault,
-      })
-      if (lifecycleResult.kind === 'skip') {
+      const onboardingAuthority =
+        await runOnboardingGoalCheckinAuthorityPrecondition({
+          automationId: input.job.source.automationId,
+          occurrenceAt,
+          vault: input.vault,
+        })
+      if (onboardingAuthority.kind === 'skip') {
+        lifecycleSkipReason = onboardingAuthority.reason
+      }
+      const lifecycleResult =
+        lifecycleSkipReason === null
+          ? await runExperimentLifecycleOutcomePrecondition({
+              automationId: input.job.source.automationId,
+              tags: input.job.source.tags,
+              vault: input.vault,
+            })
+          : null
+      if (lifecycleResult?.kind === 'skip') {
         lifecycleSkipReason = lifecycleResult.reason
       }
     }
@@ -753,11 +771,11 @@ export async function executeClaimedAssistantCronJob(
           }
           const authorizedDelivery = maintenanceJob
             ? {
+                conversationThreadId: null,
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
-            : managedOwnerAuthorization.kind === 'authorized' &&
-                managedOwnerAuthorization.ownerScope === 'authenticated-group'
+            : managedOwnerAuthorization.kind === 'authorized'
               ? managedOwnerAuthorization.authorizedDelivery
               : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                   executionContext: input.executionContext ?? null,
@@ -786,6 +804,7 @@ export async function executeClaimedAssistantCronJob(
             }
             await assertAssistantCronLifecycleNotificationStillAuthorized({
               job: input.job,
+              occurrenceAt,
               vault: input.vault,
             })
             await assertAssistantCronManagedOwnerStillAuthorized({
@@ -887,7 +906,9 @@ export async function executeClaimedAssistantCronJob(
             participantId: claimedJob.target.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-            threadId: claimedJob.target.threadId,
+            threadId:
+              authorizedDelivery.conversationThreadId ??
+              claimedJob.target.threadId,
             bindingDeliveryTarget:
               deliveryRoute.bindingDelivery?.target ??
               deliveryRoute.deliveryTarget ??
@@ -1317,6 +1338,7 @@ async function resolveAssistantCronCanonicalSourceAuthority(input: {
 
 async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
   job: ResolvedAssistantCronJob
+  occurrenceAt: string
   vault: string
 }): Promise<void> {
   if (
@@ -1324,6 +1346,18 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
     input.job.source.kind !== 'automation'
   ) {
     return
+  }
+
+  const onboardingAuthority =
+    await runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: input.job.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingAuthority.kind === 'skip') {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(
+      onboardingAuthority.reason,
+    )
   }
 
   const result = await runExperimentLifecycleDeliveryAuthorityPrecondition({
@@ -2213,9 +2247,9 @@ type AssistantCronManagedOwnerAuthorization =
   | {
       authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
       channel: string | null
+      automationId: string
       kind: 'authorized'
       ownerScope: 'member' | 'authenticated-group'
-      seed: MurphManagedAutomationSeed
       target: string | null
       threadIsDirect: boolean | null
     }
@@ -2236,17 +2270,16 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'retired' }
   }
 
-  // Only immutable current built-in identities carry hidden owner policy.
-  // Dynamically generated experiment lifecycle seeds deliberately remain on
-  // their existing path until their concurrently owned source can expose an
-  // exact identity resolver; tags, slugs, and prompt text are never authority.
-  const seed = resolveMurphManagedAutomationSeed(
+  // Only immutable current built-in or explicitly registered dynamic identities
+  // carry hidden owner policy. Other dynamic lifecycle seeds deliberately remain
+  // on their existing path until their source can expose an exact identity
+  // resolver; tags, slugs, and prompt text are never authority.
+  const ownerScope = resolveMurphManagedAutomationOwnerScope(
     input.job.source.automationId,
   )
-  if (!seed) {
+  if (!ownerScope) {
     return { kind: 'unmanaged' }
   }
-  const ownerScope = seed.ownerScope ?? 'member'
   const declaredRoute = resolveAssistantCronNotificationDeliveryRoute(
     input.target,
   )
@@ -2266,16 +2299,38 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'mismatch' }
   }
 
-  const authorizedDelivery = ownerScope === 'authenticated-group'
-    ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-        executionContext: input.executionContext,
-        signal: input.signal,
-        target: input.target,
-      })
-    : {
-        externalThreadRouteAuthority: null,
-        route: declaredRoute,
+  let authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  if (
+    ownerScope === 'authenticated-group'
+    || !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  ) {
+    try {
+      authorizedDelivery =
+        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+          executionContext: input.executionContext,
+          signal: input.signal,
+          target: input.target,
+        })
+    } catch (error) {
+      if (
+        ownerScope === 'member'
+        && input.target.channel === 'linq'
+        && readAssistantCronErrorCode(error)
+          === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
+      ) {
+        return { kind: 'mismatch' }
       }
+      throw error
+    }
+  } else {
+    authorizedDelivery = {
+      conversationThreadId: null,
+      externalThreadRouteAuthority: null,
+      route: declaredRoute,
+    }
+  }
   const route = authorizedDelivery.route
   const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
   const target = normalizeNullableString(
@@ -2293,10 +2348,10 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
 
   return {
     authorizedDelivery,
+    automationId: input.job.source.automationId,
     channel,
     kind: 'authorized',
     ownerScope,
-    seed,
     target,
     threadIsDirect: route.threadIsDirect,
   }
@@ -2339,11 +2394,13 @@ function assistantCronManagedOwnerAuthorizationMatches(
   if (expected.kind !== 'authorized' || current.kind !== 'authorized') {
     return expected.kind === current.kind && expected.kind === 'unmanaged'
   }
-  return expected.seed.automationId === current.seed.automationId &&
+  return expected.automationId === current.automationId &&
     expected.ownerScope === current.ownerScope &&
     expected.channel === current.channel &&
     expected.target === current.target &&
-    expected.threadIsDirect === current.threadIsDirect
+    expected.threadIsDirect === current.threadIsDirect &&
+    expected.authorizedDelivery.conversationThreadId ===
+      current.authorizedDelivery.conversationThreadId
 }
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
@@ -2351,13 +2408,18 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   signal: AbortSignal
   target: AssistantCronJob['target']
 }): Promise<{
+  conversationThreadId: string | null
   externalThreadRouteAuthority:
     AssistantOutboxIntent['externalThreadRouteAuthority']
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
 }> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
-    return { externalThreadRouteAuthority: null, route }
+    return {
+      conversationThreadId: null,
+      externalThreadRouteAuthority: null,
+      route,
+    }
   }
 
   if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
@@ -2396,13 +2458,18 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       )
     }
     return {
+      conversationThreadId: null,
       externalThreadRouteAuthority: authority,
       route,
     }
   }
 
   if (input.target.channel !== 'linq') {
-    return { externalThreadRouteAuthority: null, route }
+    return {
+      conversationThreadId: null,
+      externalThreadRouteAuthority: null,
+      route,
+    }
   }
 
   const target = normalizeNullableString(
@@ -2436,10 +2503,20 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     targetKind,
   })
   const authorizedTarget = normalizeNullableString(authority.target)
+  const conversationThreadId = normalizeNullableString(
+    authority.conversationThreadId,
+  )
   if (!authorizedTarget || typeof authority.threadIsDirect !== 'boolean') {
     throw new VaultCliError(
       'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       'Hosted Linq delivery requires direct or group authority before provider work.',
+      { retryable: true },
+    )
+  }
+  if (authorizedTarget !== target && !conversationThreadId) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      'Hosted Linq route changes require a matching conversation locator.',
       { retryable: true },
     )
   }
@@ -2454,6 +2531,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
+    conversationThreadId,
     externalThreadRouteAuthority: null,
     route: {
       bindingDelivery,

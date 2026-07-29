@@ -8,6 +8,7 @@ import {
 import type {
   AssistantMessageReaction,
   AssistantVaultFileResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   isLinqChatNotFoundSendMessageError,
@@ -42,6 +43,7 @@ import type {
 
 export interface HostedProviderEffectDependencies {
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
+  loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
@@ -52,6 +54,7 @@ export interface HostedProviderEffectDependencies {
 
 interface HostedProviderEffectContext {
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
+  loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
@@ -300,6 +303,7 @@ async function sendHostedProviderLinqMessageDirect(
       ? { publicFetchImplementation: context.publicFetchImplementation }
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
+    ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
   });
 }
 
@@ -315,6 +319,9 @@ function createHostedProviderEffectContext(
       : {}),
     ...(dependencies.loadVaultFile
       ? { loadVaultFile: dependencies.loadVaultFile }
+      : {}),
+    ...(dependencies.loadVaultImage
+      ? { loadVaultImage: dependencies.loadVaultImage }
       : {}),
   };
 }

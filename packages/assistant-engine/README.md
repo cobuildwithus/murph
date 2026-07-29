@@ -50,6 +50,17 @@ formatter uses the existing one-shot App Server path so its restrictive launch
 configuration cannot replace the resident ordinary-turn process or interrupt
 detached enrichment.
 
+The `creative-response` notification prompt profile is an isolated system
+continuation for verified social moments. Its prompt is built only from the
+engine-supplied task and bounded committed conversation history. Planning
+projects only `generate_song`, applies the output-only turn's native-capability
+deny set, retains the bound provider transport required by that
+application-owned tool, and keeps the ordinary response-media and outbox
+delivery owners. The prompt tells the model to call that tool exactly once for
+one short original sponsor song. A creative provider failure settles the
+optional notification instead of starting another song attempt; a committed
+delivery intent retains the ordinary outbox retry and deduplication behavior.
+
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
 ports. The App Server and its descendant shell environments never receive that
@@ -133,6 +144,15 @@ exact tool array once, fingerprints that array, and stores it on
 `AssistantRouteTurnPlan.dynamicTools`. Provider conversion forwards the complete
 turn object, and Codex sends that same array in `thread/start`; downstream layers
 must not rebuild it from copied gate booleans.
+
+Broad, low-frequency native tools use Codex's `deferLoading` field while keeping
+their ordinary argument and result contracts. The pinned App Server owns
+discovery: direct-tool models use native `tool_search`, while code-mode models
+expose only generic `ALL_TOOLS` metadata and dispatch the selected tool through
+`exec`. Narrow non-deferred tools remain eager: direct-tool models receive the
+native function, while code-mode-only models receive its schema in `exec`
+guidance without a search step. Murph must not add a second discovery action,
+execution envelope, or compatibility namespace.
 
 Runtime authority remains independent of advertisement. Hosted transports are
 typed services on `AssistantHostedToolContext`, and each tool checks that service

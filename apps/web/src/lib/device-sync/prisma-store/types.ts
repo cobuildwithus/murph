@@ -33,6 +33,7 @@ export interface HostedSignalRecord {
   traceId: string | null;
   eventType: string | null;
   resourceCategory: string | null;
+  sourceProviderSlug: string | null;
   reason: string | null;
   nextReconcileAt: string | null;
   revokeWarning: {
@@ -85,6 +86,7 @@ export interface HostedDeviceSyncDirtyConnectionAckRecord {
 
 export interface HostedDeviceSyncDueReconcileConnectionRecord {
   connectionId: string;
+  connectedAt: string;
   userId: string;
   provider: string;
   nextReconcileAt: string;
@@ -164,6 +166,7 @@ export interface CreateHostedSignalInput {
   traceId?: string | null;
   eventType?: string | null;
   resourceCategory?: string | null;
+  sourceProviderSlug?: string | null;
   reason?: string | null;
   nextReconcileAt?: string | null;
   revokeWarning?: {

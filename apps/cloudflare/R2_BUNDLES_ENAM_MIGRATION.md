@@ -1,5 +1,12 @@
 # Hosted R2 bundles: OC to ENAM migration
 
+> **Emergency frozen-window fallback only.** This command requires a fully
+> fenced source, exact mirror parity, and a writer-exclusive destination. It
+> must not be used for the live two-bucket bridge or after ENAM accepts writes.
+> The zero-user-visible-downtime operator sequence is documented in
+> `R2_BUNDLES_ENAM_ONLINE_CUTOVER.md`; its separate online command never prunes
+> destination-native data.
+
 This temporary operator runbook moves the hosted `BUNDLES` data from Oceania
 (`OC`) to Eastern North America (`ENAM`). Delete it and the migration command
 after the old buckets are retired.
@@ -50,6 +57,12 @@ source moves.
   requests. Each request uses R2's required leading-slash source, the listed
   source ETag as a precondition, metadata `COPY`, and Standard storage. There
   is no `sync` heuristic or multipart path.
+- R2 does not implement `x-amz-checksum-algorithm` for `CopyObject`, and
+  SHA-256 `FULL_OBJECT` is not an implemented R2 checksum combination. For this
+  migration, a destination `ChecksumSHA256` returned after `CopyObject` is
+  diagnostic only. The representative proof streams both objects under their
+  exact ETags and requires both body digests and copied `encryptedsha256`
+  metadata to equal the canonical v2 snapshot reference.
 - Objects at the single-copy limit, non-Standard objects, and multipart or
   non-MD5 ETags fail closed, as does any object still staged under a
   lifecycle-managed prefix.
@@ -336,33 +349,123 @@ pnpm --dir apps/cloudflare deploy:smoke
 
 Before production, require all three proofs:
 
-1. HEAD the same representative v2 snapshot in both buckets and compare
-   length, ETag, custom metadata, supported HTTP metadata, stored SHA-256, and
-   checksum type.
+1. HEAD the same representative v2 snapshot in both buckets. Compare length,
+   ETag, custom metadata, supported HTTP metadata, every returned checksum
+   field other than `ChecksumSHA256`, and checksum type. Then stream both
+   objects under their exact ETags and require each body SHA-256 plus both
+   copied `encryptedsha256` metadata values to equal
+   `snapshotRef.archive.encryptedObjectSha256` from the canonical workspace.
+   Also require the source `ChecksumSHA256` to encode that canonical digest.
+   Do not compare the destination `ChecksumSHA256`: R2 does not implement the
+   checksum-selection field for `CopyObject`, and its reported destination
+   value is not the body-integrity authority for this copy.
 2. Cold-restore that copied snapshot through the staging Worker.
 3. Write and cold-restore a fresh staging checkpoint from ENAM.
 
-Enter the private object key without terminal echo. This emits no key or
-metadata; do not use shell tracing:
+Enter the private object key and the canonical reference's lowercase
+`archive.encryptedObjectSha256` without terminal echo. This emits no key,
+metadata, object bytes, or digest; do not use shell tracing:
 
 ```bash
 (
   set -euo pipefail
+  umask 077
   read -r -s SNAPSHOT_KEY
+  read -r -s EXPECTED_ENCRYPTED_SHA256
+  case "$EXPECTED_ENCRYPTED_SHA256" in
+    (''|*[!0-9a-f]*)
+      echo "Canonical encrypted object SHA-256 must be 64 lowercase hex characters." >&2
+      exit 1
+      ;;
+  esac
+  test "${#EXPECTED_ENCRYPTED_SHA256}" -eq 64
+
   R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
   head_snapshot() {
     AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID" \
     AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY" \
       aws s3api head-object --bucket "$1" --key "$SNAPSHOT_KEY" \
         --checksum-mode ENABLED --endpoint-url "$R2_ENDPOINT" --region auto \
-        --output json --no-cli-pager | \
-      jq -Sc '{CacheControl,ChecksumCRC32,ChecksumCRC32C,ChecksumSHA1,ChecksumSHA256,ChecksumType,ContentDisposition,ContentEncoding,ContentLanguage,ContentLength,ContentType,ETag,Expires,Metadata}'
+        --output json --no-cli-pager | jq -Sc '.'
   }
+  stable_copy_head() {
+    jq -Sc \
+      '{CacheControl,ChecksumCRC32,ChecksumCRC32C,ChecksumSHA1,ChecksumType,ContentDisposition,ContentEncoding,ContentLanguage,ContentLength,ContentType,ETag,Expires,Metadata}'
+  }
+  get_snapshot() {
+    AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED \
+    AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID" \
+    AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY" \
+      aws s3api get-object --bucket "$1" --key "$SNAPSHOT_KEY" \
+        --if-match "$2" --endpoint-url "$R2_ENDPOINT" --region auto \
+        --no-cli-pager "$3" >/dev/null
+  }
+  hash_file() {
+    node -e '
+      const { createHash } = require("node:crypto");
+      const { createReadStream } = require("node:fs");
+      const hash = createHash("sha256");
+      const stream = createReadStream(process.argv[1]);
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("error", (error) => {
+        console.error(error.message);
+        process.exitCode = 1;
+      });
+      stream.on("end", () => process.stdout.write(hash.digest("hex")));
+    ' "$1"
+  }
+
   SOURCE_HEAD="$(head_snapshot "$PREVIEW_SOURCE_BUCKET")"
   DESTINATION_HEAD="$(head_snapshot "$PREVIEW_DESTINATION_BUCKET")"
   test -n "$SOURCE_HEAD"
   test -n "$DESTINATION_HEAD"
-  test "$SOURCE_HEAD" = "$DESTINATION_HEAD"
+  test "$(stable_copy_head <<<"$SOURCE_HEAD")" \
+    = "$(stable_copy_head <<<"$DESTINATION_HEAD")"
+
+  SOURCE_ETAG="$(jq -er '.ETag | strings | select(length > 0)' <<<"$SOURCE_HEAD")"
+  DESTINATION_ETAG="$(
+    jq -er '.ETag | strings | select(length > 0)' <<<"$DESTINATION_HEAD"
+  )"
+  test "$SOURCE_ETAG" = "$DESTINATION_ETAG"
+
+  SOURCE_METADATA_SHA256="$(
+    jq -er \
+      '.Metadata.encryptedsha256 | ascii_downcase | select(test("^[0-9a-f]{64}$"))' \
+      <<<"$SOURCE_HEAD"
+  )"
+  DESTINATION_METADATA_SHA256="$(
+    jq -er \
+      '.Metadata.encryptedsha256 | ascii_downcase | select(test("^[0-9a-f]{64}$"))' \
+      <<<"$DESTINATION_HEAD"
+  )"
+  test "$SOURCE_METADATA_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
+  test "$DESTINATION_METADATA_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
+
+  EXPECTED_CHECKSUM_BASE64="$(
+    node -e \
+      'process.stdout.write(Buffer.from(process.argv[1], "hex").toString("base64"))' \
+      "$EXPECTED_ENCRYPTED_SHA256"
+  )"
+  SOURCE_CHECKSUM_SHA256="$(
+    jq -er '.ChecksumSHA256 | strings | select(length > 0)' <<<"$SOURCE_HEAD"
+  )"
+  test "$SOURCE_CHECKSUM_SHA256" = "$EXPECTED_CHECKSUM_BASE64"
+
+  PROOF_DIR="$(mktemp -d)"
+  trap 'rm -rf -- "$PROOF_DIR"' EXIT
+  get_snapshot "$PREVIEW_SOURCE_BUCKET" "$SOURCE_ETAG" "$PROOF_DIR/source.enc"
+  get_snapshot \
+    "$PREVIEW_DESTINATION_BUCKET" \
+    "$DESTINATION_ETAG" \
+    "$PROOF_DIR/destination.enc"
+  SOURCE_BODY_SHA256="$(hash_file "$PROOF_DIR/source.enc")"
+  DESTINATION_BODY_SHA256="$(hash_file "$PROOF_DIR/destination.enc")"
+  test "$SOURCE_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
+  test "$DESTINATION_BODY_SHA256" = "$EXPECTED_ENCRYPTED_SHA256"
+
+  # Close the HEAD-to-GET race: neither object may change during the proof.
+  test "$(head_snapshot "$PREVIEW_SOURCE_BUCKET")" = "$SOURCE_HEAD"
+  test "$(head_snapshot "$PREVIEW_DESTINATION_BUCKET")" = "$DESTINATION_HEAD"
 )
 ```
 
@@ -464,9 +567,10 @@ from the two existing durable owners instead: the frozen source R2 inventory
 and canonical Postgres `hosted_member` rows.
 
 Before creating the destination, require the lifecycle-managed
-`hosted-email/messages/` and `hosted-meal-photos/images/` prefixes to contain
-zero objects. Copying one would restart its deletion backstop in ENAM, while
-dropping one could lose a pending import. If either prefix cannot be emptied,
+`hosted-email/messages/`, `hosted-private-media/images/`, and
+`hosted-meal-photos/images/` prefixes to contain zero objects. Copying one would
+restart its deletion backstop in ENAM, while dropping one could lose a pending
+import or an in-flight Linq avatar fetch. If any prefix cannot be emptied,
 rebook rather than copying or dropping its contents.
 
 Issue a temporary Object Read-only key scoped only to the OC source. Load it

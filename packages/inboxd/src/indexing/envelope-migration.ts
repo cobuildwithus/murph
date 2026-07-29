@@ -64,9 +64,15 @@ export interface InboxEnvelopeMigrationResult {
 export async function runInboxEnvelopeMigration(input: {
   apply?: boolean;
   maxFiles?: number;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<InboxEnvelopeMigrationResult> {
-  const detection = await detectInboxEnvelopeMigration(input.vaultRoot);
+  input.signal?.throwIfAborted();
+  const detection = await detectInboxEnvelopeMigration(
+    input.vaultRoot,
+    input.signal,
+  );
+  input.signal?.throwIfAborted();
   const mode = input.apply === true ? "apply" : "dry-run";
   const maxFiles = normalizeMaxFiles(input.maxFiles);
   const selected = detection.candidates.slice(0, maxFiles);
@@ -95,8 +101,10 @@ export async function runInboxEnvelopeMigration(input: {
   const selectedRawContents = await prepareSelectedMigrationRawContents(
     input.vaultRoot,
     selected,
+    input.signal,
   );
 
+  input.signal?.throwIfAborted();
   await applyCanonicalWriteBatch({
     vaultRoot: input.vaultRoot,
     operationType: "inbox_envelope_migration",
@@ -129,19 +137,28 @@ export async function runInboxEnvelopeMigration(input: {
   };
 }
 
-async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<MigrationDetection> {
-  const ownership = await readInboxCaptureOwnership(vaultRoot);
+async function detectInboxEnvelopeMigration(
+  vaultRoot: string,
+  signal?: AbortSignal | null,
+): Promise<MigrationDetection> {
+  signal?.throwIfAborted();
+  const ownership = await readInboxCaptureOwnership(vaultRoot, signal);
+  signal?.throwIfAborted();
   const retainedAttachments = await listInboxAttachmentRetentionRecords(vaultRoot);
-  const activeEnvelopePaths = await readActiveEnvelopePaths(vaultRoot);
+  signal?.throwIfAborted();
+  const activeEnvelopePaths = await readActiveEnvelopePaths(vaultRoot, signal);
+  signal?.throwIfAborted();
   const envelopePaths = (await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawInboxDirectory))
     .filter((relativePath) => relativePath.endsWith("/envelope.json"))
     .sort();
+  signal?.throwIfAborted();
   const candidates: MigrationCandidate[] = [];
   let activeOperationCount = 0;
   let mismatchCount = 0;
   let missingLedgerCount = 0;
 
   for (const relativePath of envelopePaths) {
+    signal?.throwIfAborted();
     if (activeEnvelopePaths.has(relativePath)) {
       activeOperationCount += 1;
       continue;
@@ -154,6 +171,7 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
     }
 
     const integrity = await safeStatAndHashVaultFile(vaultRoot, relativePath);
+    signal?.throwIfAborted();
     if (integrity.kind !== "ok") {
       mismatchCount += 1;
       continue;
@@ -165,7 +183,9 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
         relativePath,
         vaultRoot,
       });
+      signal?.throwIfAborted();
     } catch {
+      signal?.throwIfAborted();
       mismatchCount += 1;
       continue;
     }
@@ -195,6 +215,7 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
       || !(await hasValidMigrationEvidence({
         record: preparedRecord.record,
         retainedAttachments,
+        signal,
         vaultRoot,
       }))
     ) {
@@ -224,11 +245,16 @@ async function detectInboxEnvelopeMigration(vaultRoot: string): Promise<Migratio
 async function prepareSelectedMigrationRawContents(
   vaultRoot: string,
   selected: readonly MigrationCandidate[],
+  signal?: AbortSignal | null,
 ): Promise<CanonicalRawContentInput[]> {
-  const ownership = await readInboxCaptureOwnership(vaultRoot);
+  signal?.throwIfAborted();
+  const ownership = await readInboxCaptureOwnership(vaultRoot, signal);
+  signal?.throwIfAborted();
   const retainedAttachments = await listInboxAttachmentRetentionRecords(vaultRoot);
+  signal?.throwIfAborted();
   const rawContents: CanonicalRawContentInput[] = [];
   for (const candidate of selected) {
+    signal?.throwIfAborted();
     if (ownership.currentCaptureIds.has(candidate.migratedRecord.captureId)) {
       throw new TypeError(
         `Inbox capture "${candidate.migratedRecord.captureId}" gained a current owner before apply.`,
@@ -238,6 +264,7 @@ async function prepareSelectedMigrationRawContents(
       relativePath: candidate.relativePath,
       vaultRoot,
     });
+    signal?.throwIfAborted();
     if (!snapshot) {
       throw new TypeError(`Legacy inbox envelope "${candidate.relativePath}" disappeared before apply.`);
     }
@@ -253,6 +280,7 @@ async function prepareSelectedMigrationRawContents(
     if (!(await hasValidMigrationEvidence({
       record: prepared.record,
       retainedAttachments,
+      signal,
       vaultRoot,
     }))) {
       throw new TypeError(
@@ -266,19 +294,25 @@ async function prepareSelectedMigrationRawContents(
 
 async function readInboxCaptureOwnership(
   vaultRoot: string,
+  signal?: AbortSignal | null,
 ): Promise<{
   currentCaptureIds: Set<string>;
   legacyRecordsByEnvelopePath: Map<string, InboxCaptureRecord[]>;
 }> {
   const currentCaptureIds = new Set<string>();
   const legacyRecordsByEnvelopePath = new Map<string, InboxCaptureRecord[]>();
+  signal?.throwIfAborted();
   const ledgerPaths = await walkVaultFiles(vaultRoot, INBOX_CAPTURE_LEDGER_DIRECTORY, {
     extension: ".jsonl",
   });
+  signal?.throwIfAborted();
 
   for (const ledgerPath of ledgerPaths) {
+    signal?.throwIfAborted();
     const records = await readJsonlRecords({ relativePath: ledgerPath, vaultRoot });
+    signal?.throwIfAborted();
     for (const [index, value] of records.entries()) {
+      signal?.throwIfAborted();
       const record = assertContract<InboxCaptureRecord>(
         inboxCaptureRecordSchema,
         value,
@@ -299,13 +333,16 @@ async function readInboxCaptureOwnership(
 async function hasValidMigrationEvidence(input: {
   record: InboxCaptureRecord;
   retainedAttachments: Awaited<ReturnType<typeof listInboxAttachmentRetentionRecords>>;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<boolean> {
   for (const attachment of input.record.attachments) {
+    input.signal?.throwIfAborted();
     if (!attachment.storedPath) {
       continue;
     }
     const actual = await safeStatAndHashVaultFile(input.vaultRoot, attachment.storedPath);
+    input.signal?.throwIfAborted();
     if (actual.kind === "missing") {
       if (input.retainedAttachments.some((retained) =>
         retained.reason === "inbox_media_retention"
@@ -330,11 +367,19 @@ async function hasValidMigrationEvidence(input: {
   return true;
 }
 
-async function readActiveEnvelopePaths(vaultRoot: string): Promise<Set<string>> {
+async function readActiveEnvelopePaths(
+  vaultRoot: string,
+  signal?: AbortSignal | null,
+): Promise<Set<string>> {
   const active = new Set<string>();
-  for (const metadataPath of await listWriteOperationMetadataPaths(vaultRoot)) {
+  signal?.throwIfAborted();
+  const metadataPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  signal?.throwIfAborted();
+  for (const metadataPath of metadataPaths) {
+    signal?.throwIfAborted();
     try {
       const operation = await readStoredWriteOperation(vaultRoot, metadataPath);
+      signal?.throwIfAborted();
       if (operation.status === "committed" || operation.status === "rolled_back") {
         continue;
       }
@@ -348,12 +393,17 @@ async function readActiveEnvelopePaths(vaultRoot: string): Promise<Set<string>> 
         }
       }
     } catch {
+      signal?.throwIfAborted();
       // Invalid operation metadata is already reported by vault validation. It
       // must not make an otherwise unrelated envelope eligible for deletion.
-      return new Set(
-        (await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawInboxDirectory))
-          .filter((relativePath) => relativePath.endsWith("/envelope.json")),
+      const envelopePaths = await walkVaultFiles(
+        vaultRoot,
+        VAULT_LAYOUT.rawInboxDirectory,
       );
+      signal?.throwIfAborted();
+      return new Set(envelopePaths.filter(
+        (relativePath) => relativePath.endsWith("/envelope.json"),
+      ));
     }
   }
   return active;

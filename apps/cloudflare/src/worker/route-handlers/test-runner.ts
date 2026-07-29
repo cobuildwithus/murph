@@ -53,9 +53,6 @@ interface HostedLocalTestRunnerContainerStubLike {
   armGeneratedImageProviderBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
-  armGeneratedImageUploadTypeErrorForTest?(
-    input: { userId: string },
-  ): Promise<{ ok: true }>;
   armCanonicalCheckpointLostAckForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
@@ -103,15 +100,6 @@ function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
 } {
   return "armCanonicalCheckpointLostAckForTest" in stub
     && typeof stub.armCanonicalCheckpointLostAckForTest === "function";
-}
-
-function hasHostedLocalTestRunnerContainerGeneratedImageUploadTypeErrorControl(
-  stub: object,
-): stub is HostedLocalTestRunnerContainerStubLike & {
-  armGeneratedImageUploadTypeErrorForTest(input: { userId: string }): Promise<{ ok: true }>;
-} {
-  return "armGeneratedImageUploadTypeErrorForTest" in stub
-    && typeof stub.armGeneratedImageUploadTypeErrorForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(
@@ -244,22 +232,6 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     ),
     methods: ["POST"],
     name: "test-release-generated-image-provider-barrier",
-    wrongMethodResponse: "not-found",
-  },
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestGeneratedImageUploadTypeErrorRoute(context, params.userId);
-    },
-    match: matchHostedLocalTestUserRoute(
-      "/__test/users/",
-      "/generated-image-upload-type-error",
-    ),
-    methods: ["POST"],
-    name: "test-generated-image-upload-type-error",
     wrongMethodResponse: "not-found",
   },
   {
@@ -491,41 +463,6 @@ export async function handleTestCanonicalCheckpointLostAckRoute(
     );
   }
   return json(await stub.armCanonicalCheckpointLostAckForTest({ userId }));
-}
-
-export async function handleTestGeneratedImageUploadTypeErrorRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-generated-image-upload-type-error",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
-  if (!hasHostedLocalTestRunnerContainerGeneratedImageUploadTypeErrorControl(stub)) {
-    throw new Error(
-      "Hosted runner container generated-image upload TypeError test RPC is unavailable.",
-    );
-  }
-  return json(await stub.armGeneratedImageUploadTypeErrorForTest({ userId }));
 }
 
 async function handleTestGeneratedImageProviderBarrierRoute(

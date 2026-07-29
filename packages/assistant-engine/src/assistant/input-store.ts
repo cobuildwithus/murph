@@ -29,6 +29,9 @@ import {
   ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
   normalizeAssistantAttachmentArtifactPath,
 } from './attachment-artifact-paths.js'
+import {
+  retireHostedMailboxAssistantInputItemContentAtPaths,
+} from './hosted-mailbox-input-items.js'
 
 export const ASSISTANT_INPUT_EVENT_SCHEMA = 'murph.assistant-input-event.v1'
 export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
@@ -377,6 +380,11 @@ const assistantInputTelegramSourceMetadataSchema = z
 const assistantInputLinqSourceMetadataSchema = z
   .object({
     affirmativeReaction: z.literal(true).optional(),
+    editedSourceInputId: z
+      .string()
+      .regex(/^ain_[0-9a-f]{32}$/u)
+      .optional(),
+    editedTextPartIndex: z.number().int().min(0).max(2_147_483_647).optional(),
     externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
@@ -427,6 +435,9 @@ const assistantInputEventRecordSchema = z
     ),
     content: assistantInputContentSchema,
     conversation: assistantInputConversationRefSchema.nullable().default(null),
+    contentRetiredAt: safeNullableAssistantInputTimestampSchema(
+      'contentRetiredAt',
+    ).optional(),
     cursor: assistantInputCursorSchema,
     idempotencyKey: z
       .string()
@@ -580,6 +591,71 @@ export async function readAssistantInputEvent(input: {
     inputId: input.inputId,
     paths,
   })
+}
+
+export async function retireAssistantInputEventContent(input: {
+  inputId: string
+  now?: Date
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<{ retired: boolean; event: AssistantInputEventRecord | null }> {
+  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    input.signal?.throwIfAborted()
+    await ensureAssistantInputEventStore(paths)
+    const existing = await readAssistantInputEventAtPaths({
+      inputId: input.inputId,
+      paths,
+    })
+    input.signal?.throwIfAborted()
+    if (!existing) {
+      return { event: existing, retired: false }
+    }
+    // The mailbox sidecar carries one optional quoted-message field that is
+    // intentionally absent from the input event. Clear it first under the same
+    // write lock. If the later event write fails, the next pass can safely
+    // retry; the inverse order could strand the quote behind contentRetiredAt.
+    await retireHostedMailboxAssistantInputItemContentAtPaths({
+      inputId: existing.inputId,
+      paths,
+      signal: input.signal,
+    })
+    if (existing.contentRetiredAt) {
+      return { event: existing, retired: false }
+    }
+
+    const retiredAt = resolveTimestamp(input.now)
+    const retired = assistantInputEventRecordSchema.parse({
+      ...existing,
+      attachmentEvidence: {
+        ...existing.attachmentEvidence,
+        attachments: existing.attachmentEvidence.attachments.map(
+          (attachment) => ({
+            ...attachment,
+            derived: null,
+            inlineFragments: [],
+            raw: null,
+          }),
+        ),
+      },
+      content: redactAssistantInputContent(existing.content),
+      contentRetiredAt: retiredAt,
+      sourceMetadata: redactAssistantInputSourceMetadata(
+        existing.sourceMetadata,
+      ),
+      updatedAt: retiredAt,
+    })
+    await writeAssistantStateVersionedJson({
+      filePath: resolveAssistantInputEventPath({
+        inputId: retired.inputId,
+        paths,
+      }),
+      schema: ASSISTANT_INPUT_EVENT_SCHEMA,
+      schemaVersion: ASSISTANT_INPUT_EVENT_SCHEMA_VERSION,
+      value: retired,
+    })
+    input.signal?.throwIfAborted()
+    return { event: retired, retired: true }
+  }, input.signal)
 }
 
 export async function listAssistantInputEvents(input: {
@@ -967,6 +1043,21 @@ function assertAssistantInputEventReplayCompatible(input: {
   if (stableStringify(existingIdentity) === stableStringify(nextIdentity)) {
     return
   }
+  if (
+    input.existing.contentRetiredAt
+    && stableStringify(existingIdentity)
+      === stableStringify(
+        assistantInputEventImmutableIdentity({
+          ...input.next,
+          content: redactAssistantInputContent(input.next.content),
+          sourceMetadata: redactAssistantInputSourceMetadata(
+            input.next.sourceMetadata,
+          ),
+        }),
+      )
+  ) {
+    return
+  }
   const replayCompatibilityIdentity =
     assistantInputEventReplayCompatibilityIdentity({
       existing: input.existing,
@@ -983,6 +1074,28 @@ function assertAssistantInputEventReplayCompatible(input: {
       inputId: input.existing.inputId,
     },
   )
+}
+
+function redactAssistantInputContent(
+  content: AssistantInputContent,
+): AssistantInputContent {
+  return {
+    ...content,
+    text: null,
+    transcriptText: null,
+    userMessageContent: null,
+  }
+}
+
+function redactAssistantInputSourceMetadata(
+  metadata: AssistantInputSourceMetadata,
+): AssistantInputSourceMetadata {
+  return metadata?.kind === 'telegram'
+    ? {
+        ...metadata,
+        replyContext: null,
+      }
+    : metadata
 }
 
 function assistantInputEventReplayCompatibilityIdentity(input: {

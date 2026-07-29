@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 // pages here so the gate covers them.
 const ROUTES = [
   "/",
+  "/clubs",
   "/search",
   "/security",
   "/pitch",
@@ -145,6 +146,46 @@ for (const route of ROUTES) {
   }
 }
 
+test("clubs stays reachable through the global navigation at every breakpoint", async ({
+  page,
+}) => {
+  for (const width of [768, 900, 1023, 1024] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route("**/*", (route) => {
+      if (isLoopbackUrl(route.request().url())) {
+        route.continue();
+      } else {
+        route.abort();
+      }
+    });
+
+    const response = await page.goto("/clubs", { waitUntil: "load" });
+    expect(response?.status(), `/clubs should respond 200 at ${width}px`).toBe(
+      200,
+    );
+
+    const navigation = page.locator("nav.fixed").first();
+    const directClubsLink = navigation.locator('a[href="/clubs"]');
+    const menuTrigger = navigation.getByRole("button", { name: "Open menu" });
+
+    if (width < 1024) {
+      await expect(directClubsLink).toBeHidden();
+      await expect(menuTrigger).toBeVisible();
+      await menuTrigger.click();
+      await expect(
+        page.getByRole("dialog").getByRole("link", {
+          name: "Clubs",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    } else {
+      await expect(directClubsLink).toBeVisible();
+      await expect(menuTrigger).toBeHidden();
+    }
+  }
+});
+
 test("homepage dense feature findings honor their phone breakpoints", async ({
   page,
 }) => {
@@ -246,7 +287,7 @@ for (const width of [768, 1280] as const) {
       '[data-design-state="active-with-credit"]',
     );
     const card = activeState.locator(
-      '[aria-label="Pulse included AI usage"]',
+      '[aria-label="Pulse AI usage"]',
     );
     const trigger = card.getByRole("button", { name: "Add usage" });
     await expect(study.locator("[inert]")).toHaveCount(3);
@@ -254,7 +295,7 @@ for (const width of [768, 1280] as const) {
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(
-        '[data-design-state="active-with-credit"] [aria-label="Pulse included AI usage"]',
+        '[data-design-state="active-with-credit"] [aria-label="Pulse AI usage"]',
       );
       const button = Array.from(owner?.querySelectorAll("button") ?? []).find(
         (candidate) => candidate.textContent?.trim() === "Add usage",

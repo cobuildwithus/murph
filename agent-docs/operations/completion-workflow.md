@@ -1,9 +1,9 @@
 # Completion Workflow
 
-Last verified: 2026-07-26
+Last verified: 2026-07-29
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
-Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
+Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
 Prompt, frontend, and coverage audits run together in one preliminary
 `completion-specialists` ReviewGPT pass against an exact pushed PR head. That
@@ -55,7 +55,7 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
 preliminary specialist ReviewGPT pass when any lens applies, any required local
 `product-experience-review`, any required Claude Code UI double-check, parent
-final review, plan/ledger closure, and scoped commit. User-facing frontend UI
+final review, plan closure, and scoped commit. User-facing frontend UI
 work also requires the production component or section on the appropriate
 `/design` catalog tab and hosted desktop and mobile screenshots from that tab
 in the PR;
@@ -118,10 +118,15 @@ become fallback product-decision owners.
 ## Sequence
 
 1. Finish the functional implementation first.
-   During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package, app, or low-risk repo-internal workflow/tooling work, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
-   A truthful `pnpm test:diff <path ...>` already typechecks the touched owners and reverse dependents; do not run a separate root `pnpm typecheck` before it unless the verification matrix selects the full-workspace fallback.
-   Use those canonical commands unchanged. Automatic execution stays local; use explicit `MURPH_VERIFY_EXECUTOR=crabbox` only for the documented admission fallback or the required post-landing trust-root proof. Use the `:local` aliases only for executor diagnosis or an explicitly environment-bound check.
-   If a required canonical command spends 10 continuous minutes waiting only for the exclusive local shared-host slot, stop that task-owned waiter and rerun the same canonical command through Crabbox with `MURPH_VERIFY_EXECUTOR=crabbox`. The 10-minute limit covers admission wait only, not active verification. Never leave local and remote copies running together or fall back to another unbounded local wait. Follow the exact ownership, Git-state, secret-free environment, evidence, and cleanup rules in the verification doc.
+   During local iteration, run the smallest focused test, typecheck/lint/build
+   check, or direct scenario that exercises the changed behavior. For PR-bound
+   work, do not run `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or
+   `pnpm verify:acceptance` merely to open or update the PR; exact-head GitHub
+   Actions own the broad suite. If CI fails, reproduce its failing owner or
+   scenario with the narrowest useful local command and expand only when the
+   evidence requires it. Before a direct push to `main` or another shared
+   default branch, reconcile the exact candidate and run
+   `pnpm verify:acceptance`.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
@@ -129,18 +134,24 @@ become fallback product-decision owners.
    - meaning-preserving `apps/web` typo, punctuation, grammar, or equivalent localization corrections may use the tiny copy-only fast path
    - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, run local `product-experience-review`
    - user-facing `apps/web` UI changes outside the copy-only fast path activate the frontend lens and require redacted rendered desktop/mobile evidence in that pass
-   - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage activate the coverage lens
+   - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
    - any product-owned dimension separately adds local `product-experience-review`, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the later cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
-5. Run the coverage-bearing verification command chosen from the verification doc once implementation is stable enough to produce a truthful signal. Prefer `pnpm test:diff <path ...>` when it covers the touched owner truthfully; otherwise run the edited owner package/app coverage command. Retain Crabbox/Testbox evidence when the canonical command dispatches remotely.
+5. Once implementation is stable, run the focused local proof selected from the
+   verification doc. Record the exact commands and outcomes. For PR-bound work,
+   broad coverage remains pending until exact-head CI completes; for a direct
+   shared-default push, run `pnpm verify:acceptance`.
 6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Run exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not three audits.
 9. Triage every preliminary finding locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned review thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted prompt/frontend findings in the parent, rerun focused proof, commit, and push the resulting candidate. Do not rerun the preliminary pass merely because its findings caused corrections; the parent's final review and any applicable final ReviewGPT full-patch gate review the resulting diff.
 10. Run the final review locally as the parent agent after preliminary findings are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent.
 11. Enter the review-resolution loop below for every required local or preliminary audit output. Completion means there are no unresolved accepted/actionable findings, not merely that a pass ran.
-12. Run or rerun the required canonical checks after implementation and preliminary remediation are stable. This keeps final proof on the same truthful command surface regardless of whether the executor is local or Crabbox.
-13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the ledger row is removed and the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
+12. Rerun the focused local checks affected by preliminary remediation, then
+    push so required CI evaluates the exact new PR head. If CI fails, diagnose
+    from the narrowest reproducer outward. For a direct shared-default push,
+    rerun `pnpm verify:acceptance` against the final reconciled candidate.
+13. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
 14. When the final ReviewGPT gate is selected, start its immutable round-one baseline only now, after preliminary remediation, parent final review, final verification, plan closure, and the resulting push. Follow `agent-docs/operations/pr-reviewgpt-loop.md` until the exact patch returns `ROUND_OUTCOME: PASS` with zero accepted findings. Run each final-gate round concurrently with CI. Use `Final ReviewGPT Eligibility` above for proportional exemptions; never combine this final gate with local `deep-review`.
 15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
@@ -182,9 +193,51 @@ Required:
   why the change is necessary and name the regression proof. If none exist,
   write `None`. Do not hide a cross-cutting behavior change inside the ordinary
   file summary.
+- **Architecture and reuse.** Use four concrete bullets labeled `Existing
+  systems reused`, `New logic`, `New abstractions`, and `Complexity
+  intentionally avoided`. Describe the final diff rather than the work process.
+  If no abstraction was added, say so and explain which existing contract was
+  sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
+  body workflow checks the rendered section on every PR.
+- **Hot reply path impact.** State whether the PR changes the
+  `Foreground Reply Critical Path` defined in
+  `docs/contracts/00-invariants.md`: durable acceptance of a current
+  conversation message through provider start and durable reply handoff. If it
+  does not, write `Not applicable` and give the reason. If it does, list every
+  database call, network or provider call, and other awaited operation added or
+  moved onto that path. For each call, state its count at the maximum admitted
+  cardinality, whether it runs serially or in parallel, its timeout, retry, and
+  fallback behavior, and its expected or measured latency. Include before/after
+  call counts and focused trace, benchmark, or deterministic call-count proof.
+- **Murph initial provider input impact.** Report the complete first
+  provider-visible input assembled by Murph and Codex for individual and group
+  Murph separately. A provider-input-affecting PR must render the PR base and
+  head with identical representative inputs that exercise the changed path and
+  the actual target model/tool mode. Measure the final request boundary, not
+  only authored prompt files: include assembled system/developer/user messages,
+  eager tool definitions and argument schemas, deferred-tool metadata visible
+  to the provider, Codex-generated code-mode or tool-search guidance, and other
+  fixed provider-visible wrappers. Exclude transport-only metadata only when
+  the measurement names those exclusions and applies them identically.
+  Record absolute base and head input-token totals using the target model's
+  named tokenizer/version, signed token delta, signed percentage change
+  (`delta / base * 100`), absolute UTF-8 byte totals over the same included
+  fields, and signed byte delta for each runtime. Attribute the change among
+  assembled instructions, tool/schema/generated guidance, and other
+  provider-visible input so a zero authored-prompt delta cannot hide tool or
+  adapter growth. Name the changed files, builders, schemas, configuration, or
+  generated layers and the base/head refs, fixtures, model/tool mode, command
+  or deterministic request-capture method, included fields, and exclusions.
+  Changes to prompt builders or text, dynamic-tool descriptions/schemas/
+  availability/deferral, skills rendered into instructions, Codex version or
+  configuration, model tool mode, or provider-request assembly all trigger
+  this measurement. If none of those surfaces changed, write `Not applicable`
+  for both runtimes and explain why; do not claim a measured zero without
+  rendering the complete provider-visible input.
 - **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
   `applicable` or `not applicable` with one short reason each. For coverage,
-  name the canonical coverage-bearing command and current outcome. For
+  name the focused local proof and the current exact-head CI status, including
+  `pending` when the preliminary pass starts concurrently with CI. For
   frontend, name the redacted desktop/mobile rendered-evidence files packaged
   for ReviewGPT and the states/viewports they prove; write `Not applicable`
   only when the frontend lens does not trigger. Do not add the immutable
@@ -401,7 +454,7 @@ For each required local audit subagent, provide:
 - Current working-tree context and explicit review boundaries.
 - The declared review-only action mode. No audit worker may edit files, run
   commit helpers, or create commits.
-- Instruction to read `COORDINATION_LEDGER.md`, honor any explicit exclusive/refactor notes, and otherwise work carefully on top of overlapping rows.
+- Instruction to stay within the declared task and review boundaries and avoid unrelated worktree changes.
 
 For the required `product-experience-review` pass, also provide:
 
@@ -433,7 +486,7 @@ The preliminary specialist pass receives one exact pushed-head packet through
 - the PR intent contract and full current PR diff;
 - prompt, frontend, and coverage marked `applicable` or `not applicable` with
   one reason each;
-- the exact coverage-bearing command and outcome;
+- the exact focused local proof and current exact-head CI status;
 - the affected prompt stack and tool descriptions when the prompt lens applies;
 - redacted desktop/mobile rendered evidence for every touched frontend state and
   viewport when the frontend lens applies;

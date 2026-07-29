@@ -177,7 +177,12 @@ export function createCloudflareEffectsPort(input: {
       ? {
           async assertExternalThreadRouteAuthority(authority, context) {
             const payload = await fetchHostedWebControlPlaneJson({
-              body: authority,
+              body: context?.assistantAskCompletion
+                ? {
+                    assistantAskCompletion: context.assistantAskCompletion,
+                    authority,
+                  }
+                : authority,
               boundUserId: input.boundUserId,
               description: "Hosted external thread route authority assertion",
               fetchImpl: input.fetchImpl,
@@ -190,16 +195,26 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+            const assistantAskFallbackRequired =
+              (payload as { assistantAskFallbackRequired?: unknown } | null)
+                ?.assistantAskFallbackRequired;
             if (
               !payload
               || typeof payload !== "object"
               || Array.isArray(payload)
               || (payload as { authorized?: unknown }).authorized !== true
+              || (
+                assistantAskFallbackRequired !== undefined
+                && typeof assistantAskFallbackRequired !== "boolean"
+              )
             ) {
               throw new TypeError(
                 "Hosted external thread route authority response is invalid.",
               );
             }
+            return typeof assistantAskFallbackRequired === "boolean"
+              ? { assistantAskFallbackRequired }
+              : undefined;
           },
           async resolveCurrentVerifiedEmailRecipient(context) {
             const payload = await fetchHostedWebControlPlaneJson({
@@ -336,7 +351,12 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const target = readOptionalStringField(targetOverride, "target");
   const targetKind = readOptionalStringField(targetOverride, "targetKind");
   if (target && targetKind === "thread") {
+    const conversationThreadId = readOptionalStringField(
+      targetOverride,
+      "conversationThreadId",
+    );
     result.targetOverride = {
+      ...(conversationThreadId ? { conversationThreadId } : {}),
       target,
       targetKind,
     };

@@ -731,10 +731,20 @@ export interface HostedMailboxLaneConsumed {
   lane: HostedMailboxLane;
 }
 
+export interface HostedGroupRunningBitProjection {
+  expiresAt: string;
+  publicAlias: string | null;
+  requestedBit: string;
+  schema: "murph.group-sponsorship-bit.v1";
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
+  // Optional for consumer-first rollout. It is Web-owned, expiring group
+  // context and is attached only to fresh route-authorized group inputs.
+  groupRunningBit?: HostedGroupRunningBitProjection | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -755,6 +765,7 @@ export type HostedRuntimeDeviceSyncBridgeKind =
 
 export interface HostedRuntimeDeviceSyncWakeBridgeEnvelope {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
@@ -971,6 +982,55 @@ export interface HostedRuntimeGroupUsageStatus {
   remainingPercent?: number;
 }
 
+export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
+  "new_person_activation_v1",
+  "active_group_v1",
+] as const;
+
+export type HostedUsageReferralPolicyCode =
+  (typeof HOSTED_USAGE_REFERRAL_POLICY_CODES)[number];
+
+export interface HostedRuntimeUsageReferralSnapshot {
+  active: {
+    destinationKind: "group" | "personal";
+    expiresAt: string;
+    policyCode: HostedUsageReferralPolicyCode;
+    rewardLabel: string;
+    state: "armed" | "target_bound";
+  } | null;
+  availablePolicies: Array<{
+    code: HostedUsageReferralPolicyCode;
+    requirementsLabel: string;
+    rewardLabel: string;
+  }>;
+  trialCreditNotice: string | null;
+}
+
+export interface HostedRuntimeGroupToolSenderContext {
+  /**
+   * Trusted current-turn sender evidence injected by the hosted runtime. The
+   * model never supplies these fields, and exactly one provider namespace may
+   * be present.
+   */
+  linqSenderHandles?: readonly string[];
+  telegramSenderHandles?: readonly string[];
+}
+
+export interface HostedRuntimeUsageReferralSourceConversation {
+  channel: "linq" | "telegram";
+  threadId: string;
+  threadIsDirect: boolean;
+}
+
+export interface HostedRuntimeUsageReferralSourceContext {
+  /**
+   * Blinded current-conversation locator injected by the hosted runtime. Web
+   * persists it only for a personal reward so its celebration cannot drift to
+   * another direct channel or a newly bound provider conversation.
+   */
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
+}
+
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 
 export interface HostedRuntimeGroupMembershipSummary {
@@ -982,6 +1042,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
+  sponsorshipUrl: string | null;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
@@ -1016,6 +1077,93 @@ export interface HostedRuntimeGroupUpdateDisplayNameRequest {
 
 export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
+}
+
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
+  "https://murph-hosted.cobuildwithus.workers.dev";
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
+  "/private-media/v1/";
+const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
+
+export function isHostedRuntimePrivateImageDeliveryUrl(
+  url: URL,
+  expectedOrigin = HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+): boolean {
+  if (isLegacyHostedRuntimePrivateImageDeliveryUrl(url)) {
+    return true;
+  }
+  let normalizedExpectedOrigin: string;
+  try {
+    const parsedExpectedOrigin = new URL(expectedOrigin);
+    if (
+      parsedExpectedOrigin.username
+      || parsedExpectedOrigin.password
+      || parsedExpectedOrigin.pathname !== "/"
+      || parsedExpectedOrigin.search
+      || parsedExpectedOrigin.hash
+    ) {
+      return false;
+    }
+    normalizedExpectedOrigin = parsedExpectedOrigin.origin;
+  } catch {
+    return false;
+  }
+  if (
+    url.origin !== normalizedExpectedOrigin
+    || url.username
+    || url.password
+    || url.hash
+    || !HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN.test(url.pathname)
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 1
+    || entries.filter(([key]) => key === "exp").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt));
+}
+
+function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  if (
+    url.protocol !== "https:"
+    || url.hostname !== "imagedelivery.net"
+    || url.port
+    || url.username
+    || url.password
+    || url.hash
+    || pathSegments.length < 3
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (entries.length === 0) {
+    const pathAndSuffix = url.href.slice(url.origin.length);
+    return /^\/[A-Za-z0-9_-]{1,256}\/[A-Za-z0-9_-]{1,256}\/public$/u
+      .test(pathAndSuffix);
+  }
+  if (
+    entries.length !== 2
+    || entries.filter(([key]) => key === "exp").length !== 1
+    || entries.filter(([key]) => key === "sig").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  const signature = url.searchParams.get("sig");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt))
+    && signature !== null
+    && /^[0-9a-f]{64}$/u.test(signature);
 }
 
 /**
@@ -1113,6 +1261,13 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | {
+      action: "ask_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1126,7 +1281,15 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "read_chat_name" }
   | { action: "read_usage" }
+  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "arm_usage_referral";
+      policyCode: HostedUsageReferralPolicyCode;
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
+  | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";
       /**
@@ -1184,6 +1347,7 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
+  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";
@@ -1204,6 +1368,17 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_chat_name";
+      result:
+        | { displayName: string; status: "ok" }
+        | { displayName: null; status: "none" }
+        | {
+            displayName: null;
+            status: "unavailable";
+            unavailableReason: string;
+          };
     }
   | {
       action: "read_usage";
@@ -1228,6 +1403,23 @@ export type HostedRuntimeGroupToolResponse =
             status: "unavailable";
             unavailableReason: string;
             memberships: null;
+          };
+    }
+  | {
+      action:
+        | "arm_usage_referral"
+        | "cancel_usage_referral"
+        | "read_usage_referral";
+      result:
+        | {
+            outcome: "armed" | "canceled" | "read";
+            referral: HostedRuntimeUsageReferralSnapshot;
+            status: "ok";
+          }
+        | {
+            referral: null;
+            status: "unavailable";
+            unavailableReason: string;
           };
     }
   | {
@@ -1512,6 +1704,22 @@ export type HostedRuntimeFamilyPlanToolResponse =
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
     };
 
+export interface HostedRuntimeIMessageContactToolRequest {
+  assistantInputId: string;
+}
+
+export type HostedRuntimeIMessageContactToolResponse =
+  | {
+      phoneNumber: string;
+      status: "assigned" | "existing";
+      verifiedSenderPhoneHint: string;
+    }
+  | {
+      phoneNumber: null;
+      status: "identity_required" | "unavailable";
+      verifiedSenderPhoneHint: null;
+    };
+
 export type HostedRuntimeAssistantConfigurationToolRequest =
   | {
       action: "read";
@@ -1630,6 +1838,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runtime_phase_started",
   "workspace_restore_done",
   "mailbox_import_done",
+  "checkpoint_publication_expected_by",
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
@@ -1637,6 +1846,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
+  "terminal_non_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -1752,6 +1962,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqTypingAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
+    terminalNonReplyCommittedAtEpochMs?: number;
+    checkpointPublicationExpectedByEpochMs?: number;
+    runtimeLeaseGeneration?: string;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1879,6 +2092,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "linqTypingAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
+    "terminalNonReplyCommittedAtEpochMs",
+    "checkpointPublicationExpectedByEpochMs",
+    "runtimeLeaseGeneration",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -1909,7 +2125,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
-export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
@@ -2137,6 +2353,11 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return typeof value === "string"
+      && value.length <= 20
+      && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";
   }
@@ -2180,6 +2401,7 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
 export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
   assistantInputIds: string[];
   at: string;
+  checkpointPublicationExpectedBy?: string | null;
   milestone: HostedRuntimeAssistantMilestone;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;
@@ -2472,6 +2694,11 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
+  r2Cutover?: {
+    coexisting: boolean;
+    phase: "destination_active" | "source_active";
+    protocolVersion: string;
+  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

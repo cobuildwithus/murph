@@ -228,7 +228,6 @@ export async function executeCodexAssistantTurnAttempt(
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
-    hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
@@ -274,8 +273,8 @@ export async function executeCodexAssistantTurnAttempt(
       : {}),
     permissions: input.permissions ?? null,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    requireHostedGeneratedImageUploader:
-      input.requireGeneratedImageUploader ?? false,
+    requireHostedPrivateImageDelivery:
+      input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
@@ -395,6 +394,8 @@ export async function executeCodexAssistantTurnAttempt(
     rawEvents: result.jsonEvents,
     serviceTier: input.serviceTier ?? null,
   })
+  const productFeedbackCandidate =
+    input.productFeedbackRecorder?.readProductFeedback() ?? null
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
@@ -428,6 +429,11 @@ export async function executeCodexAssistantTurnAttempt(
           ? { targetInputId: segment.targetInputId }
           : {}),
       })),
+      ...(productFeedbackCandidate
+        ? {
+            productFeedbackCandidate,
+          }
+        : {}),
       responseMedia: result.responseMedia,
       stderr: result.stderr,
       stdout: result.stdout,
