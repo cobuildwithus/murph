@@ -194,6 +194,7 @@ declare module 'incur' {
       'knowledge lint': { args: {}; options: { requestId?: string } }
       'knowledge list': { args: {}; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
       'knowledge log tail': { args: {}; options: { requestId?: string; limit: number } }
+      'knowledge score-challenge': { args: {}; options: { input: string } }
       'knowledge search': { args: { query: string }; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
       'knowledge show': { args: { slug: string }; options: { requestId?: string } }
       'knowledge upsert': { args: {}; options: { requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }

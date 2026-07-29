@@ -234,9 +234,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     ),
   );
   assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.doesNotMatch(config, /direct_only_tool_namespaces/u);
   assert.match(
     config,
-    /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["murph"\]/u,
+    /\[features\.current_time_reminder\]\nenabled = true\nclock_source = "system"\ndelivery_mode = "after_user_or_tool_output"\nreminder_interval_seconds = 60/u,
   );
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
@@ -890,6 +891,15 @@ testHostedCodexAuthE2e(
           .slice(0, fixedRequestCount)
           .some((request) => /hello hosted auth regression/u.test(request)),
       );
+      const currentTimeReminders = requests
+        .slice(0, fixedRequestCount)
+        .flatMap(
+          (request) =>
+            request.match(
+              /"role":"developer","content":\[\{"type":"input_text","text":"It is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\."\}\]/gu,
+            ) ?? [],
+        );
+      assert.equal(currentTimeReminders.length, 1);
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -1441,8 +1451,11 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "plugins = false",
       "memories = true",
       "",
-      "[features.code_mode]",
-      'direct_only_tool_namespaces = ["murph"]',
+      "[features.current_time_reminder]",
+      "enabled = true",
+      'clock_source = "system"',
+      'delivery_mode = "after_user_or_tool_output"',
+      "reminder_interval_seconds = 60",
       "",
       "# This table owns enablement and the proactive per-turn mode/tool hints.",
       "# A CLI boolean override would replace the table and silently drop them.",

@@ -1,7 +1,6 @@
 # Verification And Runtime
 
 Last verified: 2026-07-29
-
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -26,6 +25,14 @@ The delivery path decides who owns broad verification:
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+For hosted Linq weighted line-planning changes, the focused owner proof is the
+hosted-web Vitest slice covering routing policy, on-demand line load, home
+routing, group outreach, canonical thread-route refresh/repair, the bounded
+account-projection backfill, and the production migration guard. Keep the
+5,000 assignment target assertions separate from the existing 7,000 provider
+traffic guideline; this verification slice must not add a runtime traffic-cap
+expectation.
 
 ## Verification Execution Location
 
@@ -359,6 +366,10 @@ pass, the review-only Fable or Opus UI pass, and the separate final ReviewGPT ga
 before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
+
+The pull-request body proof workflow requires the four concrete `Architecture
+and reuse` bullets on every PR. It validates rendered GitHub Markdown so hidden
+comments, code blocks, and raw HTML cannot satisfy the requirement.
 
 For every user-facing `apps/web` UI diff, verification also includes
 `pnpm test:frontend-design-proof`, a production-component update on

@@ -5,7 +5,6 @@ import {
 } from "./contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
@@ -30,6 +29,10 @@ import {
   listHostedLinqAssignableHomeLines,
   listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
+import {
+  buildHostedLinqAssignmentPlanningMessages,
+  readHostedLinqLinePlanningLoadSnapshot,
+} from "./linq-line-planning-load";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
@@ -609,14 +612,33 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   }
 
   const now = input.now ?? new Date();
-  const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
+  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
+  const preferredInboundLine = input.reservationKind === "inbound"
+    ? input.lines.find((line) => line.phoneNumber === preferredRecipientPhone)
+    : null;
+
+  // A healthy contacted line owns member-initiated first contact. Weighted
+  // planning balances proactive placement and degraded-line fallback; it must
+  // never turn a reciprocal inbound conversation into a cross-line send that
+  // can be suppressed by proactive pacing.
+  if (preferredInboundLine) {
+    return {
+      assignedAt: now,
+      line: preferredInboundLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
+  const planningLoadSnapshot = await readHostedLinqLinePlanningLoadSnapshot({
     ...(input.excludedActiveMemberId
-      ? { excludedMemberId: input.excludedActiveMemberId }
+      ? { excludedActiveMemberId: input.excludedActiveMemberId }
       : {}),
+    lines: input.lines,
     now,
     prisma: input.prisma,
-    recipientPhones,
   });
+  const plannedMessagesByRecipientPhone =
+    buildHostedLinqAssignmentPlanningMessages(planningLoadSnapshot);
   const dayUtc = startOfUtcDay(now);
   const proactiveConversationCounts = new Map(
     input.lines.map((line) => [
@@ -627,30 +649,18 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     ]),
   );
   const preferredOrFallbackLine = chooseHostedLinqHomeLine({
-    activeMembersByRecipientPhone,
     ignoreDailyNewConversationLimit: true,
     lines: input.lines,
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
+    plannedMessagesByRecipientPhone,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
   });
-  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
-
-  if (
-    input.reservationKind === "inbound"
-    && preferredOrFallbackLine?.phoneNumber === preferredRecipientPhone
-  ) {
-    return {
-      assignedAt: now,
-      line: preferredOrFallbackLine,
-      proactiveConversationReserved: false,
-    };
-  }
 
   if (input.reservationKind === "inbound") {
     const proactiveLine = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
     });
     const selectedLine = proactiveLine ?? preferredOrFallbackLine;
@@ -667,9 +677,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
 
   for (let lineAttempt = 0; lineAttempt < input.lines.length; lineAttempt += 1) {
     const proactiveLine = chooseHostedLinqSignupWelcomeLine({
-      activeMembersByRecipientPhone,
       lines: input.lines,
       newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      plannedMessagesByRecipientPhone,
       preferredRecipientPhone: input.preferredRecipientPhone ?? null,
     });
     if (!proactiveLine) {

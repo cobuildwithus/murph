@@ -19,7 +19,7 @@ export async function handleDatabaseHealthEgress(
     && url.origin === "https://api.planetscale.com"
     && url.pathname === "/v1/organizations/org-worker-test/metrics"
     && headers.get("authorization")
-      === "token service-token-id:service-token"
+      === "service-token-id:service-token"
   ) {
     return Response.json([
       {
