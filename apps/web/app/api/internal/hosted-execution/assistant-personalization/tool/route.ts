@@ -14,6 +14,10 @@ import {
 import {
   handleHostedRuntimeAssistantPersonalizationTool,
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
+import {
+  handleHostedRuntimePendingGroupSetupTool,
+  isHostedRuntimePendingGroupSetupToolAction,
+} from "@/src/lib/hosted-execution/pending-group-setup-tool";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
@@ -35,6 +39,14 @@ export const POST = withJsonError(async (request: Request) => {
     throw new TypeError(
       "Assistant personalization action requires assistant input authority.",
     );
+  }
+
+  if (isHostedRuntimePendingGroupSetupToolAction(body.action)) {
+    return jsonOk(await handleHostedRuntimePendingGroupSetupTool({
+      memberId,
+      ...(authority ?? {}),
+      request: body,
+    }));
   }
 
   return jsonOk(await handleHostedRuntimeAssistantPersonalizationTool({
