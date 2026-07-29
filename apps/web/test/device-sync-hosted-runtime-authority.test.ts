@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
     ...record,
     externalAccountId: null,
   })),
-  recordHostedRuntimeLogTx: vi.fn(),
+  writeHostedRuntimeLogs: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -31,8 +31,8 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
 }));
 
-vi.mock("@/src/lib/hosted-workspace/store", () => ({
-  recordHostedRuntimeLogTx: mocks.recordHostedRuntimeLogTx,
+vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
+  writeHostedRuntimeLogs: mocks.writeHostedRuntimeLogs,
 }));
 
 function buildHostedRecord(
@@ -688,7 +688,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
-    expect(mocks.recordHostedRuntimeLogTx).not.toHaveBeenCalled();
+    expect(mocks.writeHostedRuntimeLogs).not.toHaveBeenCalled();
     expect(harness.record.displayName).toBe("Hosted Device");
     expect(harness.storedAccount?.credential).toMatchObject({
       kind: "oauth_tokens",
@@ -2013,14 +2013,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       writeUpdate: "applied",
     });
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedRuntimeLogTx).toHaveBeenCalledWith(expect.objectContaining({
-      at: "2026-05-19T22:03:27.378Z",
-      component: "device-sync",
-      errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "invoke",
-      redacted: expect.objectContaining({
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
+      entries: [expect.objectContaining({
+        at: "2026-05-19T22:03:27.378Z",
+        component: "device-sync",
+        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        eventCode: "device-sync.job_failed",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: expect.objectContaining({
         failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
         failureRetryable: false,
         failureSummary: "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
@@ -2072,9 +2073,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         status: "active",
         syncCompletedAt: "2026-05-15T21:59:24.539Z",
         syncFailedAt: "2026-05-19T22:03:27.378Z",
-      }),
+        }),
+      })],
       userId: "user_123",
-    }));
+    });
   });
 
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {

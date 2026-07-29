@@ -35,7 +35,11 @@ import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
 } from "@murphai/device-syncd/provider-credential-policy";
 import { resolveDeviceProviderMatchKeys } from "@murphai/device-syncd/provider-match";
-import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  type HostedRuntimeLogEntry,
+  type HostedRuntimeRedactedJson,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import {
@@ -60,9 +64,14 @@ import { normalizeNullableString } from "./shared";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
+import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
+
+interface HostedRuntimeFailureApplyResult {
+  failureDiagnostic: HostedRuntimeLogEntry | null;
+  update: HostedExecutionDeviceSyncRuntimeApplyEntry;
+}
 
 type HostedRuntimeSnapshotWireResponse = Omit<
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
@@ -173,6 +182,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
 
 export async function applyHostedDeviceSyncRuntimeResult(input: {
   request: Request;
+  scheduleFailureDiagnostics?: (task: () => Promise<void>) => void;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
   const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest(
@@ -189,8 +199,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
   }
 
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
+  const failureDiagnostics: HostedRuntimeLogEntry[] = [];
   for (const update of parsed.updates) {
-    const result = await controlPlane.store.withConnectionMutationLock(
+    const applied = await controlPlane.store.withConnectionMutationLock(
       update.connectionId,
       async (tx) => {
         const record = await tx.deviceConnection.findFirst({
@@ -203,12 +214,15 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
         if (!record) {
           return {
-            connection: null,
-            connectionId: update.connectionId,
-            status: "missing",
-            tokenUpdate: "missing",
-            writeUpdate: "missing",
-          } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
+            failureDiagnostic: null,
+            update: {
+              connection: null,
+              connectionId: update.connectionId,
+              status: "missing",
+              tokenUpdate: "missing",
+              writeUpdate: "missing",
+            },
+          } satisfies HostedRuntimeFailureApplyResult;
         }
 
         const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
@@ -435,16 +449,15 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         }
 
-        if (!versionMismatch && (stateMutationRequested || credentialMutationRequested)) {
-          await recordHostedRuntimeFailureApplyDiagnostic({
-            appliedAt,
-            baseline,
-            nextAccount,
-            tx,
-            update,
-            userId: input.trustedUserId,
-          });
-        }
+        const failureDiagnostic =
+          !versionMismatch && (stateMutationRequested || credentialMutationRequested)
+            ? buildHostedRuntimeFailureApplyDiagnostic({
+                appliedAt,
+                baseline,
+                nextAccount,
+                update,
+              })
+            : null;
 
         const refreshedRecord = await tx.deviceConnection.findFirst({
           where: {
@@ -465,22 +478,42 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           : [];
 
         return {
-          connection: refreshedRecord
-            ? buildHostedRuntimeConnectionSnapshot(
-                refreshedRecord,
-                refreshedStoredAccount,
-                durableExternalAccountId,
-                refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
-              ).connection
-            : null,
-          connectionId: update.connectionId,
-          status: "updated",
-          tokenUpdate,
-          writeUpdate,
-        } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
+          failureDiagnostic,
+          update: {
+            connection: refreshedRecord
+              ? buildHostedRuntimeConnectionSnapshot(
+                  refreshedRecord,
+                  refreshedStoredAccount,
+                  durableExternalAccountId,
+                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
+                ).connection
+              : null,
+            connectionId: update.connectionId,
+            status: "updated",
+            tokenUpdate,
+            writeUpdate,
+          },
+        } satisfies HostedRuntimeFailureApplyResult;
       },
     );
-    updates.push(result);
+    updates.push(applied.update);
+    if (applied.failureDiagnostic) {
+      failureDiagnostics.push(applied.failureDiagnostic);
+    }
+  }
+
+  if (failureDiagnostics.length > 0) {
+    const task = async () => {
+      await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
+        entries: failureDiagnostics,
+        userId: input.trustedUserId,
+      });
+    };
+    if (input.scheduleFailureDiagnostics) {
+      input.scheduleFailureDiagnostics(task);
+    } else {
+      await task();
+    }
   }
 
   return {
@@ -1079,48 +1112,62 @@ function hostedRuntimeCredentialMutationRequiresTokenFence(
   return update.credential !== undefined;
 }
 
-async function recordHostedRuntimeFailureApplyDiagnostic(input: {
+function buildHostedRuntimeFailureApplyDiagnostic(input: {
   appliedAt: string;
   baseline: HostedRuntimeConnectionSnapshot;
   nextAccount: PublicDeviceSyncAccount;
-  tx: HostedPrismaTransactionClient;
   update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
-  userId: string;
-}): Promise<void> {
+}): HostedRuntimeLogEntry | null {
   if (!didHostedRuntimeFailureStateAdvance(
     input.baseline.localState.lastSyncErrorAt,
     input.nextAccount.lastSyncErrorAt,
   )) {
-    return;
+    return null;
   }
 
-  const at = input.nextAccount.lastSyncErrorAt ?? input.appliedAt;
-  const errorCode = toHostedRuntimeApplyLogCode(
-    input.nextAccount.lastErrorCode ?? input.update.failureDiagnostic?.code ?? null,
-  );
-  const provider = toHostedRuntimeApplyLogCode(input.nextAccount.provider);
-  const redacted = buildHostedRuntimeFailureApplyRedactedJson(input);
+  return {
+    at: input.nextAccount.lastSyncErrorAt ?? input.appliedAt,
+    component: "device-sync",
+    errorCode: toHostedRuntimeApplyLogCode(
+      input.nextAccount.lastErrorCode ?? input.update.failureDiagnostic?.code ?? null,
+    ),
+    eventCode: "device-sync.job_failed",
+    level: "warn",
+    phase: "invoke",
+    redactedJson: buildHostedRuntimeFailureApplyRedactedJson(input),
+  };
+}
 
-  try {
-    await recordHostedRuntimeLogTx({
-      at,
-      component: "device-sync",
-      errorCode,
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "invoke",
-      redacted,
-      tx: input.tx,
-      userId: input.userId,
-    });
-  } catch (error) {
-    console.warn("Hosted device-sync failure diagnostic log write failed.", {
-      ...formatHostedExecutionSafeLogErrorDetails(error, {
-        code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_LOG_WRITE_FAILED",
-      }),
-      provider,
-      runtimeFailureCode: errorCode,
-    });
+async function writeHostedRuntimeFailureApplyDiagnosticsBestEffort(input: {
+  entries: readonly HostedRuntimeLogEntry[];
+  userId: string;
+}): Promise<void> {
+  for (
+    let offset = 0;
+    offset < input.entries.length;
+    offset += HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES
+  ) {
+    const entries = input.entries.slice(
+      offset,
+      offset + HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+    );
+    try {
+      await writeHostedRuntimeLogs({
+        entries,
+        userId: input.userId,
+      });
+    } catch (error) {
+      const first = entries[0];
+      const provider = first?.redactedJson?.provider;
+      console.warn("Hosted device-sync failure diagnostic log write failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_LOG_WRITE_FAILED",
+        }),
+        batchSize: entries.length,
+        provider: typeof provider === "string" ? provider : null,
+        runtimeFailureCode: first?.errorCode ?? null,
+      });
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Purpose
 
@@ -30,6 +30,7 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations, including the beta direct WHOOP overnight-PRV summary and validation gates. | Device-provider normalization planning | Medium | 2026-07-14 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints, including group-scoped consent-permission digests and their in-flight drain floor. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |
+| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, compatibility reads, retention, migration preflight, rollout, and rollback floor. | Hosted runtime observability storage | High | 2026-07-29 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-04-29 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |

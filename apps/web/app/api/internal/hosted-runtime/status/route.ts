@@ -6,13 +6,23 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
+import {
   computeHostedMailboxLaneLag,
   readHostedMailboxRedactedStatusRecord,
 } from "@/src/lib/hosted-mailbox/lag";
 import { readHostedMailboxMaxSeqByLane } from "@/src/lib/hosted-mailbox/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  listHostedRuntimeLogs,
+  isHostedRuntimeLogDatabaseConfigured,
+} from "@/src/lib/hosted-runtime-log/database";
+import {
+  listHostedRuntimeLogs as listDedicatedHostedRuntimeLogs,
+  mergeHostedRuntimeLogRecords,
+} from "@/src/lib/hosted-runtime-log/store";
+import {
+  listHostedRuntimeLogs as listLegacyHostedRuntimeLogs,
   readHostedWorkspace,
 } from "@/src/lib/hosted-workspace/store";
 
@@ -26,7 +36,9 @@ export const GET = withJsonError(async (request: Request) => {
   const [workspace, maxSeqByLane, recentLogs] = await Promise.all([
     readHostedWorkspace({ userId }),
     readHostedMailboxMaxSeqByLane({ userId }),
-    listHostedRuntimeLogs({ limit: logLimit, userId }),
+    logLimit === 0
+      ? Promise.resolve([])
+      : readRecentHostedRuntimeLogsBestEffort({ limit: logLimit, userId }),
   ]);
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -73,6 +85,36 @@ export const GET = withJsonError(async (request: Request) => {
   }));
 });
 
+type HostedRuntimeStatusLogRecord =
+  | Awaited<ReturnType<typeof listDedicatedHostedRuntimeLogs>>[number]
+  | Awaited<ReturnType<typeof listLegacyHostedRuntimeLogs>>[number];
+
+async function readRecentHostedRuntimeLogsBestEffort(input: {
+  limit: number;
+  userId: string;
+}): Promise<HostedRuntimeStatusLogRecord[]> {
+  const legacyLogs = await listLegacyHostedRuntimeLogs(input);
+
+  try {
+    if (!isHostedRuntimeLogDatabaseConfigured()) {
+      return legacyLogs;
+    }
+
+    const dedicatedLogs = await listDedicatedHostedRuntimeLogs(input);
+    return mergeHostedRuntimeLogRecords<HostedRuntimeStatusLogRecord>(
+      [dedicatedLogs, legacyLogs],
+      input.limit,
+    );
+  } catch (error) {
+    console.warn("Hosted runtime status isolated-log read failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_RUNTIME_STATUS_LOG_READ_FAILED",
+      }),
+    });
+    return legacyLogs;
+  }
+}
+
 function readStatusLogLimit(request: Request): number {
   const rawLimit = new URL(request.url).searchParams.get("logLimit");
 
@@ -86,5 +128,5 @@ function readStatusLogLimit(request: Request): number {
 
   const parsed = Number(rawLimit);
 
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 20;
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 20;
 }

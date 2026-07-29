@@ -6,15 +6,15 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn((task: () => Promise<void>) => {
     void task();
   }),
-  recordHostedRuntimeLog: vi.fn(),
+  writeHostedRuntimeLogs: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
   after: mocks.after,
 }));
 
-vi.mock("@/src/lib/hosted-workspace/store", () => ({
-  recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
+vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
+  writeHostedRuntimeLogs: mocks.writeHostedRuntimeLogs,
 }));
 
 type RuntimeLogModule = typeof import("../src/lib/computer-use/runtime-log");
@@ -31,7 +31,7 @@ describe("hosted computer runtime logs", () => {
     mocks.after.mockImplementation((task: () => Promise<void>) => {
       void task();
     });
-    mocks.recordHostedRuntimeLog.mockResolvedValue({});
+    mocks.writeHostedRuntimeLogs.mockResolvedValue({});
   });
 
   it("records diagnostic runtime logs for computer action failures without raw action code", async () => {
@@ -62,13 +62,15 @@ describe("hosted computer runtime logs", () => {
     })).rejects.toBe(error);
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith({
-      component: "assistant",
-      errorCode: "HOSTED_COMPUTER_EVAL_FAILED",
-      eventCode: "assistant.computer_tool_failed",
-      level: "warn",
-      phase: "error",
-      redacted: {
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
+      entries: [{
+        at: expect.any(String),
+        component: "assistant",
+        errorCode: "HOSTED_COMPUTER_EVAL_FAILED",
+        eventCode: "assistant.computer_tool_failed",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
         computerFailureCategory: "strict_mode_violation",
         computerOperationKind: "act",
         httpStatus: 502,
@@ -80,13 +82,14 @@ describe("hosted computer runtime logs", () => {
         safeErrorMessage: "Computer browser evaluation failed.",
         timeoutMs: 20000,
         unknownOutcome: true,
-      },
+        },
+      }],
       userId: "member_123",
     });
-    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
+    expect(JSON.stringify(mocks.writeHostedRuntimeLogs.mock.calls[0]?.[0])).not.toContain(
       "Place your order",
     );
-    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).not.toContain(
+    expect(JSON.stringify(mocks.writeHostedRuntimeLogs.mock.calls[0]?.[0])).not.toContain(
       "strict mode violation",
     );
   });
@@ -106,13 +109,15 @@ describe("hosted computer runtime logs", () => {
     })).rejects.toBe(error);
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith({
-      component: "assistant",
-      errorCode: "HOSTED_COMPUTER_UNEXPECTED_FAILURE",
-      eventCode: "assistant.computer_tool_failed",
-      level: "warn",
-      phase: "error",
-      redacted: {
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
+      entries: [{
+        at: expect.any(String),
+        component: "assistant",
+        errorCode: "HOSTED_COMPUTER_UNEXPECTED_FAILURE",
+        eventCode: "assistant.computer_tool_failed",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
         computerOperationKind: "open",
         kernelErrorPresent: false,
         kernelStderrPresent: false,
@@ -120,10 +125,11 @@ describe("hosted computer runtime logs", () => {
         computerErrorCause: "page context closed",
         safeErrorMessage: "browser crashed",
         unknownOutcome: false,
-      },
+        },
+      }],
       userId: "member_123",
     });
-    expect(JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls[0]?.[0])).toContain(
+    expect(JSON.stringify(mocks.writeHostedRuntimeLogs.mock.calls[0]?.[0])).toContain(
       "page context closed",
     );
   });
@@ -139,7 +145,7 @@ describe("hosted computer runtime logs", () => {
     const run = vi.fn(async () => {
       throw error;
     });
-    mocks.recordHostedRuntimeLog.mockRejectedValueOnce(new Error("database write failed"));
+    mocks.writeHostedRuntimeLogs.mockRejectedValueOnce(new Error("database write failed"));
 
     try {
       await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
@@ -149,7 +155,7 @@ describe("hosted computer runtime logs", () => {
       })).rejects.toBe(error);
 
       expect(run).toHaveBeenCalledTimes(1);
-      expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+      expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledTimes(1);
       await vi.waitFor(() => {
         expect(consoleWarn).toHaveBeenCalledWith(
           "Hosted computer tool failure log write failed.",
@@ -172,7 +178,7 @@ describe("hosted computer runtime logs", () => {
       message: "Managed sign-in is temporarily unavailable.",
       retryable: true,
     });
-    mocks.recordHostedRuntimeLog.mockImplementationOnce(
+    mocks.writeHostedRuntimeLogs.mockImplementationOnce(
       async () => await new Promise(() => {}),
     );
 
@@ -224,21 +230,23 @@ describe("hosted computer runtime logs", () => {
       },
     })).rejects.toBe(error);
 
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith(
+    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith(
       expect.objectContaining({
-        errorCode: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
-        redacted: expect.objectContaining({
-          computerOperationKind: "managed-login",
-          liveViewHostnameAllowed: false,
-          liveViewParsed: true,
-          liveViewPortAllowed: false,
-          liveViewProtocolAllowed: true,
-          managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
-          managedLoginStage: "live_view_fallback",
-        }),
+        entries: [expect.objectContaining({
+          errorCode: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
+          redactedJson: expect.objectContaining({
+            computerOperationKind: "managed-login",
+            liveViewHostnameAllowed: false,
+            liveViewParsed: true,
+            liveViewPortAllowed: false,
+            liveViewProtocolAllowed: true,
+            managedLoginCauseCode: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+            managedLoginStage: "live_view_fallback",
+          }),
+        })],
       }),
     );
-    const persisted = JSON.stringify(mocks.recordHostedRuntimeLog.mock.calls.at(-1)?.[0]);
+    const persisted = JSON.stringify(mocks.writeHostedRuntimeLogs.mock.calls.at(-1)?.[0]);
     expect(persisted).not.toContain("handoff-token");
     expect(persisted).not.toContain("onkernel.com");
     expect(persisted).not.toContain("managed-auth-1");
