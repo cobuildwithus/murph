@@ -153,6 +153,107 @@ describe("database health monitor", () => {
     expect(second.message.parts[0]?.value).toContain("Checked 00:35 UTC");
   });
 
+  it("fans one admitted alert out to two separate direct chats", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+
+    expect(harness.linqRequests).toHaveLength(2);
+    const bodies = await Promise.all(
+      harness.linqRequests.map(readLinqRequestBody),
+    );
+    const primary = bodies.find((body) => body.to[0] === "+12025550123");
+    const secondary = bodies.find((body) => body.to[0] === "+12025550124");
+    expect(primary).toBeDefined();
+    expect(secondary).toBeDefined();
+    expect(secondary?.message.parts).toEqual(primary?.message.parts);
+    expect(primary?.message.idempotency_key).toBe("murph-db-1-1");
+    expect(secondary?.message.idempotency_key)
+      .toBe("murph-db-1-1-recipient-2");
+  });
+
+  it("retries a partially failed fan-out only after the global fence", async () => {
+    const harness = createMonitorHarness({
+      linqResponses: [
+        () => new Response(null, { status: 202 }),
+        () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 202 }),
+        () => new Response(null, { status: 202 }),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.linqRequests).toHaveLength(2);
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(harness.linqRequests).toHaveLength(4);
+
+    const bodies = await Promise.all(
+      harness.linqRequests.map(readLinqRequestBody),
+    );
+    const primaryBodies = bodies.filter(
+      (body) => body.to[0] === "+12025550123",
+    );
+    const secondaryBodies = bodies.filter(
+      (body) => body.to[0] === "+12025550124",
+    );
+    expect(primaryBodies).toHaveLength(2);
+    expect(secondaryBodies).toHaveLength(2);
+    expect(primaryBodies[1]).toEqual(primaryBodies[0]);
+    expect(secondaryBodies[1]).toEqual(secondaryBodies[0]);
+  });
+
+  it("attempts a healthy destination when the other chat fails closed", async () => {
+    const harness = createMonitorHarness({
+      linqHealthResponses: [
+        () => Response.json(createLinqChatResponseBody()),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+        () =>
+          Response.json(createLinqChatResponseBody({
+            healthStatus: "AT_RISK",
+            recipients: ["+12025550124"],
+          })),
+        () => Response.json(createHealthyLinqPhoneNumbersBody()),
+      ],
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      secondaryLinqChatId: "chat_secondary_test",
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.linqRequests).toHaveLength(1);
+    await expect(
+      readLinqRequestBody(harness.linqRequests[0]),
+    ).resolves.toMatchObject({ to: ["+12025550123"] });
+  });
+
+  it("rejects duplicate direct-chat configuration", () => {
+    expect(() =>
+      createMonitorHarness({ secondaryLinqChatId: "chat_test" })
+    ).toThrowError("Database health alert chat IDs must be distinct.");
+  });
+
   it("does not send a fenced gauge recurrence after recovery", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
@@ -1201,6 +1302,7 @@ function createMonitorHarness(input: {
   linqResponses?: Array<() => Response | Promise<Response>>;
   metricsBody?: string;
   readMetricsBody?: () => string;
+  secondaryLinqChatId?: string;
   serviceDiscoveryResponses?: Array<() => Response | Promise<Response>>;
 } = {}) {
   let failBeforeSuccessfulSamplePersist = false;
@@ -1265,8 +1367,13 @@ function createMonitorHarness(input: {
               ),
           );
         }
+        const recipient = url.pathname.endsWith(
+          `/chats/${input.secondaryLinqChatId}`,
+        )
+          ? "+12025550124"
+          : "+12025550123";
         return Response.json({
-          ...createLinqChatResponseBody(),
+          ...createLinqChatResponseBody({ recipients: [recipient] }),
           health_status: {
             status: input.linqChatHealthStatus ?? "HEALTHY",
           },
@@ -1280,6 +1387,8 @@ function createMonitorHarness(input: {
   });
   const environment = {
     HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_test",
+    HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID:
+      input.secondaryLinqChatId,
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: BRANCH_ID,
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: BRANCH_NAME,
     HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: DATABASE_NAME,
@@ -1345,6 +1454,7 @@ function createServiceDiscoveryResponse(): Response {
 }
 
 function createLinqChatResponseBody(input: {
+  healthStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY" | "OPTED_OUT";
   isGroup?: boolean;
   recipients?: string[];
 } = {}) {
@@ -1364,7 +1474,7 @@ function createLinqChatResponseBody(input: {
       })),
     ],
     health_status: {
-      status: "HEALTHY",
+      status: input.healthStatus ?? "HEALTHY",
     },
     is_group: input.isGroup ?? false,
   };

@@ -42,6 +42,7 @@ const DATABASE_ALERT_OPENINGS = [
 
 export interface DatabaseHealthMonitorEnvironment {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
+  HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME?: string;
@@ -69,7 +70,7 @@ interface DatabaseHealthMonitorConfig {
   databaseName: string;
   linqApiBaseUrl: string;
   linqApiToken: string;
-  linqChatId: string;
+  linqChatIds: readonly string[];
   organization: string;
   planetScaleServiceToken: string;
   planetScaleServiceTokenId: string;
@@ -419,14 +420,26 @@ export class DatabaseHealthMonitor {
 
     this.store.recordAlertAttempt(attemptedAtMs);
     try {
-      await sendDatabaseHealthLinqAlert({
-        apiBaseUrl: this.config.linqApiBaseUrl,
-        apiToken: this.config.linqApiToken,
-        chatId: this.config.linqChatId,
-        fetchImplementation: this.fetchImplementation,
-        idempotencyKey,
-        message,
-      });
+      const results = await Promise.allSettled(
+        this.config.linqChatIds.map((chatId, index) =>
+          sendDatabaseHealthLinqAlert({
+            apiBaseUrl: this.config.linqApiBaseUrl,
+            apiToken: this.config.linqApiToken,
+            chatId,
+            fetchImplementation: this.fetchImplementation,
+            idempotencyKey: buildDatabaseAlertRecipientIdempotencyKey(
+              idempotencyKey,
+              index,
+            ),
+            message,
+          })
+        ),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          throw result.reason;
+        }
+      }
       this.store.recordAlertSuccess();
       const stateAfterSuccess = this.store.readAlertState();
       if (
@@ -858,9 +871,27 @@ function buildDatabaseAlertIdempotencyKey(input: {
   return `murph-db-${input.incidentSequence}-${input.alertSequence}`;
 }
 
+function buildDatabaseAlertRecipientIdempotencyKey(
+  alertIdempotencyKey: string,
+  recipientIndex: number,
+): string {
+  return recipientIndex === 0
+    ? alertIdempotencyKey
+    : `${alertIdempotencyKey}-recipient-${recipientIndex + 1}`;
+}
+
 function readDatabaseHealthMonitorConfig(
   environment: DatabaseHealthMonitorEnvironment,
 ): DatabaseHealthMonitorConfig {
+  const primaryLinqChatId = requireConfiguredString(
+    environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
+    "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  );
+  const secondaryLinqChatId =
+    environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?.trim();
+  if (secondaryLinqChatId === primaryLinqChatId) {
+    throw new Error("Database health alert chat IDs must be distinct.");
+  }
   return {
     branchId: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID,
@@ -879,10 +910,9 @@ function readDatabaseHealthMonitorConfig(
       environment.LINQ_API_TOKEN,
       "LINQ_API_TOKEN",
     ),
-    linqChatId: requireConfiguredString(
-      environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
-    ),
+    linqChatIds: secondaryLinqChatId
+      ? [primaryLinqChatId, secondaryLinqChatId]
+      : [primaryLinqChatId],
     organization: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION,
       "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",

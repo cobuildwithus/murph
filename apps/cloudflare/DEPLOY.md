@@ -40,8 +40,9 @@ Before deploying the Worker version that introduces
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
   token with only the organization-level `read_metrics_endpoints` permission;
-- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for the existing operator chat;
-  and
+- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
+  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
+  direct operator chats; and
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
@@ -453,6 +454,7 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`

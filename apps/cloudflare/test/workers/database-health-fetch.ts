@@ -67,9 +67,16 @@ export async function handleDatabaseHealthEgress(
   if (
     method === "GET"
     && url.origin === "https://api.linqapp.com"
-    && url.pathname === "/api/partner/v3/chats/chat_worker_test"
+    && (
+      url.pathname === "/api/partner/v3/chats/chat_worker_test"
+      || url.pathname
+        === "/api/partner/v3/chats/chat_worker_secondary_test"
+    )
     && headers.get("authorization") === "Bearer linq-token"
   ) {
+    const recipient = url.pathname.endsWith("chat_worker_secondary_test")
+      ? "+12025550124"
+      : "+12025550123";
     return Response.json({
       handles: [
         {
@@ -79,7 +86,7 @@ export async function handleDatabaseHealthEgress(
           status: "active",
         },
         {
-          handle: "+12025550123",
+          handle: recipient,
           is_me: false,
           service: "iMessage",
           status: "active",
@@ -130,7 +137,10 @@ function isValidDatabaseHealthMessageRequest(input: {
     || !value.message.parts[0].value.includes("PgBouncer wait 8s")
     || !Array.isArray(value.to)
     || value.to.length !== 1
-    || value.to[0] !== "+12025550123"
+    || (
+      value.to[0] !== "+12025550123"
+      && value.to[0] !== "+12025550124"
+    )
     || "from" in value
   ) {
     return false;
