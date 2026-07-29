@@ -1,6 +1,6 @@
 # Home history experiment card polish
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -55,3 +55,4 @@ Updated: 2026-07-29
 - Canonical: `pnpm test:diff apps/web/src/components/home/home-experiment-card.tsx apps/web/app/design/components-content.tsx apps/web/test/home-experiment-card.test.tsx`.
 - Design gate: `pnpm test:frontend-design-proof`.
 - Direct proof: desktop and mobile `/design?tab=components` screenshots of the real history-card states.
+Completed: 2026-07-29
