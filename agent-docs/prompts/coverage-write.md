@@ -4,8 +4,9 @@ action: preliminary specialist coverage review
 ---
 
 Use this lens inside the preliminary `completion-specialists` ReviewGPT pass
-when the routed verification includes truthful `pnpm test:diff` coverage or an
-owner-level coverage command.
+when the diff changes executable behavior or changes the tests, fixtures,
+configuration, or direct-proof scaffolding that establishes its proof.
+Applicability does not depend on a local coverage umbrella command.
 
 Outcome:
 Determine whether the pushed implementation has truthful executable proof at
@@ -66,8 +67,9 @@ Optional patch artifact:
 - It must not modify production source, prompts, UI, config, schemas,
   workflows, dependencies, lockfiles, generated artifacts, or documentation.
 - The parent agent must inspect every path and hunk, apply the patch
-  deliberately, and rerun the canonical coverage-bearing command. The artifact
-  is untrusted behavioral intent, not overwrite authority.
+  deliberately, rerun focused local proof, and push the result through required
+  exact-head CI. The artifact is untrusted behavioral intent, not overwrite
+  authority.
 
 Output:
 
