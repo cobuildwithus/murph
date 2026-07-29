@@ -26,6 +26,11 @@ import {
   GROUP_NEWSLETTER_TONE_VALUES,
 } from '../../assistant/group-newsletter-automation.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
+import {
+  buildLazyDynamicToolSchemaResponse,
+  MURPH_LAZY_DYNAMIC_TOOL_INPUT_SCHEMA,
+  murphLazyDynamicToolArgumentsSchema,
+} from './lazy-schema.js'
 
 const AUTOMATION_TOOL_RESULT_MAX_BYTES = 24_000
 const automationIdentifierSchema = z.string().trim().min(1).max(191)
@@ -158,15 +163,26 @@ const automationArgumentsSchema = z.discriminatedUnion('action', [
   reconcileAutomationArgumentsSchema,
 ])
 
+const AUTOMATION_REQUEST_DESCRIPTION =
+  'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.'
+
+const AUTOMATION_REQUEST_INPUT_SCHEMA = z.toJSONSchema(
+  automationArgumentsSchema,
+  { io: 'input' },
+)
+
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
-  inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
+    'Manage automations through a root-only hosted capability. Call action="schema" before action="execute" unless this thread already retrieved the schema; pass one returned request shape under request. Routes remain host-bound.',
+  inputSchema: MURPH_LAZY_DYNAMIC_TOOL_INPUT_SCHEMA,
 } as const
 
 export type AutomationDynamicToolRequest =
+  | {
+      kind: 'automation-schema'
+    }
   | {
       kind: 'automation'
       request: AssistantHostedAutomationToolRequest
@@ -182,6 +198,22 @@ export function readAutomationDynamicToolRequest(input: {
 }): AutomationDynamicToolRequest | null {
   if (input.tool !== MURPH_AUTOMATION_TOOL.name) {
     return null
+  }
+
+  const envelope = parseDynamicToolArguments({
+    schema: murphLazyDynamicToolArgumentsSchema,
+    schemaRootKeys: ['action', 'request'],
+    toolName: 'murph.automation',
+    value: input.arguments,
+  })
+  if (!envelope.ok) {
+    return {
+      kind: 'invalid-automation-arguments',
+      validationDigest: envelope.validationDigest,
+    }
+  }
+  if (envelope.args.action === 'schema') {
+    return { kind: 'automation-schema' }
   }
 
   const parsed = parseDynamicToolArguments({
@@ -211,7 +243,7 @@ export function readAutomationDynamicToolRequest(input: {
       'tone',
     ],
     toolName: 'murph.automation',
-    value: input.arguments,
+    value: envelope.args.request,
   })
 
   return parsed.ok
@@ -239,6 +271,14 @@ export function readAutomationDynamicToolRequest(input: {
         kind: 'invalid-automation-arguments',
         validationDigest: parsed.validationDigest,
       }
+}
+
+export function readAutomationDynamicToolSchema() {
+  return buildLazyDynamicToolSchemaResponse({
+    description: AUTOMATION_REQUEST_DESCRIPTION,
+    requestSchema: AUTOMATION_REQUEST_INPUT_SCHEMA,
+    toolName: 'murph.automation',
+  })
 }
 
 export async function executeAutomationDynamicTool(input: {

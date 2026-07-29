@@ -601,7 +601,7 @@ function buildAssistantHostedGroupGuidanceText(
           conversationScope === "group"
           && channel?.trim().toLowerCase() === "email"
         )
-        ? "- Create the newsletter cron through `murph.automation`; `murph.newsletter` only prepares or sends after it fires."
+        ? "- Create the newsletter cron through `murph.automation`: retrieve its schema once, then execute a `save_newsletter` request. `murph.newsletter` only prepares or sends after it fires."
         : null
       : "- Create the newsletter cron through the normal `vault-cli automation` surface; `murph.newsletter` only prepares or sends after it fires.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection scopes. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime. Use `read_current` for membership and permission configuration only. For any shared-record use, `read_shared` returns the consent-aware member join and exact selector-scoped data; do not treat a projection kind as a broad grant. A Like or heart grants only the disclosed Murph group share, not Apple Health access. Apple does not expose HealthKit read authorization, so missing Steps never proves that someone denied, forgot, or has not approved Apple Health Steps.",
@@ -1533,7 +1533,7 @@ function buildAssistantSharedAutomationActionText(
   hostedRuntime: boolean
 ): string {
   const actionGuidance = hostedRuntime
-    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
+    ? `Call ${code("murph.automation")} with ${code("action: schema")} once to retrieve its request shapes, then call ${code("action: execute")} with the chosen shape under ${code("request")}. Use request ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use request ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;

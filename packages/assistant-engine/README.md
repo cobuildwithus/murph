@@ -68,6 +68,14 @@ authority. Dynamic-tool dispatch requires the exact active root turn and
 rejects descendant, stale-turn, or foreign-thread calls; closing the invocation
 withdraws the tools without replacing the App Server.
 
+The broad `murph.automation` and ordinary `murph.group` tools advertise only a
+compact discovery envelope at thread start. Their exact request descriptions
+and schemas are returned by `action="schema"` and a discovered request is
+submitted under `action="execute"`. The existing strict request validators and
+host-bound authority checks run after that envelope is removed. Narrow
+scheduled and detached group-read surfaces remain directly callable so a
+single read does not require discovery of unrelated group actions.
+
 MultiAgent V2 descendants admitted before the root final reply may keep working
 through Codex's native lifecycle after that reply. Root completion and the next
 ordinary turn do not terminate them. They retain normal local canonical

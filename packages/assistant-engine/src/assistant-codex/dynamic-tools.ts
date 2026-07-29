@@ -153,9 +153,19 @@ import {
   executeAutomationDynamicTool,
   MURPH_AUTOMATION_TOOL,
   readAutomationDynamicToolRequest,
+  readAutomationDynamicToolSchema,
   type AutomationDynamicToolRequest,
 } from './dynamic-tools/automation.js'
-export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
+export {
+  MURPH_AUTOMATION_TOOL,
+  readAutomationDynamicToolSchema,
+} from './dynamic-tools/automation.js'
+import {
+  buildLazyDynamicToolSchemaResponse,
+  MURPH_LAZY_DYNAMIC_TOOL_INPUT_SCHEMA,
+  murphLazyDynamicToolArgumentsSchema,
+} from './dynamic-tools/lazy-schema.js'
+import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   executeDeviceDynamicTool,
   MURPH_DEVICE_TOOL,
@@ -770,7 +780,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
 
 const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
 
-export const MURPH_GROUP_TOOL = {
+const MURPH_GROUP_REQUEST_CONTRACT = {
   namespace: 'murph',
   name: 'group',
   description:
@@ -934,6 +944,58 @@ export const MURPH_GROUP_TOOL = {
     required: ['action'],
   },
 } as const
+
+const MURPH_GROUP_DYNAMIC_TOOL_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: {
+      type: 'string',
+      enum: [
+        'schema',
+        'execute',
+        ...MURPH_GROUP_REQUEST_CONTRACT.inputSchema.properties.action.enum,
+      ],
+    },
+    alt: {},
+    avatarSource: {},
+    displayName: {},
+    grantId: {},
+    groupLabel: {},
+    imageRef: {},
+    kind: {},
+    membershipId: {},
+    messageRef: {},
+    outputFormat: {},
+    permissionText: {},
+    policyCode: {},
+    projectionScopes: {},
+    prompt: {},
+    quality: {},
+    question: {},
+    referenceImageRefs: {},
+    request: MURPH_LAZY_DYNAMIC_TOOL_INPUT_SCHEMA.properties.request,
+    requestedVaultShareProjectionScopes: {},
+    size: {},
+  },
+  required: ['action'],
+} as const
+
+export const MURPH_GROUP_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Use the authorized group capability. Call action="schema" before a complex action unless this thread already retrieved the schema, then call action="execute" with one returned request shape under request. Simple actions named in current instructions may be called directly. The trusted host binds member, group, sender, route, input, and occurrence.',
+  inputSchema: MURPH_GROUP_DYNAMIC_TOOL_INPUT_SCHEMA,
+} as const
+
+export function readGroupDynamicToolSchema() {
+  return buildLazyDynamicToolSchemaResponse({
+    description: MURPH_GROUP_REQUEST_CONTRACT.description,
+    requestSchema: MURPH_GROUP_REQUEST_CONTRACT.inputSchema,
+    toolName: 'murph.group',
+  })
+}
 
 export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
@@ -2132,6 +2194,9 @@ export type MurphDynamicToolRequest =
       request: HostedRuntimeAssistantConfigurationToolRequest
     }
   | {
+      kind: 'group-schema'
+    }
+  | {
       kind: 'group'
       request: MurphGroupToolRequest
       toolCallId?: string
@@ -2429,12 +2494,15 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_GROUP_TOOL.name: {
-      const parsed = parseGroupArguments(request.arguments)
+      const parsed = parseGroupDynamicToolArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-group-arguments',
           validationDigest: parsed.validationDigest,
         }
+      }
+      if (parsed.kind === 'schema') {
+        return { kind: 'group-schema' }
       }
       return {
         kind: 'group',
@@ -2750,6 +2818,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-schema':
+      return toolTextResult(
+        true,
+        safeToolPayloadText(readAutomationDynamicToolSchema()),
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {
@@ -2764,6 +2837,11 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'group-schema':
+      return toolTextResult(
+        true,
+        safeToolPayloadText(readGroupDynamicToolSchema()),
+      )
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
         available: input.groupRoomModelAvailable === true,
@@ -5449,6 +5527,49 @@ function parseAssistantConfigurationArguments(
     ok: true,
     request: parsed.data,
   }
+}
+
+function parseGroupDynamicToolArguments(
+  value: unknown,
+):
+  | {
+      kind: 'request'
+      request: MurphGroupToolRequest
+      ok: true
+    }
+  | {
+      kind: 'schema'
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const record = asRecord(value)
+  if (record?.action !== 'schema' && record?.action !== 'execute') {
+    const direct = parseGroupArguments(value)
+    return direct.ok
+      ? { kind: 'request', ok: true, request: direct.request }
+      : direct
+  }
+
+  const envelope = parseDynamicToolArguments({
+    schema: murphLazyDynamicToolArgumentsSchema,
+    schemaRootKeys: ['action', 'request'],
+    toolName: 'murph.group',
+    value,
+  })
+  if (!envelope.ok) {
+    return {
+      ok: false,
+      validationDigest: envelope.validationDigest,
+    }
+  }
+  if (envelope.args.action === 'schema') {
+    return { kind: 'schema', ok: true }
+  }
+
+  const parsed = parseGroupArguments(envelope.args.request)
+  return parsed.ok
+    ? { kind: 'request', ok: true, request: parsed.request }
+    : parsed
 }
 
 function parseGroupArguments(

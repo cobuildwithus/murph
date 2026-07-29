@@ -4149,14 +4149,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             schedule: { expression: "0 13 * * 1", kind: "cron" },
             title: "Family weekly health newsletter",
           })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter to configure this group newsletter.",
+            "Use murph.automation action=execute with request.action=save_newsletter to configure this group newsletter.",
           );
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
             lookup: "group-health-newsletter",
             schedule: { expression: "0 14 * * 1", kind: "cron" },
           })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+            "Use murph.automation action=execute with request.action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
           );
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
@@ -4488,7 +4488,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               lookup: "group-health-newsletter",
               retargetToCurrentConversation: true,
             })).rejects.toThrow(
-              "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+              "Use murph.automation action=execute with request.action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
             );
             return await automationTool.request({
               action: "patch",

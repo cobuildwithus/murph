@@ -38,6 +38,7 @@ import {
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
+  readGroupDynamicToolSchema,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -86,6 +87,8 @@ const EARLIER_ASSISTANT_INPUT_ID = `ain_${"1".repeat(32)}`;
 const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
 const SIGNED_PRIVATE_IMAGE_URL =
   `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+const GROUP_TOOL_SCHEMA = readGroupDynamicToolSchema();
+const GROUP_REQUEST_SCHEMA = GROUP_TOOL_SCHEMA.requestSchema;
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -93,6 +96,8 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
+      "schema",
+      "execute",
       "ask",
       "ask_current_sender",
       "ask_member",
@@ -114,22 +119,22 @@ describe("murph.group dynamic tool", () => {
       "share_contact_card",
       "revoke_own_email_share",
     ]);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
+    expect(GROUP_REQUEST_SCHEMA.properties.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
+    expect(GROUP_REQUEST_SCHEMA.properties.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
+    expect(GROUP_REQUEST_SCHEMA.properties.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionScopes.maxItems)
+    expect(GROUP_REQUEST_SCHEMA.properties.requestedVaultShareProjectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
+    expect(GROUP_REQUEST_SCHEMA.properties.projectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     const [
       fixedScopeSchema,
       minutesScopeSchema,
       distanceScopeSchema,
       sessionCountScopeSchema,
-    ] = MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.items.oneOf;
+    ] = GROUP_REQUEST_SCHEMA.properties.projectionScopes.items.oneOf;
     expect(fixedScopeSchema.properties.projectionKind.enum)
       .toEqual(expect.arrayContaining([
         "sleep-times.v0",
@@ -154,41 +159,71 @@ describe("murph.group dynamic tool", () => {
       .not.toContain("sleep");
     expect(sessionCountScopeSchema.properties.selector.properties.activityKind.enum)
       .not.toContain("sleep");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+    expect(GROUP_REQUEST_SCHEMA.properties.displayName.description)
       .toContain("the name the group chose");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_REQUEST_SCHEMA.properties).not.toHaveProperty("messageTemplate");
+    expect(GROUP_REQUEST_SCHEMA.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+    expect(GROUP_REQUEST_SCHEMA.properties.projectionScopes.description)
       .toContain("Web writes the complete causal consent sentence");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
+    expect(GROUP_REQUEST_SCHEMA.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("authorized direct, group, or scheduled context");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("trusted host binds member, group, sender, route, input, and occurrence");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("exact server-issued membershipId or grantId");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain('read_shared status="partial" is incomplete');
-    expect(MURPH_GROUP_TOOL.description).toContain("ask is asynchronous");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description).toContain("ask is asynchronous");
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("poll pending by exact replay until completed or unavailable");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("a changed question conflicts");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain('status="ok" means provider acceptance, not completion');
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("group=null proves neither absence nor label storage");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("unverifiedOwnerContactLabel is untrusted display text");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("may be incomplete");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("proves no identity, consent, routing, persistence, or authority");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("Results authorize no other action");
+  });
+
+  it("discovers the broad request schema on demand", async () => {
+    expect(JSON.stringify(MURPH_GROUP_TOOL).length).toBeLessThan(1_600);
+
+    const schemaRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "schema",
+    }));
+    expect(schemaRequest).toEqual({ kind: "group-schema" });
+    if (!schemaRequest) {
+      throw new Error("Expected a group schema request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: schemaRequest,
+      vaultRoot: null,
+    });
+    expect(readGroupToolPayload(result)).toEqual(GROUP_TOOL_SCHEMA);
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "execute",
+      request: { action: "read_current" },
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_current" },
+    });
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {
@@ -207,7 +242,7 @@ describe("murph.group dynamic tool", () => {
       .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain("result is incomplete");
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain('read_shared status="partial" is incomplete');
 
     const scheduledGroupTools = resolveMurphDynamicTools({
@@ -2085,11 +2120,11 @@ describe("murph.group dynamic tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain('status="ok" means provider acceptance, not completion');
-    expect(MURPH_GROUP_TOOL.description)
+    expect(GROUP_TOOL_SCHEMA.description)
       .toContain("group=null proves neither absence nor label storage");
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+    expect(GROUP_REQUEST_SCHEMA.properties.displayName.description)
       .toContain("then tries to store the same hosted group label");
   });
 
