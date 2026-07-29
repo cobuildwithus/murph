@@ -2682,6 +2682,149 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("reclaims a stale group-line recovery row only when the pinned target matches", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const phoneNumber = "+15550100042";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected recovery line lookup key.");
+    }
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupLineRecoveryDeliveryFixture({
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        phoneNumberLookupKey,
+      }),
+    );
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-group-line-recovery:exact",
+      phoneNumber,
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_recovery",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_group_line_recovery",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          phoneNumberLookupKey,
+          sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+            "event_group_recovery",
+          ),
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_line_recovery",
+        }),
+        where: expect.objectContaining({
+          id: "hld_group_line_recovery",
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "sender line",
+      overrides: {
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100043"),
+      },
+    },
+    {
+      label: "source event",
+      overrides: {
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+          "other_event_group_recovery",
+        ),
+      },
+    },
+    {
+      label: "target kind",
+      overrides: {
+        targetKind: "thread",
+      },
+    },
+    {
+      label: "template",
+      overrides: {
+        template: "invite_signup",
+      },
+    },
+    {
+      label: "chat target",
+      overrides: {
+        linqChatLookupKey:
+          createHostedLinqChatLookupKeyReadCandidates("chat_other")[0],
+      },
+    },
+  ] as const)(
+    "rejects stale group-line recovery dispatch when the pinned $label differs",
+    async ({ overrides }) => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+        buildGroupLineRecoveryDeliveryFixture(overrides),
+      );
+
+      await expect(claimHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+        idempotencyKey: "linq-group-line-recovery:exact",
+        phoneNumber: "+15550100042",
+        prisma: fixture.prisma as never,
+        reclaimStalePreProviderAttempt: true,
+        source: "hosted_webhook_side_effect",
+        sourceRef: "event_group_recovery",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      })).resolves.toEqual({
+        claimed: false,
+        id: "hld_group_line_recovery",
+        outcome: "incompatible",
+      });
+
+      expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("treats exact provider-correlated group-line recovery as completed", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupLineRecoveryDeliveryFixture({
+        acceptedAt: new Date("2026-03-26T12:01:00.000Z"),
+        messageLookupKey: "hbid:linq-message:provider-message-123",
+        status: "accepted",
+      }),
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-group-line-recovery:exact",
+      phoneNumber: "+15550100042",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_recovery",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_group_line_recovery",
+      outcome: "completed",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
   it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -4153,6 +4296,53 @@ describe("hosted Linq signup-link delivery attempts", () => {
     });
   });
 });
+
+function buildGroupLineRecoveryDeliveryFixture(overrides: Partial<{
+  acceptedAt: Date | null;
+  attemptedAt: Date;
+  deliveredAt: Date | null;
+  failureCode: string | null;
+  failedAt: Date | null;
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
+  id: string;
+  lastReceiptAt: Date | null;
+  linqChatLookupKey: string | null;
+  messageLookupKey: string | null;
+  phoneNumberLookupKey: string | null;
+  retryAfterAt: Date | null;
+  skippedAt: Date | null;
+  source: string | null;
+  sourceRef: string | null;
+  status: string;
+  targetKind: string | null;
+  template: string | null;
+}> = {}) {
+  return {
+    acceptedAt: null,
+    attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+    deliveredAt: null,
+    failureCode: null,
+    failedAt: null,
+    groupJoinOutreachId: null,
+    groupJoinReplyOccurredAt: null,
+    id: "hld_group_line_recovery",
+    lastReceiptAt: null,
+    linqChatLookupKey: null,
+    messageLookupKey: null,
+    phoneNumberLookupKey: createHostedPhoneLookupKey("+15550100042"),
+    retryAfterAt: null,
+    skippedAt: null,
+    source: "hosted_webhook_side_effect",
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+      "event_group_recovery",
+    ),
+    status: "attempted",
+    targetKind: "participant",
+    template: "group_line_recovery",
+    ...overrides,
+  };
+}
 
 function createObservabilityPrismaFixture() {
   const transaction = vi.fn();

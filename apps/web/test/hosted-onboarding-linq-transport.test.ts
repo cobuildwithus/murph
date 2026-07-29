@@ -2157,6 +2157,57 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not dispatch group-line recovery after transport-time access revocation", async () => {
+    const memberLock = vi.fn().mockResolvedValue([{ id: "member-1" }]);
+    const memberAccessRead = vi.fn().mockResolvedValue({
+      accountGroupMemberships: [],
+      billingRef: null,
+      billingStatus: HostedBillingStatus.not_started,
+      suspendedAt: new Date("2026-03-26T12:00:01.000Z"),
+      threadContainer: null,
+    });
+    const prisma = {
+      $queryRaw: memberLock,
+      hostedMember: {
+        findUnique: memberAccessRead,
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: "+15550100042",
+      groupChatId: "chat-group-1",
+      memberId: "member-1",
+      memberPhone: "+15551234567",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-group-line-recovery",
+      template: "group_line_recovery",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "group_line_recovery",
+      }],
+    });
+
+    expect(memberLock).toHaveBeenCalled();
+    expect(memberAccessRead).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "member-1" },
+    }));
+    expect(memberLock.mock.invocationCallOrder[0]).toBeLessThan(
+      memberAccessRead.mock.invocationCallOrder[0]!,
+    );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not release usage-period sent markers when AI usage quota delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({

@@ -5171,6 +5171,49 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    {
+      description: "absent",
+      homeRecipientPhone: null,
+    },
+    {
+      description: "different",
+      homeRecipientPhone: "+15559990000",
+    },
+  ] as const)(
+    "keeps an AT_RISK group line unavailable when sender route authority is $description",
+    async ({ homeRecipientPhone }) => {
+      const prisma = createStatefulThreadRoutePrisma();
+      prisma.seedActiveManagedLinqLine("+15550000000", {
+        healthStatus: "degraded",
+        providerStatus: "AT_RISK",
+      });
+      mockSenderLookup(senderCore);
+      mockHomeLinqRoute(homeRecipientPhone);
+      prisma.hostedMember.findUnique.mockResolvedValue({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      });
+
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({}),
+        prisma: prisma as never,
+      });
+
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat-line-unavailable",
+      });
+      expect(plan.desiredSideEffects).toEqual([]);
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
   it("privately recovers a hard-blocked assigned group line from a healthy line", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
@@ -5216,6 +5259,154 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalled();
   });
 
+  it.each(["SMS", "RCS"] as const)(
+    "keeps hard-blocked %s group recovery silent",
+    async (service) => {
+      const prisma = createStatefulThreadRoutePrisma();
+      prisma.seedActiveManagedLinqLine("+15550000000", {
+        healthStatus: "unhealthy",
+        providerStatus: "BLOCKED",
+      });
+      prisma.seedActiveManagedLinqLine("+15550000042", {
+        healthStatus: "healthy",
+        providerStatus: "active",
+      });
+      mockSenderLookup(senderCore);
+      mockHomeLinqRoute("+15550000000");
+      prisma.hostedMember.findUnique.mockResolvedValue({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      });
+
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({ service }),
+        prisma: prisma as never,
+      });
+
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat-line-unavailable",
+      });
+      expect(plan.desiredSideEffects).toEqual([]);
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it("falls through to another healthy recovery line when the first capacity claim is lost", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000041", {
+      healthStatus: "healthy",
+      providerStatus: "active",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000042", {
+      healthStatus: "healthy",
+      providerStatus: "active",
+    });
+    const lostLineLookupKey = createHostedPhoneLookupKey("+15550000041");
+    const selectedLineLookupKey = createHostedPhoneLookupKey("+15550000042");
+    if (!lostLineLookupKey || !selectedLineLookupKey) {
+      throw new Error("Expected recovery line lookup keys.");
+    }
+    const originalUpdateMany =
+      prisma.hostedLinqLine.updateMany.getMockImplementation();
+    if (!originalUpdateMany) {
+      throw new Error("Expected recovery line update fixture.");
+    }
+    prisma.hostedLinqLine.updateMany.mockImplementation(async (args: never) => {
+      const input = args as { where: { phoneNumberLookupKey: string } };
+      if (input.where.phoneNumberLookupKey === lostLineLookupKey) {
+        return { count: 0 };
+      }
+      return originalUpdateMany(args);
+    });
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-line-recovery",
+    });
+    expect(plan.desiredSideEffects[0]).toMatchObject({
+      payload: {
+        assignedRecipientPhone: "+15550000042",
+        template: "group_line_recovery",
+      },
+    });
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phoneNumberLookupKey: lostLineLookupKey,
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phoneNumberLookupKey: selectedLineLookupKey,
+        }),
+      }),
+    );
+  });
+
+  it("keeps recovery silent when every healthy line is capped", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const dayUtc = new Date("2026-06-24T00:00:00.000Z");
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    for (const phoneNumber of ["+15550000042", "+15550000043"]) {
+      prisma.seedActiveManagedLinqLine(phoneNumber, {
+        healthStatus: "healthy",
+        maxNewConversationsPerDay: 1,
+        proactiveConversationCount: 1,
+        proactiveConversationDayUtc: dayUtc,
+        providerStatus: "active",
+      });
+    }
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+  });
+
   it("keeps a hard-blocked group line silent when no healthy recovery sender is available", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
@@ -5244,6 +5435,59 @@ describe("Linq group chat auto-provision", () => {
     expect(plan.desiredSideEffects).toEqual([]);
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not reassign a pinned recovery sender that has left the healthy pool", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000042", {
+      healthStatus: "healthy",
+      providerStatus: "active",
+    });
+    prisma.seedActiveManagedLinqLine("+15550000043", {
+      healthStatus: "unhealthy",
+      providerStatus: "BLOCKED",
+    });
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      chatId: "chat_group_123",
+      memberId: "member_owner_123",
+      sourceEventId: "evt_group_123",
+    });
+    const idempotencyLookupKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(effectId);
+    const pinnedLineLookupKey = createHostedPhoneLookupKey("+15550000043");
+    if (!idempotencyLookupKey || !pinnedLineLookupKey) {
+      throw new Error("Expected recovery delivery lookup keys.");
+    }
+    prisma.seedLinqDelivery({
+      id: "hld_group_recovery_unhealthy_retry",
+      idempotencyKey: idempotencyLookupKey,
+      phoneNumberLookupKey: pinnedLineLookupKey,
+    });
+    mockSenderLookup(senderCore);
+    mockHomeLinqRoute("+15550000000");
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
     expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
   });
 

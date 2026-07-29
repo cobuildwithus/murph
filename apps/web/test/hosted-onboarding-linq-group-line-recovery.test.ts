@@ -20,6 +20,7 @@ describe("Hosted Linq group line recovery copy", () => {
       expect(countOccurrences(variant, BACKUP_NUMBER_PLACEHOLDER)).toBe(1);
       expect(variant).toMatch(/\b(?:existing|same) group chat\b/u);
       expect(variant).toMatch(/\b(?:intro|introduction)\b/u);
+      expect(variant).not.toMatch(/\b(?:https?:\/\/|www\.)/iu);
     }
   });
 
