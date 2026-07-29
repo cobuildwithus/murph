@@ -22,6 +22,21 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("keeps each try-it action bound to exactly one behavior", () => {
+    const invalidItems = listPublishedChangelogItems().flatMap((item) => {
+      const tryIt = item.tryIt;
+      if (!tryIt) {
+        return [];
+      }
+      const modes = [tryIt.href, tryIt.prompt].filter(
+        (value) => value !== undefined,
+      );
+      return modes.length === 1 ? [] : [item.id];
+    });
+
+    expect(invalidItems).toEqual([]);
+  });
+
   it("bounds direct-chat access recovery to shared billing states", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "recognized-members-always-get-an-answer",
@@ -39,13 +54,13 @@ describe("changelog registry", () => {
     );
   });
 
-  it("ties the Clubs launch note to both shipped page iterations", () => {
+  it("ties the Clubs launch note to every shipped page iteration", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "clubs-challenge-pilot-page",
     );
 
     expect(item).toMatchObject({
-      sourcePullRequests: [1098, 1105],
+      sourcePullRequests: [1098, 1105, 1115],
       tryIt: {
         href: "/clubs",
         label: "Explore club challenges",

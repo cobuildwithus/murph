@@ -62,7 +62,7 @@ const DESIGN_VISUALS = {
       channel="Private conversation"
       messages={[
         { from: "user", body: "Actually, I meant Tuesday." },
-        { from: "murph", body: "Got it — I’ll use Tuesday." },
+        { from: "murph", body: "Got it, I’ll use Tuesday." },
       ]}
     />
   ),

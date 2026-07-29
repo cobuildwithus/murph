@@ -82,7 +82,7 @@ const VISUALS: Record<string, ReactNode> = {
         { from: "user", body: "Actually, I meant Tuesday." },
         {
           from: "murph",
-          body: "Got it — Tuesday. That changes the timing, so I’ll use the corrected date.",
+          body: "Got it. Tuesday changes the timing, so I’ll use the corrected date.",
         },
       ]}
     />

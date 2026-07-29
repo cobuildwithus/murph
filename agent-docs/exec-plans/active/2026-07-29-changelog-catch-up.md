@@ -54,17 +54,21 @@ Updated: 2026-07-29
 - Refreshed `origin/main` after verification and folded the later Clubs
   iMessage-and-supported-wearables presentation into the same July 29 item
   rather than publishing a duplicate entry.
+- Refreshed `origin/main` again after final local verification and folded the
+  direct-launch Clubs presentation into that same stable item, removing stale
+  pilot and early-access language.
 - Rebased the task commit onto the current root snapshot after `main` history
   changed, then added the newly merged Telegram-to-iMessage contact handoff to
   the same July 29 edition.
 - Updated the existing changelog archive design study with synthetic correction
   evidence and no new component or screen.
-- Focused changelog coverage passed: 27 tests.
+- Focused changelog coverage passed: 28 tests.
 - `pnpm test:frontend-design-proof` passed: 10 tests.
-- Canonical `pnpm test:diff` passed on the final candidate through the required
-  Crabbox fallback after the local shared-host admission wait exceeded ten
-  minutes: dependency and boundary guards, web typecheck, 7,404 tests, lint
-  with no errors, dev smoke, and the production Next build.
+- Canonical `pnpm test:diff` first passed through the required Crabbox fallback
+  after the local shared-host admission wait exceeded ten minutes. The final
+  remediated candidate then acquired the local slot and passed dependency and
+  boundary guards, web typecheck, 7,405 tests, lint with no errors, dev smoke,
+  and the production Next build.
 - Desktop and mobile direct-route checks passed at 1440 by 1100 and 390 by 844:
   the latest edition rendered, the Clubs action resolved to `/clubs`, and
   neither viewport had horizontal overflow.
@@ -79,3 +83,12 @@ Updated: 2026-07-29
   mobile widths.
 - A focused product follow-up reviewed the later Telegram-to-iMessage handoff
   entry and refreshed July 29 route captures with no findings.
+- Preliminary frontend and coverage ReviewGPT found two bounded gaps: the
+  navigation-only Clubs action lacked an explicit no-contact-resolution proof,
+  and five newly authored copy strings used em dashes against the design copy
+  rule. The supplied test-only patch was inspected and applied; the parent
+  replaced only those five punctuation marks and refreshed all six rendered
+  evidence files. The final focused product follow-up returned no findings.
+- Exact-head CI was retried unchanged after the Codex image-media E2E observed
+  two sends but timed out while waiting for the third with the hosted runtime
+  still in flight; no changed file reaches that runtime path.

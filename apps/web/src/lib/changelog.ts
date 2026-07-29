@@ -75,7 +75,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Murph circles back once after onboarding",
         summary:
-          "Around three weeks after answered onboarding, Murph can send one low-pressure question about what feels worth improving, understanding, or handling now—or stay quiet when the context is not useful enough.",
+          "Around three weeks after answered onboarding, Murph can send one low-pressure question about what feels worth improving, understanding, or handling now, or stay quiet when the context is not useful enough.",
         details:
           "It is a one-time choice point, not a recurring nudge. Existing eligible members get one future catch-up rather than an immediate late message, and nothing changes until they reply.",
         relevanceTags: ["onboarding", "assistant", "follow-up", "goals"],
@@ -87,11 +87,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Club challenges have a home",
         summary:
-          "A new Clubs page explains collective, team, and head-to-head pilots, shows how iMessage and supported wearables fit, and makes it easy to email Murph about early access.",
+          "The Clubs page explains collective, team, and head-to-head challenges, shows how iMessage and supported wearables keep standings current, and makes it easy to email Murph to start.",
         details:
-          "Organizers can preview setup, scoring, and private member support without a spreadsheet. The page stays public, and the email address remains visible if a mail app cannot open.",
+          "Organizers can preview setup, scoring, private member support, and launch details without a spreadsheet. The page stays public, and the email address remains visible if a mail app cannot open.",
         relevanceTags: ["clubs", "groups", "challenges", "web"],
-        sourcePullRequests: [1098, 1105],
+        sourcePullRequests: [1098, 1105, 1115],
         tryIt: {
           href: "/clubs",
           label: "Explore club challenges",
@@ -240,7 +240,7 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "group-sponsorship-moments",
         kind: "feature",
         priority: 4,
-        title: "Sponsor the room—and make it a bit",
+        title: "Sponsor the room and make it a bit",
         summary:
           "A current participant can sponsor about 100, 200, or 400 group messages for $5, $10, or $20, add an optional public alias or note, and turn a larger pack into a short-lived running bit.",
         details:
@@ -302,7 +302,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "People get first refusal in the group",
         summary:
-          "Murph now gives friends the floor when a message is a personal artifact, shared memory, relationship question, or human-to-human beat—even when it ends with a question mark.",
+          "Murph now gives friends the floor when a message is a personal artifact, shared memory, relationship question, or human-to-human beat, even when it ends with a question mark.",
         details:
           "A direct ask to Murph still gets a brief answer. If Murph lacks authority to answer a personal fact, it says so plainly instead of guessing or turning the correction into a bit.",
         relevanceTags: ["groups", "assistant", "messaging", "privacy"],

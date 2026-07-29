@@ -124,6 +124,13 @@ describe("ChangelogPage", () => {
         },
       ]),
     );
+    expect(mocks.resolveHostedMurphContactOptions).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          subject: "Try it: Club challenges have a home",
+        }),
+      }),
+    );
   });
 
   it("renders explanatory visuals for the major new features", async () => {
