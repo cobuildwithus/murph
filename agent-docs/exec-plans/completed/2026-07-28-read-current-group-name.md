@@ -1,8 +1,8 @@
 # Let the model read the current provider group title
 
-Status: active
+Status: completed
 Created: 2026-07-28
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 ## Goal
 
@@ -109,3 +109,4 @@ Updated: 2026-07-28
   - Synthesized Linq handle labels and absent titles return `none`.
   - Invalid routes and provider failures return bounded `unavailable` results.
   - Strict response parsing rejects invalid status/title combinations.
+Completed: 2026-07-29
