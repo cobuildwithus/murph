@@ -15,7 +15,10 @@ Updated: 2026-07-29
 - Voice-only requests and owning voice-only flows explicitly leave final text
   empty.
 - Accompanying text is reserved for distinct necessary information or an
-  explicit owning-flow requirement and does not duplicate the memo transcript.
+  explicit owning-flow requirement; explicit requests for both audio and text
+  remain authoritative.
+- Voice-only completion uses an empty final assistant message instead of
+  `murph.finish_without_reply`, which is incompatible with attached media.
 - Voice-only Linq/iMessage replies do not select a native reply target, whose
   transport contract requires accompanying text.
 - Focused prompt-contract tests pass.
@@ -60,15 +63,22 @@ Updated: 2026-07-29
 - Accept the product-review finding that voice-only Linq/iMessage responses
   must avoid native reply targeting; the existing delivery rejection remains
   the runtime invariant.
+- Accept all preliminary specialist findings: preserve explicit user requests
+  for both modalities, make empty-final-message completion unambiguous, and
+  assert the complete decision sentences instead of isolated fragments.
 
 ## Verification
 
-- Focused Vitest for the prompt contract and existing Linq voice-only
-  rejection: 2 tests passed, 42 skipped.
+- Focused Vitest for the prompt contract, existing Linq voice-only rejection,
+  empty-final-message media delivery, and the incompatible no-reply sequence:
+  3 files passed; 4 tests passed and 265 skipped.
 - `pnpm --filter @murphai/assistant-engine typecheck`: passed.
 - Initial product-experience review found the native-reply-target conflict.
   The prompt caveat and contract assertion implement the accepted smallest
   correction; the fresh remediation review returned `NO FINDINGS`.
+- The fresh post-specialist product review also returned `NO FINDINGS`. It
+  records that current-model, production-faithful end-to-end adherence remains
+  unproven by the static and mocked focused checks.
 - Exact provider-input delta for the changed JSON-string tool description,
-  measured with `gpt-tokenizer` 3.4.0 `o200k_harmony`: +68 tokens and +388
+  measured with `gpt-tokenizer` 3.4.0 `o200k_harmony`: +106 tokens and +586
   UTF-8 bytes in a voice-enabled initial turn.

@@ -626,10 +626,10 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       'Final response text is optional.',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'the owning skill or product flow marks the response voice-only',
+      'Leave it empty when the memo fully carries the reply, the user asked for voice only, or the owning skill or product flow marks the response voice-only. When leaving it empty, finish with an empty final assistant message and do not call murph.finish_without_reply after attaching the memo.',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'do not duplicate the memo transcript in text.',
+      'Add accompanying text only when it contributes distinct necessary information, the owning flow explicitly requires it, or the user explicitly asks for both audio and text; otherwise do not duplicate the memo transcript in text.',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'For a voice-only Linq/iMessage response, do not call murph.select_reply_target because native reply targeting requires accompanying text.',
