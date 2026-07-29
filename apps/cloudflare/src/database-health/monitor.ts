@@ -81,6 +81,11 @@ interface PlanetScaleDiscoveryGroup {
   targets: readonly string[];
 }
 
+interface ResolvedDatabaseHealthLinqDestination {
+  recipient: string;
+  sendable: boolean;
+}
+
 interface DatabaseHealthTransactionalStorage {
   sql?: DurableObjectSqlStorageLike;
   transactionSync?<T>(callback: () => T): T;
@@ -445,10 +450,16 @@ export class DatabaseHealthMonitor {
       if (primaryResult.status === "rejected") {
         failures.push(primaryResult.reason);
       } else {
-        destinations.push({
-          idempotencyKey,
-          recipient: primaryResult.value.recipient,
-        });
+        if (primaryResult.value.sendable) {
+          destinations.push({
+            idempotencyKey,
+            recipient: primaryResult.value.recipient,
+          });
+        } else {
+          failures.push(
+            new LinqDatabaseAlertError("linq_health_suppressed"),
+          );
+        }
       }
       if (secondaryResult.status === "rejected") {
         failures.push(secondaryResult.reason);
@@ -459,6 +470,10 @@ export class DatabaseHealthMonitor {
         ) {
           failures.push(
             new LinqDatabaseAlertError("linq_duplicate_recipient"),
+          );
+        } else if (!secondaryResult.value.sendable) {
+          failures.push(
+            new LinqDatabaseAlertError("linq_health_suppressed"),
           );
         } else {
           destinations.push({
@@ -705,7 +720,7 @@ async function resolveDatabaseHealthLinqDestination(input: {
   apiToken: string;
   chatId: string;
   fetchImplementation: DatabaseHealthFetch;
-}): Promise<{ recipient: string }> {
+}): Promise<ResolvedDatabaseHealthLinqDestination> {
   const authorization = `Bearer ${input.apiToken}`;
   const chatUrl = new URL(
     `chats/${encodeURIComponent(input.chatId)}`,
@@ -715,45 +730,63 @@ async function resolveDatabaseHealthLinqDestination(input: {
     "phone_numbers",
     ensureTrailingSlash(input.apiBaseUrl),
   );
-  const [chatResponse, phoneNumbersResponse] = await Promise.all([
-    fetchWithTimeout(
-      input.fetchImplementation,
-      chatUrl,
-      {
-        headers: { authorization },
-        method: "GET",
-        redirect: "error",
-      },
-    ),
-    fetchWithTimeout(
-      input.fetchImplementation,
-      phoneNumbersUrl,
-      {
-        headers: { authorization },
-        method: "GET",
-        redirect: "error",
-      },
-    ),
-  ]).catch(() => {
-    throw new LinqDatabaseAlertError("linq_health_unavailable");
-  });
-  if (!chatResponse.ok || !phoneNumbersResponse.ok) {
+  const [chatResponseResult, phoneNumbersResponseResult] =
+    await Promise.allSettled([
+      fetchWithTimeout(
+        input.fetchImplementation,
+        chatUrl,
+        {
+          headers: { authorization },
+          method: "GET",
+          redirect: "error",
+        },
+      ),
+      fetchWithTimeout(
+        input.fetchImplementation,
+        phoneNumbersUrl,
+        {
+          headers: { authorization },
+          method: "GET",
+          redirect: "error",
+        },
+      ),
+    ]);
+  if (
+    chatResponseResult.status === "rejected"
+    || !chatResponseResult.value.ok
+  ) {
     throw new LinqDatabaseAlertError("linq_health_unavailable");
   }
-  const [chatBody, phoneNumbersBody] = await Promise.all([
-    readBoundedResponseText(chatResponse, LINQ_HEALTH_BODY_LIMIT_BYTES),
-    readBoundedResponseText(
-      phoneNumbersResponse,
-      LINQ_HEALTH_BODY_LIMIT_BYTES,
-    ),
-  ]).catch(() => {
+  const chatBody = await readBoundedResponseText(
+    chatResponseResult.value,
+    LINQ_HEALTH_BODY_LIMIT_BYTES,
+  ).catch(() => {
     throw new LinqDatabaseAlertError("linq_health_unavailable");
   });
-  const destination = resolveHealthyLinqDestination({
-    chatBody,
-    phoneNumbersBody,
-  });
-  return destination;
+  const chatIdentity = resolveLinqDirectChatIdentity(chatBody);
+  if (
+    phoneNumbersResponseResult.status === "rejected"
+    || !phoneNumbersResponseResult.value.ok
+  ) {
+    return {
+      recipient: chatIdentity.recipient,
+      sendable: false,
+    };
+  }
+  const phoneNumbersBody = await readBoundedResponseText(
+    phoneNumbersResponseResult.value,
+    LINQ_HEALTH_BODY_LIMIT_BYTES,
+  ).catch(() => null);
+  return {
+    recipient: chatIdentity.recipient,
+    sendable:
+      chatIdentity.chatHealthy
+      && phoneNumbersBody !== null
+      && hasHealthyLinqSenderLine({
+        phoneNumbersBody,
+        sender: chatIdentity.sender,
+      }),
+  };
 }
 
 async function sendDatabaseHealthLinqAlert(input: {
@@ -820,26 +853,23 @@ function buildDatabaseAlertMessage(input: {
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
 }
 
-function resolveHealthyLinqDestination(input: {
-  chatBody: string;
-  phoneNumbersBody: string;
-}): { recipient: string } {
+function resolveLinqDirectChatIdentity(
+  chatBody: string,
+): {
+  chatHealthy: boolean;
+  recipient: string;
+  sender: string;
+} {
   let chatValue: unknown;
-  let phoneNumbersValue: unknown;
   try {
-    chatValue = JSON.parse(input.chatBody);
-    phoneNumbersValue = JSON.parse(input.phoneNumbersBody);
+    chatValue = JSON.parse(chatBody);
   } catch {
     throw new LinqDatabaseAlertError("linq_health_unavailable");
   }
   if (
     !isObjectRecord(chatValue)
     || chatValue.is_group !== false
-    || !isObjectRecord(chatValue.health_status)
-    || chatValue.health_status.status !== "HEALTHY"
     || !Array.isArray(chatValue.handles)
-    || !isObjectRecord(phoneNumbersValue)
-    || !Array.isArray(phoneNumbersValue.phone_numbers)
   ) {
     throw new LinqDatabaseAlertError("linq_health_suppressed");
   }
@@ -863,11 +893,36 @@ function resolveHealthyLinqDestination(input: {
   if (!isE164PhoneNumber(sender) || !isE164PhoneNumber(recipient)) {
     throw new LinqDatabaseAlertError("linq_health_suppressed");
   }
+  const chatHealthStatus = isObjectRecord(chatValue.health_status)
+    ? normalizeLinqHealthStatus(chatValue.health_status.status)
+    : null;
+  return {
+    chatHealthy: chatHealthStatus === "HEALTHY",
+    recipient,
+    sender,
+  };
+}
 
+function hasHealthyLinqSenderLine(input: {
+  phoneNumbersBody: string;
+  sender: string;
+}): boolean {
+  let phoneNumbersValue: unknown;
+  try {
+    phoneNumbersValue = JSON.parse(input.phoneNumbersBody);
+  } catch {
+    return false;
+  }
+  if (
+    !isObjectRecord(phoneNumbersValue)
+    || !Array.isArray(phoneNumbersValue.phone_numbers)
+  ) {
+    return false;
+  }
   const currentLines = phoneNumbersValue.phone_numbers.filter(
     (candidate) =>
       isObjectRecord(candidate)
-      && normalizeLinqPhoneNumber(candidate.phone_number) === sender,
+      && normalizeLinqPhoneNumber(candidate.phone_number) === input.sender,
   );
   const currentLine = currentLines[0];
   const reputation = isObjectRecord(currentLine?.reputation)
@@ -876,14 +931,11 @@ function resolveHealthyLinqDestination(input: {
   const reputationStatus =
     normalizeLinqHealthStatus(reputation?.status)
     ?? normalizeLinqHealthStatus(currentLine?.health_status);
-  if (
+  return !(
     currentLines.length !== 1
     || !isObjectRecord(currentLine)
     || reputationStatus !== "HEALTHY"
-  ) {
-    throw new LinqDatabaseAlertError("linq_health_suppressed");
-  }
-  return { recipient };
+  );
 }
 
 function formatDatabaseHealthCondition(

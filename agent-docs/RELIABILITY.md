@@ -91,8 +91,11 @@ Last verified: 2026-07-29
   suppresses that destination's message POST without blocking the other
   destination, and retains the pending alert for the next paced cycle. Healthy
   destinations are compared before provider entry. Primary recipient identity
-  is required before any secondary POST: an unresolved primary suppresses both
-  positions, while an unresolved secondary does not block a healthy primary.
+  is required before any secondary POST: an unresolved primary identity
+  suppresses both positions, while an unresolved secondary identity does not
+  block a healthy primary. A known primary identity with unhealthy or
+  indeterminate delivery health still permits a healthy distinct secondary
+  POST; the suppressed primary keeps the page pending.
   Distinct chat ids that resolve to the same external recipient admit only the
   primary POST and keep the page pending; after configuration is corrected,
   stable provider

@@ -64,10 +64,13 @@ Last verified: 2026-07-29
   resolve to the same external recipient, only the primary operation may enter
   Linq and the pending page remains unresolved. An unresolved primary identity
   suppresses secondary provider entry because distinctness cannot be proven;
-  an unresolved secondary may still allow the healthy primary operation. It
-  otherwise uses Linq's no-`from` auto-selection endpoint separately for each
-  direct chat so a line that becomes flagged after preflight can fail over; no
-  model, runner, request, or stored state can select another recipient.
+  an unresolved secondary may still allow the healthy primary operation.
+  Primary chat or line health does not erase an otherwise unambiguous identity,
+  so a healthy distinct secondary may still enter while the primary is
+  suppressed. It otherwise uses Linq's no-`from` auto-selection endpoint
+  separately for each direct chat so a line that becomes flagged after
+  preflight can fail over; no model, runner, request, or stored state can select
+  another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - A hosted member's OpenAI or Venice choice controls only core assistant
   inference. The selected provider receives the information required to produce

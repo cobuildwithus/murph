@@ -200,13 +200,15 @@ to be `HEALTHY`. It derives that chat's sole external phone recipient in memory,
 never persists or logs it, and requires the two resolved recipients to differ
 before the secondary operation can enter Linq. If primary identity cannot be
 resolved, neither operation posts; if only the secondary is unavailable, the
-healthy primary can still post. A duplicate resolved recipient allows the
-primary operation only and leaves the alert pending. Distinct healthy recipients
-are sent through Linq's no-`from` auto-selection endpoint so a newly flagged
-line can fail over. Unhealthy or indeterminate delivery health suppresses that
-destination's POST and leaves the alert pending for the next paced attempt. This
-path does not share state or fallback behavior with the Resend-only hosted
-reply-latency monitor.
+healthy primary can still post. If the primary identity is known but its chat
+or line health is unsafe or indeterminate, a healthy distinct secondary can
+still post. A duplicate resolved recipient allows the primary operation only
+and leaves the alert pending. Distinct healthy recipients are sent through
+Linq's no-`from` auto-selection endpoint so a newly flagged line can fail over.
+Unhealthy or indeterminate delivery health suppresses that destination's POST
+and leaves the alert pending for the next paced attempt. This path does not
+share state or fallback behavior with the Resend-only hosted reply-latency
+monitor.
 
 Defaulted worker vars:
 

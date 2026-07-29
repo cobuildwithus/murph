@@ -809,9 +809,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   a provider-entered body. Before posting, the monitor resolves both direct
   chats and requires two distinct sole external recipients. Primary recipient
   identity is a prerequisite for secondary provider entry, so an unresolved
-  primary suppresses both operations while an unresolved secondary may still
-  allow the primary. If distinct chats resolve to the same recipient, only the
-  primary operation may enter Linq and the page stays pending until
+  primary identity suppresses both operations while an unresolved secondary
+  identity may still allow the primary. Delivery health is independent from
+  identity: a known but unhealthy primary destination does not block a healthy,
+  distinct secondary. If distinct chats resolve to the same recipient, only
+  the primary operation may enter Linq and the page stays pending until
   configuration is corrected. Otherwise the two
   direct-chat deliveries settle independently: the primary retains the existing
   idempotency key, the secondary uses a stable derived key, and a partial
