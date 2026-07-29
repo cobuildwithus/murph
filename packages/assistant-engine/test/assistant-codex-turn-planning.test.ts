@@ -2461,6 +2461,9 @@ describe('assistant Codex turn planning', () => {
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
+      currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
+        assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      })),
       subscriptionTool: { request: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
@@ -2589,6 +2592,73 @@ describe('assistant Codex turn planning', () => {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
     }
   })
+
+  it.each([
+    ['direct Telegram current user input', 'telegram', true, 'assistant-input', true],
+    ['direct non-Telegram current user input', 'email', true, 'assistant-input', false],
+    ['Telegram group current user input', 'telegram', false, 'assistant-input', false],
+    ['direct Telegram system input', 'telegram', true, 'system', false],
+  ] as const)(
+    'gates iMessage contact on %s',
+    async (_label, channel, threadIsDirect, source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        imessageContactTool: { ensure: vi.fn() },
+      }
+      const sharedPlan = threadIsDirect
+        ? createPrivateSharedPlan()
+        : createSharedPlan({}, {
+            channel,
+            effectiveThreadIsDirect: false,
+            threadId: 'telegram-group-thread',
+            threadIsDirect: false,
+          })
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'d'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-imessage-contact-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel,
+          threadId: threadIsDirect
+            ? 'telegram-direct-thread'
+            : 'telegram-group-thread',
+          threadIsDirect,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-27',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan,
+      })
+
+      expect(plan.dynamicTools.some((tool) => tool.name === 'imessage_contact'))
+        .toBe(expectedAvailable)
+    },
+  )
 
   it.each([
     ['assistant-input', true],
@@ -2770,6 +2840,10 @@ describe('assistant Codex turn planning', () => {
       supportsNativeResume: false,
     })
     const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: 'group-email-phone-request',
+        source: 'manual',
+      }],
       executionContext: {
         hosted: {
           memberId: 'member-group-container',
@@ -2782,6 +2856,7 @@ describe('assistant Codex turn planning', () => {
         ...createHostedToolContext(),
         assistantConfigurationTool: { request: vi.fn() },
         personalizationTool: { request: vi.fn() },
+        phoneCalls: { start: vi.fn() },
       },
       input: {
         ...createMessageInput(),
@@ -2826,6 +2901,9 @@ describe('assistant Codex turn planning', () => {
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'assistant_configuration',
     )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'create_phone_call',
+    )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
     )
@@ -2836,6 +2914,12 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       "change this room's Murph style",
     )
+    expect(plan.developerInstructions).toContain(
+      'Do not offer or attempt a phone call from group email.',
+    )
+    expect(plan.developerInstructions).toContain(
+      'authenticated Linq or Telegram group chat',
+    )
     expect(plan.developerInstructions).not.toContain(
       'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
@@ -2843,6 +2927,120 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
     expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+  })
+
+  it('keeps phone calls available on authenticated Telegram group turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      null,
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: 'telegram-group-phone-confirmation',
+        source: 'manual',
+      }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        currentGroupPhoneCallPreviewAuthority: vi.fn(async () => ({
+          assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+        })),
+        phoneCalls: { start: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'telegram',
+        threadIsDirect: false,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'telegram',
+        effectiveThreadIsDirect: false,
+        threadId: 'telegram-group-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(plan.dynamicTools.map((tool) => tool.name)).toContain(
+      'create_phone_call',
+    )
+  })
+
+  it('withholds group phone calls until a delivered preview precedes the current input', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      null,
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const currentGroupPhoneCallPreviewAuthority = vi.fn(async () => null)
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [{
+        id: 'linq-group-phone-request',
+        source: 'manual',
+      }],
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        currentGroupPhoneCallPreviewAuthority,
+        phoneCalls: { start: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        threadIsDirect: false,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-28',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: false,
+        threadId: 'linq-group-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(currentGroupPhoneCallPreviewAuthority).toHaveBeenCalledTimes(1)
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'create_phone_call',
+    )
   })
 
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {

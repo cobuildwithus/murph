@@ -456,12 +456,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const privateInteractiveAudience = conversationScope === 'direct'
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
-  const authenticatedGroupRoomModelRuntime =
+  const authenticatedGroupChatRuntime =
     hostedGroupRuntime &&
     assistantRouteSupportsGroupRoomModel({
       channel: resolvedChannel,
       threadIsDirect: false,
     })
+  const deliveredGroupPhoneCallPreviewAvailable =
+    authenticatedGroupChatRuntime &&
+    input.hostedToolContext?.phoneCalls != null &&
+    await input.hostedToolContext
+      .currentGroupPhoneCallPreviewAuthority?.() != null
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -598,7 +603,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             : []),
         ]
   const groupRoomModelPrompt =
-    authenticatedGroupRoomModelRuntime &&
+    authenticatedGroupChatRuntime &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
       ? await readAssistantGroupRoomModelPrompt({
@@ -829,13 +834,19 @@ export async function resolveAssistantRouteTurnPlan(input: {
         planUsageAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.planUsageTool != null,
+        imessageContactAvailable:
+          privateInteractiveAudience &&
+          currentAudienceDeliveryFields.channel === 'telegram' &&
+          currentAudienceDeliveryFields.threadIsDirect === true &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.imessageContactTool != null,
         subscriptionAvailable:
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.subscriptionTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
         groupRoomModelAvailable:
-          authenticatedGroupRoomModelRuntime &&
+          authenticatedGroupChatRuntime &&
           userActionAcceptedInputIds.length > 0,
         groupPermissionOfferAvailable:
           hostedGroupRuntime &&
@@ -852,7 +863,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         phoneCallsAvailable:
-          (privateInteractiveAudience || hostedGroupRuntime) &&
+          (
+            privateInteractiveAudience
+            || deliveredGroupPhoneCallPreviewAvailable
+          ) &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

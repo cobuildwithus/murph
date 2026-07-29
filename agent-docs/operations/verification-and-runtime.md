@@ -1,6 +1,31 @@
 # Verification And Runtime
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
+
+## Verification Ownership By Delivery Path
+
+The delivery path decides who owns broad verification:
+
+- **Pull request:** before opening or updating the PR, run the smallest focused
+  local tests, typecheck/lint/build checks, and direct scenarios that exercise
+  the changed behavior. Do not run `pnpm test:diff`, `pnpm test`,
+  `pnpm test:coverage`, or `pnpm verify:acceptance` merely because a PR is being
+  created. Required GitHub Actions on the exact PR head own the broad package,
+  app, coverage, fixture, smoke, and hosted E2E surfaces. The PR is not complete
+  until those required checks are green.
+- **CI failure:** inspect the failing job and begin with the narrowest local
+  command that reproduces its owner or scenario. Expand to `pnpm test:diff`,
+  an owner-level verification command, or `pnpm verify:acceptance` only when
+  broader reproduction is useful. Do not rerun an unrelated full local suite.
+- **Direct shared-default push:** after fetching and reconciling the exact
+  candidate for `main` or another shared default branch, run
+  `pnpm verify:acceptance` before pushing. This rule overrides the PR-focused
+  and docs-only fast paths because there is no PR feedback loop before the
+  shared branch changes.
+
+Focused local proof is still mandatory for changed behavior. The PR rule moves
+the broad suite to CI; it does not permit an untested push or make a green
+unrelated check sufficient.
 
 ## Verification Execution Location
 
@@ -281,13 +306,15 @@ For Blacksmith, also retain the Testbox ID and linked GitHub Actions run.
 
 ## Verification Matrix
 
-When a row offers `pnpm test:diff <path ...>`, that command is the complete
-scoped lane: it typechecks the touched owners and reverse dependents before it
-runs their tests and app verification. Do not precede it with a redundant root
-`pnpm typecheck`. The non-diff fallback deliberately pairs `pnpm typecheck`
-with the named owner coverage or verification command.
+The delivery-path rule above governs this matrix. For PR-bound work, each row
+defines the coverage surface that focused local proof and exact-head CI must
+cover; its umbrella command is a diagnostic/full-local fallback, not an
+automatic pre-PR requirement. For direct shared-default pushes, run
+`pnpm verify:acceptance` regardless of the row. When `pnpm test:diff <path ...>`
+is selected locally, it is a complete scoped lane and should not be preceded by
+a redundant root `pnpm typecheck`.
 
-| Change scope | Required commands | Notes |
+| Change scope | Canonical full/scoped command | Notes |
 | --- | --- | --- |
 | Vault-only data changes under `vault/**` | No repo-wide commands by default. | Read back the touched vault records plus any audit artifacts written by the mutation path. |
 | Review-only repo inspection with no file edits | No repo-wide commands by default. | Applies when the user asks for code review, architectural review, or repo inspection only and the task does not modify repo or vault files. Use direct file references and static analysis by default. Run tests, typecheck, or other commands only when the user explicitly asks for runtime proof or when a material review conclusion cannot be supported from static inspection alone. |
@@ -320,11 +347,11 @@ These provider-backed tests remain mocked; release proof still needs the
 documented Stripe test-mode and desktop/mobile browser smokes.
 
 The read-only Labs slice spans a provider trust boundary, two app surfaces, and
-the hosted assistant runtime. Its completion lane is therefore the union of the
-normal owner checks, not a text-only or narrow-app exception: run focused
-hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
-assistant-runtime bridge, and assistant-engine tool/prompt tests; then run
-`pnpm test:diff` for every touched owner and `pnpm test:scenario-integrity`.
+the hosted assistant runtime. Its local PR proof is therefore the union of
+focused hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
+assistant-runtime bridge, and assistant-engine tool/prompt tests. Exact-head CI
+owns the broad diff and scenario-integrity surfaces; direct shared-default
+pushes use `pnpm verify:acceptance`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
 putting a real query or ZIP in a durable artifact. Complete the local
 `product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
@@ -346,7 +373,11 @@ Playwright can capture the required states.
 
 ## Scoped Verification Mode
 
-The text-only docs/process fast path above is not a scoped-verification exception. It is the default verification rule for eligible Markdown-only docs work.
+Focused local proof is the default for PR-bound work and does not require a
+pre-existing red repo baseline. The scoped-verification exception below applies
+only when a non-PR task would otherwise require a broader local command. The
+text-only docs/process fast path remains the default for eligible Markdown-only
+docs work unless the change will be pushed directly to a shared default branch.
 
 ## Hosted Temporal Replay Proof
 
@@ -409,13 +440,16 @@ Use the low-risk repo-internal workflow/tooling fast path when all of the follow
 
 1. The diff stays within repo-internal docs/process/verification tooling paths such as `agent-docs/**`, `docs/**`, `scripts/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `vitest.config.ts`, or root `tsconfig*.json`.
 2. The change does not touch app/package runtime behavior, product behavior, persisted-state logic, auth/trust boundaries, or deploy surfaces.
-3. `pnpm test:diff <path ...>` plus direct touched-file checks are enough to exercise the changed surface directly.
+3. Focused tests or direct touched-file checks are enough to exercise the
+   changed surface locally.
 
 When that fast path applies:
 
-- `pnpm test:diff <path ...>` remains required and replaces a separate root `pnpm typecheck` for this fast path.
 - Direct checks on the touched tooling files remain required.
-- `pnpm test`, `pnpm verify:acceptance`, and the explicit acceptance-only lanes such as `pnpm test:coverage` are optional and should be skipped unless the touched files really need broader proof.
+- For a PR, `pnpm test:diff`, `pnpm test`, `pnpm verify:acceptance`, and explicit
+  acceptance-only lanes such as `pnpm test:coverage` are optional and should be
+  skipped unless the touched files or a CI failure need broader proof.
+- A direct shared-default push still requires `pnpm verify:acceptance`.
 
 ## Current Command Meaning
 
@@ -469,7 +503,24 @@ the advisory budget.
 - `pnpm deps:ignored-builds`: shows dependency install scripts that pnpm blocked so dependency updates can be reviewed instead of silently executing new lifecycle code.
 - `pnpm deps:approve-builds`: records reviewed install-script approvals into `pnpm-workspace.yaml` after a trusted-machine dependency refresh.
 - `pnpm typecheck`: validates shell syntax, syntax-checks the root `.mjs` release helpers, runs `pnpm deps:guard`, the workspace-boundary and package-cycle audits, hosted architecture/privacy guards, repo-owned TS tools typecheck, the contracts build, and every package/app no-emit typecheck. The canonical root and workspace `tsc` binary is stable TypeScript 7; the hosted web keeps a local TypeScript 5 dependency only for Next, ESLint, Workflow, and Solana tools that still require the legacy JavaScript compiler API or peer range. Repo-owned source-analysis checks use Babel's parser and do not depend on a TypeScript compiler API, so the web-local TypeScript 5 boundary can be deleted independently once its framework/tooling consumers support TypeScript 7. Tsconfig path-map discovery now reads root tsconfigs non-recursively and scans only `packages/**` plus `apps/**`; it no longer walks unrelated local residue. The repo-tools pass keeps an ignored `tsconfig.tools.tsbuildinfo` cache for warm runs. Independent preflight checks overlap the contracts prerequisite, then the package/app fanout runs with `MURPH_TYPECHECK_WORKSPACE_CONCURRENCY=min(logical CPUs, 8)` on an ordinary local host, `2` on CI or a local shared host, and no unnecessary topological ordering. The capable-host acceptance composition may use the wider local fanout inside its exclusive verification slot. The command retains the per-worktree artifact lock and clean contracts proof used by full acceptance.
-- `pnpm test:diff`: the self-contained default agent/local lane for scoped repo code. It maps the requested worktree paths to workspace owners and reverse dependents, runs the relevant global guards, then batches affected typechecks through the existing bounded pnpm fanout and batches exact package-local test scripts through `MURPH_TEST_DIFF_WORKSPACE_CONCURRENCY` (up to four local processes by default). Each nested Vitest process receives an absolute worker budget derived from available CPUs; `MURPH_TEST_DIFF_VITEST_MAX_WORKERS` can override it. When Assistant Engine is selected, its test command runs separately with the same 6 GiB heap ceiling used by package coverage so the single-worker diff lane does not fall back to Node's insufficient 4 GiB default. Contracts build/test mutation stays behind the artifact lock, package-boundary follow-ups remain intact, and two affected apps reuse the parent-locked parallel `test:apps` lane. CLI source-first/escalation semantics are unchanged. Tooling-only diffs retain the narrow guard fast path, while root workspace manifests still broaden to the whole workspace. Because this lane already typechecks touched owners and reverse dependents, do not pair it with a separate root `pnpm typecheck` for narrow changes.
+- `pnpm test:diff`: the self-contained optional local lane for a diff-aware
+  scoped check or CI diagnosis. It maps the requested worktree paths to
+  workspace owners and reverse dependents, runs the relevant global guards,
+  then batches affected typechecks through the existing bounded pnpm fanout and
+  batches exact package-local test scripts through
+  `MURPH_TEST_DIFF_WORKSPACE_CONCURRENCY` (up to four local processes by
+  default). Each nested Vitest process receives an absolute worker budget
+  derived from available CPUs; `MURPH_TEST_DIFF_VITEST_MAX_WORKERS` can override
+  it. When Assistant Engine is selected, its test command runs separately with
+  the same 6 GiB heap ceiling used by package coverage so the single-worker
+  diff lane does not fall back to Node's insufficient 4 GiB default. Contracts
+  build/test mutation stays behind the artifact lock, package-boundary
+  follow-ups remain intact, and two affected apps reuse the parent-locked
+  parallel `test:apps` lane. CLI source-first/escalation semantics are
+  unchanged. Tooling-only diffs retain the narrow guard fast path, while root
+  workspace manifests still broaden to the whole workspace. Because this lane
+  already typechecks touched owners and reverse dependents, do not pair it with
+  a separate root `pnpm typecheck` for narrow changes.
 - `pnpm test`: runs the fast deterministic behavior loop under the artifact lock: warm-safe incremental contracts artifact verification, the root multi-project Vitest lane, and fixture/scenario-manifest verification without coverage. Full acceptance and release lanes retain clean contracts builds. Package projects share one bounded pool; the four independent CLI buckets share the next phase, while the five explicit `fileParallelism: false` smoke buckets remain isolated. Shared Vitest global setup places every ordinary package/app/repo-tool process beneath one marked private temp root inside a dedicated Murph owner directory, removes it on teardown even after test failures, and sweeps only old dead-owner marked roots before a later run without enumerating unrelated host temp entries. `MURPH_VITEST_MAX_WORKERS` now actually controls the root and ordinary package configs, defaulting to `75%` locally or `50%` in CI. Local runs overlap repo Vitest with scenario-manifest verification when `MURPH_TEST_LANES_PARALLEL` allows it; CI stays sequential by default.
 - `pnpm docs:drift`: runs the manual durable-doc drift check. Use it when a task intentionally changes `agent-docs/**`, `ARCHITECTURE.md`, or other durable repo docs and you want the old index/truthfulness guard explicitly, without making every default `pnpm test` run sensitive to unrelated dirty-tree doc work. Doc gardening intersects unindexed findings with Git's tracked-file inventory, so ignored or otherwise untracked local documents cannot block acceptance. It also excludes immutable `agent-docs/exec-plans/completed/**` snapshots from live index enforcement; active plans and durable current docs remain governed.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
@@ -479,7 +530,7 @@ the advisory budget.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
-- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
+- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`. PR-bound work runs focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement proof locally while exact-head CI owns broad acceptance. A direct shared-default push must use `pnpm verify:acceptance`. Neither automated path replaces a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
 - `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. The tag-driven release workflow performs the one required install up front, opts the verify lanes into CI parallel execution through `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1`, and leaves the actual tarball packing to the later dedicated pack step instead of repacking inside `release:check`. Treat it as the release-specific extension of `pnpm verify:acceptance`, with the extra clean-build proof layered on top.
 
 ## Incur-Backed CLI Guardrails
