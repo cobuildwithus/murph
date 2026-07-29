@@ -11749,7 +11749,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late runtime wake imports conversation input after the delivery barrier", async () => {
+  test("late runtime wake retries a failed foreground import without another notification", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-late-foreground-direct-"),
     );
@@ -11757,6 +11757,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedSeqs: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const mailboxItems = Array.from({ length: 13 }, (_, index) => {
       const seq = String(index + 1);
       return createMailboxItem({
@@ -11769,6 +11770,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantPhaseLinqContextTargets: string[][] = [];
     let lateAssistantInputId: string | null = null;
     let assistantPhaseCalls = 0;
+    let lateConversationImportAttempts = 0;
+    let ingressWakeNotifications = 0;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -11806,6 +11809,10 @@ describe("hosted workspace runtime entrypoint", () => {
             if (item.item.laneSeq !== "14") {
               return { status: "imported" };
             }
+            lateConversationImportAttempts += 1;
+            if (lateConversationImportAttempts === 1) {
+              throw new Error("Synthetic foreground conversation import failure.");
+            }
             const target = "thread_late_foreground_group";
             lateAssistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item,
@@ -11832,6 +11839,7 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           platform: createPlatform({
+            logRequests,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -11846,10 +11854,17 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeWakeSignal,
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
-            const inputBatch = input.initialAssistantInputBatch;
-            assistantPhaseInputIds.push([...(inputBatch?.assistantInputIds ?? [])]);
+            const importedAssistantInputIds =
+              input.initialAssistantInputBatch?.assistantInputIds
+              ?? input.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            const importedLinqDeliveryContexts =
+              input.initialAssistantInputBatch?.linqDeliveryContexts
+              ?? input.initialMailboxImport.importResult.linqDeliveryContexts
+              ?? [];
+            assistantPhaseInputIds.push([...importedAssistantInputIds]);
             assistantPhaseLinqContextTargets.push(
-              [...(inputBatch?.linqDeliveryContexts ?? [])]
+              [...importedLinqDeliveryContexts]
                 .map((context) => context.target ?? ""),
             );
             events.push(
@@ -11862,6 +11877,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 laneSeq: "14",
                 occurredAt: "2026-04-27T00:00:14.000Z",
               }));
+              ingressWakeNotifications += 1;
               runtimeWakeSignal.notify();
               return {
                 checkpointReason: "assistant_runtime_commit",
@@ -11876,14 +11892,25 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(assistantPhaseCalls, 2);
       assert.ok(lateAssistantInputId);
-      assert.deepEqual(assistantPhaseInputIds[1], [lateAssistantInputId]);
+      assert.deepEqual(
+        assistantPhaseInputIds[1],
+        [lateAssistantInputId],
+        events.join(","),
+      );
       assert.deepEqual(assistantPhaseLinqContextTargets[1], [
         "thread_late_foreground_group",
       ]);
       assert.deepEqual(
         importedSeqs,
-        Array.from({ length: 14 }, (_, index) => String(index + 1)),
+        [
+          ...Array.from({ length: 13 }, (_, index) => String(index + 1)),
+          "14",
+          "13",
+          "14",
+        ],
       );
+      assert.equal(lateConversationImportAttempts, 2);
+      assert.equal(ingressWakeNotifications, 1);
       assert.ok(
         fetchRequests.some((request) =>
           readConversationImportedSeq(request) === "12"
@@ -11903,6 +11930,11 @@ describe("hosted workspace runtime entrypoint", () => {
         "14",
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "14");
+      expect(
+        logRequests
+          .flatMap((request) => request.entries)
+          .filter((entry) => entry.errorCode === "foreground_mailbox_import_failed"),
+      ).toHaveLength(1);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -17412,6 +17444,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const imageGenerationRelease = createDeferred<void>();
+    const phaseItemIds: Array<string | null> = [];
     const phasePayloadSchemas: Array<string | null> = [];
     let assistantPhaseCalls = 0;
     let resultPromise:
@@ -17494,6 +17527,11 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: assistantInputId,
               vault: vaultRoot,
             });
+            phaseItemIds.push(
+              event?.sourceRef.kind === "hosted-mailbox"
+                ? event.sourceRef.itemId
+                : null,
+            );
             phasePayloadSchemas.push(
               event?.sourceRef.kind === "hosted-mailbox"
                 ? event.sourceRef.payloadSchema
@@ -17569,11 +17607,19 @@ describe("hosted workspace runtime entrypoint", () => {
         () => JSON.stringify({
           assistantPhaseCalls,
           events,
+          phaseItemIds,
           phasePayloadSchemas,
         }),
       );
 
       assert.equal(assistantPhaseCalls, 3);
+      assert.deepEqual(phaseItemIds, [
+        "mailbox_item_image_foreground_wake_origin",
+        "mailbox_item_image_foreground_wake_followup",
+        `image-completion:${createHash("sha256")
+          .update("image_operation_foreground_wake")
+          .digest("hex")}`,
+      ]);
       assert.deepEqual(phasePayloadSchemas, [
         HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -17604,7 +17650,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ReturnType<typeof createAssistantOutboxIntent>
     > | null = null;
     let firstCompletionInputId: string | null = null;
-    let imageIndexFailureInjected = false;
+    let imageIndexFailureCount = 0;
     let imageProviderInvocationCount = 0;
     let originInputId: string | null = null;
     let secondCompletionInputId: string | null = null;
@@ -17650,12 +17696,12 @@ describe("hosted workspace runtime entrypoint", () => {
             vault: request.vaultRoot,
           });
           if (
-            !imageIndexFailureInjected
+            imageIndexFailureCount < 2
             && event?.sourceRef.kind === "hosted-mailbox"
             && event?.sourceRef.payloadSchema
               === "murph.hosted-image-completion.v1"
           ) {
-            imageIndexFailureInjected = true;
+            imageIndexFailureCount += 1;
             throw new Error("Synthetic first image pending-index failure.");
           }
           return await actualEnqueue(request);
@@ -17681,7 +17727,7 @@ describe("hosted workspace runtime entrypoint", () => {
             request: {
               attemptId: "attempt_image_evidence_retry",
               budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 180_000,
+              idleCheckpointDelayMs: 1,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -17928,7 +17974,7 @@ describe("hosted workspace runtime entrypoint", () => {
         /Synthetic phase failure after second image terminal evidence\./u,
       );
 
-      assert.equal(imageIndexFailureInjected, true);
+      assert.equal(imageIndexFailureCount, 2);
       assert.equal(terminalEvidenceReadFailureInjected, true);
       assert.equal(terminalEvidenceRetryObserved, true);
       const pendingAtEnd = await compactHostedPendingAssistantInputIds({
@@ -17964,7 +18010,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const firstCompletionEnqueueCalls =
         mocks.enqueueHostedPendingAssistantInputId.mock.calls
           .filter(([request]) => request.inputId === firstCompletionInputId);
-      assert.equal(firstCompletionEnqueueCalls.length, 2);
+      assert.equal(firstCompletionEnqueueCalls.length, 3);
       const terminalEvidenceInputIds =
         mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mock.calls
           .map(([request]) => request.inputId);

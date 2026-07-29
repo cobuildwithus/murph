@@ -41,9 +41,10 @@ import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
-import type {
-  RuntimeWakeNotification,
-  RuntimeWakeSignal,
+import {
+  requeueRuntimeWakeNotification,
+  type RuntimeWakeNotification,
+  type RuntimeWakeSignal,
 } from "./runtime-wake.ts";
 
 import {
@@ -991,18 +992,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return false;
     }
 
-    input.runtimeWakeSignal?.notify({
-      ...(pendingRuntimeWake.orchestration
-        ? { orchestration: pendingRuntimeWake.orchestration }
-        : {}),
-      notifiedAtEpochMs: pendingRuntimeWake.notifiedAtEpochMs,
+    requeueRuntimeWakeNotification({
+      notification: pendingRuntimeWake,
+      runtimeWakeSignal: input.runtimeWakeSignal,
     });
-    if (
-      pendingRuntimeWake.latestNotifiedAtEpochMs !== undefined
-      && pendingRuntimeWake.latestNotifiedAtEpochMs !== pendingRuntimeWake.notifiedAtEpochMs
-    ) {
-      input.runtimeWakeSignal?.notify(pendingRuntimeWake.latestNotifiedAtEpochMs);
-    }
     foregroundRuntimeWakeObservedAfterStop = true;
     return true;
   };
@@ -1496,10 +1489,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
           break;
         }
+        requeueRuntimeWakeNotification({
+          notification,
+          runtimeWakeSignal,
+        });
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
           error,
           input: input.input,
         });
+        break;
       } finally {
         resolveActiveWake();
         if (activeWakeCompletion === currentWakeCompletion) {

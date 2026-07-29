@@ -1449,13 +1449,11 @@ test('sendAssistantMessageLocal preserves a Linq recovery reply target through d
             targetInputId: acceptedMessage.inputId,
           },
         ],
-        response:
-          'The image is unavailable, but the requested file is still being delivered.',
+        response: 'The image is unavailable.',
         responseDeliveryContextOrdinal: 0,
         session,
         targetInputId: acceptedMessage.inputId,
-        transcriptResponse:
-          'The image is unavailable, but the requested file is still being delivered.',
+        transcriptResponse: 'The image is unavailable.',
       },
     },
     adapter: {

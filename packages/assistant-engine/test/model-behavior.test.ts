@@ -840,7 +840,16 @@ describe('assistant execution prompt contract', () => {
       'the runtime owns the attachment delivery',
     )
     expect(prompt).toContain(
-      'Do not send a companion chat reply or repeat the filename',
+      'If another tool result already requires a visible reply',
+    )
+    expect(prompt).toContain(
+      "send only that result's recovery text without mentioning the file, approval, or delivery",
+    )
+    expect(prompt).toContain(
+      'otherwise call `finish_without_reply`',
+    )
+    expect(prompt).toContain(
+      'Do not send a companion acknowledgment or repeat the filename',
     )
     expect(prompt).toContain(
       'call `finish_without_reply`',

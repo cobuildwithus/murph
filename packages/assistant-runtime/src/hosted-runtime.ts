@@ -3256,7 +3256,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const imageGenerationWorkPending =
           options.runtimeWakeSignal !== null
           && options.runtimeWakeSignal !== undefined
-          && imageGenerationController?.hasWork() === true;
+          && imageGenerationController?.hasWork() === true
+          && imageGenerationController.hasCompleted() === false;
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           // An idle checkpoint cannot release the workspace while detached
           // image work is still running. Both image readiness and new mailbox

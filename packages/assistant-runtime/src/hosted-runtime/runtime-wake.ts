@@ -30,6 +30,27 @@ export function consumePendingRuntimeWakeUnlessShuttingDown(input: {
   return input.runtimeWakeSignal?.consumePending() ?? null;
 }
 
+export function requeueRuntimeWakeNotification(input: {
+  notification: RuntimeWakeNotification;
+  runtimeWakeSignal: RuntimeWakeSignal | null | undefined;
+}): void {
+  input.runtimeWakeSignal?.notify({
+    ...(input.notification.orchestration
+      ? { orchestration: input.notification.orchestration }
+      : {}),
+    notifiedAtEpochMs: input.notification.notifiedAtEpochMs,
+  });
+  if (
+    input.notification.latestNotifiedAtEpochMs !== undefined
+    && input.notification.latestNotifiedAtEpochMs
+      !== input.notification.notifiedAtEpochMs
+  ) {
+    input.runtimeWakeSignal?.notify(
+      input.notification.latestNotifiedAtEpochMs,
+    );
+  }
+}
+
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let latestPendingNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;

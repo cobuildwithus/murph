@@ -1196,7 +1196,7 @@ describe('assistant codex runtime', () => {
                 {
                   type: 'inputText',
                   text:
-                    'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+                    'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
                 },
               ],
             },
@@ -19541,7 +19541,7 @@ describe('steered final segments', () => {
       {
         expectedSuccess: false,
         expectedText:
-          'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+          'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
         id: 103,
         kind: 'attach-response-media',
         media: [{
@@ -19558,20 +19558,24 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'assistant-invalid-media-recovery',
         type: 'assistant_message',
-        message: 'That requested image is unavailable.',
+        message: "I couldn't attach the requested image in this reply.",
       }),
     ])
 
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalAction).toBeNull()
-    expect(result.finalMessage).toBe('That requested image is unavailable.')
+    expect(result.finalMessage).toBe(
+      "I couldn't attach the requested image in this reply.",
+    )
     expect(result.responseMedia).toEqual([])
   })
 
   it.each([
     {
+      expectedFinalMessage:
+        "I couldn't attach the requested image in this reply.",
       expectedMediaText:
-        'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+        'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
       media: [{
         kind: 'vault_image',
         ref: 'raw/captures/incomplete-overlap.png',
@@ -19579,6 +19583,7 @@ describe('steered final segments', () => {
       name: 'malformed',
     },
     {
+      expectedFinalMessage: 'The requested image is unavailable.',
       expectedMediaText:
         'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
       media: [{
@@ -19595,7 +19600,7 @@ describe('steered final segments', () => {
     },
   ])(
     'applies an overlapping $name media failure before a later no-reply request',
-    async ({ expectedMediaText, media }) => {
+    async ({ expectedFinalMessage, expectedMediaText, media }) => {
       const workingDirectory = await createTempDir(
         'assistant-codex-overlapping-media-failure-work-',
       )
@@ -19669,7 +19674,7 @@ describe('steered final segments', () => {
             noReplyResponse = await noReplyResponsePromise
             writeCodexV2AssistantEventTurn({
               child,
-              finalMessage: 'The requested image is unavailable.',
+              finalMessage: expectedFinalMessage,
               threadId: 'thread-overlapping-media-failure',
               turnId: 'turn-overlapping-media-failure',
             })
@@ -19734,7 +19739,7 @@ describe('steered final segments', () => {
       })
       expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
       expect(result.finalAction).toBeNull()
-      expect(result.finalMessage).toBe('The requested image is unavailable.')
+      expect(result.finalMessage).toBe(expectedFinalMessage)
       expect(result.responseMedia).toEqual([])
       expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
       expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
@@ -19825,7 +19830,7 @@ describe('steered final segments', () => {
         expectedText: JSON.stringify({
           filename: 'report.pdf',
           note:
-            'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
+            "Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning this file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment.",
           status: 'approved',
         }),
         id: 112,
@@ -19856,8 +19861,7 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'assistant-mixed-output-recovery',
         type: 'assistant_message',
-        message:
-          'The image is unavailable, but the requested file is still being delivered.',
+        message: 'The image is unavailable.',
       }),
     ], {
       hostedToolContext: createHostedToolContext({
@@ -19873,9 +19877,7 @@ describe('steered final segments', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalAction).toBeNull()
-    expect(result.finalMessage).toBe(
-      'The image is unavailable, but the requested file is still being delivered.',
-    )
+    expect(result.finalMessage).toBe('The image is unavailable.')
     expect(result.targetInputId).toBe(replyRef)
     expect(result.responseMedia).toEqual([])
   })
@@ -19902,7 +19904,7 @@ describe('steered final segments', () => {
         expectedText: JSON.stringify({
           filename: 'report.pdf',
           note:
-            'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
+            "Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning this file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment.",
           status: 'approved',
         }),
         id: 108,
@@ -19912,7 +19914,7 @@ describe('steered final segments', () => {
       completedItemEvent({
         id: 'assistant-approved-vault-file',
         type: 'assistant_message',
-        message: 'The file is now being delivered.',
+        message: 'The first file attempt failed.',
       }),
     ], {
       hostedToolContext: createHostedToolContext({
@@ -19925,7 +19927,7 @@ describe('steered final segments', () => {
     expect(sendVaultFile).toHaveBeenCalledTimes(2)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalAction).toBeNull()
-    expect(result.finalMessage).toBe('The file is now being delivered.')
+    expect(result.finalMessage).toBe('The first file attempt failed.')
   })
 
   it('keeps a different generated-file request replyable while a prior send is active', async () => {

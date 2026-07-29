@@ -43,6 +43,14 @@ Updated: 2026-07-29
   unresolved image work, the dirty loop can repeatedly observe an already-due
   checkpoint and continue through resolved promises without installing the
   runtime wake waiter.
+- The first ReviewGPT debugging response proposed a wider wake-claim lifecycle.
+  After receiving the decisive event trace and regression evidence, the same
+  review corrected that diagnosis: the proven incident is event-loop starvation
+  at the dirty wait, and no claim lifecycle is warranted.
+- The corrected review identified one adjacent destructive-consume edge: a
+  non-abort foreground import exception could consume the only wake before
+  returning a result. The existing notification can be restored locally before
+  handing off the watcher; no new state owner is required.
 
 ## Tasks
 
@@ -68,6 +76,20 @@ Updated: 2026-07-29
   foreground input, projected assistant work, shutdown, and abort retain their
   existing wake paths. Runtimes without a wake signal retain the existing idle
   checkpoint behavior.
+- Keep completed-but-not-enqueued image work on the ordinary idle retry path;
+  only unresolved provider work extends the wait to the next real wake.
+- If foreground mailbox import throws a non-abort error after consuming a wake,
+  restore the same notification before logging and stop that watcher. The next
+  existing watcher or outer pass retries it, avoiding both notification loss
+  and a same-watcher hot loop.
+- Preliminary specialist finding dispositions:
+  - accepted: do not extend the wait for a retained completed image;
+  - accepted: approved vault-file guidance yields to an already-required
+    visible recovery reply without claiming file delivery;
+  - accepted: malformed response-media recovery says the attachment failed,
+    not that the underlying image is unavailable;
+  - accepted: the foreground/image regression asserts exact origin, follow-up,
+    and completion identities, not only payload schemas.
 
 ## Verification
 
@@ -85,6 +107,10 @@ Updated: 2026-07-29
 - Adjacent focused image-state and runtime-wake suites passed 4/4.
 - The complete hosted workspace entrypoint suite passed 253/253.
 - Assistant-runtime typecheck passed.
+- The non-abort import regression injects one failure after one ingress wake,
+  then proves two import attempts, one failure log, preserved mailbox
+  watermark retry, and follow-up admission by the next assistant pass in the
+  same invocation.
 - Focused coverage executed the regression successfully; the intentionally
   filtered one-test run then failed only the package-wide aggregate thresholds.
 - Local hosted image/provider E2E packaging stopped before test execution

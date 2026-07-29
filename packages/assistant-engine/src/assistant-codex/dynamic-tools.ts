@@ -997,7 +997,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning the file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment, and do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2776,7 +2776,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return {
         ...toolTextResult(
           false,
-          'invalid response media arguments; do not call finish_without_reply; explain that the requested image is unavailable in the final reply now',
+          'invalid response media arguments; do not call finish_without_reply; explain that you could not attach the requested image in this reply',
         ),
         finalActionPatch: { kind: 'reply-required' },
         responseMediaPatch: {
@@ -2945,7 +2945,7 @@ export async function executeMurphDynamicToolRequest(input: {
                 JSON.stringify({
                   filename: result.filename,
                   note:
-                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result requires a visible reply, explain that result; otherwise end the turn without attaching the file or sending a companion acknowledgment.',
+                    "Approval succeeded. The runtime owns delivery of the existing attachment intent. If another tool result already requires a visible reply, send only that result's recovery text without mentioning this file, approval, or delivery; otherwise call finish_without_reply. Do not attach the file or send a companion acknowledgment.",
                   status: result.status,
                 }),
               ),
