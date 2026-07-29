@@ -2926,6 +2926,16 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope: requestKeyScope.conversationScope,
         })
+        if (
+          requestKeyScope.conversationScope === 'group'
+          && await hostedToolContext
+            .currentGroupPhoneCallPreviewAuthority?.(brief) !== true
+        ) {
+          return toolTextResult(
+            false,
+            'group phone calling requires an exact preview that was successfully delivered before the current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
+          )
+        }
         const result = await phoneCalls.start({
           brief,
           ...(requestKeyScope.conversationScope === 'group'

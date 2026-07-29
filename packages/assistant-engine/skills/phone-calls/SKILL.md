@@ -16,25 +16,38 @@ health-safety guidance and direct the user to the appropriate immediate help.
 
 ## Establish authority and the call goal
 
-Place a call only after Murph externally delivered an exact call preview in an
-earlier assistant turn and the current requester explicitly confirms that
-preview in a later message. Offering to call, asking what Murph would share, or
-the request that caused the preview is not confirmation. Never deliver the
-preview and invoke `murph.create_phone_call` in the same provider turn.
+For a private call, follow the current request and the applicable skill's
+explicit consent or ready-to-act gate. Use a separate preview and confirmation
+when the user still needs to inspect material terms, but do not add an extra
+round trip when the existing private-call gate is already satisfied.
 
-The preview must state the official destination, purpose, success criteria,
-timezone, concrete dates/times, commitment and fee bounds, cancellation terms,
-and every requester fact Murph would share. End that turn without calling so
-the user or room has a real opportunity to correct or refuse it. If any term or
-disclosure changes, deliver the complete revised preview and stop again.
+For a hosted group call, first deliver one complete preview headed exactly
+`GROUP CALL PREVIEW`, then stop without invoking `murph.create_phone_call`. Use
+the exact values that the later call brief will contain, without paraphrasing:
+official destination label and phone number, caller name or its omission, goal,
+every instruction, every shareable-fact key and value, success criteria,
+timezone, concrete dates/times, commitment and fee bounds, and cancellation
+terms. Include the exact line `Transfer to a participant: no`. The runtime uses
+that visible preview plus the existing outbox delivery receipt as call
+authority, so a missing value or changed wording will fail closed.
 
-On the later confirmation turn, compare the current message with the exact
-delivered preview. In a group, confirmation covers only the concrete room-owned
-task and stated bounds. The current confirmation message must itself explicitly
-approve any requester name or contact fact used in the call. One participant's
+Only a later inbound message received after that preview was successfully
+delivered may confirm it. Offering to call, asking what Murph would share, the
+request that caused the preview, or a confirmation received while delivery was
+retrying is not authority. If the tool is unavailable or declines the
+confirmation, deliver or repeat the complete preview and ask the room to confirm
+again after seeing it. Never treat transcript order, outbox staging, a delivery
+attempt, an ambiguous result, or a failed delivery as proof that the room saw
+the preview.
+
+On the later group confirmation turn, compare the current message with the exact
+delivered preview. Confirmation covers only the concrete room-owned task and
+stated bounds. The current confirmation message must itself explicitly approve
+any requester name or contact fact used in the call. One participant's
 acknowledgement never authorizes a different participant's identity, account,
-contact details, or private facts. Do not imply the call started until the tool
-result says so.
+contact details, or private facts. If any term or disclosure changes, deliver
+the complete revised preview and stop again. Do not imply the call started until
+the tool result says so.
 
 For a hosted-group reservation, availability check, or service call, do not load
 `appointment-scheduling` unless health care is involved. Resolve the official

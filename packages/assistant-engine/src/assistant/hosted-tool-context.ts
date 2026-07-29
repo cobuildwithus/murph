@@ -9,6 +9,9 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedPhoneCallBrief,
+} from '@murphai/hosted-execution/phone-calls'
+import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
@@ -46,6 +49,9 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import {
+  hasDeliveredAssistantGroupPhoneCallPreview,
+} from './group-phone-call-preview-authority.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -116,6 +122,9 @@ export interface AssistantHostedToolContext {
   claimSubscriptionAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
+  currentGroupPhoneCallPreviewAuthority?(
+    brief?: HostedPhoneCallBrief,
+  ): Promise<boolean>
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -333,6 +342,17 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
+    },
+    currentGroupPhoneCallPreviewAuthority: async (brief) => {
+      const deliveryContext = readDeliveryContext()
+      return await hasDeliveredAssistantGroupPhoneCallPreview({
+        acceptedInputIds:
+          input.getUserActionAcceptedInputIds?.() ?? [],
+        ...(brief === undefined ? {} : { brief }),
+        channel: deliveryContext.messageInput.channel,
+        sessionId: deliveryContext.session.sessionId,
+        vault: deliveryContext.messageInput.vault,
+      })
     },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()

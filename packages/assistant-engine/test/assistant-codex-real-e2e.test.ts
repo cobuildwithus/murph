@@ -258,11 +258,16 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         expect(previewToolCalls).toHaveLength(0)
+        expect(preview.finalMessage).toContain('GROUP CALL PREVIEW')
         expect(preview.finalMessage).toMatch(/restaurant|reserve|reservation/iu)
+        expect(preview.finalMessage).toContain('+12025550123')
         expect(preview.finalMessage).toMatch(/August 15|2026-08-15/iu)
         expect(preview.finalMessage).toMatch(/six|party.?size.{0,20}6/iu)
         expect(preview.finalMessage).toMatch(/\$?50|deposit/iu)
         expect(preview.finalMessage).toMatch(/24 hours|24-hour|refund/iu)
+        expect(preview.finalMessage).toContain(
+          'Transfer to a participant: no',
+        )
         expect(preview.finalMessage).toMatch(/confirm|approve/iu)
 
         const confirmed = await executeRealCodexAppServerTurn({

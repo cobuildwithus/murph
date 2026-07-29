@@ -53,16 +53,19 @@ describe('assistant capability policy skills', () => {
       'ordinary shared-life logistics task',
     )
     expect(normalized).toContain(
-      'Place a call only after Murph externally delivered an exact call preview in an earlier assistant turn and the current requester explicitly confirms that preview in a later message.',
+      'For a hosted group call, first deliver one complete preview headed exactly `GROUP CALL PREVIEW`, then stop without invoking `murph.create_phone_call`.',
     )
     expect(normalized).toContain(
-      'Never deliver the preview and invoke `murph.create_phone_call` in the same provider turn.',
+      'Only a later inbound message received after that preview was successfully delivered may confirm it.',
     )
     expect(normalized).toContain(
-      'End that turn without calling so the user or room has a real opportunity to correct or refuse it.',
+      'The runtime uses that visible preview plus the existing outbox delivery receipt as call authority',
     )
     expect(normalized).toContain(
       'If any term or disclosure changes, deliver the complete revised preview and stop again.',
+    )
+    expect(normalized).toContain(
+      'do not add an extra round trip when the existing private-call gate is already satisfied',
     )
     expect(normalized).toContain(
       'The current confirmation message must itself explicitly approve any requester name or contact fact used in the call',
