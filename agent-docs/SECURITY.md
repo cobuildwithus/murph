@@ -42,8 +42,11 @@ Last verified: 2026-07-28
   Its PlanetScale service-token id/token, Linq token, and operator chat id are
   required Worker-only secrets and must never enter runner env, URLs, logs,
   persisted samples, fixtures with real values, or alert copy. The configured
-  PlanetScale organization and branch selectors are deploy vars, not request
-  input. Service discovery uses the fixed PlanetScale API origin and the
+  PlanetScale organization, database, branch-name, and branch-ID selectors are
+  deploy vars, not request input. The dedicated service token is
+  organization-scoped because that is where PlanetScale grants
+  `read_metrics_endpoints`, and it has no other permission. Service discovery
+  uses the fixed PlanetScale API origin and the
   documented `token <id>:<token>` authorization contract; the authenticated
   response may select only one HTTPS/443 scrape target with a bounded path and
   bounded signed `__param_*` query values. The service credential is sent only

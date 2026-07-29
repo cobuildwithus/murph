@@ -138,6 +138,8 @@ Required worker vars:
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
@@ -165,6 +167,12 @@ to retain 30 days of:
   against `max_connections`, plus server-pool state counts;
 - primary Postgres connection states and total utilization; and
 - per-region direct-port 5432 connection-error counters and positive deltas.
+
+Discovery selects exactly one target by organization, database name, and branch
+name. The configured branch ID then filters the selected Prometheus payload's
+metric series. Both selectors are required because one organization can have
+several production branches with the same branch name while discovery does not
+publish branch IDs.
 
 The direct-port signal is named a migration admission failure because production
 application traffic is required to use transaction-mode PgBouncer on 6432 and

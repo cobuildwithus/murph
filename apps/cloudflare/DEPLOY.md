@@ -33,11 +33,13 @@ Before deploying the Worker version that introduces
 `DatabaseHealthDurableObject`, configure the production GitHub environment:
 
 - var `HOSTED_DATABASE_ALERT_ENABLED=1` (leave it unset outside production);
-- vars `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION` and
+- vars `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`,
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`,
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`, and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`;
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
-  token with only `read_metrics_endpoints`;
+  token with only the organization-level `read_metrics_endpoints` permission;
 - secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for the existing operator chat;
   and
 - the already-required `LINQ_API_TOKEN`.
@@ -396,6 +398,8 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_ENABLED=1` (production only; it must be unset for
   preview and development)
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`

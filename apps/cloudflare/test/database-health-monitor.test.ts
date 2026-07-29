@@ -5,6 +5,9 @@ import { createTestSqlStorage } from "./sql-storage.ts";
 import { buildMetricsBody } from "./helpers/database-health.ts";
 
 const BRANCH_ID = "branch_test";
+const BRANCH_NAME = "main";
+const DATABASE_NAME = "database_test";
+const ORGANIZATION = "org-test";
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1_000;
 const POSTGRES_STATE_ALERT_CASES: ReadonlyArray<{
@@ -1107,6 +1110,45 @@ describe("database health monitor", () => {
     }
   });
 
+  it("selects the exact database and branch when discovery repeats branch names", async () => {
+    const harness = createMonitorHarness({
+      serviceDiscoveryResponses: [
+        () =>
+          Response.json([
+            {
+              labels: {
+                __metrics_path__: "/metrics",
+                __scheme__: "https",
+                planetscale_branch_name: BRANCH_NAME,
+                planetscale_database_name: "other-database",
+                planetscale_organization_name: ORGANIZATION,
+              },
+              targets: ["other.metrics.planetscale.test"],
+            },
+            {
+              labels: {
+                __metrics_path__: "/metrics",
+                __scheme__: "https",
+                planetscale_branch_name: BRANCH_NAME,
+                planetscale_database_name: DATABASE_NAME,
+                planetscale_organization_name: ORGANIZATION,
+              },
+              targets: ["metrics.planetscale.test"],
+            },
+          ]),
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        outcome: "healthy",
+        sampleStatus: "ok",
+      });
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(new URL(harness.planetScaleRequests[1]?.url ?? "").hostname)
+      .toBe("metrics.planetscale.test");
+  });
+
   it("rejects an unsafe discovered target before scrape egress", async () => {
     const harness = createMonitorHarness({
       serviceDiscoveryResponses: [
@@ -1116,7 +1158,9 @@ describe("database health monitor", () => {
               labels: {
                 __metrics_path__: "/metrics",
                 __scheme__: "https",
-                planetscale_database_branch_id: BRANCH_ID,
+                planetscale_branch_name: BRANCH_NAME,
+                planetscale_database_name: DATABASE_NAME,
+                planetscale_organization_name: ORGANIZATION,
               },
               targets: ["metrics.planetscale.test/redirect"],
             },
@@ -1237,7 +1281,9 @@ function createMonitorHarness(input: {
   const environment = {
     HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_test",
     HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: BRANCH_ID,
-    HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME: BRANCH_NAME,
+    HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME: DATABASE_NAME,
+    HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: ORGANIZATION,
     HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "service-token",
     HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "service-token-id",
     LINQ_API_TOKEN: "linq-token",
@@ -1289,7 +1335,9 @@ function createServiceDiscoveryResponse(): Response {
         __param_exp: "2000000000",
         __param_sig: "signed-scrape-token",
         __scheme__: "https",
-        planetscale_database_branch_id: BRANCH_ID,
+        planetscale_branch_name: BRANCH_NAME,
+        planetscale_database_name: DATABASE_NAME,
+        planetscale_organization_name: ORGANIZATION,
       },
       targets: ["metrics.planetscale.test"],
     },

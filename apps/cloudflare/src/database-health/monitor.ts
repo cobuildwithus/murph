@@ -43,6 +43,8 @@ const DATABASE_ALERT_OPENINGS = [
 export interface DatabaseHealthMonitorEnvironment {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
@@ -63,6 +65,8 @@ export interface DatabaseHealthMonitorResult {
 
 interface DatabaseHealthMonitorConfig {
   branchId: string;
+  branchName: string;
+  databaseName: string;
   linqApiBaseUrl: string;
   linqApiToken: string;
   linqChatId: string;
@@ -487,7 +491,11 @@ async function fetchPlanetScaleMetrics(input: {
   const groups = parsePlanetScaleDiscoveryGroups(discoveryBody);
   const metricsUrl = resolvePlanetScaleBranchMetricsUrl(
     groups,
-    input.config.branchId,
+    {
+      branchName: input.config.branchName,
+      databaseName: input.config.databaseName,
+      organization: input.config.organization,
+    },
   );
 
   const metricsResponse = await fetchWithTimeout(
@@ -556,13 +564,18 @@ function parsePlanetScaleDiscoveryGroups(
 
 function resolvePlanetScaleBranchMetricsUrl(
   groups: readonly PlanetScaleDiscoveryGroup[],
-  branchId: string,
+  selector: {
+    branchName: string;
+    databaseName: string;
+    organization: string;
+  },
 ): URL {
   const matchingTargets = groups.flatMap((group) => {
-    const discoveredBranchId =
-      group.labels.planetscale_database_branch_id
-      ?? group.labels.__meta_planetscale_database_branch_id;
-    return discoveredBranchId === branchId
+    return (
+      group.labels.planetscale_organization_name === selector.organization
+      && group.labels.planetscale_database_name === selector.databaseName
+      && group.labels.planetscale_branch_name === selector.branchName
+    )
       ? group.targets.map((target) => ({ labels: group.labels, target }))
       : [];
   });
@@ -852,6 +865,14 @@ function readDatabaseHealthMonitorConfig(
     branchId: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID,
       "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID",
+    ),
+    branchName: requireConfiguredString(
+      environment.HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME,
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_NAME",
+    ),
+    databaseName: requireConfiguredString(
+      environment.HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME,
+      "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
     ),
     linqApiBaseUrl: readLinqApiBaseUrl(environment.LINQ_API_BASE_URL),
     linqApiToken: requireConfiguredString(
