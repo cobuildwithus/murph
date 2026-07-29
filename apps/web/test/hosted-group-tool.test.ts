@@ -1073,39 +1073,97 @@ describe("handleHostedRuntimeGroupTool", () => {
     },
   );
 
-  it.each([
-    "no_safe_unique_label",
-    "no_contact_match",
-  ] as const satisfies readonly HostedAddressBookAdvisoryLookupOutcome[])(
-    "marks a fully checked empty advisory lookup as a name miss when the outcome is %s",
-    async (outcome) => {
-      mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
-        candidates: [{
+  it("marks a definitive no-contact result as a name miss", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [{
+        profileDisplayName: null,
+        senderHandle: "+15552220002",
+      }],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map(), "no_contact_match"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15552220002"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        nameMissSenderHandles: ["+15552220002"],
+        participants: [],
+        status: "ok",
+      },
+    });
+  });
+
+  it("keeps an ambiguous contact-label result operation-local", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [{
+        profileDisplayName: null,
+        senderHandle: "+15552220002",
+      }],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map(), "no_safe_unique_label"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15552220002"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: { participants: [], status: "ok" },
+    });
+  });
+
+  it("does not infer a name miss for an unnamed handle in a mixed contact match", async () => {
+    mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({
+      candidates: [
+        {
           profileDisplayName: null,
+          senderHandle: "+15552220002",
+        },
+        {
+          profileDisplayName: null,
+          senderHandle: "+15553330003",
+        },
+      ],
+      status: "ok",
+    });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(
+        new Map([["+15552220002", "Named Contact"]]),
+        "matched",
+      ),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15552220002", "+15553330003"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Named Contact",
+          displayNameSource: "unverified-owner-contact",
           senderHandle: "+15552220002",
         }],
         status: "ok",
-      });
-      mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
-        addressBookLookupResult(new Map(), outcome),
-      );
-
-      await expect(handleHostedRuntimeGroupTool({
-        memberId: "member_group_runtime",
-        request: {
-          action: "read_participant_display_names",
-          linqSenderHandles: ["+15552220002"],
-        },
-      })).resolves.toEqual({
-        action: "read_participant_display_names",
-        result: {
-          nameMissSenderHandles: ["+15552220002"],
-          participants: [],
-          status: "ok",
-        },
-      });
-    },
-  );
+      },
+    });
+  });
 
   it("does not consult owner contacts when current profile membership is unavailable", async () => {
     mocks.readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId.mockResolvedValue({

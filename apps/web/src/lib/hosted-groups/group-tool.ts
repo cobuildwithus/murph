@@ -1671,11 +1671,7 @@ async function handleHostedRuntimeGroupReadParticipantDisplayNames(input: {
     }
     if (
       ownerContactLookup
-      && (
-        ownerContactLookup.outcome === "matched"
-        || ownerContactLookup.outcome === "no_contact_match"
-        || ownerContactLookup.outcome === "no_safe_unique_label"
-      )
+      && ownerContactLookup.outcome === "no_contact_match"
     ) {
       const namedPhoneHandles = ownerContactLookup.names;
       for (const senderHandle of unresolvedPhoneHandles) {
