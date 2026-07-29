@@ -368,15 +368,15 @@ status badge; retain `Open Murph` as the quiet secondary action.
 
 Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
 large choice cards, then one primary **Sponsor ~200 messages · $10** action and
-a plain cancel action. Explain once that the contribution is one-time, Murph
-uses a saved card when available, and Stripe handles card entry or verification
-when needed. Do not imply that selecting an amount charges the card; only the
-explicit primary action authorizes the contribution. Keep the alias, note, and
-eligible temporary running bit behind one optional disclosure, and state the
-server-owned bit duration beside that field. Stack amount cards and actions on
-narrow screens, preserve visible focus and selection states, and render the
-production components on both the Components and Sections tabs of `/design`
-for review.
+a plain cancel action. Keep the description to the one-time group contribution;
+do not repeat saved-card or verification mechanics there. Do not imply that
+selecting an amount charges the card; only the explicit primary action
+authorizes the contribution. Keep the alias, note, and eligible temporary
+running bit behind one optional disclosure, and state the server-owned bit
+duration beside that field. Optional text fields use the sage focus border
+without an outer glow. Stack amount cards and actions on narrow screens,
+preserve visible focus and selection states, and render the production
+components on both the Components and Sections tabs of `/design` for review.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

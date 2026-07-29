@@ -127,9 +127,8 @@ function GroupUsageFundingStudy() {
           groupName="Sunday sleep crew"
         />
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          The amount dialog authorizes one contribution at a time. Murph uses a
-          saved card when available; Stripe collects or verifies the card when
-          needed.
+          The amount dialog authorizes one contribution at a time. Optional
+          fields use a quiet sage border-only focus state.
         </p>
       </div>
       <div
