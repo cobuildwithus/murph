@@ -1,6 +1,6 @@
 # Hide the bedtime-transition draft and simplify experiment start handoff
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -168,3 +168,18 @@ Updated: 2026-07-29
   gap because no approved provider credential is configured. The opt-in probe
   was tightened after the review to use the actual public name-only sentence
   without an extra instruction rejecting the competing starter candidate.
+- The candidate was merged normally with current `origin/main` without
+  conflicts. Post-merge verification passed:
+  - `pnpm --dir packages/health-commons verify`: 19 files and 92 tests, plus
+    deterministic generated-artifact consistency.
+  - Focused Web Vitest: 3 files and 22 tests.
+  - Focused assistant-engine Vitest: 3 files and 33 tests, with the normal
+    suite skipping 11 credential-gated real-Codex cases.
+  - Web and assistant-engine typechecks.
+  - `git diff --check` and task-path privacy scan.
+- Parent final review: `NO FINDINGS`. The final diff keeps public publishing,
+  native channel handoff, assistant exact-resolution/CAS ownership, and legacy
+  reference compatibility at their existing owners without adding persisted
+  state or a new abstraction. Exact-head CI and the final PR ReviewGPT gate run
+  after this plan is archived and the final head is pushed.
+Completed: 2026-07-29
