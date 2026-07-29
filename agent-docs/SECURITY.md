@@ -210,8 +210,9 @@ Last verified: 2026-07-28
   Current-policy Checkout enables Stripe's explicit payment-method save choice;
   Murph does not upgrade or broadly redisplay historical methods. The server
   creates the PaymentIntent
-  unconfirmed, then revalidates the exact personal or Family billing Customer
-  and Subscription under the payer lock before storing the intent's encrypted
+  unconfirmed, then revalidates the exact personal or Family billing Customer,
+  Subscription, canonical billing status, suspension state, and last accepted
+  Stripe-event time under the payer lock before storing the intent's encrypted
   exact reference on the frozen purchase and confirming it off session. A
   billing-reference change, deletion, or terminal-state race cancels the
   unbound intent and never confirms it. After bind, a later billing change does

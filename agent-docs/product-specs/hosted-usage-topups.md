@@ -700,10 +700,11 @@ funding route share this sequence:
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase. Personal and Family attempts also re-read the current
-    persisted billing Customer and Subscription under that lock. Bind only an
-    active payer's still-`created` purchase whose billing authority still
-    matches to that exact intent, and only then confirm it off session. If a
-    billing change, suspension, deletion, or another terminal transition wins
+    persisted billing Customer, Subscription, billing status, suspension state,
+    and last accepted Stripe-event time under that lock. Bind only an active
+    payer's still-`created` purchase whose complete selected billing authority
+    still matches to that exact intent, and only then confirm it off session. If
+    a billing change, suspension, deletion, or another terminal transition wins
     that lock, cancel the unbound intent and never confirm it. A retry retrieves
     and continues only an exact already-bound intent without retargeting after a
     later billing change. A definitive authentication or card failure

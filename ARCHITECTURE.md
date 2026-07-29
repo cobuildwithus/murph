@@ -1068,8 +1068,11 @@ derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. Current-policy personal, Family, and group funding may bind one
 unconfirmed saved-card PaymentIntent to that row before confirmation. The payer-row lock is the
 linearization boundary: it rechecks active payer and still-created purchase
-state, and a deletion or terminal transition that wins first cancels the
-unbound intent without confirmation. Ambiguous confirmation remains
+state. Personal and Family attempts also revalidate the selected exact billing
+Customer and Subscription together with canonical status, suspension state,
+and last accepted Stripe-event time; a deletion, authority change, or terminal
+transition that wins first cancels the unbound intent without confirmation.
+Ambiguous confirmation remains
 recoverable only through that exact encrypted reference; a definitive failure
 must be verified canceled before the purchase can return to `created` and open
 Checkout. The existing payer-owned cancel path also resolves a sessionless

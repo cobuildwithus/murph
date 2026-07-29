@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedAccountGroupStripeBillingRef: vi.fn(),
   resolveHostedFamilyUsageCreditCheckoutTargetTx: vi.fn(),
+  readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://join.example.test"),
   requireHostedStripeApiMode: vi.fn(),
@@ -96,7 +97,15 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  hasHostedAccountGroupAccess: (input: {
+    billingStatus: string;
+    suspendedAt?: Date | null;
+  }) => input.billingStatus === "active" && !input.suspendedAt,
   readHostedAccountGroupStripeBillingRef:
     mocks.readHostedAccountGroupStripeBillingRef,
   resolveHostedFamilyUsageCreditCheckoutTargetTx:
@@ -177,8 +186,59 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
+const LAST_STRIPE_EVENT_AT = new Date("2026-07-16T16:59:00.000Z");
 const MEMBER_ID = "hbm_member123";
 const CLIENT_REQUEST_KEY = "request_key_123456";
+
+function buildPersonalSavedCardBillingSnapshot(input?: {
+  billingStatus?: "active" | "canceled";
+  lastStripeEventCreatedAt?: Date;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+}) {
+  return {
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      lastStripeEventCreatedAt:
+        input?.lastStripeEventCreatedAt ?? LAST_STRIPE_EVENT_AT,
+      memberId: MEMBER_ID,
+      stripeCustomerId: input?.stripeCustomerId ?? "cus_123",
+      stripeSubscriptionId: input?.stripeSubscriptionId ?? "sub_123",
+    },
+    core: {
+      billingStatus: input?.billingStatus ?? "active",
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      id: MEMBER_ID,
+      suspendedAt: null,
+      updatedAt: NOW,
+    },
+  };
+}
+
+function buildFamilySavedCardBillingRef(input?: {
+  billingStatus?: "active" | "canceled";
+  lastStripeEventCreatedAt?: Date;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+}) {
+  return {
+    group: {
+      billingStatus: input?.billingStatus ?? "active",
+      id: "hbag_abcdefghijklmnop",
+      ownerMemberId: MEMBER_ID,
+      suspendedAt: null,
+    },
+    groupId: "hbag_abcdefghijklmnop",
+    lastStripeEventCreatedAt:
+      input?.lastStripeEventCreatedAt ?? LAST_STRIPE_EVENT_AT,
+    stripeCustomerId: input?.stripeCustomerId ?? "cus_family_owner",
+    stripeSubscriptionId:
+      input?.stripeSubscriptionId ?? "sub_family_owner",
+    updatedAt: NOW,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -206,6 +266,9 @@ beforeEach(() => {
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
   });
+  mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+    buildPersonalSavedCardBillingSnapshot(),
+  );
   mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
     "usage_5_usd",
     "usage_10_usd",
@@ -230,11 +293,9 @@ beforeEach(() => {
     groupId: "hbag_abcdefghijklmnop",
     stripeCustomerId: "cus_family_owner",
   });
-  mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
-    groupId: "hbag_abcdefghijklmnop",
-    stripeCustomerId: "cus_family_owner",
-    stripeSubscriptionId: "sub_family_owner",
-  });
+  mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue(
+    buildFamilySavedCardBillingRef(),
+  );
   mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(
     ({ offerCode }: { offerCode: string }) => ({
       offerCode,
@@ -2219,11 +2280,10 @@ describe("createHostedUsageCreditCheckout", () => {
       const fake = createFakePrisma();
       mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValueOnce(
         billingCustomerId
-          ? {
-              groupId: "hbag_abcdefghijklmnop",
+          ? buildFamilySavedCardBillingRef({
               stripeCustomerId: billingCustomerId,
               stripeSubscriptionId: "sub_family_owner",
-            }
+            })
           : null,
       );
       mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
@@ -2615,17 +2675,19 @@ describe("createHostedUsageCreditCheckout", () => {
       });
       mocks.stripePaymentIntentCreate.mockImplementationOnce(async () => {
         if (targetKind === "family") {
-          mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
-            groupId: "hbag_abcdefghijklmnop",
-            stripeCustomerId: customerId,
-            stripeSubscriptionId: "sub_family_replacement",
-          });
+          mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue(
+            buildFamilySavedCardBillingRef({
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: "sub_family_replacement",
+            }),
+          );
         } else {
-          mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
-            memberId: MEMBER_ID,
-            stripeCustomerId: customerId,
-            stripeSubscriptionId: "sub_personal_replacement",
-          });
+          mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+            buildPersonalSavedCardBillingSnapshot({
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: "sub_personal_replacement",
+            }),
+          );
         }
         return buildSavedCardPaymentIntent({
           amountReceived: 0,
@@ -2673,6 +2735,106 @@ describe("createHostedUsageCreditCheckout", () => {
           idempotencyKey: expect.stringContaining(":cancel"),
         }),
       );
+      expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
+        mocks.stripeCheckoutCreate,
+      );
+      expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+      expect(onlyPurchase(fake.purchases)).toMatchObject({
+        status: "checkout_open",
+        stripePaymentIntentLookupKey: null,
+      });
+    },
+  );
+
+  it.each([
+    ["personal", "terminal billing status", "cus_123", "sub_123"],
+    [
+      "family",
+      "terminal billing status",
+      "cus_family_owner",
+      "sub_family_owner",
+    ],
+    ["personal", "billing freshness", "cus_123", "sub_123"],
+    [
+      "family",
+      "billing freshness",
+      "cus_family_owner",
+      "sub_family_owner",
+    ],
+  ] as const)(
+    "cancels an unbound %s intent when %s changes without changing Stripe IDs",
+    async (targetKind, authorityChange, customerId, subscriptionId) => {
+      const fake = createFakePrisma();
+      mockCanonicalSavedCard(customerId);
+      mocks.stripeSubscriptionsList.mockResolvedValueOnce({
+        data: [{
+          customer: customerId,
+          default_payment_method: null,
+          id: subscriptionId,
+          livemode: false,
+          object: "subscription",
+          status: "active",
+        }],
+        has_more: false,
+        object: "list",
+        url: "/v1/subscriptions",
+      });
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(async () => {
+        const changedAuthority = authorityChange === "terminal billing status"
+          ? { billingStatus: "canceled" as const }
+          : {
+              lastStripeEventCreatedAt: new Date(
+                LAST_STRIPE_EVENT_AT.getTime() + 1_000,
+              ),
+            };
+        if (targetKind === "family") {
+          mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue(
+            buildFamilySavedCardBillingRef(changedAuthority),
+          );
+        } else {
+          mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+            buildPersonalSavedCardBillingSnapshot(changedAuthority),
+          );
+        }
+        return buildSavedCardPaymentIntent({
+          amountReceived: 0,
+          customerId,
+          latestCharge: null,
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status: "requires_confirmation",
+        });
+      });
+      mocks.stripePaymentIntentCancel.mockImplementationOnce(async () =>
+        buildSavedCardPaymentIntent({
+          amountReceived: 0,
+          customerId,
+          latestCharge: null,
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status: "canceled",
+        })
+      );
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      const result = targetKind === "family"
+        ? await createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : await createHostedUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            memberId: MEMBER_ID,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            prisma: fake.prisma as never,
+          });
+
+      expect(result).toMatchObject({ status: "checkout_open" });
       expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
         mocks.stripeCheckoutCreate,
       );
@@ -3863,7 +4025,8 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(recovered).not.toHaveProperty("requestKeyMatched");
     expect(fake.purchases.size).toBe(1);
     expectNoStripeProviderIo();
-    expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledOnce();
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
     expect(mocks.requireHostedStripeUsageCreditCheckoutConfig).toHaveBeenCalledTimes(1);
     expect(mocks.requireHostedOnboardingPublicBaseUrl).toHaveBeenCalledTimes(1);

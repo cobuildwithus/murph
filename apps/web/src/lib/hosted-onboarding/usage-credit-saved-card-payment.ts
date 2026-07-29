@@ -1,4 +1,5 @@
 import {
+  type HostedBillingStatus,
   HostedUsageCreditPurchaseStatus,
   type HostedUsageCreditPurchase,
   type PrismaClient,
@@ -6,8 +7,12 @@ import {
 import type Stripe from "stripe";
 
 import { coerceStripeObjectId } from "./billing";
-import { readHostedAccountGroupStripeBillingRef } from "./family-plan";
-import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import {
+  hasHostedAccountGroupAccess,
+  readHostedAccountGroupStripeBillingRef,
+} from "./family-plan";
+import { hasHostedMemberOwnActiveBilling } from "./entitlement";
+import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import {
   createHostedStripeBillingEventLookupKey,
   hostedLookupKeyMatchesValue,
@@ -54,15 +59,22 @@ export type HostedUsageCreditSavedCardBillingAuthority =
   | {
       familyGroupId: string;
       kind: "family";
-      stripeSubscriptionId: string | null;
+      subscription: HostedUsageCreditSavedCardSubscriptionAuthority | null;
     }
   | {
       kind: "group";
     }
   | {
       kind: "personal";
-      stripeSubscriptionId: string | null;
+      subscription: HostedUsageCreditSavedCardSubscriptionAuthority | null;
     };
+
+export interface HostedUsageCreditSavedCardSubscriptionAuthority {
+  billingStatus: HostedBillingStatus;
+  lastStripeEventCreatedAt: Date | null;
+  stripeSubscriptionId: string;
+  suspendedAt: Date | null;
+}
 
 export async function tryChargeHostedUsageCreditSavedCard(input: {
   billingAuthority: HostedUsageCreditSavedCardBillingAuthority;
@@ -351,7 +363,7 @@ async function resolveHostedUsageCreditSavedCard(input: {
   );
   const stripeSubscriptionId = input.billingAuthority.kind === "group"
     ? null
-    : input.billingAuthority.stripeSubscriptionId;
+    : input.billingAuthority.subscription?.stripeSubscriptionId ?? null;
   if (
     customerDefaultPaymentMethodId &&
     attachedPaymentMethodIds.has(customerDefaultPaymentMethodId)
@@ -908,20 +920,52 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
       }
       const billingAuthority = input.billingAuthority;
       if (billingAuthority.kind !== "group") {
-        const billingRef = billingAuthority.kind === "family"
-          ? await readHostedAccountGroupStripeBillingRef({
-              groupId: billingAuthority.familyGroupId,
-              prisma: tx,
-            })
-          : await readHostedMemberStripeBillingRef({
-              memberId: payerMemberId,
-              prisma: tx,
-            });
-        if (
-          billingRef?.stripeCustomerId !== input.customerId ||
-          billingRef.stripeSubscriptionId !==
-            billingAuthority.stripeSubscriptionId
-        ) {
+        const subscription = billingAuthority.subscription;
+        let authorityStillCurrent = false;
+        if (subscription && billingAuthority.kind === "family") {
+          const billingRef = await readHostedAccountGroupStripeBillingRef({
+            groupId: billingAuthority.familyGroupId,
+            prisma: tx,
+          });
+          authorityStillCurrent = Boolean(
+            billingRef &&
+            hasHostedAccountGroupAccess(billingRef.group) &&
+            billingRef.group.billingStatus === subscription.billingStatus &&
+            hostedUsageCreditBillingDateMatches(
+              billingRef.group.suspendedAt,
+              subscription.suspendedAt,
+            ) &&
+            hostedUsageCreditBillingDateMatches(
+              billingRef.lastStripeEventCreatedAt,
+              subscription.lastStripeEventCreatedAt,
+            ) &&
+            billingRef.stripeCustomerId === input.customerId &&
+            billingRef.stripeSubscriptionId ===
+              subscription.stripeSubscriptionId
+          );
+        } else if (subscription) {
+          const member = await readHostedMemberBillingSnapshot({
+            memberId: payerMemberId,
+            prisma: tx,
+          });
+          authorityStillCurrent = Boolean(
+            member?.billingRef &&
+            hasHostedMemberOwnActiveBilling(member.core) &&
+            member.core.billingStatus === subscription.billingStatus &&
+            hostedUsageCreditBillingDateMatches(
+              member.core.suspendedAt,
+              subscription.suspendedAt,
+            ) &&
+            hostedUsageCreditBillingDateMatches(
+              member.billingRef.lastStripeEventCreatedAt,
+              subscription.lastStripeEventCreatedAt,
+            ) &&
+            member.billingRef.stripeCustomerId === input.customerId &&
+            member.billingRef.stripeSubscriptionId ===
+              subscription.stripeSubscriptionId
+          );
+        }
+        if (!authorityStillCurrent) {
           return { kind: "not_bound", purchase: current };
         }
       }
@@ -988,6 +1032,13 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
     }
     return { kind: "bound", purchase: bound };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function hostedUsageCreditBillingDateMatches(
+  current: Date | null | undefined,
+  expected: Date | null,
+): boolean {
+  return (current?.getTime() ?? null) === (expected?.getTime() ?? null);
 }
 
 function requireHostedUsageCreditDirectPaymentBinding(

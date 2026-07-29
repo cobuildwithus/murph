@@ -240,7 +240,8 @@ Last verified: 2026-07-28
   older policy requests remain byte-for-byte reconstructible.
   The producer must bind its encrypted exact reference under the payer lock
   before confirmation. For personal and Family v4 attempts, that locked bind
-  also re-reads the current persisted billing Customer and Subscription. A
+  also re-reads the current persisted billing Customer, Subscription, canonical
+  billing status, suspension state, and last accepted Stripe-event time. A
   billing change, suspension, deletion, or terminal transition that wins first
   leaves the intent unbound, canceled, and never confirmed. Once bound, retries
   remain tied to that exact intent rather than retargeting after a later billing

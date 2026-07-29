@@ -12,9 +12,12 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { hasHostedMemberOwnActiveBilling } from "./entitlement";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import {
+  hasHostedAccountGroupAccess,
   readHostedAccountGroupStripeBillingRef,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
   type HostedFamilyUsageCreditCheckoutTarget,
@@ -996,25 +999,45 @@ async function resolveHostedUsageCreditSavedCardBillingAuthority(input: {
   if (input.target.kind === "group") {
     return { kind: "group" };
   }
-  const billingRef = input.target.kind === "family"
-    ? await readHostedAccountGroupStripeBillingRef({
-        groupId: input.target.familyGroupId,
-        prisma: input.prisma,
-      })
-    : await readHostedMemberStripeBillingRef({
-        memberId: input.payerMemberId,
-        prisma: input.prisma,
-      });
+  if (input.target.kind === "family") {
+    const billingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: input.target.familyGroupId,
+      prisma: input.prisma,
+    });
+    return {
+      familyGroupId: input.target.familyGroupId,
+      kind: "family",
+      subscription:
+        billingRef?.stripeCustomerId === input.stripeCustomerId &&
+        billingRef.stripeSubscriptionId &&
+        hasHostedAccountGroupAccess(billingRef.group)
+          ? {
+              billingStatus: billingRef.group.billingStatus,
+              lastStripeEventCreatedAt:
+                billingRef.lastStripeEventCreatedAt ?? null,
+              stripeSubscriptionId: billingRef.stripeSubscriptionId,
+              suspendedAt: billingRef.group.suspendedAt,
+            }
+          : null,
+    };
+  }
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.payerMemberId,
+    prisma: input.prisma,
+  });
   return {
-    ...(input.target.kind === "family"
-      ? {
-          familyGroupId: input.target.familyGroupId,
-          kind: "family" as const,
-        }
-      : { kind: "personal" as const }),
-    stripeSubscriptionId:
-      billingRef?.stripeCustomerId === input.stripeCustomerId
-        ? billingRef.stripeSubscriptionId
+    kind: "personal",
+    subscription:
+      member?.billingRef?.stripeCustomerId === input.stripeCustomerId &&
+      member.billingRef.stripeSubscriptionId &&
+      hasHostedMemberOwnActiveBilling(member.core)
+        ? {
+            billingStatus: member.core.billingStatus,
+            lastStripeEventCreatedAt:
+              member.billingRef.lastStripeEventCreatedAt ?? null,
+            stripeSubscriptionId: member.billingRef.stripeSubscriptionId,
+            suspendedAt: member.core.suspendedAt,
+          }
         : null,
   };
 }
