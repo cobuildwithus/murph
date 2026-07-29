@@ -774,19 +774,20 @@ the tokens and encrypted labels. Full replacement, explicit deletion,
 permission-loss deletion after the companion next reconciles in the foreground,
 and account deletion use that one lifecycle. Replacement remains gated by
 active access and current launch consent. An enabled projection remains active
-until one of those deletion paths runs. The only consumer is the existing
-route-authorized group participant read. It consults the human group owner's
-projection only while the owner still exists, remains unsuspended, and holds
-current launch consent, for at most 16 canonical phone participant handles. The
-enclosing route authorization owns admission to that live read; the optional
-overlay does not separately reinterpret the owner's current personal or
-sponsored billing after the projection was validly enabled. Participant
-selection remains independent of each participant's durable `hasOwnMurph`
-activation result, and a match is exposed only as current-turn
-`unverifiedOwnerContactLabel` presentation text. It is never identity,
-membership, consent, routing, profile, invite, or signup authority, and it
-cannot override a registered participant's Murph identity. Failures omit the
-optional overlay without changing the truthful live roster.
+until one of those deletion paths runs. The consumers are the existing
+route-authorized group participant read and the signed Linq participant-change
+context path described below. Each consults the human group owner's projection
+only while the owner still exists, remains unsuspended, and holds current launch
+consent. The live roster read is bounded to at most 16 canonical phone
+participant handles; the event path requests only the single normalized changed
+handle. The enclosing route authorization owns admission to either read; the
+optional overlay does not separately reinterpret the owner's current personal
+or sponsored billing after the projection was validly enabled. A match is
+exposed only as current-turn `unverifiedOwnerContactLabel` presentation text.
+It is never identity, membership, consent, routing, profile, invite, or signup
+authority, and it cannot override a registered participant's Murph identity.
+Failures omit the optional overlay without changing the truthful live roster or
+the signed participant-change fact.
 The full boundary and rollout contract is
 `agent-docs/product-specs/ios-address-book-advisory-names.md`.
 
@@ -1270,37 +1271,59 @@ rosters therefore cannot turn an omitted or departed participant into an
 unbounded subscription capability.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
-facts, not runtime work. A unique participant addition may set one nullable
-coalescing bit only on an existing thread route; it does not retain the
-participant identity, create authority, fetch the roster, append mailbox work,
-or wake a runtime. The next normally admitted non-direct message takes the
-canonical chat-ownership lock before the route row, consumes exact `true` in the
-same transaction as its ordinary mailbox append, and carries one typed context
-hint. The runner records that hint in the existing tolerant mailbox-to-input
-sidecar rather than the strict persisted assistant-input event, projects it only
-onto the transient input candidate, and renders the same fixed context for both
-normal and captureless active-turn prompt paths. It exposes the hint only with
-route authority and explicit group attestation, while the existing live roster
-tool remains the sole decision-time participant source. Duplicate additions
-coalesce, removals remain ledger-only, and any failed or raced append rolls
-consumption back.
+facts, not standalone runtime work. The shared ingress contract normalizes the
+documented full participant handle (or Linq's deprecated handle fallback), but
+the diagnostic ledger still stores no participant id, handle, phone, email, or
+label. For a routed group, Web takes the canonical chat-ownership lock before
+provider-event insertion, then locks the group owner before mutating the route
+or reading optional context. A unique event may then append one bounded
+participant-attributed item to the route's existing encrypted transient
+group-event buffer in that same transaction. The item says which canonical
+handle was added or removed and may include the human group owner's unverified
+address-book label only when that phone is not proven to have an activated
+Murph identity. The locked route rejects any participant
+lookup key that belongs to its own Linq account, even when the provider omits
+`is_me`. No live-roster fetch is needed: the signed participant event is
+evidence of the change, while the existing live roster tool remains the sole
+decision-time source for current membership and join-offer decisions.
 
-Hosted Linq group reactions use the same one-shot context boundary. A unique,
+Participant events still create no mailbox item, wake, route, membership,
+invite, consent, share, or outbound message. A unique addition also sets the
+existing nullable coalescing bit in the same transaction as ledger insertion;
+that anonymous hint is the durable fallback when optional contact lookup,
+encryption, or detailed staging fails. Removals have no automatic reply or
+generic fallback: their detailed item is intentionally optional context. The
+same chat lock serializes this transaction against the next normally admitted
+non-direct message, so a later message cannot consume the route between ledger
+insertion and detailed staging. That message then locks the route row, consumes
+the addition bit and encrypted buffer in the same transaction as its ordinary
+mailbox append, and carries them through the existing tolerant
+mailbox-to-input sidecar. Prompt assembly exposes the buffer only with route
+authority and explicit group attestation, clearly marks it as weak context
+rather than a message or instruction, and uses the same path for normal and
+captureless turns. Duplicate events do not restage context, and any failed or
+raced mailbox append rolls consumption back.
+
+Hosted Linq group reactions share that one-shot context boundary. A unique,
 verified reaction for an active account-bound group route is checked against
 the live roster and exact reacted-to message, then appends one actor-attributed
-entry to an encrypted transient buffer on that route. The same nullable column
-holds the newest ten entries in insertion order; older entries fall off without
-creating a separately processed queue. Each entry keeps the canonical active
-roster handle, reaction action/type, and bounded target text, but no provider
-identifier, URL, or attachment metadata. It is optional lossy context, not
-product truth, and creates no mailbox item or wake. The next normally admitted
-group message consumes and clears the whole buffer under the existing chat and
-route locks, carries it on that ordinary `conversation.message`, and exposes it
-only through the existing tolerant mailbox-input sidecar as a clearly quoted
-weak prompt hint. Corrupt context fails open, authority rotation clears it, and
-a failed or raced mailbox append rolls consumption back. Append decrypt and
-reseal share one 500 ms deadline, and consume decrypt has the same bound, so
-optional crypto cannot inherit the general KMS deadline while holding locks.
+entry to the same encrypted transient buffer on that route. The legacy physical
+column name remains reaction-specific, but its logical owner is the bounded
+group-event buffer. It holds the newest ten entries in insertion order; older
+entries fall off without creating a separately processed queue. Reaction
+entries keep the canonical active roster handle, action/type, and bounded
+target text, but no provider identifier, URL, or attachment metadata.
+Participant entries keep only the normalized handle, change action, and
+optional unverified owner label. Address-book replacement or deletion takes the
+same owner-member lock as label staging and clears pending encrypted group-event
+buffers for that owner's routes before committing. A staged label therefore
+cannot survive Stop, permission-loss cleanup, or replacement; the existing
+anonymous addition bit remains independent. Clearing may also discard pending
+optional reaction context, which is already lossy and creates no work owner.
+Corrupt context fails open, authority rotation clears it, and a failed or raced
+mailbox append rolls consumption back. Append decrypt and reseal share one
+500 ms deadline, and consume decrypt has the same bound, so optional crypto
+cannot inherit the general KMS deadline while holding locks.
 When raising the consumed hint beyond the legacy 512-character contract, deploy
 the hosted runner bundle before the web producer so every parser accepts the
 new 5,129-character maximum before web can emit it. Once web has written the

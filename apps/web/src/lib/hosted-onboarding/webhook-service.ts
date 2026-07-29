@@ -6,6 +6,7 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageEditedEvent,
+  requireHostedLinqParticipantChangedEvent,
   requireHostedLinqMessageReceivedEvent,
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
@@ -91,6 +92,9 @@ import {
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
 import type {
@@ -113,6 +117,9 @@ import {
   stageHostedLinqGroupReactionContext,
 } from "./webhook-provider-linq-reaction-context";
 import {
+  stageHostedLinqGroupParticipantContextTx,
+} from "./webhook-provider-linq-participant-context";
+import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
 import type {
@@ -122,6 +129,7 @@ import {
   createHostedPostCommitDeadline,
   readHostedPostCommitRemainingMs,
 } from "./bounded-post-commit";
+import { lockHostedMemberRow } from "./shared";
 
 export {
   handleHostedStripeWebhook,
@@ -299,6 +307,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         || event.event_type === "participant.removed"
         ? await ingestHostedLinqParticipantEventDirect({
             event: providerEvent,
+            participantChange: requireHostedLinqParticipantChangedEvent(event),
             prisma,
           })
         : await ingestHostedLinqProviderEventDirect({
@@ -1062,38 +1071,56 @@ async function ingestHostedLinqProviderEventDirect(input: {
 
 async function ingestHostedLinqParticipantEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  participantChange: ReturnType<typeof requireHostedLinqParticipantChangedEvent>;
   prisma: PrismaClient;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(input.prisma, async (transaction) => {
-    const providerResult = await ingestHostedLinqProviderEventTx({
-      event: input.event,
-      prisma: transaction,
-    });
-    if (providerResult.duplicate || input.event.eventType !== "participant.added") {
-      return providerResult;
-    }
+  return runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    async (transaction) => {
+      const chatId = input.participantChange.data.chat_id;
+      if (chatId) {
+        await acquireHostedLinqChatOwnershipLockTx({
+          chatId,
+          tx: transaction,
+        });
+      }
+      const providerResult = await ingestHostedLinqProviderEventTx({
+        event: input.event,
+        prisma: transaction,
+      });
+      if (providerResult.duplicate) {
+        return providerResult;
+      }
 
-    const chatId = input.event.linqChatId;
-    if (!chatId) {
-      return providerResult;
-    }
+      if (!chatId) {
+        return providerResult;
+      }
 
-    const route = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: transaction,
-      threadId: chatId,
-    });
-    if (!route) {
-      return providerResult;
-    }
+      const route = await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: transaction,
+        threadId: chatId,
+      });
+      if (!route) {
+        return providerResult;
+      }
 
-    await markHostedLinqThreadRouteParticipantAdditionPendingTx({
-      containerMemberId: route.containerMemberId,
-      prisma: transaction,
-      threadId: chatId,
-    });
-    return providerResult;
-  });
+      await lockHostedMemberRow(transaction, route.owner.id);
+      if (input.participantChange.event_type === "participant.added") {
+        await markHostedLinqThreadRouteParticipantAdditionPendingTx({
+          containerMemberId: route.containerMemberId,
+          prisma: transaction,
+          threadId: chatId,
+        });
+      }
+      await stageHostedLinqGroupParticipantContextTx({
+        event: input.participantChange,
+        prisma: transaction,
+        route,
+      });
+      return providerResult;
+    },
+  );
 }
 
 function scheduleHostedLinqProviderEventIngestionBestEffort(input: {
