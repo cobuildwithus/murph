@@ -284,7 +284,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   no stale fenced gauge page after recovery, exact body/idempotency reuse after
   an ambiguous Linq send, transactional rollback before direct
   counter-baseline advancement, one-sample direct errors admitted inside the
-  attempt fence and retained across clean samples, health-suppressed recovery,
+  attempt fence and retained across clean samples, mixed inside-fence pages
+  limited to direct-error evidence with full current evidence at the boundary,
+  health-suppressed recovery,
   documented formatted/deprecated Linq inventory shapes with duplicate and
   mismatch rejection, zero message POSTs for unhealthy or indeterminate
   chat/line health, healthy auto-selected Linq delivery, discovery-only

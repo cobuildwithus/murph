@@ -753,8 +753,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   bounded state maps, error-counter baselines, failure codes, and alert
   admission state. First-incident and non-replayable direct-error alert
   admission shares one synchronous SQLite transaction with sample/baseline
-  persistence; acknowledged replayable recurrence is admitted only from the
-  current sample once the attempt fence opens. Acknowledged Linq entry is the
+  persistence; an inside-fence direct-error body excludes co-occurring
+  replayable evidence, and acknowledged replayable recurrence is admitted only
+  from the current sample once the attempt fence opens. Acknowledged Linq entry is the
   only operation that clears a pending page. SQLite contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a

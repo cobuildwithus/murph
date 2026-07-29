@@ -47,6 +47,10 @@ Last verified: 2026-07-27
   A newly opened incident or one-shot direct migration admission failure admits
   its exact body and idempotency key in the same synchronous SQLite transaction
   that persists the sample and advances any direct-error counter baseline.
+  When a direct error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  direct-error evidence; co-occurring replayable gauges remain in the persisted
+  sample but cannot become stale pending claims.
   An acknowledged incident's replayable gauge or monitoring recurrence does
   not admit stale evidence while the attempt fence is closed; once the fence
   opens, a still-unsafe current sample admits the recurrence, while recovery

@@ -671,6 +671,86 @@ describe("database health monitor", () => {
     });
   });
 
+  it("excludes replayable gauge evidence from an inside-fence direct-error page", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 9,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        {
+          kind: "client_wait",
+          seconds: 9,
+        },
+        {
+          count: 2,
+          kind: "direct_migration_admission_failures",
+        },
+      ],
+      outcome: "alert_deferred",
+    });
+
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    const delayedMessage = (
+      await readLinqRequestBody(harness.linqRequests[1])
+    ).message.parts[0]?.value;
+    expect(delayedMessage).toContain("2 direct migration connection errors");
+    expect(delayedMessage).not.toContain("PgBouncer wait");
+  });
+
+  it("includes all current mixed conditions when the attempt fence opens", async () => {
+    let metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+      directErrors: 5,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody: () => metricsBody,
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    metricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 12,
+      directErrors: 7,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+    const currentMessage = (
+      await readLinqRequestBody(harness.linqRequests[1])
+    ).message.parts[0]?.value;
+    expect(currentMessage).toContain("PgBouncer wait 12s");
+    expect(currentMessage).toContain("2 direct migration connection errors");
+    expect(currentMessage).toContain("Checked 00:35 UTC");
+  });
+
   it("retains a direct-error page suppressed by Linq health after recovery", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

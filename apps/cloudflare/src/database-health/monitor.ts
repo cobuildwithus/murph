@@ -253,6 +253,13 @@ export class DatabaseHealthMonitor {
           input.checkedAtMs - alertState.lastAlertAttemptedAtMs
           >= DATABASE_HEALTH_ALERT_INTERVAL_MS
         );
+      const admittedConditions =
+        !isNewIncident && !attemptFenceOpen && hasDirectConnectionError
+          ? sample.conditions.filter(
+            (condition) =>
+              condition.kind === "direct_migration_admission_failures",
+          )
+          : sample.conditions;
       if (
         (
           !alertState.pendingAlertIdempotencyKey
@@ -269,7 +276,7 @@ export class DatabaseHealthMonitor {
           message: buildDatabaseAlertMessage({
             alertSequence: nextAlertSequence,
             checkedAtMs: input.checkedAtMs,
-            conditions: sample.conditions,
+            conditions: admittedConditions,
             incidentSequence: alertState.incidentSequence,
           }),
         });
