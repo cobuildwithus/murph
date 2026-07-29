@@ -23,7 +23,7 @@ model HostedLinqChatHealth {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
-  @@index([phoneNumberLookupKey, providerStatus])
-  @@index([providerStatus, providerUpdatedAt])
+  @@index([phoneNumberLookupKey, providerStatus], map: "hosted_linq_chat_health_phone_status_idx")
+  @@index([providerStatus, providerUpdatedAt], map: "hosted_linq_chat_health_status_updated_idx")
   @@map("hosted_linq_chat_health")
 }
