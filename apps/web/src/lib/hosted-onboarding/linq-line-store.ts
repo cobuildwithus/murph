@@ -32,7 +32,6 @@ type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
 export const HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT = 250;
 
 export type HostedLinqAssignableHomeLine = {
-  activeMemberLimit: number | null;
   assignmentWeight: number;
   maxNewConversationsPerDay: number | null;
   phoneNumber: string;
@@ -51,7 +50,6 @@ export type HostedLinqContactCardLine = {
 };
 
 type HostedLinqAssignableHomeLineRow = {
-  activeMemberLimit: number | null;
   assignmentWeight: number;
   maxNewConversationsPerDay: number | null;
   phoneNumberEncrypted: string | null;
@@ -68,6 +66,7 @@ type HostedLinqContactCardLineRow = {
 };
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
+  /** @deprecated Additive-rollout compatibility; assignment does not read it. */
   activeMemberLimit?: number | null;
   observedAt: Date;
   phoneNumber: string;
@@ -88,6 +87,7 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 }
 
 async function upsertHostedLinqLineForPhoneInTransaction(input: {
+  /** @deprecated Additive-rollout compatibility; assignment does not read it. */
   activeMemberLimit?: number | null;
   observedAt: Date;
   phoneNumber: string;
@@ -243,6 +243,11 @@ function chooseHostedLinqLineWriteLookupKey(
 }
 
 export async function syncHostedLinqConfiguredLinesTx(input: {
+  /**
+   * Additive-rollout compatibility for previous application builds only.
+   * Weighted assignment never reads this value; remove the column and env
+   * seam after no rollback target still owns the legacy direct-member policy.
+   */
   activeMemberLimit: number | null;
   observedAt?: Date;
   phoneNumbers: readonly string[];
@@ -272,7 +277,6 @@ export async function listHostedLinqAssignableHomeLines(input: {
     ],
     take: limit + 1,
     select: {
-      activeMemberLimit: true,
       assignmentWeight: true,
       maxNewConversationsPerDay: true,
       phoneNumberEncrypted: true,
@@ -346,7 +350,6 @@ export async function listHostedLinqHealthyProactiveLines(input: {
     ],
     take: limit + 1,
     select: {
-      activeMemberLimit: true,
       assignmentWeight: true,
       maxNewConversationsPerDay: true,
       phoneNumberEncrypted: true,
@@ -451,7 +454,6 @@ function mapHostedLinqAssignableHomeLineRows(
       return [];
     }
     return [{
-      activeMemberLimit: row.activeMemberLimit,
       assignmentWeight: row.assignmentWeight,
       maxNewConversationsPerDay: row.maxNewConversationsPerDay,
       phoneNumber,
