@@ -14,10 +14,12 @@ export function HostedAiUsageActivity(props: {
   activity: HostedAiUsageActivitySnapshot;
   missionContactOption: MurphContactOption | null;
 }) {
+  const canStartMissions =
+    props.activity.missionsEnabled && props.missionContactOption !== null;
   const hasMissionSurface =
-    props.activity.missionsEnabled || props.activity.missions.length > 0;
+    canStartMissions || props.activity.missions.length > 0;
   const heading = hasMissionSurface ? "Credits & missions" : "Usage credits";
-  const description = props.activity.missionsEnabled
+  const description = canStartMissions
     ? "Credits extend the usage included in your plan automatically. Missions are optional and only start after you choose one with Murph."
     : hasMissionSurface
       ? "Credits extend the usage included in your plan automatically. Your existing mission activity remains below."
@@ -37,7 +39,7 @@ export function HostedAiUsageActivity(props: {
             {description}
           </p>
         </div>
-        {props.activity.missionsEnabled && props.missionContactOption ? (
+        {canStartMissions && props.missionContactOption ? (
           <MurphContactLink
             actionLabel="Ask Murph about usage missions"
             className={cn(
@@ -117,7 +119,7 @@ export function HostedAiUsageActivity(props: {
               Missions
             </h4>
             <p className="mt-1 text-sm text-muted-foreground">
-              {props.activity.missionsEnabled
+              {canStartMissions
                 ? "Ask Murph what is available. A mission starts only after you choose one, and its reward is included in your overall AI usage."
                 : "New missions are not available. Your existing activity remains here for reference."}
             </p>

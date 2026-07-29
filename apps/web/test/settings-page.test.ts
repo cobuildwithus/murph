@@ -1453,7 +1453,7 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   }), undefined);
 });
 
-test("SettingsPage drops unsupported chat links for an email-only member", async () => {
+test("SettingsPage omits an empty email-only invitation but preserves activity history", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -1505,9 +1505,10 @@ test("SettingsPage drops unsupported chat links for an email-only member", async
   expect(mocks.CustomizeMurphSettings).toHaveBeenCalledWith(expect.objectContaining({
     voiceTestContactOption: null,
   }), undefined);
-  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+  expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
-      missionContactOption: null,
+      usageActivityDetail: null,
     }),
     undefined,
   );
@@ -1522,6 +1523,55 @@ test("SettingsPage drops unsupported chat links for an email-only member", async
         body: "Hey Murph, what usage missions can I choose from?",
       },
     }),
+  );
+
+  mocks.HostedAiUsageActivity.mockClear();
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [{
+      addedLabel: "$5.00",
+      dateLabel: "Jul 29, 2026",
+      id: "credit_email_history",
+      sourceLabel: "Added for you",
+    }],
+    missions: [],
+    missionsEnabled: true,
+  });
+  renderToStaticMarkup(await SettingsPage());
+  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      activity: expect.objectContaining({
+        credits: [expect.objectContaining({ id: "credit_email_history" })],
+      }),
+      missionContactOption: null,
+    }),
+    undefined,
+  );
+
+  mocks.HostedAiUsageActivity.mockClear();
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [{
+      destinationLabel: "your Murph",
+      id: "mission_email_history",
+      requirementsLabel: "Complete the selected mission.",
+      rewardLabel: "$2.00",
+      selectedLabel: "Jul 20, 2026",
+      status: "completed",
+      statusLabel: "Completed",
+      timingLabel: "Earned Jul 27, 2026",
+      title: "Completed mission",
+    }],
+    missionsEnabled: true,
+  });
+  renderToStaticMarkup(await SettingsPage());
+  expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      activity: expect.objectContaining({
+        missions: [expect.objectContaining({ id: "mission_email_history" })],
+      }),
+      missionContactOption: null,
+    }),
+    undefined,
   );
 });
 

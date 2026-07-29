@@ -1868,6 +1868,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       linqSenderHandles: [" +15551110001 "],
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"c".repeat(32)}`,
         threadIsDirect: true,
       },
@@ -1876,13 +1877,17 @@ describe("parseHostedRuntimeGroupTool", () => {
       linqSenderHandles: ["+15551110001"],
       sourceConversation: {
         channel: "linq",
+        linqService: "imessage",
         threadId: `hid_${"c".repeat(32)}`,
         threadIsDirect: true,
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -1891,7 +1896,10 @@ describe("parseHostedRuntimeGroupTool", () => {
       telegramSenderHandles: [" 1234567890 "],
     })).toEqual({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -1911,8 +1919,16 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/policyCode must be a non-empty string/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "future_policy",
+      policyCodes: ["future_policy"],
     })).toThrow(/not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: [],
+    })).toThrow(/between 1 and 2 entries/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    })).toThrow(/must have unique entries/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
@@ -1920,7 +1936,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/more than one channel/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: "raw-provider-thread",
@@ -1929,7 +1945,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/threadId is invalid/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         identityId: `hid_${"b".repeat(32)}`,
@@ -1937,6 +1953,24 @@ describe("parseHostedRuntimeGroupTool", () => {
         threadIsDirect: true,
       },
     })).toThrow(/identityId is not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        linqService: "imessage",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "unknown",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
   });
 
   it("parses a closed, canonical read_shared roster and status matrix", () => {

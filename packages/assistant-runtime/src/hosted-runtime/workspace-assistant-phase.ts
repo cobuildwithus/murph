@@ -391,10 +391,16 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
             });
         const sourceContext = resolveHostedUsageReferralSourceContext(
           input.currentDeliveryRoute,
+          input.linqDeliveryContexts,
         );
         const referralRequest = request.action === "read_usage_referral"
           ? { action: request.action }
-          : {
+          : request.action === "arm_usage_referral"
+            ? {
+              action: request.action,
+              policyCodes: request.policyCodes,
+            }
+            : {
               action: request.action,
               policyCode: request.policyCode,
             };
@@ -432,6 +438,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
 
 function resolveHostedUsageReferralSourceContext(
   route: AssistantCurrentDeliveryRoute | null | undefined,
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[],
 ): HostedRuntimeUsageReferralSourceContext {
   const channel = normalizeAssistantRouteString(route?.channel)?.toLowerCase();
   const threadId = normalizeAssistantRouteString(route?.threadId);
@@ -443,13 +450,38 @@ function resolveHostedUsageReferralSourceContext(
   ) {
     return {};
   }
+  const linqService = channel === "linq"
+    ? resolveHostedUsageReferralLinqService(linqDeliveryContexts)
+    : null;
   return {
     sourceConversation: {
       channel,
+      ...(linqService ? { linqService } : {}),
       threadId,
       threadIsDirect: route.threadIsDirect,
     },
   };
+}
+
+function resolveHostedUsageReferralLinqService(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): "imessage" | "rcs" | "sms" | null {
+  let resolved: "imessage" | "rcs" | "sms" | null = null;
+  for (const context of contexts) {
+    const service = context.service?.trim().toLowerCase();
+    if (
+      service !== "imessage"
+      && service !== "rcs"
+      && service !== "sms"
+    ) {
+      return null;
+    }
+    if (resolved && resolved !== service) {
+      return null;
+    }
+    resolved = service;
+  }
+  return resolved;
 }
 
 function buildHostedGroupEmailRestrictedActionUnavailable(

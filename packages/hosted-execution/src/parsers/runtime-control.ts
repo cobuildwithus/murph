@@ -1252,20 +1252,40 @@ export function parseHostedRuntimeGroupToolRequest(
       new Set([
         "action",
         "linqSenderHandles",
-        "policyCode",
+        "policyCodes",
         "sourceConversation",
         "telegramSenderHandles",
       ]),
       "Hosted runtime group tool arm_usage_referral request",
     );
+    const policyCodeValues = requireArray(
+      record.policyCodes,
+      "Hosted runtime group tool arm_usage_referral request policyCodes",
+    );
+    if (
+      policyCodeValues.length < 1
+      || policyCodeValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length
+    ) {
+      throw new TypeError(
+        `Hosted runtime group tool arm_usage_referral request policyCodes must contain between 1 and ${HOSTED_USAGE_REFERRAL_POLICY_CODES.length} entries.`,
+      );
+    }
+    const policyCodes = policyCodeValues.map((policyCode, index) =>
+      parseHostedRuntimeUsageReferralPolicyCode(
+        policyCode,
+        `Hosted runtime group tool arm_usage_referral request policyCodes[${index}]`,
+      )
+    );
+    if (new Set(policyCodes).size !== policyCodes.length) {
+      throw new TypeError(
+        "Hosted runtime group tool arm_usage_referral request policyCodes must have unique entries.",
+      );
+    }
     return {
       action,
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
       ...parseHostedRuntimeUsageReferralSourceContext(record),
-      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
-        record.policyCode,
-        "Hosted runtime group tool arm_usage_referral request policyCode",
-      ),
+      policyCodes,
     };
   }
   if (
@@ -1578,7 +1598,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
   );
   assertAllowedObjectKeys(
     source,
-    new Set(["channel", "threadId", "threadIsDirect"]),
+    new Set(["channel", "linqService", "threadId", "threadIsDirect"]),
     "Hosted runtime usage referral source conversation",
   );
   const channel = requireString(
@@ -1590,9 +1610,31 @@ function parseHostedRuntimeUsageReferralSourceContext(
       "Hosted runtime usage referral source conversation channel is invalid.",
     );
   }
+  const linqService = source.linqService === undefined
+    ? null
+    : requireString(
+        source.linqService,
+        "Hosted runtime usage referral source conversation linqService",
+      );
+  if (
+    linqService !== null
+    && (
+      channel !== "linq"
+      || (
+        linqService !== "imessage"
+        && linqService !== "rcs"
+        && linqService !== "sms"
+      )
+    )
+  ) {
+    throw new TypeError(
+      "Hosted runtime usage referral source conversation linqService is invalid.",
+    );
+  }
   return {
     sourceConversation: {
       channel,
+      ...(linqService === null ? {} : { linqService }),
       threadId: parseHostedRuntimeUsageReferralBlindedIdentifier(
         source.threadId,
         "Hosted runtime usage referral source conversation threadId",

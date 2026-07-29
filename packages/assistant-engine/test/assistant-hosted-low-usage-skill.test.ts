@@ -136,7 +136,15 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('an explicit "both" is consent')
     expect(skill).toContain('Different policies are independent')
     expect(skill).toContain('one-mission limit')
-    expect(skill).toContain('one compact message')
+    expect(normalizedSkill).toContain('one compact message')
+    expect(normalizedSkill).toContain(
+      'Call `arm_usage_referral` once with the exact selected `policyCodes` set',
+    )
+    expect(skill).toContain('Never split one selection across multiple calls')
+    expect(skill).toContain('usage_referral_selection_requires_one')
+    expect(normalizedSkill).toContain(
+      'no new mission from that request committed',
+    )
     expect(normalizedSkill).toContain('invent operational limitations')
     expect(normalizedSkill).toContain('still `armed` when the group is created')
     expect(normalizedSkill).toContain('language respectful and person-first')
@@ -179,6 +187,9 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedSkill).toContain(
       'The ordinary first-reply group setup flow owns the rest',
+    )
+    expect(normalizedSkill).toContain(
+      'asks them to come back and say hi in the group once setup is done',
     )
     expect(normalizedSkill).toContain(
       'confirm the handoff in one short sentence',

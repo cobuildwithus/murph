@@ -291,6 +291,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('When `action="read_chat_participants"`')
     expect(section).toContain('check the participants once on your first reply')
     expect(section).toContain('text you to get set up')
+    expect(section).toContain(
+      'come back and say hi in the group once setup is done',
+    )
     expect(section).toContain('Use your own words, not a fixed script')
     expect(section).toContain('Do not repeat the invitation unprompted')
     expect(section).toContain('when someone joins later')

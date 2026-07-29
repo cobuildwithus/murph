@@ -1020,6 +1020,11 @@ export interface HostedRuntimeGroupToolSenderContext {
 
 export interface HostedRuntimeUsageReferralSourceConversation {
   channel: "linq" | "telegram";
+  /**
+   * Ephemeral provider service observed by the Linq runtime. It is used only
+   * to gate service-specific referral behavior and is never persisted.
+   */
+  linqService?: "imessage" | "rcs" | "sms";
   threadId: string;
   threadIsDirect: boolean;
 }
@@ -1291,7 +1296,7 @@ export type HostedRuntimeGroupToolRequest =
       & HostedRuntimeUsageReferralSourceContext)
   | ({
       action: "arm_usage_referral";
-      policyCode: HostedUsageReferralPolicyCode;
+      policyCodes: HostedUsageReferralPolicyCode[];
     } & HostedRuntimeGroupToolSenderContext
       & HostedRuntimeUsageReferralSourceContext)
   | ({

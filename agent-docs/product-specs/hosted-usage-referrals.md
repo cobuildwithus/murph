@@ -51,8 +51,12 @@ person.
 
 One fresh group binds every eligible unbound policy the creator has armed, and
 each mission then qualifies independently against the same admitted messages.
-Arming an already-active policy for the same reward destination is idempotent;
-it never replaces another policy. Earned rewards are final.
+One explicit arm request commits the sender's exact selected policy set or none
+of it. A policy already active for the same reward destination is idempotent.
+One policy can be armed for only one destination at a time; a read in another
+destination suppresses that policy without exposing where it is armed. A
+previously bound instance does not prevent arming the same policy for a future
+group. Earned rewards are final.
 
 The new-person mission deliberately reuses normal Murph onboarding instead of
 creating a referral-specific claim or activation system. After arming, Murph
@@ -60,9 +64,10 @@ tells the referrer only to bring one new person and Murph together in a fresh
 group. The ordinary first-reply group setup flow owns the reciprocal onboarding:
 Murph shares its contact card once and naturally invites the newcomer to save
 and text it. Setup happens in the newcomer's 1:1 thread after they initiate it.
-Because that group onboarding path is currently Linq-owned, the runtime offers
-and arms the new-person mission only from a Linq conversation. Telegram remains
-eligible for the provider-neutral active-group mission.
+Because that contact-card onboarding path is currently iMessage-owned, the
+runtime offers and arms the new-person mission only from an exact current Linq
+iMessage conversation. SMS, RCS, and Telegram remain eligible only for the
+provider-neutral active-group mission.
 The person completes the ordinary activation flow with the same provider
 identity observed in the target, returns to the group, and says hi. The
 combination of post-arm activation and target presence provides attribution;
@@ -83,10 +88,12 @@ one-at-a-time contract. New arming never emits it.
 
 Arming freezes the referrer, beneficiary, policy code and version, reward,
 seven-day window, and—only for a personal destination—the blinded source
-conversation. The referrer's next newly created thread container binds every
-eligible policy that referrer has armed when its durable owner is that exact
-referrer and creation happened after arming. The new-person policy additionally
-requires a Linq target container; Telegram containers leave it armed for a later
+conversation. The current Linq transport service is trusted runtime context,
+not persisted referral state. The referrer's next newly created thread
+container binds every compatible policy that referrer has armed when its
+durable owner is that exact referrer and creation happened after arming. The
+new-person policy additionally requires an exact Linq iMessage target
+container; SMS, RCS, and Telegram containers leave it armed for a later
 eligible group. Existing rooms cannot bind.
 
 The hosted runtime injects current Linq or Telegram sender handles from accepted
@@ -97,8 +104,10 @@ provider-scoped current sender resolves to an active personal member.
 
 No hidden watermark is created by low-usage copy. `read_usage_referral` reads
 availability; `arm_usage_referral` and `cancel_usage_referral` require fresh
-user-sourced input. Cancellation names one exact policy and applies only while
-that mission is unbound; every other mission is left unchanged.
+user-sourced input. Arming accepts one exact selected set of returned policies
+and commits every missing row in one transaction. Cancellation names one exact
+policy and applies only while that mission is unbound; every other mission is
+left unchanged.
 
 ## Portable ingress evidence
 
@@ -200,11 +209,16 @@ owner. Its detail surface is a read-only projection:
   expose aggregate or per-grant remaining capacity;
 - mission rows include only the referrer's canonical outstanding commitments and
   rewarded history;
+- a bound mission remains visible as `Checking final activity` between its exact
+  UTC deadline and the end of the bounded late-evidence grace; this is only a
+  projection of the durable referral state, not a second lifecycle;
 - the surface never creates another balance, mission lifecycle, qualification
   counter, participant list, or group-name store;
 - the action opens the member's existing Murph channel with a prefilled question
   about available missions; opening or sending that question does not arm a
   mission by itself;
+- accounts without a supported Murph conversation keep existing credits and
+  mission history visible but receive no empty invitation or action;
 - disabling new referrals hides that action but does not hide current
   commitments or already-earned history.
 
@@ -215,8 +229,8 @@ Provider timing references:
 
 ## Abuse bounds
 
-- At most one unbound armed instance of a policy per referrer and reward
-  destination.
+- At most one unbound armed instance of a policy per referrer across reward
+  destinations.
 - At most three nonterminal missions per referrer across armed and bound state.
 - At most $10.50 in rolling-30-day rewards plus outstanding commitments per
   referrer.

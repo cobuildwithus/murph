@@ -106,7 +106,20 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 27, 2026",
       status: "in_progress",
       statusLabel: "In progress",
-      timingLabel: "Ends Aug 3, 2026",
+      timingLabel: "Ends Aug 3, 2026, 12:00:00 PM UTC",
+      title: "Start an active group",
+    },
+    {
+      destinationLabel: "the group",
+      id: "design-mission-checking-final-activity",
+      requirementsLabel:
+        "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+      rewardLabel: "$3.50",
+      selectedLabel: "Jul 20, 2026",
+      status: "checking_final_activity",
+      statusLabel: "Checking final activity",
+      timingLabel:
+        "Action closed Jul 27, 2026, 12:00:00 PM UTC; checking delayed activity",
       title: "Start an active group",
     },
     {
@@ -137,7 +150,7 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
       selectedLabel: "Jul 29, 2026",
       status: "waiting_for_group",
       statusLabel: "Waiting for a new group",
-      timingLabel: "Start a new group by Aug 5, 2026",
+      timingLabel: "Start a new group by Aug 5, 2026, 12:00:00 PM UTC",
       title: "Start an active group",
     },
   ],

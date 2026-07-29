@@ -326,6 +326,7 @@ describe("hosted usage referral policy", () => {
       occurredAt,
       ownerMemberId: "member_referrer",
       targetChannel: "linq",
+      targetLinqService: "iMessage",
       targetContainerMemberId: "member_target_container",
       tx: tx as never,
     })).resolves.toEqual({
@@ -379,7 +380,58 @@ describe("hosted usage referral policy", () => {
       occurredAt,
       ownerMemberId: "member_referrer",
       targetChannel: "telegram",
+      targetLinqService: null,
       targetContainerMemberId: "member_target_container",
+      tx: tx as never,
+    })).resolves.toEqual({ referralIds: ["referral_group"] });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: { in: ["referral_group"] },
+      }),
+    }));
+  });
+
+  it.each([
+    {
+      targetLinqService: "sms",
+      title: "leaves a new-person mission armed for a new SMS group",
+    },
+    {
+      targetLinqService: "RCS",
+      title: "leaves a new-person mission armed for a new RCS group",
+    },
+    {
+      targetLinqService: null,
+      title: "leaves a new-person mission armed for an unknown Linq service",
+    },
+  ])("$title", async ({ targetLinqService }) => {
+    const occurredAt = new Date("2026-07-26T12:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      hostedUsageReferral: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "referral_person",
+            policyCode: "new_person_activation_v1",
+          },
+          {
+            id: "referral_group",
+            policyCode: "active_group_v1",
+          },
+        ]),
+        updateMany,
+      },
+    };
+
+    await expect(bindArmedHostedUsageReferralToNewContainerTx({
+      enabled: true,
+      occurredAt,
+      ownerMemberId: "member_referrer",
+      targetChannel: "linq",
+      targetContainerMemberId: "member_target_container",
+      targetLinqService,
       tx: tx as never,
     })).resolves.toEqual({ referralIds: ["referral_group"] });
 
@@ -696,6 +748,7 @@ describe("hosted usage referral policy", () => {
       occurredAt: new Date(expiresAt.getTime() + 1),
       ownerMemberId: "member_referrer",
       targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_later_container",
       tx: tx as never,
     })).resolves.toEqual({ referralIds: [] });
@@ -726,6 +779,7 @@ describe("hosted usage referral policy", () => {
       ),
       ownerMemberId: "member_referrer",
       targetChannel: "linq",
+      targetLinqService: "imessage",
       targetContainerMemberId: "member_after_grace_container",
       tx: tx as never,
     })).resolves.toEqual({ referralIds: [] });

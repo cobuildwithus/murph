@@ -273,14 +273,24 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
     }))).toEqual({
       kind: "group",
       request: {
         action: "arm_usage_referral",
-        policyCode: "active_group_v1",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
       },
     });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
@@ -362,7 +372,7 @@ describe("murph.group dynamic tool", () => {
   it("keeps a committed referral arm recovery result tool-successful", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -409,7 +419,7 @@ describe("murph.group dynamic tool", () => {
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     });
   });
 

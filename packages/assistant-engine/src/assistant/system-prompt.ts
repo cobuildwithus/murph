@@ -596,7 +596,7 @@ function buildAssistantHostedGroupGuidanceText(
       : []),
     "- `murph.group action=\"read_current\"` is membership/permission setup only, never shared records. Use `action=\"read_shared\"` as the only hosted path for shared facts. Request one to three exact `projectionScopes`; the host resolves live authority lazily after the tool call. `status=\"ok\"` is complete. Model-size `status=\"partial\"` lists current `omittedParticipantIds`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact `Sender:` handle must appear in exactly one returned member's `currentTurnHandles`; use that row's group-scoped `participantId`, never name, order, values, `Sender name:`, or global id. Scheduled and detached reads have no current-turn handles. Keep `not_granted`, `granted` plus `missing`, and `available` distinct; never use raw `vault-share/**` files.",
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
-    "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact and text you to get set up. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks you to resend the card, share it again. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. `action=\"post_join_offer\"` sends Web's canonical offer; liking or hearting it adds only its disclosed permission snapshot and grants membership only when needed. Existing members keep their membership and other grants unchanged.",
+    "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact, text you to get set up, and come back and say hi in the group once setup is done. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks you to resend the card, share it again. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. `action=\"post_join_offer\"` sends Web's canonical offer; liking or hearting it adds only its disclosed permission snapshot and grants membership only when needed. Existing members keep their membership and other grants unchanged.",
     "- `murph.newsletter` is scheduled-only. `prepare` returns authorized current-week facts in `result.members`; compose only from `result.members`. Normal context and tools remain available. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses; never send the first edition immediately after setup.",
     hostedRuntime
       ? hostedAutomationAvailable
@@ -629,6 +629,8 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
     conversationScope === "unverified-external"
       ? ASSISTANT_DATE_STYLE_GUIDANCE_TEXT
       : buildAssistantTimeStyleContextText({
+          personalCurrentTimeAvailable:
+            input.hostedRuntime === true && conversationScope === "direct",
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
@@ -923,6 +925,9 @@ const ASSISTANT_DATE_STYLE_GUIDANCE_TEXT =
 const ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT =
   'For relative dates, be careful around late-night or after-midnight messages: if the user says "tomorrow" or "tmrw" before they have slept, or before the current night has a sleep record, they may mean the upcoming wake-day, which can be the current calendar day. Clarify before writing dates, scheduling, or logging when this changes the outcome.';
 
+const ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT =
+  "When timing materially affects immediate advice, use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise to what still makes sense now.";
+
 function buildAssistantTimezoneLineText(currentTimeZone: string): string {
   return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
 }
@@ -942,6 +947,7 @@ function buildAssistantProductBaseUrlLineText(
 }
 
 function buildAssistantTimeStyleContextText(input: {
+  personalCurrentTimeAvailable: boolean;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
@@ -950,6 +956,9 @@ function buildAssistantTimeStyleContextText(input: {
       buildAssistantTimezoneLineText(input.currentTimeZone),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
       ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
+      ...(input.personalCurrentTimeAvailable
+        ? [ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT]
+        : []),
     ].join("\n"),
     buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
   );

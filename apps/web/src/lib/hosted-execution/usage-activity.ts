@@ -31,6 +31,16 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeZone: "UTC",
 });
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  month: "short",
+  second: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+  year: "numeric",
+});
 
 interface HostedUsageReferralActivityRecord {
   armedAt: Date;
@@ -130,6 +140,7 @@ export async function readHostedAiUsageActivity(input: {
     .sort(compareHostedUsageReferralActivity)
     .map((row) => projectHostedUsageMissionActivity({
       memberId: input.memberId,
+      now,
       row,
     }));
 
@@ -150,10 +161,11 @@ export async function readHostedAiUsageActivity(input: {
 
 function projectHostedUsageMissionActivity(input: {
   memberId: string;
+  now: Date;
   row: HostedUsageReferralActivityRecord;
 }): HostedAiUsageMissionActivityRow {
   const policy = getHostedUsageReferralPolicyDisplay(input.row.policyCode);
-  const status = projectHostedUsageMissionStatus(input.row);
+  const status = projectHostedUsageMissionStatus(input.row, input.now);
 
   return {
     destinationLabel: input.row.beneficiaryMemberId === input.memberId
@@ -165,7 +177,7 @@ function projectHostedUsageMissionActivity(input: {
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),
-    timingLabel: projectHostedUsageMissionTimingLabel(input.row),
+    timingLabel: projectHostedUsageMissionTimingLabel(input.row, status),
     title: policy.title,
   };
 }
@@ -202,6 +214,7 @@ function hostedUsageMissionStatusRank(
 
 function projectHostedUsageMissionStatus(
   row: HostedUsageReferralActivityRecord,
+  now: Date,
 ): HostedAiUsageMissionActivityStatus {
   if (row.status === "rewarded") {
     return "completed";
@@ -210,7 +223,12 @@ function projectHostedUsageMissionStatus(
     return "waiting_for_group";
   }
   if (row.status === "target_bound") {
-    return row.qualifiedAt ? "reward_pending" : "in_progress";
+    if (row.qualifiedAt) {
+      return "reward_pending";
+    }
+    return now.getTime() >= row.expiresAt.getTime()
+      ? "checking_final_activity"
+      : "in_progress";
   }
   throw new TypeError(`Unsupported usage mission status: ${row.status}`);
 }
@@ -227,11 +245,15 @@ function projectHostedUsageMissionStatusLabel(
   if (status === "in_progress") {
     return "In progress";
   }
+  if (status === "checking_final_activity") {
+    return "Checking final activity";
+  }
   return "Waiting for a new group";
 }
 
 function projectHostedUsageMissionTimingLabel(
   row: HostedUsageReferralActivityRecord,
+  status: HostedAiUsageMissionActivityStatus,
 ): string {
   if (row.status === "rewarded") {
     return row.rewardedAt
@@ -241,9 +263,12 @@ function projectHostedUsageMissionTimingLabel(
   if (row.qualifiedAt) {
     return `Qualified ${formatDate(row.qualifiedAt)}`;
   }
+  if (status === "checking_final_activity") {
+    return `Action closed ${formatDateTime(row.expiresAt)}; checking delayed activity`;
+  }
   return row.status === "armed"
-    ? `Start a new group by ${formatDate(row.expiresAt)}`
-    : `Ends ${formatDate(row.expiresAt)}`;
+    ? `Start a new group by ${formatDateTime(row.expiresAt)}`
+    : `Ends ${formatDateTime(row.expiresAt)}`;
 }
 
 function formatUsdMicros(value: bigint): string {
@@ -253,4 +278,8 @@ function formatUsdMicros(value: bigint): string {
 
 function formatDate(value: Date): string {
   return DATE_FORMATTER.format(value);
+}
+
+function formatDateTime(value: Date): string {
+  return DATE_TIME_FORMATTER.format(value);
 }

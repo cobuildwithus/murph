@@ -852,7 +852,19 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
         description:
-          'Required for action="arm_usage_referral" or action="cancel_usage_referral". Arm only an exact available policy the current sender explicitly chose; cancel only an exact mission with state="armed" from activeMissions.',
+          'Required only for action="cancel_usage_referral". Cancel only one exact mission with state="armed" from activeMissions.',
+      },
+      policyCodes: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
+        },
+        minItems: 1,
+        maxItems: HOSTED_USAGE_REFERRAL_POLICY_CODES.length,
+        uniqueItems: true,
+        description:
+          'Required only for action="arm_usage_referral". Send one exact set containing only available policies the current sender explicitly selected.',
       },
       groupLabel: {
         type: 'string',
@@ -1539,7 +1551,14 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('arm_usage_referral'),
-      policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
+      policyCodes: z
+        .array(z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES))
+        .min(1)
+        .max(HOSTED_USAGE_REFERRAL_POLICY_CODES.length)
+        .refine(
+          (policyCodes) => new Set(policyCodes).size === policyCodes.length,
+          { message: 'policyCodes must contain unique exact policies' },
+        ),
     })
     .strict(),
   z

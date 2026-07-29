@@ -28,6 +28,35 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('uses hosted direct current time without treating group time as personal', () => {
+    const hostedDirectLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const hostedGroupLayers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
+
+    expect(hostedDirectLayers.threadContextPrompt).toContain(
+      "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
+    )
+    expect(hostedGroupLayers.threadContextPrompt).toContain(
+      'The runtime member is a synthetic room container, not the human speaker',
+    )
+    expect(hostedGroupLayers.threadContextPrompt).not.toContain(
+      'use the user\'s current local time',
+    )
+    expect(
+      buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope: 'direct',
+      }).threadContextPrompt,
+    ).not.toContain('use the user\'s current local time')
+  })
+
   it.each(['direct', 'group'] as const)(
     'adds the conversational low-usage rule for hosted %s chats',
     (conversationScope) => {

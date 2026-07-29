@@ -1,7 +1,6 @@
-CREATE UNIQUE INDEX "hosted_usage_referral_one_armed_policy_per_destination"
+CREATE UNIQUE INDEX "hosted_usage_referral_one_armed_policy_per_referrer"
   ON "hosted_usage_referral"(
     "referrer_member_id",
-    "beneficiary_member_id",
     "policy_code"
   )
   WHERE "status" = 'armed';

@@ -2540,6 +2540,7 @@ async function planHostedLinqGroupChatWebhook(input: {
         occurredAt: new Date(occurredAt),
         ownerMemberId: sender.id,
         targetChannel: "linq",
+        targetLinqService: messageEvent.data.service ?? null,
         targetContainerMemberId: ensureResult.containerMemberId,
         tx: input.prisma,
       });
