@@ -1504,8 +1504,8 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
 
 test.sequential('Health Commons active starts require completed non-blocking safety screens', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-gate-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1516,7 +1516,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-missing-screen-dry-run',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--dry-run',
@@ -1531,7 +1531,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-missing-screen',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--vault',
@@ -1554,7 +1554,7 @@ test.sequential('Health Commons active starts require completed non-blocking saf
       'start',
       'bedtime-dangerous-sleepiness',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
@@ -1588,8 +1588,8 @@ test.sequential('Health Commons active starts require completed non-blocking saf
 
 test.sequential('Health Commons safety screening validates recorded question ids and dispositions', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-safety-answers-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1599,13 +1599,13 @@ test.sequential('Health Commons safety screening validates recorded question ids
       'start',
       'bedtime-missing-disposition',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
       completedAt,
       '--positive-question-id',
-      'external_schedule_constraint',
+      'severe_writing_activation_risk',
       '--vault',
       vaultRoot,
     ])
@@ -1617,7 +1617,7 @@ test.sequential('Health Commons safety screening validates recorded question ids
       'start',
       'bedtime-unknown-question',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--intervention-start',
       '2026-05-01',
       '--onboarding-completed-at',
@@ -1690,8 +1690,8 @@ test.sequential('Health Commons safety screening enforces negative-answer dispos
 
 test.sequential('Health Commons safety screening gates reactivation and preserves lineage', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-reactivation-'))
-  const bedtimeProtocol =
-    'protocol_variant:bedtime-transition/standard-tiny-fallback-transition'
+  const screenedProtocol =
+    'protocol_variant:cognitive-offload-before-bed/five-minute-tomorrow-list'
   const completedAt = '2026-04-30T15:00:00.000Z'
 
   try {
@@ -1701,7 +1701,7 @@ test.sequential('Health Commons safety screening gates reactivation and preserve
       'start',
       'bedtime-planned',
       '--from-protocol',
-      bedtimeProtocol,
+      screenedProtocol,
       '--status',
       'planned',
       '--intervention-start',

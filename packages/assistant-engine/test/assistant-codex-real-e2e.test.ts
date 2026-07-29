@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -14,6 +14,8 @@ import {
   MURPH_AUTOMATION_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
@@ -131,6 +133,13 @@ interface ResumeCacheProbeSummary {
   }
 }
 
+const EXPERIMENT_START_EXACT_KEY =
+  'protocol_variant:dry-sauna/bryan-johnson-blueprint'
+const EXPERIMENT_START_STARTER_KEY =
+  'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
+const EXPERIMENT_START_PAGE_REVISION = `sha256:${'1'.repeat(64)}`
+const EXPERIMENT_START_RUN_SPEC_REVISION = `sha256:${'2'.repeat(64)}`
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
     'prefers grounded group-chat actions while respecting collective human ownership',
@@ -191,6 +200,90 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'groupchat-comedy skill read',
         ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'discovers the deferred group tool from a natural group-status request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-status-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                return {
+                  action: 'read_current',
+                  result: {
+                    group: null,
+                    status: 'none',
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Please check whether this chat already has a Murph hosted group',
+            'set up. Use the current group configuration rather than guessing,',
+            'then tell me whether one exists.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const groupCall = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(groupCall).toBeDefined()
+        expect(groupRequests).toEqual([{ action: 'read_current' }])
+        expect(result.finalMessage).toMatch(
+          /no (?:hosted )?group|not (?:yet )?set up|doesn'?t exist/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -336,6 +429,96 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ...config.temporaryPaths,
         ])
       }
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex experiment onboarding e2e', () => {
+  it(
+    'resolves a name-first experiment start without replacing the exact match with its starter',
+    async () => {
+      const result = await runNameFirstExperimentStartProbe({
+        dryRunRevisionMismatch: false,
+      })
+      const startCommands = result.actions.filter((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment start')
+      )
+
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('experiment-onboarding/SKILL.md')
+          && action.output.includes('# Experiment onboarding')
+        ),
+        'experiment-onboarding skill read',
+      ).toBe(true)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli commons protocol show')
+          && action.command.includes(EXPERIMENT_START_EXACT_KEY)
+        ),
+        'exact named protocol show',
+      ).toBe(true)
+      expect(startCommands).toHaveLength(2)
+      expect(
+        startCommands.filter((action) =>
+          action.kind === 'command' && action.command.includes('--dry-run')
+        ),
+      ).toHaveLength(1)
+      for (const action of startCommands) {
+        if (action.kind !== 'command') {
+          continue
+        }
+        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
+        expect(normalizedCommand).toContain(
+          `--from-protocol ${EXPERIMENT_START_EXACT_KEY}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
+        )
+        expect(normalizedCommand).not.toContain(EXPERIMENT_START_STARTER_KEY)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'stops after a name-first revision mismatch instead of retrying unpinned',
+    async () => {
+      const result = await runNameFirstExperimentStartProbe({
+        dryRunRevisionMismatch: true,
+      })
+      const startCommands = result.actions.filter((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment start')
+      )
+
+      expect(startCommands.length).toBeGreaterThan(0)
+      expect(
+        startCommands.some((action) =>
+          action.kind === 'command' && !action.command.includes('--dry-run')
+        ),
+        'no real start after revision mismatch',
+      ).toBe(false)
+      for (const action of startCommands) {
+        if (action.kind !== 'command') {
+          continue
+        }
+        const normalizedCommand = action.command.replaceAll(/['"]/gu, '')
+        expect(normalizedCommand).toContain(
+          `--page-revision-id ${EXPERIMENT_START_PAGE_REVISION}`,
+        )
+        expect(normalizedCommand).toContain(
+          `--run-spec-revision-id ${EXPERIMENT_START_RUN_SPEC_REVISION}`,
+        )
+      }
+      expect(result.finalMessage).toMatch(/changed|revision|updated/iu)
     },
     360_000,
   )
@@ -502,6 +685,165 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'saves one finite dense reminder conversation and stays quiet after its sent grace',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-dense-reminder-conversation-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'behavior-followthrough',
+        })
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (
+                request: AssistantHostedAutomationToolRequest,
+              ) => {
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-dense-desk-reset',
+                  created: true,
+                  lookupId: 'dense-desk-reset-check-in',
+                  routeBinding: 'current_conversation',
+                  status: 'active',
+                } as const
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const offer = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Help me stay consistent with a five-minute desk reset at 9 a.m., 1 p.m., and 5 p.m. each day for the next three days.',
+            'I want conversational accountability, but do not save anything yet.',
+            'Offer the smallest finite plan first and let me answer naturally.',
+          ].join(' '),
+        })
+        const offerActions = readCapabilityRoutingActions(offer.jsonEvents)
+
+        expect(
+          offerActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_AUTOMATION_TOOL.name
+          ),
+        ).toHaveLength(0)
+        expect(
+          offerActions.find((action) =>
+            action.kind === 'command'
+            && action.command.includes('behavior-followthrough/SKILL.md')
+            && action.output.includes('# Behavior & Follow-Through')
+          ),
+          'behavior-followthrough skill read',
+        ).toBeDefined()
+        expect(offer.finalMessage).toMatch(/\?/u)
+        expect(offer.finalMessage).not.toMatch(
+          /reply\s+(?:yes|done|skip|later|stop)/iu,
+        )
+
+        const accepted = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Yes, save that exact finite conversational plan now.',
+            'Keep the three requested times, ask naturally about only the immediately preceding reset when the next one arrives, and go quiet after one unanswered combined grace message.',
+          ].join(' '),
+          resumeSessionId: offer.sessionId,
+        })
+        const acceptedActions = readCapabilityRoutingActions(
+          accepted.jsonEvents,
+        )
+        const saveCalls = acceptedActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(saveCalls).toHaveLength(1)
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          activeUntil: expect.any(String),
+          continuityPolicy: 'preserve',
+          supportKind: 'check_in',
+        })
+        const savedAutomation = automationRequests[0]
+        if (!savedAutomation || savedAutomation.action !== 'save') {
+          throw new Error('Expected one dense reminder automation save.')
+        }
+        const storedInstructions = savedAutomation.instructions
+        expect(storedInstructions).toMatch(
+          /immediately preceding|previous reset/iu,
+        )
+        expect(storedInstructions).toMatch(/natural|ordinary|normal language/iu)
+        expect(storedInstructions).toMatch(/skip|stay quiet|send nothing/iu)
+
+        const exhaustedGrace = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          allowFinishWithoutReply: true,
+          developerInstructions:
+            buildDenseReminderScheduledDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          prompt: [
+            'Run the current dense desk-reset check-in occurrence.',
+            'The preceding occurrence already combined one unresolved immediately prior reset with the then-current cue in one ordinary question.',
+            'That grace message was accepted and sent by the provider, no related reply followed, and there is no confirmed delivery failure.',
+            'This is the next later occurrence. Apply the saved quiet-stop rule without sending a repair or pause message.',
+          ].join(' '),
+          resumeSessionId: accepted.sessionId,
+        })
+        const exhaustedGraceActions = readCapabilityRoutingActions(
+          exhaustedGrace.jsonEvents,
+        )
+
+        expect(
+          exhaustedGraceActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          ),
+        ).toHaveLength(1)
+        expect(exhaustedGrace.finalMessage).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
   )
 
   it(
@@ -1040,6 +1382,172 @@ async function materializeAssistantSkill(input: {
   )
 }
 
+async function runNameFirstExperimentStartProbe(input: {
+  dryRunRevisionMismatch: boolean
+}): Promise<{
+  actions: CapabilityRoutingAction[]
+  finalMessage: string
+}> {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-name-first-experiment-e2e-'),
+  )
+
+  try {
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const binDirectory = path.join(workingDirectory, 'bin')
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'experiment-onboarding',
+    })
+    await materializeExperimentStartVaultCli({
+      binDirectory,
+      dryRunRevisionMismatch: input.dryRunRevisionMismatch,
+    })
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions:
+        buildExperimentOnboardingDeveloperInstructions(),
+      env: {
+        ...config.env,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt: [
+        'I want to start the Bryan Johnson Sauna experiment.',
+        'Use its default one-day test plan starting tomorrow.',
+        'There are no active experiments or saved-context changes, its safety screen has no questions, and I decline reminders or other support.',
+        input.dryRunRevisionMismatch
+          ? 'If the selected protocol changed during validation, stop and tell me; do not retry or start a different revision.'
+          : 'Create the run now after the required dry run.',
+      ].join(' '),
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    return {
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      finalMessage: result.finalMessage,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+async function materializeExperimentStartVaultCli(input: {
+  binDirectory: string
+  dryRunRevisionMismatch: boolean
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const exploreResult = JSON.stringify({
+    groups: [{
+      matchedProtocol: {
+        key: EXPERIMENT_START_EXACT_KEY,
+        title: 'Bryan Johnson Sauna',
+      },
+      starterCandidate: {
+        protocol: {
+          key: EXPERIMENT_START_STARTER_KEY,
+          title: 'Finnish Dry Sauna',
+        },
+      },
+    }],
+    matchedEntity: {
+      entityType: 'protocol_variant',
+      key: EXPERIMENT_START_EXACT_KEY,
+      revision: {
+        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
+        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
+      },
+      title: 'Bryan Johnson Sauna',
+    },
+    starterCandidate: {
+      protocol: {
+        key: EXPERIMENT_START_STARTER_KEY,
+        title: 'Finnish Dry Sauna',
+      },
+    },
+  })
+  const showResult = JSON.stringify({
+    protocol: {
+      experimentOnboarding: {
+        safetyScreen: {
+          mustAsk: [],
+        },
+        setupSlots: [],
+      },
+      key: EXPERIMENT_START_EXACT_KEY,
+      protocol: {
+        sessionFieldIds: [],
+      },
+      revision: {
+        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
+        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
+      },
+      routeId: 'bryan-johnson-sauna',
+      safety: {
+        stopIf: [],
+      },
+      testPlans: [{
+        baselineDays: 0,
+        id: 'default',
+        interventionDays: 1,
+        primaryBiomarkerKey: 'biomarker:heat-exposure',
+      }],
+      title: 'Bryan Johnson Sauna',
+    },
+  })
+  const dryRunResult = input.dryRunRevisionMismatch
+    ? '{"error":{"code":"protocol_revision_mismatch","message":"The selected protocol changed."}}'
+    : '{"dryRun":true,"ok":true}'
+  const dryRunExit = input.dryRunRevisionMismatch ? 'exit 1' : 'exit 0'
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'command_line="$*"',
+      'case "$command_line" in',
+      '  *"commons protocol explore"*|*"commons protocol list"*)',
+      `    printf '%s\\n' '${exploreResult}'`,
+      '    ;;',
+      '  *"commons protocol show"*)',
+      `    printf '%s\\n' '${showResult}'`,
+      '    ;;',
+      '  *"experiment start"*"--dry-run"*)',
+      `    printf '%s\\n' '${dryRunResult}'`,
+      `    ${dryRunExit}`,
+      '    ;;',
+      '  *"experiment start"*)',
+      '    printf \'%s\\n\' \'{"experiment":{"id":"experiment-bryan"},"ok":true}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    {
+      encoding: 'utf8',
+      mode: 0o700,
+    },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 function buildGroupPointOfViewDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -1055,6 +1563,50 @@ function buildGroupPointOfViewDeveloperInstructions(): string {
     conversationScope: 'group',
     currentLocalDate: '2026-07-27',
     currentTimeZone: 'America/New_York',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildExperimentOnboardingDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildHostedGroupStatusDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
@@ -1192,6 +1744,29 @@ function buildMidnightLinqReminderDeveloperInstructions(): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
+  })
+}
+
+function buildDenseReminderScheduledDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedAutomationAvailable: true,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
   })
 }
 

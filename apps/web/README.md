@@ -162,6 +162,12 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+For a runnable public protocol, Start opens the member's connected channel with
+one human-readable sentence naming the experiment. The draft does not expose
+Health Commons keys or revision hashes. Murph resolves that name through the
+generated protocol discovery surface, then the protocol-backed run owner stores
+the exact key and revisions used at creation.
+
 ## Saved biomarker reference context
 
 Saved lab-result pages keep the imported source flag and per-result laboratory
@@ -636,8 +642,10 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target; assignments remain available when every line reaches it
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only while an
+  older rollback build may still populate the deprecated
+  `HostedLinqLine.activeMemberLimit` column; current weighted assignment does
+  not read it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -732,7 +740,7 @@ Hosted AI usage metering:
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Personal and Family funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy group funding first selects one canonical card attached to the authenticated payer's Customer. It creates an unconfirmed PaymentIntent, then rechecks active payer and still-created purchase state while durably binding that exact intent under the payer lock before off-session confirmation; a deletion or terminal-state race cancels the unbound intent and never confirms it. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Group Checkout saves the entered card for a later explicit contribution. Murph stores no raw card data and never charges from amount selection alone.
+- Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
 - Conversational usage referrals reserve their fixed server-catalog reward
@@ -963,9 +971,9 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   cron visibly. The latency path has no Linq/iMessage fallback.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
-- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
-  balancing target rather than a hard admission limit.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
+  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only for an
+  older rollback build; current weighted assignment does not read it.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -1046,6 +1054,36 @@ backfill or dual-write as needed, switch application reads/writes in a later
 deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
+
+The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
+`HostedThreadRoute.accountLookupKey` and its index; old application code remains
+compatible if the build fails after migration. Once the replacement build is
+live, a count-and-decrypt dry run may begin. Before applying, prove the
+production alias points at the replacement build, wait the configured
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, and prove
+the alias again. Then repeat bounded projection batches until readiness:
+
+```bash
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --apply --batch-size 50
+
+NODE_OPTIONS=--conditions=react-server \
+  vercel env run --environment=production -- \
+  pnpm --dir apps/web linq:backfill-thread-route-accounts -- --check
+```
+
+The command decrypts only through the existing thread-delivery-route owner,
+emits aggregate counts only, and updates rows with an optimistic authority
+check. Do not run `--apply` before the final alias proof and prior-function
+drain, do not treat a dry-run as readiness, and do not drop the legacy
+`HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
+assignment and deployment contract is in
+`docs/hosted-linq-db-home-lines-migration.md`.
 
 The exact
 `20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a

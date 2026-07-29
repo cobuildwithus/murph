@@ -141,7 +141,7 @@ become fallback product-decision owners.
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
-6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
+6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. Do not stop, ask the user to attach a browser, or report a screenshot blocker until the Playwright fallback has been attempted; if Playwright also fails, record its command and concrete failure. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Run exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not three audits.
 9. Triage every preliminary finding locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned review thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted prompt/frontend findings in the parent, rerun focused proof, commit, and push the resulting candidate. Do not rerun the preliminary pass merely because its findings caused corrections; the parent's final review and any applicable final ReviewGPT full-patch gate review the resulting diff.
@@ -193,6 +193,12 @@ Required:
   why the change is necessary and name the regression proof. If none exist,
   write `None`. Do not hide a cross-cutting behavior change inside the ordinary
   file summary.
+- **Architecture and reuse.** Use four concrete bullets labeled `Existing
+  systems reused`, `New logic`, `New abstractions`, and `Complexity
+  intentionally avoided`. Describe the final diff rather than the work process.
+  If no abstraction was added, say so and explain which existing contract was
+  sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
+  body workflow checks the rendered section on every PR.
 - **Hot reply path impact.** State whether the PR changes the
   `Foreground Reply Critical Path` defined in
   `docs/contracts/00-invariants.md`: durable acceptance of a current
@@ -203,16 +209,31 @@ Required:
   cardinality, whether it runs serially or in parallel, its timeout, retry, and
   fallback behavior, and its expected or measured latency. Include before/after
   call counts and focused trace, benchmark, or deterministic call-count proof.
-- **Murph runtime system prompt impact.** Report the final assembled
-  system-prompt change for individual and group Murph separately. For a
-  prompt-affecting PR, render the PR base and head with identical representative
-  inputs that exercise the changed path; count shared prompt changes in both
-  runtimes. Record base and head character counts, the signed character delta,
-  and the signed percentage change (`delta / base * 100`) for each runtime.
-  Name the changed prompt files, builders, or layers and the base/head refs plus
-  fixture, command, or deterministic measurement method. If no system-prompt
-  surface changed, record a zero delta for both runtimes and explain why no
-  render measurement was necessary.
+- **Murph initial provider input impact.** Report the complete first
+  provider-visible input assembled by Murph and Codex for individual and group
+  Murph separately. A provider-input-affecting PR must render the PR base and
+  head with identical representative inputs that exercise the changed path and
+  the actual target model/tool mode. Measure the final request boundary, not
+  only authored prompt files: include assembled system/developer/user messages,
+  eager tool definitions and argument schemas, deferred-tool metadata visible
+  to the provider, Codex-generated code-mode or tool-search guidance, and other
+  fixed provider-visible wrappers. Exclude transport-only metadata only when
+  the measurement names those exclusions and applies them identically.
+  Record absolute base and head input-token totals using the target model's
+  named tokenizer/version, signed token delta, signed percentage change
+  (`delta / base * 100`), absolute UTF-8 byte totals over the same included
+  fields, and signed byte delta for each runtime. Attribute the change among
+  assembled instructions, tool/schema/generated guidance, and other
+  provider-visible input so a zero authored-prompt delta cannot hide tool or
+  adapter growth. Name the changed files, builders, schemas, configuration, or
+  generated layers and the base/head refs, fixtures, model/tool mode, command
+  or deterministic request-capture method, included fields, and exclusions.
+  Changes to prompt builders or text, dynamic-tool descriptions/schemas/
+  availability/deferral, skills rendered into instructions, Codex version or
+  configuration, model tool mode, or provider-request assembly all trigger
+  this measurement. If none of those surfaces changed, write `Not applicable`
+  for both runtimes and explain why; do not claim a measured zero without
+  rendering the complete provider-visible input.
 - **Preliminary specialist lenses.** Mark prompt, frontend, and coverage as
   `applicable` or `not applicable` with one short reason each. For coverage,
   name the focused local proof and the current exact-head CI status, including

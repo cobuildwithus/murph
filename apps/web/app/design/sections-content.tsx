@@ -153,14 +153,16 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Clubs iMessage and wearables marketing page">
+      <StudySection title="Clubs profiles, iMessage, and wearables">
         <ClubsPageStudy />
       </StudySection>
 
       <Separator />
 
       <StudySection title="Changelog archive edition">
-        <ChangelogArchiveStudy />
+        <div data-design-section="changelog-archive">
+          <ChangelogArchiveStudy />
+        </div>
       </StudySection>
 
       <Separator />

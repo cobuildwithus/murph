@@ -571,6 +571,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'genetics import-json',
     'goal import-json',
     'immunization import-json',
+    'knowledge score-challenge',
     'meal import-json',
     'measurement import-json',
     'protocol import-json',

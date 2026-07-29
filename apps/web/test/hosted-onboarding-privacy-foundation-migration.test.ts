@@ -1015,6 +1015,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "20260728190000_hosted_mailbox_source_message",
       "20260729043000_hosted_member_assistant_provider_preference",
+      "20260729170000_hosted_thread_route_account_lookup_key",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
