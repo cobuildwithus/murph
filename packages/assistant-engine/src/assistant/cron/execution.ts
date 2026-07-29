@@ -45,7 +45,6 @@ import {
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
-  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import {
@@ -1553,14 +1552,6 @@ function resolveAssistantCronNotificationResponsePolicy(
 function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
-  if (
-    job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    job.source.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
-  ) {
-    return { kind: 'onboarding-goal-checkin' }
-  }
-
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
   return policy
     ? {

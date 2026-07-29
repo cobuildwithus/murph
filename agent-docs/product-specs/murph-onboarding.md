@@ -48,11 +48,9 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
   context collection or split onboarding into competing lifecycle owners.
-- After answered completion, use one separate member-owned managed one-shot as
-  a post-onboarding choice point. It is not an onboarding continuation,
-  foundation collector, or support owner and cannot change product state.
-  Ordinary managed maintenance also installs it for eligible members whose
-  answered onboarding predates the feature.
+- Keep the post-onboarding choice point separate from unfinished-onboarding
+  recovery. It is one finite managed one-shot for members who answered
+  onboarding, not another collection flow, recurring cadence, or profile.
 - Do not add persisted step state, branch state, profile completion, context
   maturity, or a data-point score. Infer progress from visible conversation,
   the existing resume snapshot, and a targeted canonical read only when the
@@ -550,77 +548,27 @@ reflection-only scheduled message returns skip.
 
 ## Post-Onboarding Choice Point
 
-Answered onboarding receives one low-pressure choice point about three weeks
-after completion. Schedule it 21 local-calendar days after completion at 1:30
-p.m. in the vault timezone, keep it eligible for seven days, and archive it
-through the ordinary one-shot lifecycle after execution. Members whose original
-window predates the feature receive one future catch-up on the same local
-weekday as their completion; once installed, that canonical automation record
-anchors the occurrence. Open onboarding, `user_declined`, manual completion,
-and an already consumed choice point remain ineligible.
+After answered onboarding, Murph gets one low-pressure chance to ask what
+deserves attention now. The one-shot is scheduled 21 local-calendar days after
+completion and expires seven days later. Existing eligible members receive one
+future same-weekday catch-up rather than an immediate late message; once
+installed, its occurrence does not drift.
 
-The message is two to four short sentences with exactly one easy question. It
-does the reflective work instead of asking for a retrospective or status
-report, and it gives the member room to continue, make the approach easier or
-different, switch focus, or intentionally leave the thread open. Praise follows
-specific reliable evidence only. Missing, sparse, stale, misclassified, or
-contradictory tracking never proves failure.
+This is an ordinary member-owned managed automation in the current private
+conversation. Murph uses recent conversation and targeted canonical vault
+reads to understand current goals or open threads, relevant progress, and
+whether another review already owns the moment. If the goal was unclear,
+unshared, deliberately open, or exploratory, Murph must not pretend one exists
+or manufacture a problem; keeping the thread open is a valid answer. Murph
+sends two to four short sentences with one easy question or skips quietly.
+Missing or messy data is not failure, and praise requires specific evidence.
+The scheduled turn does not create or change goals, plans, experiments,
+regimens, memories, or automations; normal conversation owns any change after
+the member replies.
 
-An unclear, unshared, deliberately open, or explore-mode goal is a first-class
-outcome. Murph must not imply that the member previously named a goal, infer one
-from health or wearable data, invent progress, or manufacture a problem. It asks
-naturally whether anything feels worth improving, understanding, or handling
-now, while making continued open-ended learning valid.
-
-Current intent and safety always win. Skip quietly when a similar review or
-proactive question is recent, another proactive question remains unanswered, a
-plan or experiment review owns the choice, the member requested no follow-up,
-the conversation is urgent or sensitive, or trustworthy evidence cannot support
-the proposed claim. The turn cannot create, update, complete, or archive goals,
-plans, experiments, regimens, memories, or automations. Those changes remain
-with the normal conversational owner after a reply. The engine enforces that
-boundary with a fresh output-only turn: bounded recent member messages
-and an engine-projected list of bounded active-goal titles remain available,
-while the memory document, generic CLI contract, shell, hosted dynamic tools,
-broad health-context injection, network fetches, and writable filesystem access
-do not. At actual evidence admission, each member message requires a valid,
-unexpired `contentReceivedAt`, and the planner keeps only
-the coherent suffix beginning with an admissible member entry after the latest
-inadmissible one. It never derives missing receipt authority from transcript
-creation time, so delayed execution, interrupted retention, and retained
-assistant text cannot expose expired member content or create a misleading
-one-sided exchange. Assistant and status entries are excluded because they
-carry no source-receipt provenance. Count and byte bounds recompute authority
-from the member entries actually retained.
-Before provider work, the notification owner derives only a transient
-unanswered-question result when a recent assistant question follows the latest
-receipt-authorized member entry with no later member reply. The assistant entry
-must match a same-session turn receipt by redacted response fingerprint and
-turn-time envelope. Only a `sent` disposition consumes the one-shot through the
-existing quiet-skip path, after the ordinary commit precondition runs. A
-matching queued or retryable disposition defers the claimed occurrence through
-the existing cron retry owner; failed delivery or a missing receipt restores
-normal provider planning. Assistant text is never returned to the model. The
-model handles only suppression facts supported by the bounded member messages
-it actually receives.
-The route plan carries only that earliest retained receipt deadline; if it
-passes before the actual Codex `turn/start` request, including during one-shot
-process or thread startup, the provider drops the whole bounded history and
-uses the history-free truthful generic branch.
-The isolated turn preserves the member's live conversation resume state
-whether it sends or skips. The dedicated system prompt owns the evidence and
-no-mutation contract above untrusted conversation, goal, and task text.
-
-Canonical onboarding remains the execution authority. Cron rechecks that the
-state is still completed with `user_answered` and old enough for the claimed
-occurrence before model work and again before tools, delivery, and commit. A
-queued delivery repeats that check at final outbox provider entry, after any
-restart or delay. A reopen, replacement completion, malformed state, or lost
-authority consumes the one-shot as a quiet skip rather than starting a retry
-loop. The 20-elapsed-day execution floor is the conservative lower bound for a
-21-local-calendar-day schedule: it admits late-day completions and timezone
-transitions without allowing a newly replaced completion to inherit an older
-occurrence.
+Canonical onboarding state remains the scheduling and execution authority.
+Open, declined, and manual completion do not create the one-shot, and reopened
+or replaced completion state blocks a pending occurrence before delivery.
 
 ## Success Criteria
 

@@ -37,7 +37,7 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
-- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
+- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that identity during classifier latency, the admitted planner re-reads the winner under the shared participant-phone lock, cannot mint a token, and follows the ordinary signup-link path without attaching its event to the winner's invite. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
 
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
@@ -122,73 +122,8 @@ Last verified: 2026-07-27
   coalesce against the bounded four-minute send lease until the attempt settles
   or expires; only then may the persisted incident become healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
-- Managed automation ownership is exact-identity and route-authority based.
-  Built-in seeds without an explicit scope default to `member`; the stable
-  dynamic post-onboarding choice-point id is explicitly registered as
-  `member`. Member identities run only on personal/direct routes, while
-  `authenticated-group` identities run only on live non-direct Linq/iMessage or
-  Telegram routes. Group email is excluded. Reconciliation archives every
-  nonterminal wrong-owner managed record, including paused records, while
-  already archived records and caller-supplied unscoped custom seeds retain
-  their prior behavior. Claimed registered identities resolve immutable owner
-  scope before lifecycle hooks and revalidate the same owner and live route
-  before evidence, provider admission, tools, delivery, and commit; editable
-  tags, slugs, titles, routes, and instructions cannot acquire authority.
-  Permanently retired built-in IDs are not seeds: reconciliation archives
-  matching persisted records and claimed occurrences fail closed before
-  lifecycle or model work. Dynamically generated experiment-lifecycle seeds
-  remain on their existing path until their separately coordinated owner
-  exposes an exact resolver. Immutable personal-memory and group-room-model IDs
-  still exclusively select silent maintenance policy and its provider-admission
-  replay barrier.
-- The post-onboarding choice point is one finite managed one-shot, including for
-  members whose answered onboarding predates its rollout. Recent completion
-  keeps the original 21-local-day schedule and seven-day window. An expired
-  original window derives the next future 1:30 p.m. occurrence on the same
-  local weekday as completion; once installed, the existing canonical
-  automation record freezes that occurrence across later maintenance passes.
-  Archived or consumed records are never reactivated. A malformed onboarding
-  read fails only this optional seed contribution, and a later maintenance pass
-  may retry without blocking unrelated managed automations. At execution,
-  canonical onboarding must still be completed with `user_answered` and at
-  least 20 elapsed days older than the claimed occurrence. That conservative
-  floor admits the earliest valid 21-local-calendar-day occurrence after a
-  late-day completion or timezone transition while rejecting a recently
-  replaced completion. The cron owner rechecks that fact before model work and
-  at every existing provider, tool, delivery, and commit boundary. Its exact
-  automation identity also selects a fresh one-shot output-only turn with
-  bounded recent member messages and engine-projected active-goal titles but no memory
-  document, generic CLI contract, shell, hosted dynamic tools, network fetch,
-  writable filesystem, or product-state mutation surface. That isolated turn
-  preserves live conversation resume state. At actual evidence admission,
-  member-message evidence requires unexpired receipt authority and
-  keeps only the coherent suffix beginning with an admissible member entry
-  after the latest inadmissible one. It never derives a missing receipt from
-  transcript creation time. Assistant and status transcript entries are
-  excluded because they carry no source-receipt provenance. Count and byte caps
-  retain only a suffix of authorized member entries and recompute the earliest
-  retained receipt deadline. The one-shot provider rechecks that deadline when
-  constructing the actual `turn/start` request after process and thread
-  startup, so expiry during cold startup falls back to the history-free prompt.
-  Before provider work, the notification owner may derive only a transient
-  unanswered-question result when a recent assistant question follows the
-  latest receipt-authorized member entry with no later member reply. The
-  assistant entry must match a same-session turn receipt by redacted response
-  fingerprint and turn-time envelope. Only a `sent` disposition consumes the
-  one-shot through the existing quiet-skip path, after the ordinary commit
-  precondition runs. A matching queued or retryable disposition defers the
-  claimed occurrence through the existing cron failure/backoff owner; a failed
-  disposition or missing receipt allows normal provider planning. Assistant
-  text is never added back to provider evidence. The final outbox provider-entry
-  gate repeats the onboarding precondition after deferred delivery or restart
-  even when the automation revision itself is unchanged.
-  A skip consumes the one-shot normally and creates no retrying outreach loop.
-  Engine and runtime support ship in one runner bundle. Once that bundle writes
-  the stable choice-point record, it is the hard rollback floor because an
-  older bundle cannot enforce the record's immutable owner, onboarding
-  precondition, or output-only execution profile. Use immediate container rollout
-  and runner-bundle fingerprint proof; do not roll back below that floor while
-  any installed record can still execute.
+- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so reopened, declined, manual, or replaced completion state cannot send. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.

@@ -133,7 +133,6 @@ import type {
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
 
 afterEach(() => {
-  vi.useRealTimers()
   providerMocks.executeCodexAssistantTurnAttemptFromInput.mockReset()
   providerMocks.resolveCodexAssistantCapabilities.mockReset()
   providerMocks.resolveCodexAssistantTargetCapabilities.mockReset()
@@ -547,17 +546,7 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  async function verifyRestrictedProviderExecution(scenario: {
-    expiresBeforeProvider?: boolean
-    label: string
-    promptProfile: 'onboarding-goal-checkin' | 'system-notification'
-    toolProfile: 'output-only-turn'
-  }): Promise<void> {
-    const { expiresBeforeProvider, promptProfile, toolProfile } = scenario
-    if (expiresBeforeProvider === true) {
-      vi.useFakeTimers()
-      vi.setSystemTime(new Date('2026-07-20T17:29:59.000Z'))
-    }
+  it('enforces the output-only boundary at provider execution', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -610,8 +599,8 @@ describe('Codex model catalog', () => {
       hostedToolContext: unsafeHostedToolContext,
       input,
       profile: {
-        promptProfile,
-        toolProfile,
+        promptProfile: 'system-notification',
+        toolProfile: 'output-only-turn',
         threadScope: 'isolated-thread',
       },
       promptTimeContext: {
@@ -642,20 +631,6 @@ describe('Codex model catalog', () => {
         },
         dynamicTools: unsafeDynamicTools,
         environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
-        ...(promptProfile === 'onboarding-goal-checkin'
-          ? {
-              conversationHistoryContentAuthorityExpiresAt:
-                expiresBeforeProvider === true
-                  ? '2026-07-20T17:30:00.000Z'
-                  : '2099-07-20T17:30:00.000Z',
-              conversationHistoryMessages: [
-                {
-                  content: 'Current receipt-authorized member context.',
-                  role: 'user' as const,
-                },
-              ],
-            }
-          : {}),
         onboardingGuidanceInjected: false,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
@@ -670,13 +645,6 @@ describe('Codex model catalog', () => {
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
-      ...(expiresBeforeProvider === true
-        ? {
-            onProviderRequestPlanned: async () => {
-              vi.setSystemTime(new Date('2026-07-20T17:30:00.000Z'))
-            },
-          }
-        : {}),
       plan: createSharedPlan(),
       resolvedSession: session,
       route,
@@ -693,15 +661,13 @@ describe('Codex model catalog', () => {
     })
     expect(providerInput?.codexConfigOverrides).toEqual(
       expect.arrayContaining([
+        'features.shell_tool=false',
         'web_search="disabled"',
         'features.apps=false',
         'features.browser_use=false',
         'features.plugins=false',
         'features.multi_agent=false',
       ]),
-    )
-    expect(providerInput?.codexConfigOverrides).toContain(
-      'features.shell_tool=false',
     )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=true',
@@ -721,50 +687,9 @@ describe('Codex model catalog', () => {
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
     })
-    expect(providerInput?.conversationHistoryMessages).toEqual(
-      promptProfile !== 'onboarding-goal-checkin'
-        ? undefined
-        : [
-            {
-              content: 'Current receipt-authorized member context.',
-              role: 'user',
-            },
-          ],
-    )
-    expect(
-      providerInput?.conversationHistoryContentAuthorityExpiresAt,
-    ).toBe(
-      promptProfile !== 'onboarding-goal-checkin'
-        ? undefined
-        : expiresBeforeProvider === true
-          ? '2026-07-20T17:30:00.000Z'
-          : '2099-07-20T17:30:00.000Z',
-    )
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
-  }
-
-  it.each([
-    {
-      label: 'detached system notification',
-      promptProfile: 'system-notification' as const,
-      toolProfile: 'output-only-turn' as const,
-    },
-    {
-      label: 'current onboarding check-in evidence',
-      promptProfile: 'onboarding-goal-checkin' as const,
-      toolProfile: 'output-only-turn' as const,
-    },
-    {
-      expiresBeforeProvider: true,
-      label: 'onboarding evidence carried to the turn-start boundary',
-      promptProfile: 'onboarding-goal-checkin' as const,
-      toolProfile: 'output-only-turn' as const,
-    },
-  ])(
-    'enforces restricted provider input for $label',
-    verifyRestrictedProviderExecution,
-  )
+  })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {
     const route = createRoute()

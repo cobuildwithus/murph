@@ -26,6 +26,7 @@ Last verified: 2026-07-28
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | The final daily slot admits exactly one claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-group-join-outreach-reply-recovery-postgres.test.ts` | Opt-in real-PostgreSQL proof for group-join outreach, reply recovery, and deletion fences. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Focused cases prove provider-native replies select the exact older or newer accepted opener when two group intents share one direct chat and an unmatched anchor selects neither; exact reply occurrence and direct outreach correlation survive retries; failed and distinct replies remain independently recoverable; generic/group terminal receipts converge in both orders; phone-bound member creation, opener dispatch, and immediate reply planning serialize on the same participant lock; a concurrently accepted group link suppresses a fresh generic dispatch under that member lock; membership appearing before a fresh dispatch forces canonical replanning without a provider call; opener dispatch and account deletion converge with either fence winning; group-reply deletion races preserve daily suppression until the final live delivery is gone; and provider-body stalls, drain contention, and buffered terminal failure remain bounded and recoverable |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition, reversal freshness/suspension ownership, and the Privy deletion/authentication handoff. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits; full-refund and withdrawn-dispute progress commits and exact replay stays idempotent; two distinct reversals defeat an older restore in sequential and concurrent schedules; terminal Privy cleanup deletes the provider principal and receipt before stale authentication resumes, after which live-provider authority rejects replacement member, identity, and session state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for concurrent hosted Telegram routing writes. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | In both writer orders, hosted-member serialization makes identity-only sync and the production webhook planner converge on the exact inbound thread. A completed relink also rejects the stale account before any mailbox write. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, referral grant, cap-reservation, direct-personal referral transaction boundary, installed ledger constraints, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | The validated amount and source checks cover every live database enum kind; concurrent purchase-grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, deletion-first ordering cannot append an orphaned grant, the direct-personal `read -> arm -> read -> cancel` flow succeeds on a one-connection pool without nested or overlapping transaction-client queries or referral-owned queued pool demand (`waitingRequests > 0`) and leaves one canceled durable row, a pre-expiry qualification reconciles after expiry into one purchase-free grant that the ordinary FIFO settlement consumes, the replay-safe group celebration resolves its live source route, and different group referrers serialize so only one can reserve the destination's final cap capacity |
@@ -74,27 +75,20 @@ the required frontend and coverage specialist audits, the review-only Fable or
 Opus UI pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
 
-The post-onboarding choice-point coverage spans managed-automation installation,
-legacy answered-onboarding catch-up, stable one-shot reconciliation, immutable
-member ownership, execution-time onboarding replacement/reopen races, and the
-exact output-only cron profile. Assistant planning and provider-runner tests
-prove that the profile retains bounded committed history plus bounded
-engine-projected active-goal titles while removing the whole memory document,
-generic CLI contract, shell, hosted dynamic tools, broad context, network
-fetches, writable filesystem access, generated artifacts, progress hooks, and
-mutation-capable configuration overrides. Notification tests prove send and
-skip preserve the live direct-session resume owner; planning tests prove
-beginning, middle, and end-of-window execution admits only a coherent suffix
-with current receipt authority whether retention has already run or not,
-including cold reconstruction and unstamped legacy entries.
-Planning tests exercise both message-count and total-byte caps, prove retained
-history still begins with an authorized member entry, and bind the deadline to
-the earliest retained member receipt. Provider-execution tests advance the
-clock across one-shot process/thread startup and inspect the real `turn/start`
-payload, proving history is present immediately before the deadline and absent
-at inclusive equality and afterward;
-outbox tests prove a deferred send revalidates answered onboarding at final
-provider entry.
+Post-onboarding choice-point coverage is owned by assistant-engine tests. The
+seed suite proves answered-onboarding eligibility, 21-day local scheduling,
+seven-day expiry, stable installed occurrences, future same-weekday catch-up
+for older members, member ownership, and idempotent reconciliation. Managed
+maintenance tests prove that malformed onboarding state isolates this optional
+seed without blocking unrelated automations.
+
+Cron and outbox suites prove that the registered dynamic identity rejects
+non-direct routes, uses the ordinary scheduled-notification turn rather than a
+feature-specific assistant profile, and revalidates canonical onboarding state
+at claim and queued provider entry. Prompt assertions keep unclear or unshared
+goals, evidence-grounded reflection, quiet skip, one easy question, and
+no-mutation-before-reply behavior explicit without adding a second evidence or
+session pipeline.
 
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
@@ -192,19 +186,6 @@ before the ordinary group outbox path. Delimiter-bearing human text stays one
 quoted message; rendered transcript structure is ignored; attachment
 descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
 not enter evidence; and attachment-only input fails closed before provider work.
-
-Post-onboarding choice-point coverage is concentrated in assistant-engine and
-assistant-runtime. Seed tests prove the 21-local-day schedule, DST handling,
-seven-day window, explicit unclear/unshared-goal prompt branch, legacy
-same-weekday catch-up, installed-occurrence stability, terminal non-reactivation,
-member ownership, and malformed-state failure isolation. Cron tests prove that
-recompletion or reopening invalidates a claimed occurrence before model work or
-delivery and that canonical onboarding is rechecked alongside existing owner
-and lifecycle authority. Outbox tests repeat that proof at final provider entry
-for a durably queued intent after onboarding changed without an automation
-revision. Hosted-runtime tests prove optional preparation failures enter the
-bounded managed-maintenance retry path without blocking the other managed
-automations.
 
 ## Current CI Workflows
 

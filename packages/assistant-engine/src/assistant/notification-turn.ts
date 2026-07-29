@@ -38,13 +38,10 @@ import {
   applyAssistantSessionCodexResumeStateAction,
   persistAssistantTurnAndSession,
   resolveAssistantProviderResumeStateAction,
+  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
-import {
-  assistantTurnReceiptMatchesResponse,
-  createAssistantTurnId,
-  listRecentAssistantTurnReceiptsForSession,
-} from './turns.js'
+import { createAssistantTurnId } from './turns.js'
 import {
   normalizeAssistantDeliverySubject,
   selectedAssistantEmailDeliveryIsThreadReply,
@@ -86,15 +83,10 @@ import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
-import { listAssistantTranscriptEntries } from './store.js'
 import {
   createAssistantSessionId,
   resolveAssistantStatePaths,
 } from './store/paths.js'
-import {
-  ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
-  ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
-} from './store/persistence.js'
 import {
   normalizeNullableString,
   normalizeRequiredText,
@@ -138,14 +130,6 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'onboarding-goal-checkin',
-  threadScope: 'isolated-thread',
-  toolProfile: 'output-only-turn',
-}
 const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -163,15 +147,11 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy =
-  | {
-      kind: 'maintenance-exact-skip'
-      maintenanceProfile: AssistantMaintenanceProfile
-      privateSummary: string
-    }
-  | {
-      kind: 'onboarding-goal-checkin'
-    }
+export type AssistantNotificationTurnPolicy = {
+  kind: 'maintenance-exact-skip'
+  maintenanceProfile: AssistantMaintenanceProfile
+  privateSummary: string
+}
 
 export type AssistantNotificationPromptProfile = 'creative-response'
 
@@ -360,39 +340,6 @@ export async function sendAssistantNotificationLocal(
         })
       }
 
-      const unansweredQuestionDelivery =
-        isAssistantNotificationOnboardingGoalCheckin(input)
-          ? await resolveRecentUnansweredAssistantQuestionDelivery({
-              now: new Date(),
-              sessionId: resolved.session.sessionId,
-              vault: input.vault,
-            })
-          : null
-      if (unansweredQuestionDelivery === 'pending') {
-        throw new VaultCliError(
-          'ASSISTANT_NOTIFICATION_PRIOR_QUESTION_DELIVERY_PENDING',
-          'A recent assistant question is still awaiting terminal delivery.',
-          { retryable: true },
-        )
-      }
-      if (unansweredQuestionDelivery === 'sent') {
-        const decision: AssistantNotificationDecision = {
-          kind: 'skip',
-          privateSummary:
-            'A recent assistant question is still unanswered.',
-        }
-        await runAssistantNotificationBeforeCommit(input, {
-          decision,
-          deliveryOutcome: null,
-          response: null,
-        })
-        return withPostTurnDeliveryExpectations({
-          decision,
-          response: null,
-          session: resolved.session,
-        })
-      }
-
       const responsePolicy: AssistantNotificationResponsePolicy =
         input.responsePolicy ?? { kind: 'allow_send_or_skip' }
       if (responsePolicy.kind === 'require_send_exact_text') {
@@ -411,7 +358,7 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const hostedExecutionContext =
         isAssistantNotificationScheduledOccurrence(input) &&
-        !assistantNotificationUsesRestrictedToolProfile(input)
+        !isAssistantNotificationMaintenanceExactSkip(input)
           ? executionContext?.hosted ?? null
           : null
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
@@ -445,7 +392,7 @@ export async function sendAssistantNotificationLocal(
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
-        assistantNotificationUsesRestrictedToolProfile(input)
+        isAssistantNotificationMaintenanceExactSkip(input)
           ? null
           : startAssistantChannelTypingIndicator({
               channelDependencies:
@@ -560,9 +507,9 @@ export async function sendAssistantNotificationLocal(
           })
         const selectedRoute = providerResult.route
         const providerResumeStateAction =
-          resolveAssistantProviderResumeStateAction({
-            codexThreadId: providerResult.codexThreadId,
-            threadScope: notificationThreadScope,
+          resolveAssistantNotificationProviderResumeStateAction({
+            input,
+            providerResult,
           })
         await recordAssistantUsageEvent({
           executionContext,
@@ -1469,6 +1416,22 @@ async function deliverAssistantNotificationMessage(input: {
   }
 }
 
+function resolveAssistantNotificationProviderResumeStateAction(input: {
+  input: AssistantNotificationInput
+  providerResult: { codexThreadId?: string | null }
+}): AssistantProviderResumeStateAction {
+  if (
+    isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    !isAssistantNotificationScheduledOccurrence(input.input)
+  ) {
+    return 'preserve-existing'
+  }
+
+  return normalizeNullableString(input.providerResult.codexThreadId)
+    ? 'persist-from-provider-turn'
+    : 'preserve-existing'
+}
+
 function createAssistantMaintenanceNotificationResolvedSession(input: {
   boundaryDefaultTarget:
     Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
@@ -1519,106 +1482,6 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
-function isAssistantNotificationOnboardingGoalCheckin(
-  input: AssistantNotificationInput,
-): boolean {
-  return input.turnPolicy?.kind === 'onboarding-goal-checkin'
-}
-
-type RecentUnansweredAssistantQuestionDelivery = 'pending' | 'sent'
-
-async function resolveRecentUnansweredAssistantQuestionDelivery(input: {
-  now: Date
-  sessionId: string
-  vault: string
-}): Promise<RecentUnansweredAssistantQuestionDelivery | null> {
-  let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
-  let receipts: Awaited<
-    ReturnType<typeof listRecentAssistantTurnReceiptsForSession>
-  >
-  try {
-    [entries, receipts] = await Promise.all([
-      listAssistantTranscriptEntries(input.vault, input.sessionId),
-      listRecentAssistantTurnReceiptsForSession(
-        input.vault,
-        input.sessionId,
-        ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
-      ),
-    ])
-  } catch {
-    return null
-  }
-
-  let latestUserIndex = -1
-  for (const [index, entry] of entries.entries()) {
-    if (entry.kind === 'user') {
-      latestUserIndex = index
-    }
-  }
-  if (latestUserIndex === -1) {
-    return null
-  }
-
-  const latestUser = entries[latestUserIndex]
-  const contentReceivedAtMs = Date.parse(latestUser?.contentReceivedAt ?? '')
-  const nowMs = input.now.getTime()
-  const userContentIsCurrent =
-    latestUser?.kind === 'user' &&
-    latestUser.textRetiredAt === undefined &&
-    normalizeNullableString(latestUser.text) !== null &&
-    Number.isFinite(contentReceivedAtMs) &&
-    contentReceivedAtMs <= nowMs &&
-    contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS > nowMs
-  if (!userContentIsCurrent) {
-    return null
-  }
-
-  let deliveryPending = false
-  for (const entry of entries.slice(latestUserIndex + 1)) {
-    if (entry.kind !== 'assistant' || !/[?؟？]/u.test(entry.text)) {
-      continue
-    }
-    const entryCreatedAtMs = Date.parse(entry.createdAt)
-    if (!Number.isFinite(entryCreatedAtMs)) {
-      continue
-    }
-    for (const receipt of receipts) {
-      const receiptStartedAtMs = Date.parse(receipt.startedAt)
-      const receiptCompletedAtMs = Date.parse(
-        receipt.completedAt ?? receipt.updatedAt,
-      )
-      if (
-        !assistantTurnReceiptMatchesResponse(receipt, entry.text) ||
-        !Number.isFinite(receiptStartedAtMs) ||
-        !Number.isFinite(receiptCompletedAtMs) ||
-        receiptStartedAtMs > entryCreatedAtMs ||
-        receiptCompletedAtMs < entryCreatedAtMs
-      ) {
-        continue
-      }
-      if (receipt.deliveryDisposition === 'sent') {
-        return 'sent'
-      }
-      if (
-        receipt.deliveryDisposition === 'queued' ||
-        receipt.deliveryDisposition === 'retryable'
-      ) {
-        deliveryPending = true
-      }
-    }
-  }
-  return deliveryPending ? 'pending' : null
-}
-
-function assistantNotificationUsesRestrictedToolProfile(
-  input: AssistantNotificationInput,
-): boolean {
-  return (
-    isAssistantNotificationMaintenanceExactSkip(input) ||
-    isAssistantNotificationOnboardingGoalCheckin(input)
-  )
-}
-
 function requireAssistantNotificationMaintenanceProfile(
   input: AssistantNotificationInput,
 ): AssistantMaintenanceProfile {
@@ -1640,9 +1503,6 @@ function resolveAssistantNotificationTurnProfile(
 ): Required<AssistantCodexTurnThreadScopeProfile> | null {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
-  }
-  if (isAssistantNotificationOnboardingGoalCheckin(input)) {
-    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
   }
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE

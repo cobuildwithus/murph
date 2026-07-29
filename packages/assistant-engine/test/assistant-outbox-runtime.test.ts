@@ -2766,7 +2766,7 @@ describe('assistant outbox runtime', () => {
       ...scaffold,
       activeUntil: '2026-07-27T17:30:00.000Z',
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      continuityPolicy: 'fresh',
+      continuityPolicy: 'preserve',
       instructions: 'Offer one low-pressure health direction choice.',
       now: new Date('2026-07-20T17:29:00.000Z'),
       schedule: {

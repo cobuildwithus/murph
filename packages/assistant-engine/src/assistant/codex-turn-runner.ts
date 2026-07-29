@@ -23,7 +23,6 @@ import type {
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
-  AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderRequestStartTiming,
   AssistantProviderRequestOutcome,
@@ -456,8 +455,6 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
-    const onboardingGoalCheckinTurn =
-      executionPlan.profile.promptProfile === 'onboarding-goal-checkin'
     const nativeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -510,13 +507,6 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
-        ...(onboardingGoalCheckinTurn
-          ? {
-              conversationHistoryContentAuthorityExpiresAt:
-                attemptPlan.routePlan
-                  .conversationHistoryContentAuthorityExpiresAt ?? null,
-            }
-          : {}),
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -561,9 +551,7 @@ async function executeAssistantCodexAttempt(input: {
               }
             : {}),
           productFeedbackRecorder:
-            outputOnlyTurn
-              ? null
-              : executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
+            executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),
         providerThreadEphemeral: groupRoomModelMaintenanceTurn
           ? true
@@ -574,9 +562,7 @@ async function executeAssistantCodexAttempt(input: {
         permissions: groupRoomModelMaintenanceTurn
           ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
           : null,
-        ...(systemNotificationTurn ||
-          onboardingGoalCheckinTurn ||
-          groupRoomModelMaintenanceTurn
+        ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
         providerFetch: outputOnlyTurn

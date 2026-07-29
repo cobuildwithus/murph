@@ -5,7 +5,6 @@ import {
   initializeVault,
   patchAutomation,
   showAutomation,
-  upsertGoal,
 } from '@murphai/core'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -15,7 +14,6 @@ import {
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-  buildOnboardingGoalCheckinEvidenceContext,
   buildOnboardingGoalCheckinSeed,
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
@@ -93,7 +91,7 @@ describe('onboarding goal check-in automation', () => {
       // March 22 and 29 are EDT, so 13:30 local resolves to 17:30 UTC.
       activeUntil: '2026-03-29T17:30:00.000Z',
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      continuityPolicy: 'fresh',
+      continuityPolicy: 'preserve',
       ownerScope: 'member',
       schedule: {
         at: '2026-03-22T17:30:00.000Z',
@@ -102,10 +100,11 @@ describe('onboarding goal check-in automation', () => {
       slug: 'onboarding-goal-checkin',
       title: 'First health direction check-in',
     })
-    expect(seed?.instructions).toContain('engine-owned')
-    expect(seed?.instructions).toContain('immutable system policy')
-    expect(seed?.instructions).not.toContain('vault-cli memory show')
-    expect(seed?.instructions).not.toContain('vault-cli goal list')
+    expect(seed?.instructions).toContain('current private conversation')
+    expect(seed?.instructions).toContain('normal Murph vault tools')
+    expect(seed?.instructions).toContain('unclear, unshared')
+    expect(seed?.instructions).toContain('keep learning for now')
+    expect(seed?.instructions).toContain('Do not create, update, complete, or archive goals')
     expect(seed?.instructions).not.toContain('you are making a lot of progress')
 
     expect(
@@ -113,34 +112,6 @@ describe('onboarding goal check-in automation', () => {
         MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       ),
     ).toBe('member')
-  })
-
-  it('projects only bounded active-goal titles into model evidence', async () => {
-    const vaultRoot = await createVaultRoot()
-    await upsertGoal({
-      horizon: 'ongoing',
-      priority: 2,
-      status: 'active',
-      title: 'Keep an evening wind-down routine',
-      vaultRoot,
-      window: { startAt: '2026-06-01' },
-    })
-    await upsertGoal({
-      horizon: 'short_term',
-      priority: 1,
-      status: 'completed',
-      title: 'Private completed direction that must stay omitted',
-      vaultRoot,
-      window: { startAt: '2026-05-01' },
-    })
-
-    const evidence = await buildOnboardingGoalCheckinEvidenceContext(vaultRoot)
-
-    expect(evidence).toContain('Keep an evening wind-down routine')
-    expect(evidence).not.toContain('Private completed direction')
-    expect(evidence).toContain('not progress evidence')
-    expect(evidence).not.toContain('metricTargets')
-    expect(evidence).not.toContain('memory')
   })
 
   it('does not seed open, declined, manual, or invalid-timezone onboarding', () => {

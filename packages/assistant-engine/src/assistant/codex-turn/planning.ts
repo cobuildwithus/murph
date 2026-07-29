@@ -56,9 +56,6 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
-  ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
-} from '../store/persistence.js'
-import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../turn-finalizer.js'
@@ -80,15 +77,11 @@ import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
-  buildAssistantOnboardingGoalCheckinSystemPromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
-import {
-  buildOnboardingGoalCheckinEvidenceContext,
-} from '../onboarding-goal-checkin-automation.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantCodexContinuation,
@@ -130,7 +123,6 @@ export interface AssistantRouteTurnPlan {
   developerInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[]
-  conversationHistoryContentAuthorityExpiresAt?: string | null
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
@@ -231,7 +223,6 @@ export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'maintenance'
   | 'assistant-ask-continuation'
-  | 'onboarding-goal-checkin'
   | 'system-notification'
   | 'creative-notification'
 
@@ -473,8 +464,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
-  const onboardingGoalCheckinTurn =
-    input.profile.promptProfile === 'onboarding-goal-checkin'
   const systemNotificationTurn =
     input.profile.promptProfile === 'system-notification' ||
     input.profile.promptProfile === 'creative-notification'
@@ -485,24 +474,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
-    onboardingGoalCheckinTurn ||
     input.profile.promptProfile === 'creative-notification'
-  const resolveCommittedTranscriptHistory = async () =>
+  const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
           currentUserPrompt: input.input.prompt,
-          ...(onboardingGoalCheckinTurn
-            ? {
-                requireCurrentUserContentAuthority: true,
-              }
-            : {}),
           sessionId: input.session.sessionId,
           vault: input.input.vault,
         })
-      : {
-          contentAuthorityExpiresAt: null,
-          messages: [],
-        }
+      : []
   const assistantStyleSettingsAvailable =
     (
       (
@@ -648,15 +628,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
   })
-  const onboardingGoalCheckinEvidence = onboardingGoalCheckinTurn
-    ? await buildOnboardingGoalCheckinEvidenceContext(input.input.vault)
-    : null
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
-    maintenanceTurn ||
-    onboardingGoalCheckinTurn ||
-    systemNotificationTurn ||
-    !privateInteractiveAudience
+    maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
       ? null
       : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -703,20 +677,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     if (input.profile.promptProfile === 'system-notification') {
       return buildAssistantSystemNotificationPromptWithCacheMetadata({
         channel: resolvedChannel,
-      }, {
-        toolSchemaHash,
-      })
-    }
-
-    if (input.profile.promptProfile === 'onboarding-goal-checkin') {
-      return buildAssistantOnboardingGoalCheckinSystemPromptWithCacheMetadata({
-        activeGoalEvidence:
-          onboardingGoalCheckinEvidence ??
-          'Bounded active-goal evidence is unavailable.',
-        channel: resolvedChannel,
-        currentLocalDate: input.promptTimeContext.currentLocalDate,
-        currentTimeZone: input.promptTimeContext.currentTimeZone,
-        scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       }, {
         toolSchemaHash,
       })
@@ -936,12 +896,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : null
   const resumeCodexThreadId = candidateResumeCodexThreadId
-  const conversationHistory = resumeCodexThreadId === null
-    ? await resolveCommittedTranscriptHistory()
-    : {
-        contentAuthorityExpiresAt: null,
-        messages: [],
-      }
+  const conversationHistoryMessages = resumeCodexThreadId === null
+    ? await resolveCommittedTranscriptHistoryMessages()
+    : []
   const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
   const actualAssistantCliContract = shouldPrepareBootstrapContext
@@ -986,15 +943,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
     environments: outputOnlyTurn ? [] : undefined,
-    ...(onboardingGoalCheckinTurn
-      ? {
-          conversationHistoryContentAuthorityExpiresAt:
-            conversationHistory.contentAuthorityExpiresAt,
-        }
-      : {}),
     conversationHistoryMessages:
-      conversationHistory.messages.length > 0
-        ? conversationHistory.messages
+      conversationHistoryMessages.length > 0
+        ? conversationHistoryMessages
         : undefined,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
@@ -1045,48 +996,27 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
-  requireCurrentUserContentAuthority?: boolean
   sessionId: string
   vault: string
-}): Promise<{
-  contentAuthorityExpiresAt: string | null
-  messages: readonly AssistantProviderConversationMessage[]
-}> {
+}): Promise<readonly AssistantProviderConversationMessage[]> {
   let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
   } catch {
-    return {
-      contentAuthorityExpiresAt: null,
-      messages: [],
-    }
-  }
-  if (input.requireCurrentUserContentAuthority === true) {
-    entries = selectCurrentAssistantTranscriptEvidenceSuffix(
-      entries,
-      Date.now(),
-    )
+    return []
   }
 
   type TranscriptHistoryCandidate = {
-    contentAuthorityExpiresAtMs: number | null
     message: AssistantProviderConversationMessage
     userPromptKey: string | null
   }
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
     if (
-      input.requireCurrentUserContentAuthority === true &&
-      entry.kind !== 'user'
-    ) {
-      return []
-    }
-    if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
     ) {
       return [{
-        contentAuthorityExpiresAtMs: null,
         message: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
@@ -1102,18 +1032,8 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       rawContent,
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES,
     )
-    const contentReceivedAtMs =
-      entry.kind === 'user' &&
-      input.requireCurrentUserContentAuthority === true
-        ? Date.parse(entry.contentReceivedAt ?? '')
-        : Number.NaN
     return content
       ? [{
-          contentAuthorityExpiresAtMs:
-            Number.isFinite(contentReceivedAtMs)
-              ? contentReceivedAtMs +
-                ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
-              : null,
           message: {
             content,
             role: entry.kind,
@@ -1149,79 +1069,9 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     break
   }
 
-  let retained = limitAssistantConversationHistoryCandidates(messages)
-  if (input.requireCurrentUserContentAuthority !== true) {
-    return {
-      contentAuthorityExpiresAt: null,
-      messages: retained.map(({ message }) => message),
-    }
-  }
-
-  if (retained.length === 0) {
-    return {
-      contentAuthorityExpiresAt: null,
-      messages: [],
-    }
-  }
-
-  let contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
-  for (const candidate of retained) {
-    if (
-      candidate.message.role !== 'user' ||
-      candidate.contentAuthorityExpiresAtMs === null ||
-      !Number.isFinite(candidate.contentAuthorityExpiresAtMs)
-    ) {
-      return {
-        contentAuthorityExpiresAt: null,
-        messages: [],
-      }
-    }
-    contentAuthorityExpiresAtMs = Math.min(
-      contentAuthorityExpiresAtMs,
-      candidate.contentAuthorityExpiresAtMs,
-    )
-  }
-
-  return {
-    contentAuthorityExpiresAt:
-      Number.isFinite(contentAuthorityExpiresAtMs)
-        ? new Date(contentAuthorityExpiresAtMs).toISOString()
-        : null,
-    messages: retained.map(({ message }) => message),
-  }
-}
-
-function selectCurrentAssistantTranscriptEvidenceSuffix(
-  entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>,
-  evidenceAdmissionAtMs: number,
-): Awaited<ReturnType<typeof listAssistantTranscriptEntries>> {
-  const cutoffMs =
-    evidenceAdmissionAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
-  let evidenceStartIndex = -1
-
-  for (const [index, entry] of entries.entries()) {
-    if (entry.kind !== 'user') {
-      continue
-    }
-    const contentReceivedAtMs = Date.parse(entry.contentReceivedAt ?? '')
-    const hasCurrentContentAuthority =
-      entry.textRetiredAt === undefined &&
-      normalizeNullableString(entry.text) !== null &&
-      Number.isFinite(contentReceivedAtMs) &&
-      contentReceivedAtMs > cutoffMs &&
-      contentReceivedAtMs <= evidenceAdmissionAtMs
-    if (!hasCurrentContentAuthority) {
-      evidenceStartIndex = -1
-      continue
-    }
-    if (evidenceStartIndex === -1) {
-      evidenceStartIndex = index
-    }
-  }
-
-  return evidenceStartIndex === -1
-    ? []
-    : entries.slice(evidenceStartIndex)
+  return limitAssistantConversationHistoryMessages(
+    messages.map(({ message }) => message),
+  )
 }
 
 function normalizeAssistantConversationHistoryText(value: string): string | null {
@@ -1245,21 +1095,14 @@ function shouldDropTrailingCurrentUserPrompt(input: {
   )
 }
 
-function limitAssistantConversationHistoryCandidates<
-  TCandidate extends {
-    message: AssistantProviderConversationMessage
-  },
->(
-  candidates: readonly TCandidate[],
-): TCandidate[] {
-  const countLimited = candidates.slice(
-    -ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT,
-  )
-  const retained: TCandidate[] = []
+function limitAssistantConversationHistoryMessages(
+  messages: readonly AssistantProviderConversationMessage[],
+): AssistantProviderConversationMessage[] {
+  const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
+  const retained: AssistantProviderConversationMessage[] = []
   let retainedBytes = 0
 
-  for (const candidate of [...countLimited].reverse()) {
-    const { message } = candidate
+  for (const message of [...countLimited].reverse()) {
     if (typeof message.content !== 'string') {
       continue
     }
@@ -1273,7 +1116,7 @@ function limitAssistantConversationHistoryCandidates<
     ) {
       break
     }
-    retained.push(candidate)
+    retained.push(message)
     retainedBytes += messageBytes
   }
 

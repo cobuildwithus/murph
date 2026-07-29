@@ -265,14 +265,6 @@ export async function listRecentAssistantTurnReceiptsForSession(
   })
 }
 
-export function assistantTurnReceiptMatchesResponse(
-  receipt: AssistantTurnReceipt,
-  response: string,
-): boolean {
-  const responsePreview = buildRedactedTurnTextPreview(response)
-  return responsePreview !== null && receipt.responsePreview === responsePreview
-}
-
 async function listRecentAssistantTurnReceiptsInternal(
   vault: string,
   input: {

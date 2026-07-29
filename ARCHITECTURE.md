@@ -106,42 +106,27 @@ kind, roster service, cursor, vector index, per-participant page, or pruning
 workflow; the admitted committed transcript is evidence and the single page is
 the only durable room-intelligence owner.
 
-Managed automations with an exact registered identity additionally carry one
-immutable owner scope. Static built-in seeds and the stable dynamic
-post-onboarding choice-point id resolve through that registry: member seeds may
-reconcile and execute only on personal/direct routes, while
-authenticated-group seeds may do so only on live non-direct Linq/iMessage or
-Telegram routes. Reconciliation archives every nonterminal wrong-owner record,
-and claimed occurrences revalidate the current identity and live route before
-lifecycle hooks, evidence, provider/model work, tools, delivery, and commit.
-The onboarding choice point also revalidates canonical answered-onboarding
-state at those boundaries. Caller-supplied unscoped seeds retain their prior
-compatibility behavior, and mutable tags, slugs, titles, routes, or instructions
-never acquire this authority. Dynamically generated experiment-lifecycle seeds
-stay on their existing separately owned path until that owner exposes an exact
+Managed automations additionally carry one immutable owner scope from their
+exact current seed or registered dynamic identity. Member seeds may reconcile and execute only
+on personal/direct routes; authenticated-group seeds may do so only on live
+non-direct Linq/iMessage or Telegram routes. Reconciliation archives every
+nonterminal wrong-owner record, and claimed occurrences revalidate the current
+seed and live route before lifecycle hooks, evidence, provider/model work,
+tools, delivery, and commit. Caller-supplied unscoped seeds retain their prior
+compatibility behavior, and mutable tags, slugs, titles, or instructions never
+acquire this authority. The post-onboarding choice point is the one registered
+dynamic member identity; dynamically generated experiment-lifecycle seeds stay
+on their existing separately owned path until that owner exposes an exact
 identity resolver.
 
-Answered onboarding schedules one member-owned post-onboarding choice point at
-1:30 p.m. local time 21 local-calendar days after completion, with a seven-day
-active window. Ordinary managed maintenance also reconciles members whose
-answered onboarding predates the feature: it derives one future occurrence on
-the same local weekday as completion, then the canonical automation record
-anchors that occurrence so later passes cannot move or recreate it. Open,
-declined, and manual completion never create it. The engine projects only
-bounded active-goal titles alongside bounded committed conversation history;
-the turn receives no memory document, generic CLI contract, shell, hosted
-dynamic tools, broad health-context injection, network fetch, writable
-filesystem access, or product-state mutation surface. Its dedicated
-output-only prompt treats unclear or unshared goals as a first-class branch and
-keeps the evidence and no-mutation boundary above untrusted conversation and
-goal text. This adds no database table,
-migration, recurring cadence, rollout state, or second onboarding lifecycle.
-The first production runner bundle that can install this stable automation ID
-is the rollback floor after any such record is written: an older bundle does
-not know the ID's member ownership, onboarding precondition, or output-only turn
-profile. Deploy this additive change with immediate container rollout and prove
-the runner-bundle fingerprint before managed maintenance can be treated as
-converged.
+The post-onboarding choice point is one ordinary managed one-shot. Answered
+onboarding schedules it 21 local-calendar days after completion; maintenance
+gives older eligible members one future same-weekday catch-up and keeps the
+installed occurrence stable. A claimed occurrence revalidates canonical
+onboarding state, then uses the ordinary scheduled-turn planner, current direct
+conversation, and normal authorized vault tools. The automation asks one
+low-pressure question or skips, and it does not change goals, plans, memories,
+experiments, or automations before the member replies.
 
 No built-in member-facing group social automation currently ships. The removed
 Sunday superlatives ID remains only as a permanent retirement tombstone:
@@ -1319,7 +1304,11 @@ excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer
 acceptance remains the earlier exact owner. Removals and nonaffirmative
 reactions remain on the silent group context path above (or ignored outside
-groups).
+groups), with one exception: a removal of the exact canonical join offer by a
+nonmember whose phone region has no derivable safe send window is consumed by
+the join-offer owner before that path runs, so a participant the outreach
+feature declines cannot have their phone and reaction persisted into
+group-owned context.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the first-contact path. It runs after cheap deterministic ingress filters and

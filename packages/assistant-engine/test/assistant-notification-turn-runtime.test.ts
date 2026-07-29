@@ -37,17 +37,6 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
-import {
-  replaceTranscriptEntries,
-} from '../src/assistant/store/persistence.ts'
-import {
-  resolveAssistantStatePaths,
-} from '../src/assistant/store/paths.ts'
-import {
-  createAssistantTurnReceipt,
-  finalizeAssistantTurnReceipt,
-} from '../src/assistant/turns.ts'
-import { createDeferred } from './test-helpers.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -86,7 +75,6 @@ const CODEX_MODEL_PROVIDER_CONFIG = {
 }
 
 afterEach(() => {
-  vi.useRealTimers()
   vi.resetModules()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
@@ -97,7 +85,6 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/execution-context.js')
   vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
-  vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/codex-turn-runner.js')
   vi.doUnmock('../src/assistant/service-usage.js')
@@ -275,8 +262,6 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -725,8 +710,6 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -977,8 +960,6 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1222,8 +1203,6 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1288,7 +1267,7 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
   expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
 })
 
-test('a sent transcript-backed voice-only first contact supersedes the exact-text signup welcome through real state', async () => {
+test('an organic same-route reply supersedes the exact-text signup welcome through the real first-contact state', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-first-contact-supersede-'))
   const routeBinding = {
     actorId: 'hid_linq_actor_supersede',
@@ -1380,8 +1359,6 @@ test('a sent transcript-backed voice-only first contact supersedes the exact-tex
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1444,9 +1421,7 @@ test('a sent transcript-backed voice-only first contact supersedes the exact-tex
         media: [],
         session: initialSession,
       },
-      // Local service supplies the persisted voice transcript as receipt
-      // provenance while the channel-visible text response remains empty.
-      response: 'Voice-only first-contact reply.',
+      response: 'Nice. First, what should I call you?',
       turnId: 'turn-organic-reply',
       vault,
     })
@@ -1593,8 +1568,6 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1778,8 +1751,6 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1959,8 +1930,6 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -2134,8 +2103,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -2545,14 +2512,9 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   const observedHostedToolContexts: Array<
     NotificationTurnProviderInput['hostedToolContext']
   > = []
-  const observedProfiles: Array<NotificationTurnProviderInput['profile']> = []
-  const {
-    mocks,
-    sendAssistantNotificationLocal,
-  } = await loadNotificationTurnHarness({
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
       observedHostedToolContexts.push(providerInput.hostedToolContext)
-      observedProfiles.push(providerInput.profile)
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -2595,16 +2557,7 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     },
     vault: '/vaults/notification-device-scope',
   })
-  await sendAssistantNotificationLocal({
-    executionContext,
-    instructions: 'Offer one low-pressure health direction choice.',
-    scheduledOccurrenceAt: '2026-07-18T15:00:00.000Z',
-    turnPolicy: {
-      kind: 'onboarding-goal-checkin',
-    },
-    vault: '/vaults/notification-device-scope',
-  })
-  expect(observedHostedToolContexts).toHaveLength(4)
+  expect(observedHostedToolContexts).toHaveLength(3)
   expect(observedHostedToolContexts[0]).toBeNull()
   expect(observedHostedToolContexts[1]?.automationTool).toBe(automationTool)
   expect(observedHostedToolContexts[1]?.connectedApps).toBe(connectedApps)
@@ -2615,636 +2568,6 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   )
   expect(observedHostedToolContexts[1]?.computerToolsAvailable).toBe(true)
   expect(observedHostedToolContexts[2]).toBeNull()
-  expect(observedHostedToolContexts[3]).toBeNull()
-  expect(observedProfiles[3]).toEqual({
-    nativeResumePolicy: 'disabled',
-    promptProfile: 'onboarding-goal-checkin',
-    threadScope: 'isolated-thread',
-    toolProfile: 'output-only-turn',
-  })
-  expect(mocks.resolveAssistantProviderResumeStateAction).toHaveBeenLastCalledWith({
-    codexThreadId: providerResult.codexThreadId,
-    threadScope: 'isolated-thread',
-  })
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      providerResumeStateAction: 'preserve-existing',
-    }),
-  )
-})
-
-test('sendAssistantNotificationLocal keeps onboarding goal check-in skips silent', async () => {
-  const providerResult = createProviderResult({
-    response:
-      '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
-  })
-  const {
-    deliverMessage,
-    mocks,
-    sendAssistantNotificationLocal,
-  } = await loadNotificationTurnHarness({
-    providerResult,
-    turnId: 'turn-onboarding-goal-checkin-skip',
-  })
-
-  const result = await sendAssistantNotificationLocal({
-    instructions: 'Offer one low-pressure health direction choice.',
-    scheduledOccurrenceAt: '2026-07-18T15:00:00.000Z',
-    turnPolicy: {
-      kind: 'onboarding-goal-checkin',
-    },
-    vault: '/vaults/onboarding-goal-checkin-skip',
-  })
-
-  expect(result.decision).toEqual({
-    kind: 'skip',
-    privateSummary: 'No notification required.',
-  })
-  expect(result.response).toBeNull()
-  expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({
-      providerResumeStateAction: 'preserve-existing',
-    }),
-  )
-})
-
-test('sendAssistantNotificationLocal quietly suppresses an unanswered recent assistant question before provider work', async () => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-unanswered-question-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-unanswered-question',
-  })
-  const providerResult = createProviderResult({ session })
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:15:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'That is completely fine.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    await persistAssistantQuestionReceipt({
-      completedAt: '2026-07-18T14:16:30.000Z',
-      deliveryDisposition: 'sent',
-      question: 'Should I keep learning for now?',
-      sessionId: session.sessionId,
-      startedAt: '2026-07-18T14:15:30.000Z',
-      turnId: 'turn-prior-question-sent',
-      vault,
-    })
-    const {
-      deliverMessage,
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-unanswered-question',
-    })
-
-    const result = await sendAssistantNotificationLocal({
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })
-
-    expect(result).toMatchObject({
-      decision: {
-        kind: 'skip',
-        privateSummary: 'A recent assistant question is still unanswered.',
-      },
-      response: null,
-      session: {
-        sessionId: session.sessionId,
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
-    expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
-    expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
-    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-    expect(deliverMessage).not.toHaveBeenCalled()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test('sendAssistantNotificationLocal restores normal planning after a member answers the recent assistant question', async () => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-answered-question-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-answered-question',
-  })
-  const providerResult = createProviderResult({
-    response:
-      '```json\n{"kind":"skip","privateSummary":"No useful choice point now."}\n```',
-    session,
-  })
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-        {
-          contentReceivedAt: '2026-07-18T14:30:00.000Z',
-          createdAt: '2026-07-18T14:30:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Yes, that sounds right.',
-        },
-      ],
-    )
-    await persistAssistantQuestionReceipt({
-      completedAt: '2026-07-18T14:16:30.000Z',
-      deliveryDisposition: 'sent',
-      question: 'Should I keep learning for now?',
-      sessionId: session.sessionId,
-      startedAt: '2026-07-18T14:15:30.000Z',
-      turnId: 'turn-prior-question-answered',
-      vault,
-    })
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-answered-question',
-    })
-
-    await expect(sendAssistantNotificationLocal({
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })).resolves.toMatchObject({
-      decision: {
-        kind: 'skip',
-        privateSummary: 'No useful choice point now.',
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test.each([
-  {
-    label: 'without a delivery receipt',
-    receiptDisposition: null,
-  },
-  {
-    label: 'after its matching delivery failed',
-    receiptDisposition: 'failed' as const,
-  },
-])('sendAssistantNotificationLocal continues planning $label', async ({
-  receiptDisposition,
-}) => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-undelivered-question-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-undelivered-question',
-  })
-  const providerResult = createProviderResult({
-    response:
-      '```json\n{"kind":"skip","privateSummary":"No useful choice point now."}\n```',
-    session,
-  })
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    if (receiptDisposition !== null) {
-      await persistAssistantQuestionReceipt({
-        completedAt: '2026-07-18T14:16:30.000Z',
-        deliveryDisposition: receiptDisposition,
-        question: 'Should I keep learning for now?',
-        sessionId: session.sessionId,
-        startedAt: '2026-07-18T14:15:30.000Z',
-        turnId: 'turn-prior-question-failed',
-        vault,
-      })
-    }
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-undelivered-question',
-    })
-
-    await expect(sendAssistantNotificationLocal({
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })).resolves.toMatchObject({
-      decision: {
-        kind: 'skip',
-        privateSummary: 'No useful choice point now.',
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test.each([
-  'queued',
-  'retryable',
-] as const)('sendAssistantNotificationLocal defers behind a matching %s question and restores planning after failure', async (
-  pendingDisposition,
-) => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-pending-question-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-pending-question',
-  })
-  const providerResult = createProviderResult({
-    response:
-      '```json\n{"kind":"skip","privateSummary":"No useful choice point now."}\n```',
-    session,
-  })
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    await persistAssistantQuestionReceipt({
-      completedAt: '2026-07-18T14:16:30.000Z',
-      deliveryDisposition: pendingDisposition,
-      question: 'Should I keep learning for now?',
-      sessionId: session.sessionId,
-      startedAt: '2026-07-18T14:15:30.000Z',
-      turnId: `turn-prior-question-${pendingDisposition}`,
-      vault,
-    })
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-pending-question',
-    })
-    const notificationInput = {
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin' as const,
-      },
-      vault,
-    }
-
-    await expect(
-      sendAssistantNotificationLocal(notificationInput),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_NOTIFICATION_PRIOR_QUESTION_DELIVERY_PENDING',
-      context: {
-        retryable: true,
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
-
-    await finalizeAssistantTurnReceipt({
-      completedAt: '2026-07-18T14:45:00.000Z',
-      deliveryDisposition: 'failed',
-      response: 'Should I keep learning for now?',
-      status: 'failed',
-      turnId: `turn-prior-question-${pendingDisposition}`,
-      vault,
-    })
-    await expect(
-      sendAssistantNotificationLocal(notificationInput),
-    ).resolves.toMatchObject({
-      decision: {
-        kind: 'skip',
-        privateSummary: 'No useful choice point now.',
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test('sendAssistantNotificationLocal rechecks authority before committing an unanswered-question skip', async () => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-question-authority-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-question-authority',
-  })
-  const providerResult = createProviderResult({ session })
-  const authorityError = new VaultCliError(
-    'ASSISTANT_CRON_LIFECYCLE_INVALIDATED',
-    'Onboarding authority changed before the quiet skip committed.',
-  )
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    await persistAssistantQuestionReceipt({
-      completedAt: '2026-07-18T14:16:30.000Z',
-      deliveryDisposition: 'sent',
-      question: 'Should I keep learning for now?',
-      sessionId: session.sessionId,
-      startedAt: '2026-07-18T14:15:30.000Z',
-      turnId: 'turn-prior-question-authority',
-      vault,
-    })
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-question-authority',
-    })
-
-    await expect(sendAssistantNotificationLocal({
-      beforeCommit: () => {
-        throw authorityError
-      },
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })).rejects.toBe(authorityError)
-    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test('sendAssistantNotificationLocal observes an abort that arrives during unanswered-question evidence reads', async () => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-question-abort-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-question-abort',
-  })
-  const providerResult = createProviderResult({ session })
-  const readStarted = createDeferred<void>()
-  const releaseRead = createDeferred<void>()
-  const abortController = new AbortController()
-  const abortError = new Error('notification invocation cancelled')
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-18T14:00:00.000Z',
-          createdAt: '2026-07-18T14:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-18T14:16:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    await persistAssistantQuestionReceipt({
-      completedAt: '2026-07-18T14:16:30.000Z',
-      deliveryDisposition: 'sent',
-      question: 'Should I keep learning for now?',
-      sessionId: session.sessionId,
-      startedAt: '2026-07-18T14:15:30.000Z',
-      turnId: 'turn-prior-question-abort',
-      vault,
-    })
-    vi.doMock('../src/assistant/store.js', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('../src/assistant/store.ts')>()
-      return {
-        ...actual,
-        listAssistantTranscriptEntries: vi.fn(async (
-          inputVault: string,
-          inputSessionId: string,
-        ) => {
-          readStarted.resolve()
-          await releaseRead.promise
-          return await actual.listAssistantTranscriptEntries(
-            inputVault,
-            inputSessionId,
-          )
-        }),
-      }
-    })
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-question-abort',
-    })
-
-    const notification = sendAssistantNotificationLocal({
-      abortSignal: abortController.signal,
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })
-    await readStarted.promise
-    abortController.abort(abortError)
-    releaseRead.resolve()
-
-    await expect(notification).rejects.toBe(abortError)
-    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
-})
-
-test('sendAssistantNotificationLocal does not suppress from member evidence at its receipt deadline', async () => {
-  vi.useFakeTimers()
-  const now = new Date('2026-07-18T15:00:00.000Z')
-  vi.setSystemTime(now)
-  const vault = await mkdtemp(
-    path.join(tmpdir(), 'assistant-notification-expired-question-'),
-  )
-  const session = createAssistantSession({
-    sessionId: 'session-onboarding-expired-question',
-  })
-  const providerResult = createProviderResult({
-    response:
-      '```json\n{"kind":"skip","privateSummary":"No current evidence for a useful message."}\n```',
-    session,
-  })
-
-  try {
-    await replaceTranscriptEntries(
-      resolveAssistantStatePaths(vault),
-      session.sessionId,
-      [
-        {
-          contentReceivedAt: '2026-07-04T15:00:00.000Z',
-          createdAt: '2026-07-04T15:00:00.000Z',
-          kind: 'user',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'I may want to leave this open for now.',
-        },
-        {
-          createdAt: '2026-07-04T15:01:00.000Z',
-          kind: 'assistant',
-          schema: 'murph.assistant-transcript-entry.v1',
-          text: 'Should I keep learning for now?',
-        },
-      ],
-    )
-    const {
-      mocks,
-      sendAssistantNotificationLocal,
-    } = await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-onboarding-expired-question',
-    })
-
-    await expect(sendAssistantNotificationLocal({
-      instructions: 'Offer one low-pressure health direction choice.',
-      scheduledOccurrenceAt: now.toISOString(),
-      sessionId: session.sessionId,
-      turnPolicy: {
-        kind: 'onboarding-goal-checkin',
-      },
-      vault,
-    })).resolves.toMatchObject({
-      decision: {
-        kind: 'skip',
-        privateSummary: 'No current evidence for a useful message.',
-      },
-    })
-    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
-  } finally {
-    await rm(vault, { force: true, recursive: true })
-  }
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
@@ -4318,8 +3641,6 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -4491,8 +3812,6 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -4882,8 +4201,6 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
-    resolveAssistantProviderResumeStateAction:
-      resolveTestAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -5115,40 +4432,6 @@ function createSharedPlan(): AssistantTurnSharedPlan {
   }
 }
 
-async function persistAssistantQuestionReceipt(input: {
-  completedAt: string
-  deliveryDisposition: 'failed' | 'queued' | 'retryable' | 'sent'
-  question: string
-  sessionId: string
-  startedAt: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await createAssistantTurnReceipt({
-    deliveryRequested: true,
-    prompt: 'Prior member turn.',
-    provider: 'codex-cli',
-    providerModel: 'gpt-test',
-    sessionId: input.sessionId,
-    startedAt: input.startedAt,
-    turnId: input.turnId,
-    vault: input.vault,
-  })
-  await finalizeAssistantTurnReceipt({
-    completedAt: input.completedAt,
-    deliveryDisposition: input.deliveryDisposition,
-    response: input.question,
-    status:
-      input.deliveryDisposition === 'sent'
-        ? 'completed'
-        : input.deliveryDisposition === 'failed'
-          ? 'failed'
-          : 'deferred',
-    turnId: input.turnId,
-    vault: input.vault,
-  })
-}
-
 async function loadNotificationTurnHarness(input: {
   onExecuteCodexTurnWithRecovery?: (
     providerInput: NotificationTurnProviderInput,
@@ -5295,8 +4578,7 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../src/assistant/turns.ts')>()),
+  vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => input.turnId,
   }))
   vi.doMock('../src/assistant/channel-typing.js', () => ({
@@ -5331,16 +4613,6 @@ async function loadNotificationTurnHarness(input: {
     mocks,
     sendAssistantNotificationLocal,
   }
-}
-
-function resolveTestAssistantProviderResumeStateAction(input: {
-  codexThreadId: string | null
-  threadScope: 'isolated-thread' | 'session-thread'
-}): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
-  if (input.threadScope === 'isolated-thread') {
-    return 'preserve-existing'
-  }
-  return input.codexThreadId ? 'persist-from-provider-turn' : 'clear'
 }
 
 function createProviderResult(input?: {

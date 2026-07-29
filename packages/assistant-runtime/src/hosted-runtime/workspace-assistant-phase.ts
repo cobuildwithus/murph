@@ -2465,59 +2465,6 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     }
   }
 
-  if (result.onboardingGoalCheckinFailure !== undefined) {
-    // The pass still delivered every automation that does not depend on the
-    // onboarding snapshot, so report this optional stage without discarding
-    // unrelated setup work.
-    const failure = buildHostedRuntimeFailureDiagnostics(
-      result.onboardingGoalCheckinFailure,
-      "Hosted managed automation onboarding goal check-in staging failed.",
-      { includeSafeIdentity: true },
-    );
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields({
-          attemptId: input.input.request.attemptId,
-          leaseGeneration: input.input.request.leaseGeneration,
-          workspaceVersion: input.input.request.workspaceVersion,
-        }),
-        component: "runtime",
-        errorCode: failure.errorCode,
-        eventCode: "runner.error",
-        level: "warn",
-        phase: "error",
-        redactedJson: {
-          ...failure.redactedJson,
-          ...buildHostedManagedAutomationStageDiagnostics({
-            stage: "onboarding_goal_checkin",
-          }),
-          murphManagedAutomationOnboardingGoalCheckinFailed: true,
-        },
-      },
-      platform: input.input.runtime.platform,
-    });
-
-    // This check-in is a finite one-shot, so transient read or lock failures use
-    // the existing bounded setup-retry ladder rather than waiting for a later,
-    // unrelated runtime wake.
-    if (
-      isHostedManagedAutomationSetupRetryableError(
-        result.onboardingGoalCheckinFailure,
-      )
-    ) {
-      return buildHostedManagedAutomationFailureResult({
-        error: result.onboardingGoalCheckinFailure,
-        input: input.input,
-        redactedStatus: {
-          murphManagedAutomationCreated: result.created,
-          murphManagedAutomationOnboardingGoalCheckinFailed: true,
-          murphManagedAutomationSkipped: result.skipped,
-          murphManagedAutomationUpdated: result.updated,
-        },
-      });
-    }
-  }
-
   if (result.yielded === true) {
     return {
       checkpointReason: "assistant_runtime_commit",
