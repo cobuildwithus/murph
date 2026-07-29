@@ -1,9 +1,6 @@
 import type { AutomationAssistantTargetOverride } from '@murphai/contracts'
 import type { AssistantTurnTrigger } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  normalizeAssistantExecutionContext,
-  type AssistantExecutionContext,
-} from '../execution-context.js'
+import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type {
@@ -53,7 +50,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     abortSignal: input.signal,
     ...(targetOverride ? { assistantTargetOverride: targetOverride } : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: normalizeAssistantExecutionContext(input.executionContext),
+    executionContext: input.executionContext ?? { hosted: null },
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
