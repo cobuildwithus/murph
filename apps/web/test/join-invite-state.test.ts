@@ -64,6 +64,31 @@ test("server refresh snapshots ignore stale verify payloads and refresh changed 
   );
 });
 
+test.each(["checkout", "syncing"] as const)(
+  "status polling refreshes the server-derived Family %s projection",
+  (familyBillingRecovery) => {
+    const status = createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    });
+
+    assert.equal(
+      shouldRefreshJoinInviteStatusFromPayload({
+        current: buildJoinInviteStatusRefreshSnapshot(
+          status,
+          familyBillingRecovery,
+        ),
+        nextStatus: status,
+      }),
+      true,
+    );
+  },
+);
+
 test("verify-stage session resolution only waits for authenticated unresolved verify state", () => {
   expect(hasResolvedHostedInviteVerification(createStatus({
     session: {
