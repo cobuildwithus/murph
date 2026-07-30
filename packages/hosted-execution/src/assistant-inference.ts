@@ -22,6 +22,28 @@ export const HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS = 8_192;
 export const HOSTED_INFERENCE_CONTEXT_WINDOW_MAX_TOKENS = 2_000_000;
 export const HOSTED_INFERENCE_MODEL_MAX_CODE_POINTS = 200;
 export const HOSTED_INFERENCE_ENDPOINT_MAX_CODE_POINTS = 2_048;
+export const HOSTED_INFERENCE_AUTH_SECRET_MAX_CODE_POINTS = 4_096;
+
+const HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_KEY = "api-version";
+const HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_VALUE_PATTERN =
+  /^[A-Za-z0-9._-]{1,64}$/u;
+const HOSTED_INFERENCE_ENDPOINT_DENIED_HOST_SUFFIXES = [
+  ".internal",
+  ".local",
+  ".localhost",
+  ".worker",
+  ".withmurph.ai",
+  ".justco.build",
+] as const;
+const HOSTED_INFERENCE_ENDPOINT_DENIED_EXACT_HOSTS = new Set([
+  "localhost",
+  "withmurph.ai",
+  "justco.build",
+]);
+const HOSTED_INFERENCE_ENDPOINT_HOST_PATTERN =
+  /^(?:xn--)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.(?:xn--)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u;
+const HOSTED_INFERENCE_ENDPOINT_ENCODED_SEPARATOR_PATTERN =
+  /%(?:2e|2f|5c)/iu;
 
 export interface HostedAssistantCustomInferenceOverride {
   contextWindowTokens: number;
@@ -46,6 +68,111 @@ export function isHostedInferenceAuthKind(
 
 export function buildHostedCustomInferenceModelAlias(revision: number): string {
   return `murph-custom-r${requireHostedInferenceRevision(revision)}`;
+}
+
+export function hostedInferenceOperationPathSuffix(
+  protocol: HostedInferenceProtocol,
+): string {
+  return protocol === "responses" ? "/responses" : "/chat/completions";
+}
+
+export function normalizeHostedInferenceEndpointUrl(input: {
+  protocol: HostedInferenceProtocol;
+  value: unknown;
+}): string {
+  const value = requireHostedInferenceString(
+    input.value,
+    "Hosted inference endpointUrl",
+  );
+  if ([...value].length > HOSTED_INFERENCE_ENDPOINT_MAX_CODE_POINTS) {
+    throw new RangeError(
+      `Hosted inference endpointUrl must be at most ${HOSTED_INFERENCE_ENDPOINT_MAX_CODE_POINTS} code points.`,
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError("Hosted inference endpointUrl must be an absolute URL.");
+  }
+  if (url.protocol !== "https:") {
+    throw new TypeError("Hosted inference endpointUrl must use HTTPS.");
+  }
+  if (url.port && url.port !== "443") {
+    throw new TypeError("Hosted inference endpointUrl must use port 443.");
+  }
+  if (url.username || url.password) {
+    throw new TypeError(
+      "Hosted inference endpointUrl must not contain URL credentials.",
+    );
+  }
+  if (url.hash) {
+    throw new TypeError("Hosted inference endpointUrl must not contain a fragment.");
+  }
+  if (HOSTED_INFERENCE_ENDPOINT_ENCODED_SEPARATOR_PATTERN.test(url.pathname)) {
+    throw new TypeError(
+      "Hosted inference endpointUrl must not contain encoded path separators.",
+    );
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  if (
+    HOSTED_INFERENCE_ENDPOINT_DENIED_EXACT_HOSTS.has(hostname)
+    || HOSTED_INFERENCE_ENDPOINT_DENIED_HOST_SUFFIXES.some((suffix) =>
+      hostname.endsWith(suffix)
+    )
+    || hostname.endsWith(".")
+    || isHostedInferenceIpLiteral(hostname)
+    || !HOSTED_INFERENCE_ENDPOINT_HOST_PATTERN.test(hostname)
+  ) {
+    throw new TypeError(
+      "Hosted inference endpointUrl must use a public DNS hostname.",
+    );
+  }
+
+  const expectedSuffix = hostedInferenceOperationPathSuffix(input.protocol);
+  if (!url.pathname.endsWith(expectedSuffix)) {
+    throw new TypeError(
+      `Hosted inference endpointUrl must end in ${expectedSuffix}.`,
+    );
+  }
+
+  const queryEntries = [...url.searchParams.entries()];
+  if (
+    queryEntries.some(([key]) => key !== HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_KEY)
+    || url.searchParams.getAll(HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_KEY).length > 1
+  ) {
+    throw new TypeError(
+      "Hosted inference endpointUrl supports only one api-version query parameter.",
+    );
+  }
+  const apiVersion = url.searchParams.get(
+    HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_KEY,
+  );
+  if (
+    apiVersion !== null
+    && !HOSTED_INFERENCE_ENDPOINT_ALLOWED_QUERY_VALUE_PATTERN.test(apiVersion)
+  ) {
+    throw new TypeError(
+      "Hosted inference endpointUrl api-version is invalid.",
+    );
+  }
+
+  return url.toString();
+}
+
+export function normalizeHostedInferenceModel(value: unknown): string {
+  const model = requireHostedInferenceString(value, "Hosted inference model");
+  if (
+    [...model].length > HOSTED_INFERENCE_MODEL_MAX_CODE_POINTS
+    || /[\u0000-\u001f\u007f]/u.test(model)
+  ) {
+    throw new RangeError(
+      `Hosted inference model must contain at most ${HOSTED_INFERENCE_MODEL_MAX_CODE_POINTS} safe code points.`,
+    );
+  }
+  return model;
 }
 
 export function parseHostedAssistantCustomInferenceOverride(
@@ -101,7 +228,7 @@ export function requireHostedInferenceContextWindowTokens(
   return value;
 }
 
-function requireHostedInferenceProtocol(
+export function requireHostedInferenceProtocol(
   value: unknown,
 ): HostedInferenceProtocol {
   if (!isHostedInferenceProtocol(value)) {
@@ -112,7 +239,18 @@ function requireHostedInferenceProtocol(
   return value;
 }
 
-function requireHostedInferenceRevision(value: unknown): number {
+export function requireHostedInferenceAuthKind(
+  value: unknown,
+): HostedInferenceAuthKind {
+  if (!isHostedInferenceAuthKind(value)) {
+    throw new TypeError(
+      "Hosted inference auth kind must be bearer, api_key, or x_api_key.",
+    );
+  }
+  return value;
+}
+
+export function requireHostedInferenceRevision(value: unknown): number {
   if (
     typeof value !== "number"
     || !Number.isSafeInteger(value)
@@ -121,6 +259,17 @@ function requireHostedInferenceRevision(value: unknown): number {
     throw new TypeError("Hosted inference revision must be a positive integer.");
   }
   return value;
+}
+
+function isHostedInferenceIpLiteral(hostname: string): boolean {
+  const unwrapped = hostname.replace(/^\[/u, "").replace(/\]$/u, "");
+  if (unwrapped.includes(":")) {
+    return true;
+  }
+  const parts = unwrapped.split(".");
+  return parts.length === 4
+    && parts.every((part) => /^\d{1,3}$/u.test(part))
+    && parts.every((part) => Number(part) >= 0 && Number(part) <= 255);
 }
 
 function requireHostedInferenceBoolean(
