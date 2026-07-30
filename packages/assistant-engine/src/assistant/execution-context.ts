@@ -284,6 +284,7 @@ export interface AssistantHostedAssistantConfigurationTool {
 export interface AssistantHostedGroupTool {
   request(
     request: HostedRuntimeGroupToolRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>
 }
 
