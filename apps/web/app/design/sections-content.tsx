@@ -28,6 +28,7 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
+import { StructuredReviewResultsStudy } from "./structured-review-results-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -235,6 +236,12 @@ export function SectionsContent() {
 
       <StudySection title="Private experiment results share">
         <ExperimentResultsShareStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private structured-review result">
+        <StructuredReviewResultsStudy />
       </StudySection>
 
       <Separator />

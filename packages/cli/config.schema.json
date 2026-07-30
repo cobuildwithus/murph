@@ -10832,12 +10832,59 @@
                           }
                         },
                         "primaryBiomarkerKey": {
-                          "description": "Primary metric/biomarker key for analysis. Required for --custom starts; use biomarker:<metric-slug>.",
+                          "description": "Legacy primary biomarker identity. Prefer --primary-outcome-key for new runs.",
                           "type": "string",
                           "minLength": 1
                         },
+                        "primaryOutcomeKey": {
+                          "description": "Stable first-class primary outcome identity. Required for new custom runs; use biomarker:<outcome-slug>.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeKind": {
+                          "description": "Primary outcome mode: metric for numeric/queryable outcomes or structured_review for qualitative evidence that should not be converted into a score.",
+                          "type": "string",
+                          "enum": [
+                            "metric",
+                            "structured_review"
+                          ]
+                        },
+                        "primaryOutcomeLabel": {
+                          "description": "Human-readable primary outcome label for results and reviews.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "primaryOutcomeSessionField": {
+                          "description": "Declared session field that supplies a custom numeric primary outcome.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeUnit": {
+                          "description": "Unit for a custom numeric session-field outcome.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeSourceMetricKey": {
+                          "description": "Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonStatistic": {
+                          "description": "Reducer for a metric outcome inside each window: count, latest, mean, median, min, max, or sum. Defaults to mean.",
+                          "type": "string",
+                          "enum": [
+                            "latest",
+                            "count",
+                            "mean",
+                            "median",
+                            "min",
+                            "max",
+                            "sum"
+                          ]
+                        },
                         "secondaryBiomarkerKey": {
-                          "description": "Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.",
+                          "description": "Secondary metric or biomarker identities. Repeat --secondary-biomarker-key for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -11231,12 +11278,59 @@
                           }
                         },
                         "primaryBiomarkerKey": {
-                          "description": "Primary Health Commons biomarker key for the analysis plan.",
+                          "description": "Legacy primary biomarker identity. Prefer --primary-outcome-key.",
                           "type": "string",
                           "minLength": 1
                         },
+                        "primaryOutcomeKey": {
+                          "description": "Stable first-class primary outcome identity.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeKind": {
+                          "description": "Primary outcome mode: metric or structured_review.",
+                          "type": "string",
+                          "enum": [
+                            "metric",
+                            "structured_review"
+                          ]
+                        },
+                        "primaryOutcomeLabel": {
+                          "description": "Human-readable primary outcome label for results and reviews.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "primaryOutcomeSessionField": {
+                          "description": "Declared session field that supplies a custom numeric primary outcome.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeUnit": {
+                          "description": "Unit for a custom numeric session-field outcome.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryOutcomeSourceMetricKey": {
+                          "description": "Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "comparisonStatistic": {
+                          "description": "Reducer for a metric outcome: count, latest, mean, median, min, max, or sum.",
+                          "type": "string",
+                          "enum": [
+                            "latest",
+                            "count",
+                            "mean",
+                            "median",
+                            "min",
+                            "max",
+                            "sum"
+                          ]
+                        },
                         "secondaryBiomarkerKey": {
-                          "description": "Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.",
+                          "description": "Secondary metric or biomarker identities. Repeat --secondary-biomarker-key for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
