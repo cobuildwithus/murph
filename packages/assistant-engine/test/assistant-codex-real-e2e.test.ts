@@ -357,9 +357,34 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'utf8',
         )
-        const scopes = ['direct', 'group'] as const
+        const routes = [
+          {
+            channel: 'linq',
+            conversationScope: 'direct',
+            filesystemAccess: true,
+            label: 'direct',
+          },
+          {
+            channel: 'linq',
+            conversationScope: 'group',
+            filesystemAccess: true,
+            label: 'group-linq',
+          },
+          {
+            channel: 'email',
+            conversationScope: 'group',
+            filesystemAccess: false,
+            label: 'group-email',
+          },
+        ] as const
 
-        for (const conversationScope of scopes) {
+        for (const route of routes) {
+          const {
+            channel,
+            conversationScope,
+            filesystemAccess,
+            label,
+          } = route
           const commonInput = {
             approvalPolicy: 'never' as const,
             baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -367,8 +392,19 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
               ?? undefined,
             codexHome: config.codexHome,
+            configOverrides: filesystemAccess
+              ? undefined
+              : [
+                  'features.shell_tool=false',
+                  'features.multi_agent=false',
+                  'features.multi_agent_v2=false',
+                  'features.tool_suggest=false',
+                ],
             developerInstructions:
-              buildPainRoutingDeveloperInstructions(conversationScope),
+              buildPainRoutingDeveloperInstructions({
+                channel,
+                conversationScope,
+              }),
             env: {
               ...config.env,
               [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -378,13 +414,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             model: config.model,
             modelProvider: config.modelProvider,
             reasoningEffort: 'low',
-            sandbox: 'workspace-write' as const,
+            sandbox: filesystemAccess
+              ? ('workspace-write' as const)
+              : ('read-only' as const),
             workingDirectory,
           }
           const stable = await executeRealCodexAppServerTurn({
             ...commonInput,
             prompt: [
-              'My knee has gradually become uncomfortable during squats over the past six weeks.',
+              'I think I tore something, but my knee has gradually become uncomfortable during squats over the past six weeks.',
               'There was no fall, twist, pop, or other traumatic incident.',
               'I can walk and use stairs, and there is no swelling, locking, giving way, numbness, or fever.',
               'I want a permanent fix, not just tips for today. What should I do?',
@@ -393,45 +431,59 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           const stableText = stable.finalMessage.trim()
           const stableActions = readCapabilityRoutingActions(stable.jsonEvents)
 
-          expect(
-            stableActions.some((action) =>
+          const stableReadPhysicalTherapy = stableActions.some(
+            (action) =>
               action.kind === 'command'
               && action.command.includes('physical-therapy/SKILL.md')
-              && action.output.includes('# Physical therapy')
-            ),
-            `${conversationScope} stable physical-therapy skill read`,
-          ).toBe(true)
+              && action.output.includes('# Physical therapy'),
+          )
+          expect(
+            stableReadPhysicalTherapy,
+            `${label} stable physical-therapy skill read`,
+          ).toBe(filesystemAccess)
+          if (!filesystemAccess) {
+            expect(
+              stableActions.some((action) => action.kind === 'command'),
+              `${label} stable filesystem command`,
+            ).toBe(false)
+          }
           expect(
             stableText,
-            `${conversationScope} stable working interpretation`,
+            `${label} stable working interpretation`,
           ).toMatch(
             /gradual|load(?:-| )related|load tolerance|capacity|irritab|non-traumatic/iu,
           )
           expect(
             (stableText.match(/\?/gu) ?? []).length,
-            `${conversationScope} stable question economy`,
+            `${label} stable question economy`,
           ).toBeLessThanOrEqual(1)
           expect(
             stableText,
-            `${conversationScope} stable durable first step`,
+            `${label} stable durable first step`,
           ).toMatch(
             /graded|progress|strength|tolerat|range of motion|range|load|track/iu,
           )
           expect(
             stableText,
-            `${conversationScope} stable unsupported restriction`,
+            `${label} stable unsupported restriction`,
           ).not.toMatch(
-            /complete rest|stop all (?:activity|movement|exercise)|avoid all (?:activity|movement|exercise)|do nothing until/iu,
+            /complete rest|do not (?:keep )?train|don[’']t (?:keep )?train|stop (?:all (?:activity|movement|exercise)|training)|avoid all (?:activity|movement|exercise)|do nothing until/iu,
           )
           expect(
             stableText,
-            `${conversationScope} stable fixed recovery claim`,
+            `${label} stable label-only acute routing`,
+          ).not.toMatch(
+            /\burgent\b|same-day|emergency|emergency room|\bER\b/iu,
+          )
+          expect(
+            stableText,
+            `${label} stable fixed recovery claim`,
           ).not.toMatch(
             /(?:fully recovered|permanently fixed|completely healed|back to normal) (?:in|within) \d/iu,
           )
           expect(
             stableText,
-            `${conversationScope} stable referral-only response`,
+            `${label} stable referral-only response`,
           ).not.toMatch(
             /^(?:see|book|visit|consult|contact) (?:a |an |your )?(?:doctor|clinician|physical therapist|physio)[^.?!]*[.?!]?$/iu,
           )
@@ -447,23 +499,31 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           const acuteText = acute.finalMessage.trim()
           const acuteActions = readCapabilityRoutingActions(acute.jsonEvents)
 
-          expect(
-            acuteActions.some((action) =>
+          const acuteReadPhysicalTherapy = acuteActions.some(
+            (action) =>
               action.kind === 'command'
               && action.command.includes('physical-therapy/SKILL.md')
-              && action.output.includes('# Physical therapy')
-            ),
-            `${conversationScope} acute physical-therapy skill read`,
-          ).toBe(true)
+              && action.output.includes('# Physical therapy'),
+          )
+          expect(
+            acuteReadPhysicalTherapy,
+            `${label} acute physical-therapy skill read`,
+          ).toBe(filesystemAccess)
+          if (!filesystemAccess) {
+            expect(
+              acuteActions.some((action) => action.kind === 'command'),
+              `${label} acute filesystem command`,
+            ).toBe(false)
+          }
           expect(
             acuteText,
-            `${conversationScope} acute protective route`,
+            `${label} acute protective route`,
           ).toMatch(
             /urgent|same-day|today|prompt (?:medical )?(?:care|assessment|evaluation)|emergency|protect/iu,
           )
           expect(
             acuteText,
-            `${conversationScope} acute activity restriction`,
+            `${label} acute activity restriction`,
           ).toMatch(
             /do not (?:keep )?train|don[’']t (?:keep )?train|stop (?:training|playing)|avoid (?:training|playing|weight-bearing)|limit weight-bearing|keep weight off|crutches/iu,
           )
@@ -2528,7 +2588,10 @@ function buildDirectSchoolworkDeveloperInstructions(): string {
 }
 
 function buildPainRoutingDeveloperInstructions(
-  conversationScope: 'direct' | 'group',
+  input: {
+    channel: 'email' | 'linq'
+    conversationScope: 'direct' | 'group'
+  },
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -2536,12 +2599,12 @@ function buildPainRoutingDeveloperInstructions(
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
+    channel: input.channel,
     cliAccess: {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
-    conversationScope,
+    conversationScope: input.conversationScope,
     currentLocalDate: '2026-07-30',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
