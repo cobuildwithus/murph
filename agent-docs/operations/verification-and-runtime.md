@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -577,16 +577,13 @@ the advisory budget.
   `pg_typeof(column)::text` when the column type matters, and only use
   `column AT TIME ZONE 'UTC'` when the query is intentionally converting a
   UTC-naive value into a PostgreSQL `timestamptz`.
-- The root `render.yaml` defines the hosted Temporal orchestration worker as two
-  Render Background Worker instances on one Task Queue. Each instance permits
-  100 concurrent Activity executions and 20 concurrent Workflow Task
-  executions, with Temporal autoscaling both poller types. It builds
-  `packages/hosted-orchestrator-temporal` and starts the built worker process;
-  account-specific Render, Temporal, hosted web, Cloudflare, and signing-secret
-  values must stay in Render environment variables, not repo files. The worker's
-  Render service keeps native auto-deploy disabled; `.github/workflows/deploy-render-temporal-worker.yml`
-  triggers the secret deploy hook for the exact current `main` commit only after
-  `Murph Host Support` and `Repo Hygiene` push CI are green.
+- The private `cobuildwithus/murph-cloud` repository owns the hosted Temporal
+  worker's Render Blueprint, deployment workflow, production configuration, and
+  integration check. This public repository retains the released contracts,
+  hosted-local harness, and temporary rollback implementation, but it must not
+  define or trigger the production Render deployment. Murph Cloud verifies the
+  private worker against the public hosted-local Temporal scenario before a
+  protected `main` deployment.
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `hosted-execution` and `runtime-state` packages, and build the CLI package through the same TypeScript workspace toolchain used for local development.
 - Existing supplement-label databases receive the payload constraint as `NOT VALID`, which enforces new writes without blocking the retained pre-repair corpus. The exact guarded July 2026 repair validates it after correcting the known legacy rows; fresh tables create it as valid. `apps/web/README.md` owns the restore sequence and importer rollback floor.
 - Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam plus phone-call start contracts between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.
@@ -631,8 +628,8 @@ the advisory budget.
   also fails closed when the Workflow bundle exceeds 2.25 MiB, loses inspectable
   inline source-map evidence, or pulls broad contracts/vault-share source
   closures into the Workflow graph. Production pins a 100-Workflow cache with
-  reusable V8 contexts, and the root Render Blueprint pins two worker instances
-  to the 2 GB Standard plan.
+  reusable V8 contexts, and the private Murph Cloud Render Blueprint pins two
+  worker instances to the 2 GB Standard plan.
 - `apps/cloudflare/wrangler.jsonc` remains the checked-in worker scaffold, but the generated deploy config from `apps/cloudflare/scripts/**` is authoritative for environment-specific bindings and required Worker secrets. The generated Worker secret list currently requires `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`, `HOSTED_LOG_FINGERPRINT_SECRET`, `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`, `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`, `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`, `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, and `OPENAI_API_KEY`; optional provider secrets include `ELEVENLABS_API_KEY` for generated voice memos. The checked-in scaffold keeps only a tight local placeholder list. The deploy vars require the direct-R2 presign account and bucket names, with an optional account-scoped R2 HTTPS endpoint override; hosted-local dev, worker-only, and E2E profiles use a Docker MinIO sidecar plus local-only presign endpoint flags instead of relying on `wrangler dev` to emulate the R2 S3 API. The repo also ships the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` transient-cleanup config plus `pnpm --dir apps/cloudflare r2:lifecycle:apply`, and the manual GitHub Actions workflow `.github/workflows/deploy-cloudflare-hosted.yml` for environment-driven config rendering, cached native runner base preparation, direct `wrangler deploy` execution, explicit `instance_type` pinning, and smoke checks that poll operator status until the Durable Object runner reaches idle and status exposes the latest workspace checkpoint ref. The deploy flow requires `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke workflow runs, expects operators to apply the checked-in transient R2 lifecycle rules to the real bundles buckets as part of deploy setup, treats `CF_PLATFORM_ENVELOPE_KEY_ID` as single-key metadata for the active platform envelope key, and uses `wrangler deploy` as the direct-cut default deploy path. The deploy helper validates generated config, secrets, and runner bundle artifacts, runs direct Wrangler deploy, then reads `wrangler deployments status --json` for the smoke version and final traffic summary. That deploy flow prepares `apps/cloudflare/.deploy/runner-bundle/` ahead of time as a runtime leaf artifact and prepares a stable local base image from `Dockerfile.cloudflare-hosted-runner-base`; hosted-local E2E lanes may reuse the matching GHCR fingerprinted base image, but production-capable deploy paths force a local base build from the protected checkout before Wrangler's final image build copies the prepared bundle. The bounded direct hosted workspace invocation core still lives in `packages/assistant-runtime`. Protected-main Cloudflare deploy workflow jobs run on Blacksmith: normal predeploy E2E gates, runner smoke, the hosted Codex auth guard, and the production deploy job. The `cf:deploy:immediate` path skips the slower E2E and runner smoke gates, while the production deploy job still builds the runner bundle and native base image directly from its verified protected-main checkout before rendering secrets, dry-running/deploying through Wrangler, and smoking deployed endpoints.
 - The same protected-main deploy workflow also exposes one reusable `preview`
   target through the existing GitHub `Preview` Environment. It keeps the
