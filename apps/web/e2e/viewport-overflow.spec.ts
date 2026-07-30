@@ -398,8 +398,30 @@ for (const width of [768, 1280] as const) {
       '[aria-label="Pulse AI usage"]',
     );
     const trigger = card.getByRole("button", { name: "Add usage" });
-    await expect(study.locator("[inert]")).toHaveCount(3);
+    const historyOnlyPreview = study.locator(
+      '[data-design-interaction="history-only"]',
+    );
+    await expect(
+      study.locator('[data-design-state="exhausted-with-credit"] [inert]'),
+    ).toHaveCount(1);
+    await expect(
+      study.locator('[data-design-state="exhausted-without-credit"] [inert]'),
+    ).toHaveCount(1);
+    await expect(
+      study.locator('[data-design-state="trial-conversion"] [inert]'),
+    ).toHaveCount(1);
+    await expect(historyOnlyPreview).toHaveCount(1);
+    expect(
+      await historyOnlyPreview.evaluate((element) =>
+        element.hasAttribute("inert"),
+      ),
+    ).toBe(false);
     await expect(trigger).toBeVisible();
+
+    const history = historyOnlyPreview.locator("details");
+    await expect(history).not.toHaveAttribute("open", "");
+    await history.locator("summary").click();
+    await expect(history).toHaveAttribute("open", "");
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(
