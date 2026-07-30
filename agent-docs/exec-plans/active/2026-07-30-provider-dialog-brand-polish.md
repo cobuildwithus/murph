@@ -13,8 +13,10 @@ Updated: 2026-07-30
 
 - Show approved OpenAI and Venice vector marks in a light, compact choice
   layout.
-- Describe Venice as the privacy-first provider without implying a privacy mode
-  or retention guarantee that the settings control does not own.
+- Describe Venice as privacy-first through the bounded provider-layer fact that
+  Venice stores no prompts or replies, without implying E2EE, TEE, or broader
+  upstream retention or training behavior that the settings control does not
+  own.
 - Explain in smaller supporting copy that image generation, voice, search, and
   other specialized tools continue using their specialized providers.
 - Keep selection, dismissal, read-only behavior, and deferred persistence
@@ -26,7 +28,8 @@ Updated: 2026-07-30
 ## Scope
 
 - In scope: provider-dialog presentation and copy, provider logo assets,
-  focused component tests, and the existing design-catalog study.
+  focused component tests, the existing design-catalog study, and the bounded
+  product/security disclosure that supports the privacy copy.
 - Out of scope: model cards, provider persistence or availability, runtime
   routing, billing upgrade behavior, and specialized-tool provider selection.
 
@@ -40,8 +43,8 @@ Updated: 2026-07-30
 ## Tasks
 
 1. Add the approved light-surface provider vectors.
-2. Refine the dialog hierarchy, choice rows, privacy-first description, and
-   specialized-provider note.
+2. Refine the dialog hierarchy, choice rows, bounded Venice privacy
+   description, and specialized-provider note.
 3. Update focused tests and the existing design-catalog presentation.
 4. Capture desktop and mobile rendered proof and run required local checks.
 5. Resolve the required product/frontend/coverage reviews, then commit, push,
@@ -62,4 +65,21 @@ Updated: 2026-07-30
   audit bundle omitted the applicable current product specification.
 - The full audit packager now scans current product specifications, with
   focused package-level proof that the provider-choice specification is
-  present. The corrected exact head must retry the same preliminary pass.
+  present.
+- The corrected preliminary pass accepted the frontend and coverage proof but
+  found that generic "privacy-first routing" copy was not bounded by the
+  canonical product/security contract. The remediation replaces it with the
+  exact Venice-layer no-storage disclosure documented by Venice, while
+  explicitly excluding model-level E2EE, TEE, and broader upstream guarantees.
+- Parent product-experience revalidation found no remaining finding. The
+  irreducible purpose is to let a member recognize and choose the core reply
+  provider with a truthful privacy distinction and a clear specialized-tool
+  boundary; the summary, one `Change` action, two immediate draft choices, and
+  existing `Save` boundary are the smallest complete experience. Refreshed
+  desktop and mobile rendered proof covers both provider states, the corrected
+  disclosure, dialog containment, close/reopen draft retention, and the
+  specialized-provider note.
+- Open pull requests touching the settings component, hosted-plan
+  specification, or security guide were checked before remediation; their work
+  is unrelated billing, group-model, or trust-boundary work rather than a
+  duplicate provider-dialog change.

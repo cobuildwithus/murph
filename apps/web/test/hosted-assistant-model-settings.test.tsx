@@ -206,7 +206,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /Privacy-first routing through Venice/u,
+    /Privacy-first\. Venice stores no prompts or replies\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",

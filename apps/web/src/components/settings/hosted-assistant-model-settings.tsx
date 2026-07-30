@@ -94,7 +94,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Privacy-first routing through Venice",
+    description: "Privacy-first. Venice stores no prompts or replies.",
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
