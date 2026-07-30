@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   act,
   createElement,
@@ -110,7 +111,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Sponsor more messages: group funding, recovery, and fulfilled receipt",
+    "Capped monthly group sponsorship and one-time contribution",
   );
   expect(sectionsMarkup).toContain("Overall AI usage, referral details, and history");
   expect(sectionsMarkup).toContain("Biomarker result detail");
@@ -124,10 +125,14 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Sunday sleep crew");
   expect(sectionsMarkup).toContain("Keep Murph going");
   expect(sectionsMarkup).toContain("Sponsor this chat");
-  expect(sectionsMarkup).toContain('data-design-state="usage-added-follow-up"');
-  expect(sectionsMarkup).toContain("Preview group usage added");
-  expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
-  expect(sectionsMarkup).toContain("Preview usage added with channel choices");
+  expect(sectionsMarkup).toContain('data-design-state="monthly-activation"');
+  expect(sectionsMarkup).toContain('data-design-state="ordinary-sponsored-one-time"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-active"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-paused"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
+  expect(sectionsMarkup).toContain("Monthly sponsorship is the primary flow");
+  expect(sectionsMarkup).toContain("One-time contribution");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
   expect(sectionsMarkup).toContain("Pulse AI usage");
   expect(sectionsMarkup).toContain("Static owner-layout preview");
@@ -158,6 +163,12 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain(
+    'data-design-component="group-sponsorship-management"',
+  );
+  expect(componentsMarkup).toContain("Charged this period");
+  expect(componentsMarkup).toContain("Pending");
+  expect(componentsMarkup).toContain("Apply monthly maximum");
   expect(componentsMarkup).toContain("Sunday sleep crew");
   expect(componentsMarkup).toContain("Keep Murph going");
   expect(componentsMarkup).toContain("Sponsor this chat");
@@ -169,6 +180,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
+
+  const groupFundingStudySource = readFileSync(
+    new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(1);
+  expect(groupFundingStudySource).toContain(
+    "<GroupSponsorshipManagementCard",
+  );
+  expect(groupFundingStudySource).toContain(
+    'mode="one_time"',
+  );
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {

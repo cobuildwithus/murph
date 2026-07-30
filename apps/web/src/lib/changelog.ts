@@ -67,8 +67,32 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-30",
     title: "More ways through, less waiting around",
     summary:
-      "Usage choices arrive together, experiments can end in more than a number, and group conversations gain sharper voice, GIF, name, and app-download context. Sign-in, checkout, wearable setup, and cold replies all get a cleaner way through.",
+      "Capped group sponsorship joins the ways to get more usage, experiments can end in more than a number, and group conversations gain sharper voice, GIF, name, and app-download context. Sign-in, checkout, wearable setup, and cold replies all get a cleaner way through.",
     items: [
+      {
+        id: "capped-monthly-group-sponsorship",
+        kind: "feature",
+        priority: 5,
+        title: "Sponsor a chat up to a monthly maximum",
+        summary:
+          "A current participant can authorize up to $5, $10, or $20 per month for a group. Murph starts with one $5 purchase and makes another $5 purchase only when the group needs capacity and the private maximum still allows it.",
+        details:
+          "The sponsor can privately change, pause, resume, recover, or cancel the authorization. Unused purchased credit stays with the group across sponsorship periods, automatic refills stay silent, and a separate one-time contribution remains available.",
+        relevanceTags: ["groups", "billing", "usage", "sponsorship"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "usage-credit-without-message-estimates",
+        kind: "improvement",
+        priority: 4,
+        title: "Usage credit is shown without message estimates",
+        summary:
+          "Personal, Family, and group funding now present dollar-denominated cost-weighted usage credit without converting it into an approximate number of messages.",
+        details:
+          "Actual model and tool costs vary, so the credit amount is the durable financial truth. Group participants see only whether Murph is sponsored, while exact charges, pending purchases, and monthly maximums stay private to the sponsor.",
+        relevanceTags: ["billing", "usage", "groups", "privacy"],
+        sourcePullRequests: [],
+      },
       {
         id: "usage-options-together",
         kind: "feature",
@@ -233,9 +257,9 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "group-sponsorship-cleaner-finish",
         kind: "improvement",
         priority: 4,
-        title: "Sponsoring a group has a cleaner finish",
+        title: "One-time group contributions have a cleaner finish",
         summary:
-          "The contribution dialog now leads with Sponsor more messages, keeps optional context under Add a note, and turns verified success into a clear receipt with Open Messages.",
+          "The one-time contribution dialog keeps optional context under Add a note and turns verified success into a clear receipt with Open Messages.",
         details:
           "Amount choice, payment verification, recovery, and group-credit delivery keep their existing owners. The receipt stays honest that Messages opens at the app level.",
         relevanceTags: ["groups", "billing", "usage", "design"],
@@ -471,9 +495,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Sponsor the room and make it a bit",
         summary:
-          "A current participant can sponsor about 100, 200, or 400 group messages for $5, $10, or $20, add an optional public alias or note, and turn a larger pack into a short-lived running bit.",
+          "A current participant can make one $5, $10, or $20 contribution, add an optional public alias or note, and turn a larger one-time contribution into a short-lived running bit.",
         details:
-          "Verified payment grants ordinary group usage first. Murph then sends one short original sponsor song in that group; the optional creative moment never controls the credit.",
+          "Verified payment adds ordinary cost-weighted group usage credit first. Murph then sends one short original sponsor song in that group; the optional creative moment never controls the credit.",
         relevanceTags: ["groups", "billing", "usage", "music"],
         sourcePullRequests: [1026, 1135],
       },

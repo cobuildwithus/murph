@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
-  readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
   useRealUsageStatus: false,
@@ -40,11 +39,6 @@ vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
         : mocks.readHostedPersonalAiUsageStatus(input),
   };
 });
-
-vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
-  readHostedMemberAssistantModelPreference:
-    mocks.readHostedMemberAssistantModelPreference,
-}));
 
 import {
   handleHostedUsageReferralGroupTool,
@@ -120,9 +114,6 @@ describe("hosted usage referral tool", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-      model: "gpt-5.6-terra",
-    });
     mocks.readHostedGroupUsageStatus.mockResolvedValue({ status: "active" });
     mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
       lookup: {
@@ -186,14 +177,14 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "about 100 more messages on the model your Murph is using now",
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
               rewardLabel:
-                "about 140 more messages on the model your Murph is using now",
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -202,10 +193,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("resolves approximate reward capacity from the current personal model", async () => {
-    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-      model: "gpt-5.6-sol",
-    });
+  it("keeps personal referral rewards in cost-weighted credit", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -225,12 +213,12 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "about 50 more messages on the model your Murph is using now",
+                "$2.00 of cost-weighted usage credit for your Murph",
             },
             {
               code: "active_group_v1",
               rewardLabel:
-                "about 70 more messages on the model your Murph is using now",
+                "$3.50 of cost-weighted usage credit for your Murph",
             },
           ],
         },
@@ -238,58 +226,33 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it.each([
-    {
-      label: "about 70 more messages on the model this room is using now",
-      model: "gpt-5.6-sol",
-    },
-    {
-      label: "about 140 more messages on the model this room is using now",
-      model: "gpt-5.6-terra",
-    },
-    {
-      label: "bonus usage on the model this room is using now",
-      model: "gpt-5.6-luna",
-    },
-  ] as const)(
-    "projects the room's $model referral reward capacity",
-    async ({ label, model }) => {
-      mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-        model,
-      });
-      const { prisma } = buildPrisma({
-        containerMemberId: "member_group",
-      });
+  it("keeps group referral rewards in cost-weighted credit", async () => {
+    const { prisma } = buildPrisma({
+      containerMemberId: "member_group",
+    });
 
-      await expect(handleHostedUsageReferralGroupTool({
-        enabled: true,
-        memberId: "member_group",
-        prisma: prisma as never,
-        request: {
-          action: "read_usage_referral",
-          sourceConversation: TELEGRAM_GROUP_SOURCE,
-          telegramSenderHandles: ["123456789"],
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_group",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: TELEGRAM_GROUP_SOURCE,
+        telegramSenderHandles: ["123456789"],
+      },
+    })).resolves.toMatchObject({
+      result: {
+        referral: {
+          availablePolicies: [{
+            code: "active_group_v1",
+            rewardLabel:
+              "$3.50 of cost-weighted usage credit for this room",
+          }],
         },
-      })).resolves.toMatchObject({
-        result: {
-          referral: {
-            availablePolicies: [{
-              code: "active_group_v1",
-              rewardLabel: label,
-            }],
-          },
-          status: "ok",
-        },
-      });
-
-      expect(
-        mocks.readHostedMemberAssistantModelPreference,
-      ).toHaveBeenCalledWith({
-        memberId: "member_group",
-        prisma,
-      });
-    },
-  );
+        status: "ok",
+      },
+    });
+  });
 
   it("offers only the provider-neutral mission from Telegram", async () => {
     const { prisma } = buildPrisma();
@@ -708,14 +671,6 @@ describe("hosted usage referral tool", () => {
         return ACTIVE_PERSONAL_USAGE_STATUS;
       }),
     );
-    mocks.readHostedMemberAssistantModelPreference.mockImplementation(
-      (input) => runQuery(() => {
-        projectionTransactionStates.push(transactionState.open);
-        expect(input.prisma).toBe(prisma);
-        return { model: "gpt-5.6-terra" };
-      }),
-    );
-
     await expect(handleHostedUsageReferralGroupTool({
       enabled: true,
       memberId: "member_personal",

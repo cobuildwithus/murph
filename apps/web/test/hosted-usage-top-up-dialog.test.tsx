@@ -21,6 +21,7 @@ import {
 } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  isMobile: vi.fn(() => false),
   randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000001"),
   requestHostedOnboardingJson: vi.fn(),
   routerRefresh: vi.fn(),
@@ -43,9 +44,9 @@ const USAGE_TOP_UP_TARGET_CASES = [
     scope: "family",
   },
   {
-    addLabel: "Sponsor ~100 messages · $5",
+    addLabel: "Contribute $5",
     checkoutUrl: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
-    openLabel: "Sponsor this chat",
+    openLabel: "Make a one-time contribution",
     scope: "group",
   },
 ] as const;
@@ -65,6 +66,10 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
     authenticated: true,
     openAuthDialog: () => {},
   }),
+}));
+
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: mocks.isMobile,
 }));
 
 vi.mock("@/src/components/ui/button", () => ({
@@ -168,6 +173,36 @@ vi.mock("@/src/components/ui/dialog", async () => {
   };
 });
 
+vi.mock("@/src/components/ui/drawer", () => ({
+  Drawer: ({
+    children,
+    open,
+  }: {
+    children?: ReactNode;
+    open?: boolean;
+  }) =>
+    open
+      ? createElement("div", { "data-drawer-open": "true" }, children)
+      : null,
+  DrawerClose: ({ children }: { children?: ReactNode }) => children,
+  DrawerContent: ({
+    children,
+    className,
+  }: HTMLAttributes<HTMLDivElement>) =>
+    createElement(
+      "div",
+      { className, "data-slot": "drawer-content", role: "dialog" },
+      children,
+    ),
+  DrawerDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+    createElement("p", props),
+  DrawerHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  DrawerTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+    createElement("h2", props),
+  DrawerTrigger: ({ children }: { children?: ReactNode }) => children,
+}));
+
 vi.mock("@/src/components/ui/field", () => ({
   Field: (props: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", props),
@@ -186,8 +221,14 @@ vi.mock("@/src/components/ui/field", () => ({
 }));
 
 vi.mock("@/src/components/ui/collapsible", () => ({
-  Collapsible: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
+  Collapsible: ({
+    defaultOpen,
+    ...props
+  }: HTMLAttributes<HTMLDivElement> & { defaultOpen?: boolean }) =>
+    createElement("div", {
+      ...props,
+      "data-default-open": defaultOpen ? "true" : "false",
+    }),
   CollapsibleContent: (props: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", props),
   CollapsibleTrigger: ({
@@ -290,6 +331,7 @@ vi.mock("@/src/components/ui/choice-card", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isMobile.mockReturnValue(false);
   vi.stubGlobal("crypto", {
     randomUUID: mocks.randomUUID,
   });
@@ -363,10 +405,10 @@ test("requires an explicit amount choice after opening from the settings deep li
     assert.ok(firstAmountCard);
     assert.equal(firstAmountCard.classList.contains("h-24"), true);
     assert.equal(firstAmountCard.classList.contains("sm:h-28"), true);
-    // Message estimate leads, price stays secondary, and the estimate is always
-    // rendered as approximate.
-    assert.match(firstAmountCard.textContent ?? "", /~100/);
-    assert.match(firstAmountCard.textContent ?? "", /messages · \$5/);
+    // Price leads, and the dialog describes the grant as cost-weighted credit
+    // without converting it into message counts.
+    assert.match(firstAmountCard.textContent ?? "", /\$5/);
+    assert.match(firstAmountCard.textContent ?? "", /Cost-weighted usage credit/);
     assert.equal(
       firstAmountCard.classList.contains(
         "[&_[data-slot=field-content]]:justify-center",
@@ -453,18 +495,20 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   try {
     assert.equal(
       rendered.container.querySelector("h2")?.textContent,
-      "Sponsor more messages",
+      "Make a one-time contribution",
     );
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent?.trim() === "Sponsor this chat");
+    ).find((button) =>
+      button.textContent?.trim() === "Make a one-time contribution"
+    );
     assert.ok(groupTrigger);
     assert.equal(groupTrigger.dataset.size, "xl");
     assert.equal(groupTrigger.dataset.variant, "default");
     assert.equal(groupTrigger.classList.contains("w-full"), true);
     assert.match(
       rendered.container.textContent ?? "",
-      /one-time contribution to keep Murph talking for everyone here\./,
+      /Choose one explicit contribution of cost-weighted usage credit for this chat\./,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -474,7 +518,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~100 messages · $5",
+      "Contribute $5",
     );
     assert.equal(
       buttonByText(rendered.container, "Sponsoring chat…").getAttribute(
@@ -561,12 +605,12 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-alias"),
       rendered.window,
-      "Jake’s Lower Back",
+      "The Group Historian",
     );
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-message"),
       rendered.window,
-      "Please stop inviting Jake to basketball.",
+      "For whatever adventure comes next.",
     );
     await setTextInput(
       runningBit,
@@ -576,7 +620,7 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~400 messages · $20",
+      "Contribute $20",
     );
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -585,10 +629,11 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_20_usd",
         sponsorship: {
-          publicAlias: "Jake’s Lower Back",
+          publicAlias: "The Group Historian",
           runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-          sponsorMessage: "Please stop inviting Jake to basketball.",
+          sponsorMessage: "For whatever adventure comes next.",
         },
+        sponsorshipKind: "one_time",
       },
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
@@ -598,6 +643,151 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
       purchaseId: "hucp_group_sponsorship",
       status: "payment_pending",
     });
+    await rendered.cleanup();
+  }
+});
+
+test("keeps the private monthly maximum out of the public sponsorship moment", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "monthly",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: [groupSponsorshipOffers()[0]],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const dialogText = rendered.container.textContent ?? "";
+    assert.match(
+      dialogText,
+      /Choose your monthly sponsorship limit\./u,
+    );
+    assert.doesNotMatch(dialogText, /required first \$5 activation purchase/u);
+    const initialChargeButton = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find(
+      (button) => button.textContent?.trim() === "Sponsor this chat · $5",
+    );
+    assert.ok(initialChargeButton);
+    assert.match(dialogText, /Add a note/u);
+    assert.ok(
+      rendered.container.querySelector('[data-default-open="true"]'),
+    );
+    const capSlider = rendered.container.querySelector<HTMLElement>(
+      '[role="slider"][aria-valuetext="Up to $5 per month"]',
+    );
+    assert.ok(capSlider);
+    assert.equal(capSlider.getAttribute("aria-valuemin"), "5");
+    assert.equal(capSlider.getAttribute("aria-valuemax"), "20");
+    const amountLabels = Array.from(
+      rendered.container.querySelectorAll("span.font-serif.text-3xl"),
+      (amountLabel) => amountLabel.textContent,
+    );
+    assert.deepEqual(amountLabels, ["$5", "$10", "$20"]);
+
+    await act(async () => {
+      const endKey = new rendered.window.Event("keydown", { bubbles: true });
+      Object.defineProperty(endKey, "key", { value: "End" });
+      capSlider.dispatchEvent(endKey);
+      await Promise.resolve();
+    });
+    assert.equal(capSlider.getAttribute("aria-valuenow"), "20");
+    assert.equal(
+      capSlider.getAttribute("aria-valuetext"),
+      "Up to $20 per month",
+    );
+    assert.equal(
+      rendered.container.querySelector("#group-sponsor-bit"),
+      null,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Lasts for/u);
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-alias"),
+      rendered.window,
+      "Chat sponsor",
+    );
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-message"),
+      rendered.window,
+      "Glad to keep this going.",
+    );
+    const sponsorButtons = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).filter((button) => button.textContent?.includes("Sponsor this chat"));
+    const submitButton = sponsorButtons.at(-1);
+    assert.ok(submitButton);
+    await act(async () => {
+      submitButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        monthlyCapMinor: 2_000,
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: "Chat sponsor",
+          sponsorMessage: "Glad to keep this going.",
+        },
+        sponsorshipKind: "monthly",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_monthly_sponsorship",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
+test("identifies the fixed activation charge in the mobile sponsorship drawer", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      mode: "monthly",
+      monthlyCapOptions: groupSponsorshipMonthlyCaps(),
+      offers: [groupSponsorshipOffers()[0]],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.ok(
+      rendered.container.querySelector('[data-slot="drawer-content"]'),
+    );
+    const initialChargeButton = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find(
+      (button) => button.textContent?.trim() === "Sponsor this chat · $5",
+    );
+    assert.ok(initialChargeButton);
+  } finally {
     await rendered.cleanup();
   }
 });
@@ -649,7 +839,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~200 messages · $10",
+      "Contribute $10",
     );
     assert.equal(
       sessionStorage.getItem(
@@ -672,7 +862,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~200 messages · $10",
+      "Contribute $10",
     );
 
     assert.match(
@@ -691,13 +881,13 @@ test("clears a lost group request after terminal recovery with a remounted spons
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor this chat",
+      "Make a one-time contribution",
     );
     await clickRadio(rendered.container, rendered.window, "usage_10_usd");
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~200 messages · $10",
+      "Contribute $10",
     );
 
     const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
@@ -713,6 +903,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
           runningBitRequest: "",
           sponsorMessage: "",
         },
+        sponsorshipKind: "one_time",
       },
       {
         clientRequestKey: firstRequestKey,
@@ -722,6 +913,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
           runningBitRequest: "",
           sponsorMessage: "",
         },
+        sponsorshipKind: "one_time",
       },
       {
         clientRequestKey: secondRequestKey,
@@ -731,6 +923,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
           runningBitRequest: "",
           sponsorMessage: "",
         },
+        sponsorshipKind: "one_time",
       },
     ]);
     expect(mocks.randomUUID).toHaveBeenCalledTimes(2);
@@ -763,7 +956,10 @@ test(
     );
 
     try {
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/);
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Add a note/,
+      );
       assert.equal(
         rendered.container.querySelector("#group-sponsor-alias"),
         null,
@@ -778,15 +974,16 @@ test(
       await clickButton(
         rendered.container,
         rendered.window,
-        "Sponsor ~400 messages · $20",
+        "Contribute $20",
       );
 
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
         method: "POST",
         payload: {
-          clientRequestKey: "00000000-0000-4000-8000-000000000001",
-          offerCode: "usage_20_usd",
-        },
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_20_usd",
+        sponsorshipKind: "one_time",
+      },
         signal: expect.any(AbortSignal),
         url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
       });
@@ -802,9 +999,9 @@ test(
 
 test("shows and preserves exact frozen sponsor details when retrying payment", async () => {
   const frozenSponsorship = {
-    publicAlias: "Jake’s Lower Back",
+    publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-    sponsorMessage: "Please stop inviting Jake to basketball.",
+    sponsorMessage: "For whatever adventure comes next.",
   };
   mocks.requestHostedOnboardingJson.mockImplementation(
     (request: { method: string }) =>
@@ -843,10 +1040,10 @@ test("shows and preserves exact frozen sponsor details when retrying payment", a
       rendered.container.textContent ?? "",
       /Your original sponsor details are still attached/u,
     );
-    assert.match(rendered.container.textContent ?? "", /Jake’s Lower Back/u);
+    assert.match(rendered.container.textContent ?? "", /The Group Historian/u);
     assert.match(
       rendered.container.textContent ?? "",
-      /Please stop inviting Jake to basketball\./u,
+      /For whatever adventure comes next\./u,
     );
     assert.match(
       rendered.container.textContent ?? "",
@@ -862,6 +1059,7 @@ test("shows and preserves exact frozen sponsor details when retrying payment", a
         offerCode: "usage_10_usd",
         recoveryOnly: true,
         sponsorship: frozenSponsorship,
+        sponsorshipKind: "one_time",
       },
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
@@ -923,6 +1121,7 @@ test("shows and preserves an intentionally empty frozen sponsor draft", async ()
         offerCode: "usage_10_usd",
         recoveryOnly: true,
         sponsorship: {},
+        sponsorshipKind: "one_time",
       },
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
@@ -1776,7 +1975,7 @@ test("keeps an uncertain group payment locked to the original amount and request
     await clickButton(
       rendered.container,
       rendered.window,
-      "Sponsor ~500 messages · $25",
+      "Contribute $25",
     );
 
     assert.equal(dialog.scrollTop, 0);
@@ -2037,7 +2236,7 @@ test.each([
       await clickButton(
         rendered.container,
         rendered.window,
-        scope === "group" ? "Sponsor ~100 messages · $5" : "Add usage · $5",
+        scope === "group" ? "Contribute $5" : "Add usage · $5",
       );
 
       assert.doesNotMatch(
@@ -2104,7 +2303,7 @@ test.each([
       await clickButton(
         rendered.container,
         rendered.window,
-        scope === "group" ? "Sponsor this chat" : "Add usage",
+        scope === "group" ? "Make a one-time contribution" : "Add usage",
       );
       assert.equal(
         rendered.container
@@ -2667,7 +2866,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       await clickButton(
         rendered.container,
         rendered.window,
-        scope === "group" ? "Sponsor ~200 messages · $10" : "Add usage · $10",
+        scope === "group" ? "Contribute $10" : "Add usage · $10",
       );
 
       const finalPostPayloads = mocks.requestHostedOnboardingJson.mock.calls
@@ -2881,7 +3080,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       await clickButton(
         rendered.container,
         rendered.window,
-        scope === "group" ? "Sponsor ~500 messages · $25" : "Add usage · $25",
+        scope === "group" ? "Contribute $25" : "Add usage · $25",
       );
 
       const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
@@ -4437,9 +4636,9 @@ function textMurphContactOption() {
 
 function usageCreditOffers() {
   return [
-    { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_500" },
-    { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_1000" },
-    { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_2500" },
+    { amountLabel: "$5", offerCode: "usage_500" },
+    { amountLabel: "$10", offerCode: "usage_1000" },
+    { amountLabel: "$25", offerCode: "usage_2500" },
   ] as const;
 }
 
@@ -4459,22 +4658,27 @@ function groupSponsorshipOffers() {
   return [
     {
       amountLabel: "$5",
-      estimatedMessages: 100,
       offerCode: "usage_5_usd",
       runningBitDurationLabel: null,
     },
     {
       amountLabel: "$10",
-      estimatedMessages: 200,
       offerCode: "usage_10_usd",
       runningBitDurationLabel: "1 day",
     },
     {
       amountLabel: "$20",
-      estimatedMessages: 400,
       offerCode: "usage_20_usd",
       runningBitDurationLabel: "3 days",
     },
+  ] as const;
+}
+
+function groupSponsorshipMonthlyCaps() {
+  return [
+    { amountLabel: "$5", monthlyCapMinor: 500 },
+    { amountLabel: "$10", monthlyCapMinor: 1_000 },
+    { amountLabel: "$20", monthlyCapMinor: 2_000 },
   ] as const;
 }
 

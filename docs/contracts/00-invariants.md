@@ -449,6 +449,15 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Safety, reliability, privacy, authentication, and review fixes preserve the
   authorized success path for existing critical flows. Disabling, silently
   dropping, or degrading the flow is a product decision, not a technical fix.
+- A live monthly group sponsorship is a payer authorization, not a Stripe
+  subscription and not a message bundle. It stores only payer, beneficiary,
+  status, $5/$10/$20 cap, and anchored period. Current-period committed spend is
+  derived from exact-$5 `HostedUsageCreditPurchase` rows in fulfilled or pending
+  states; `HostedUsageCreditEntry` is the only balance and unused credit carries
+  forward. One live authorization per group is database-enforced. Refill
+  admission occurs only inside the existing beneficiary serialization boundary,
+  provider work is post-commit, Stripe reconciliation alone grants credit, and
+  group-visible projections reveal only sponsored versus unsponsored.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal
