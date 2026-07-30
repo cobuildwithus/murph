@@ -236,6 +236,11 @@ remaining effective capacity. Buying credit can move that bar backward
 immediately. The presentation does not expose the internal dollar value of the
 plan allowance or the usage-credit balance.
 
+Settings may separately show a bounded history of immutable purchase grants
+with the original added amount, source, and date. That history does not read or
+display aggregate or per-grant remaining capacity; the combined AI usage bar
+remains the only current-capacity view.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.

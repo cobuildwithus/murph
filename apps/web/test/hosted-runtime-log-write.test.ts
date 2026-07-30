@@ -18,6 +18,7 @@ import {
   HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE,
   HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE,
   HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE,
+  getHostedRuntimeLogPool,
   isHostedRuntimeLogDatabaseConfigured,
   readHostedRuntimeLogStorageMode,
 } from "@/src/lib/hosted-runtime-log/database";
@@ -94,6 +95,25 @@ describe("hosted runtime log write routing", () => {
       "isolated database unavailable",
     );
     expect(mocks.recordLegacyHostedRuntimeLogs).not.toHaveBeenCalled();
+  });
+
+  it("keeps PgBouncer startup parameters free of statement_timeout", async () => {
+    vi.stubEnv(
+      "HOSTED_RUNTIME_LOG_DATABASE_URL",
+      "postgresql://runtime.test:6432/runtime_logs",
+    );
+
+    const pool = getHostedRuntimeLogPool();
+    const options = Reflect.get(pool, "options");
+
+    expect(options).toMatchObject({
+      connectionTimeoutMillis: 3_000,
+      idleTimeoutMillis: 30_000,
+      max: 5,
+      query_timeout: 12_000,
+    });
+    expect(options).not.toHaveProperty("statement_timeout");
+    await pool.end();
   });
 });
 

@@ -188,7 +188,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B',
         )
         expect(
           actions.some((action) =>
@@ -206,6 +206,114 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ),
           'groupchat-comedy skill read',
         ).toBe(true)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'answers schoolwork and declines professional deliverables in direct and group scopes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-schoolwork-scope-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const scopes = [
+          {
+            developerInstructions:
+              buildDirectSchoolworkDeveloperInstructions(),
+            label: 'direct',
+          },
+          {
+            developerInstructions:
+              buildGroupPointOfViewDeveloperInstructions(),
+            label: 'group',
+          },
+        ] as const
+
+        for (const scope of scopes) {
+          const commonInput = {
+            approvalPolicy: 'never' as const,
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions: scope.developerInstructions,
+            env: {
+              ...config.env,
+              [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            },
+            excludeResumeTurns: true,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write' as const,
+            workingDirectory,
+          }
+          const schoolwork = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            prompt: [
+              'Murph, this is a programming assignment for my software-deployment course.',
+              'It uses a production-style checkout example, but it is only class work and will not be shipped or used for a client.',
+              'Correct this TypeScript function and briefly explain the bug:',
+              '`function add(a: number, b: number) { return a - b }`',
+            ].join(' '),
+          })
+          const schoolworkText = schoolwork.finalMessage.trim()
+
+          expect(
+            schoolworkText,
+            `${scope.label} schoolwork answer`,
+          ).toMatch(/return a \+ b/iu)
+          expect(
+            schoolworkText,
+            `${scope.label} schoolwork disclaimer`,
+          ).not.toMatch(
+            /hypothetical|practice framing|scope disclaimer|can(?:not|[’']t) help/iu,
+          )
+
+          const professional = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            prompt: [
+              'Murph, write the production TypeScript checkout function',
+              '`deployCheckoutHotfix` for my employer.',
+              'This code will be shipped today. Return the implementation only.',
+            ].join(' '),
+          })
+          const professionalText = professional.finalMessage.trim()
+
+          expect(
+            professionalText,
+            `${scope.label} professional refusal`,
+          ).toMatch(/can(?:not|[’']t)|declin|unable|don[’']t/iu)
+          expect(
+            professionalText,
+            `${scope.label} professional artifact`,
+          ).not.toMatch(
+            /```|function\s+deployCheckoutHotfix|const\s+deployCheckoutHotfix/iu,
+          )
+          expect(
+            professionalText.split(/\s+/u).length,
+            `${scope.label} concise professional refusal`,
+          ).toBeLessThanOrEqual(40)
+          expect(
+            professionalText.split(/\r?\n/u).filter(Boolean),
+            `${scope.label} one-line professional refusal`,
+          ).toHaveLength(1)
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -699,6 +807,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
     async () => {
       const result = await runNameFirstExperimentStartProbe({
         dryRunRevisionMismatch: false,
+        exactTitleAvailable: true,
       })
       const startCommands = result.actions.filter((action) =>
         action.kind === 'command'
@@ -748,10 +857,63 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
   )
 
   it(
+    'answers a stale title-only Start draft without clarification or a write',
+    async () => {
+      const result = await runNameFirstExperimentStartProbe({
+        dryRunRevisionMismatch: false,
+        exactTitleAvailable: false,
+      })
+
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('experiment-onboarding/SKILL.md')
+          && action.output.includes('# Experiment onboarding')
+        ),
+        'experiment-onboarding skill read',
+      ).toBe(true)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && (
+            action.command.includes('vault-cli commons protocol explore')
+            || action.command.includes('vault-cli commons protocol list')
+          )
+        ),
+        'current public protocol lookup',
+      ).toBe(true)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli commons protocol show')
+        ),
+        'no protocol show without an exact match',
+      ).toBe(false)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli experiment start')
+        ),
+        'no experiment write without an exact match',
+      ).toBe(false)
+      expect(result.finalMessage).toMatch(/not currently available/iu)
+      expect(result.finalMessage).toMatch(/no (?:run|experiment) was created/iu)
+      expect(result.finalMessage).toMatch(/Finnish Dry Sauna/iu)
+      expect(result.finalMessage).not.toMatch(/which experiment|clarif/iu)
+      expect(result.finalMessage).not.toMatch(/refresh|reopen/iu)
+      expect(result.finalMessage).not.toContain(EXPERIMENT_START_EXACT_KEY)
+      expect(result.finalMessage).not.toContain(EXPERIMENT_START_STARTER_KEY)
+      expect(result.finalMessage).not.toContain('sha256:')
+    },
+    360_000,
+  )
+
+  it(
     'stops after a name-first revision mismatch instead of retrying unpinned',
     async () => {
       const result = await runNameFirstExperimentStartProbe({
         dryRunRevisionMismatch: true,
+        exactTitleAvailable: true,
       })
       const startCommands = result.actions.filter((action) =>
         action.kind === 'command'
@@ -1643,6 +1805,7 @@ async function materializeAssistantSkill(input: {
 
 async function runNameFirstExperimentStartProbe(input: {
   dryRunRevisionMismatch: boolean
+  exactTitleAvailable: boolean
 }): Promise<{
   actions: CapabilityRoutingAction[]
   finalMessage: string
@@ -1662,6 +1825,7 @@ async function runNameFirstExperimentStartProbe(input: {
     await materializeExperimentStartVaultCli({
       binDirectory,
       dryRunRevisionMismatch: input.dryRunRevisionMismatch,
+      exactTitleAvailable: input.exactTitleAvailable,
     })
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
@@ -1680,14 +1844,16 @@ async function runNameFirstExperimentStartProbe(input: {
       excludeResumeTurns: true,
       model: config.model,
       modelProvider: config.modelProvider,
-      prompt: [
-        'I want to start the Bryan Johnson Sauna experiment.',
-        'Use its default one-day test plan starting tomorrow.',
-        'There are no active experiments or saved-context changes, its safety screen has no questions, and I decline reminders or other support.',
-        input.dryRunRevisionMismatch
-          ? 'If the selected protocol changed during validation, stop and tell me; do not retry or start a different revision.'
-          : 'Create the run now after the required dry run.',
-      ].join(' '),
+      prompt: input.exactTitleAvailable
+        ? [
+            'I want to start the Bryan Johnson Sauna experiment.',
+            'Use its default one-day test plan starting tomorrow.',
+            'There are no active experiments or saved-context changes, its safety screen has no questions, and I decline reminders or other support.',
+            input.dryRunRevisionMismatch
+              ? 'If the selected protocol changed during validation, stop and tell me; do not retry or start a different revision.'
+              : 'Create the run now after the required dry run.',
+          ].join(' ')
+        : 'I want to start the Bryan Johnson Sauna experiment.',
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -1708,38 +1874,51 @@ async function runNameFirstExperimentStartProbe(input: {
 async function materializeExperimentStartVaultCli(input: {
   binDirectory: string
   dryRunRevisionMismatch: boolean
+  exactTitleAvailable: boolean
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
-  const exploreResult = JSON.stringify({
-    groups: [{
-      matchedProtocol: {
-        key: EXPERIMENT_START_EXACT_KEY,
-        title: 'Bryan Johnson Sauna',
-      },
-      starterCandidate: {
-        protocol: {
-          key: EXPERIMENT_START_STARTER_KEY,
-          title: 'Finnish Dry Sauna',
+  const exploreResult = input.exactTitleAvailable
+    ? JSON.stringify({
+        groups: [{
+          matchedProtocol: {
+            key: EXPERIMENT_START_EXACT_KEY,
+            title: 'Bryan Johnson Sauna',
+          },
+          starterCandidate: {
+            protocol: {
+              key: EXPERIMENT_START_STARTER_KEY,
+              title: 'Finnish Dry Sauna',
+            },
+          },
+        }],
+        matchedEntity: {
+          entityType: 'protocol_variant',
+          key: EXPERIMENT_START_EXACT_KEY,
+          revision: {
+            pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
+            runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
+          },
+          title: 'Bryan Johnson Sauna',
         },
-      },
-    }],
-    matchedEntity: {
-      entityType: 'protocol_variant',
-      key: EXPERIMENT_START_EXACT_KEY,
-      revision: {
-        pageRevisionId: EXPERIMENT_START_PAGE_REVISION,
-        runSpecRevisionId: EXPERIMENT_START_RUN_SPEC_REVISION,
-      },
-      title: 'Bryan Johnson Sauna',
-    },
-    starterCandidate: {
-      protocol: {
-        key: EXPERIMENT_START_STARTER_KEY,
-        title: 'Finnish Dry Sauna',
-      },
-    },
-  })
+        starterCandidate: {
+          protocol: {
+            key: EXPERIMENT_START_STARTER_KEY,
+            title: 'Finnish Dry Sauna',
+          },
+        },
+      })
+    : JSON.stringify({
+        groups: [{
+          starterCandidate: {
+            protocol: {
+              key: EXPERIMENT_START_STARTER_KEY,
+              title: 'Finnish Dry Sauna',
+            },
+          },
+        }],
+        matchedEntity: null,
+      })
   const showResult = JSON.stringify({
     protocol: {
       experimentOnboarding: {
@@ -1880,13 +2059,35 @@ function buildHostedGroupStatusDeveloperInstructions(): string {
   })
 }
 
+function buildDirectSchoolworkDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
 function buildGroupPointOfViewCandidateProbe(): string {
   return [
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'Each candidate describes the complete action for that transcript.',
-    'For transcripts 14-22 and 30-35, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D>` with no explanation.',
+    'For transcripts 14-22, 30-35, and 46-48, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -2048,6 +2249,18 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'B: Send a sarcastic voice memo.',
     'C: Generate a song.',
     'D: Finish without a reply.',
+    '',
+    '46. A floor-authorized playful turn hinges on a niche public cultural reference. Murph can confidently name the concrete premise and recurring bit needed for a specific callback.',
+    'A: Write one short, original, reference-native callback from that known context without doing a redundant lookup.',
+    'B: Look it up anyway, summarize the source, and explain the reference before making the joke.',
+    '',
+    '47. A floor-authorized playful turn hinges on a niche public cultural reference. Murph only vaguely recognizes it and cannot confidently name the concrete premise, vocabulary, or recurring bit.',
+    'A: Bluff from vague recognition or use a generic "I haven\'t seen it" line.',
+    'B: Do a narrow public lookup, use only a few verified details for one short original callback, and do not narrate the research or copy an online joke.',
+    '',
+    '48. Murph does the narrow public lookup from transcript 47, but it still does not establish the reference well enough for a specific callback.',
+    'A: Invent plausible lore so the room still gets a joke.',
+    'B: Stay plain rather than inventing lore.',
   ].join('\n')
 }
 

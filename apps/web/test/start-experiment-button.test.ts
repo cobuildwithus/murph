@@ -129,6 +129,12 @@ describe("StartExperimentButton", () => {
     expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
       .toContain("I want to start the Finnish Dry Sauna experiment.");
     expect(links.join("\n")).not.toContain("sha256");
+    const telegramAnchor = anchors.find((anchor) =>
+      anchor.textContent?.includes("Telegram"),
+    );
+    expect(telegramAnchor?.getAttribute("target")).toBe("_blank");
+    expect(telegramAnchor?.getAttribute("rel")).toBe("noreferrer");
+
     for (const anchor of anchors) {
       expect(anchor.className).toContain("focus-visible:border-ring");
       expect(anchor.className).toContain("focus-visible:ring-ring");
@@ -143,6 +149,38 @@ describe("StartExperimentButton", () => {
     expect(renderedContactSurface).not.toContain("member@example.test");
     expect(renderedContactSurface).not.toContain("tg_user_123");
     expect(renderedContactSurface).not.toContain("member_handle");
+  });
+
+  it("keeps a synthetic Telegram fragment in the current document", async () => {
+    const { StartExperimentChannelDialog } = await import(
+      "@/src/components/experiments/experiment-detail/start-experiment-button"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(StartExperimentChannelDialog, {
+        onOpenChange: vi.fn(),
+        open: true,
+        options: [
+          {
+            connected: true,
+            description: "Preview a prepared Telegram draft.",
+            href: "#experiment-start-channel-picker-study",
+            kind: "telegram",
+            label: "Telegram",
+          },
+        ],
+        protocolDays: 14,
+        protocolTitle: "Example Evening Routine",
+      }),
+      { requireButton: false },
+    );
+    cleanupRender = cleanup;
+
+    const anchor = container.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe(
+      "#experiment-start-channel-picker-study",
+    );
+    expect(anchor?.hasAttribute("target")).toBe(false);
+    expect(anchor?.hasAttribute("rel")).toBe(false);
   });
 
   it("does not run contact routing while the rendered button is disabled", async () => {

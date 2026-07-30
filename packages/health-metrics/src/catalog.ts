@@ -142,10 +142,10 @@ export interface ExperimentPrimaryMetricCaptureAssessment {
 }
 
 /**
- * Resolve the primary metric and, for subjective/session-owned metrics, prove
- * that the run declares exactly one canonical capture field. Multiple aliases
- * are ambiguous just like a missing field: either shape would make active-run
- * logging and outcome analysis disagree about the source of truth.
+ * Resolve the primary outcome metric and, for known subjective/session-owned
+ * metrics, prove that the run declares exactly one canonical capture field.
+ * Unknown identities remain valid custom metrics: canonical evidence, not
+ * catalog enrollment, decides whether the experiment eventually has a result.
  */
 export function assessExperimentPrimaryMetricCapture(input: {
   primaryBiomarkerKey: string | null | undefined;
@@ -166,9 +166,11 @@ export function assessExperimentPrimaryMetricCapture(input: {
   if (!definition) {
     return {
       canonicalBiomarkerKey: candidateBiomarkerKey,
-      issue: "unsupported_primary_biomarker",
+      issue: null,
       matchingSessionFieldIds: [],
-      metricKey: null,
+      metricKey: normalizeMetricKey(
+        candidateBiomarkerKey.split(":").at(-1) ?? candidateBiomarkerKey,
+      ),
       requiresSessionField: false,
     };
   }
