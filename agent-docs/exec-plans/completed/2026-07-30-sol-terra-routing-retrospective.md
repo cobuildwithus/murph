@@ -1,6 +1,6 @@
 # Sol/Terra routing retrospective correction
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -45,3 +45,22 @@ Updated: 2026-07-30
 3. Parse optional V2 activity model evidence and add ordering-independent proof.
 4. Run focused verification, update the PR, and complete correction review and
    exact-head CI.
+
+## Verification
+
+- Passed: assistant-engine focused Vitest, 250 tests.
+- Passed: assistant-runtime hosted Codex config Vitest, 42 tests with 2 skipped.
+- Passed: Cloudflare container-entrypoint Vitest, 50 tests.
+- Passed: hosted allowance-pricing Vitest, 104 tests.
+- Passed: assistant-engine, assistant-runtime, and Cloudflare runner typechecks.
+- Passed: ReviewGPT correction-verification round 3 with no findings.
+- Passed: parent final source, test, privacy, scope, and mergeability review.
+- Pending after plan closure: exact-head CI on the final docs-only commit.
+
+## Outcome
+
+- Cross-model child routing is deferred. The hosted production and smoke configs
+  match their pre-PR behavior, the racy lookup and raw requested-model inference
+  are deleted, and only direct optional V2 activity model evidence can override
+  the parent fallback.
+Completed: 2026-07-30
