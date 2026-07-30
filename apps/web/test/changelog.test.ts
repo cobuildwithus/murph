@@ -113,13 +113,72 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through July 29 shipment set", () => {
+  it("keeps the July 30 usage and experiment claims bounded", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("usage-options-together")).toMatchObject({
+      sourcePullRequests: [1120, 1136, 1138, 1157],
+      details: expect.stringContaining("can be cancelled independently"),
+    });
+    expect(items.get("open-ended-experiment-outcomes")).toMatchObject({
+      sourcePullRequests: [1094],
+      details: expect.stringContaining("instead of a made-up numeric effect"),
+    });
+  });
+
+  it("keeps the July 30 identity and payment claims narrow", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+
+    expect(items.get("group-bursts-one-turn")).toMatchObject({
+      sourcePullRequests: [1032, 1133],
+      details: expect.stringContaining("never identity or permission"),
+    });
+    expect(items.get("checkout-resumes-one-session")).toMatchObject({
+      sourcePullRequests: [1041],
+      summary: expect.stringContaining("same open Stripe session"),
+    });
+    expect(items.get("wearable-connect-owner-confirmation")).toMatchObject({
+      sourcePullRequests: [1059],
+      summary: expect.stringContaining("explicit Finish connection"),
+    });
+    expect(items.get("ios-app-link-in-chat")).toMatchObject({
+      sourcePullRequests: [1150],
+      details: expect.stringContaining("still stay private or in the app"),
+    });
+  });
+
+  it("publishes the complete July 21 through July 30 shipment set", () => {
     expect(
       listChangelogEditions().slice(0, 10).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-30",
+        itemIds: [
+          "usage-options-together",
+          "open-ended-experiment-outcomes",
+          "core-reply-provider-choice",
+          "schoolwork-conversation-help",
+          "group-voice-only-punchlines",
+          "animated-gif-filmstrips",
+          "ios-app-link-in-chat",
+          "time-aware-immediate-advice",
+          "group-bursts-one-turn",
+          "homepage-auth-stays-usable",
+          "wearable-connect-owner-confirmation",
+          "checkout-resumes-one-session",
+          "group-newsletters-compose-once",
+          "group-sponsorship-cleaner-finish",
+          "cold-replies-start-sooner",
+          "obscure-group-references-grounded",
+        ],
+      },
       {
         id: "2026-07-29",
         itemIds: [
@@ -266,23 +325,6 @@ describe("changelog registry", () => {
           "experiment-results-match-the-dashboard",
         ],
       },
-      {
-        id: "2026-07-20",
-        itemIds: [
-          "challenge-standings-explain-missing-data",
-          "phone-link-settings-recovery",
-          "weekly-insights-skip-obvious-weekend",
-          "scheduled-messages-get-the-full-murph",
-          "pulse-finishes-after-payment-setup",
-          "contaminant-tests-on-product-pages",
-          "private-experiments-open-from-home",
-          "named-lab-marker-answers-faster",
-          "dense-voice-memo-keeps-onboarding-moving",
-          "welcome-continues-your-conversation",
-          "approval-page-sign-in-recovery",
-          "strava-connections-paused",
-        ],
-      },
     ]);
   });
 
@@ -379,8 +421,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-29");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-23");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-30");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-24");
   });
 
   it("resolves only known canonical edition cursors", () => {
