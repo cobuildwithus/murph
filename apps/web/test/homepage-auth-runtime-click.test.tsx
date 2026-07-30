@@ -5,6 +5,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as null | {
+    autoSendPastedPhoneNumber?: boolean;
     open: boolean;
     privyRuntime?: { kind: string };
   },
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     open: boolean;
     privyRuntime?: { kind: string };
   }) {
@@ -102,6 +104,7 @@ test("a homepage click before idle opens immediately and starts the shared runti
     expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
     expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
     expect(mocks.authDialogProps).toMatchObject({
+      autoSendPastedPhoneNumber: true,
       open: true,
       privyRuntime: { kind: "configured" },
     });

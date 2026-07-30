@@ -42,7 +42,6 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_PROVIDERS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
   hostedRuntimeSubscriptionToolRequestSchema,
@@ -630,6 +629,44 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
       },
     },
     required: ['action'],
+  },
+} as const
+
+export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
+  namespace: 'murph',
+  name: 'assistant_configuration',
+  description:
+    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, provider, reasoning, account, or billing settings. Group rooms default to Sol, and Luna, Terra, or Sol may be selected for the room. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+  inputSchema: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['read'],
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['update'],
+          },
+          model: {
+            type: 'string',
+            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            description: 'Required next-turn group room model.',
+          },
+        },
+        required: ['action', 'model'],
+      },
+    ],
   },
 } as const
 
@@ -1268,6 +1305,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
@@ -1289,6 +1327,7 @@ export interface MurphDynamicToolAvailability {
   imessageContactAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
+  groupAssistantConfigurationAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
   groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
@@ -1367,6 +1406,12 @@ export function resolveMurphDynamicTools(
     if (progressToolIndex >= 0) {
       tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
     }
+  }
+  if (
+    availability.assistantConfigurationAvailable !== true &&
+    availability.groupAssistantConfigurationAvailable === true
+  ) {
+    tools.push(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL)
   }
   if (
     availability.groupAvailable !== true &&
@@ -3617,6 +3662,21 @@ async function executeAssistantConfigurationTool(input: {
       'assistant configuration tools are unavailable for this turn',
     )
   }
+  const conversationScope =
+    input.hostedToolContext?.currentUserActionScope?.()?.conversationScope ?? null
+  if (
+    input.request.action === 'update' &&
+    conversationScope === 'group' &&
+    (
+      input.request.provider !== undefined ||
+      input.request.reasoningEffort !== undefined
+    )
+  ) {
+    return toolTextResult(
+      false,
+      'group assistant configuration supports room model changes only',
+    )
+  }
 
   try {
     const currentTurn = input.hostedToolContext?.currentAssistantTarget?.() ?? {
@@ -3644,68 +3704,10 @@ async function executeAssistantConfigurationTool(input: {
       )
     }
 
-    const readResult = await assistantConfigurationTool.request({ action: 'read' })
-    if (readResult.action !== 'read') {
-      throw new TypeError('Assistant configuration read returned an update response.')
-    }
-    const savedForNextTurn = readResult.result
-    const requestedForNextTurn = {
-      model: input.request.model ?? savedForNextTurn.model,
-      provider: input.request.provider ?? savedForNextTurn.provider,
-      reasoningEffort:
-        input.request.reasoningEffort ?? savedForNextTurn.reasoningEffort,
-    }
-    if (!savedForNextTurn.configurationAvailable) {
-      return toolTextResult(true, safeToolPayloadText({
-        currentTurn,
-        savedForNextTurn: {
-          ...savedForNextTurn,
-          appliesAt: 'next_turn',
-          requiredPlan: null,
-          status: 'unavailable',
-        },
-      }))
-    }
-    if (
-      requestedForNextTurn.model === HOSTED_ASSISTANT_SOL_MODEL &&
-      !savedForNextTurn.solAvailable
-    ) {
-      return toolTextResult(true, safeToolPayloadText({
-        currentTurn,
-        savedForNextTurn: {
-          ...savedForNextTurn,
-          appliesAt: 'next_turn',
-          requiredPlan: 'edge',
-          status: 'upgrade_required',
-        },
-      }))
-    }
-    const result = input.request.model !== undefined
-      ? await assistantConfigurationTool.request({
-          action: 'update',
-          assistantInputId,
-          model: requestedForNextTurn.model,
-          ...(input.request.provider === undefined
-            ? {}
-            : { provider: requestedForNextTurn.provider }),
-          ...(input.request.reasoningEffort === undefined
-            ? {}
-            : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
-        })
-      : input.request.provider !== undefined
-        ? await assistantConfigurationTool.request({
-            action: 'update',
-            assistantInputId,
-            provider: requestedForNextTurn.provider,
-            ...(input.request.reasoningEffort === undefined
-              ? {}
-              : { reasoningEffort: requestedForNextTurn.reasoningEffort }),
-          })
-        : await assistantConfigurationTool.request({
-            action: 'update',
-            assistantInputId,
-            reasoningEffort: requestedForNextTurn.reasoningEffort,
-          })
+    const result = await assistantConfigurationTool.request({
+      ...input.request,
+      assistantInputId,
+    })
     if (result.action !== 'update') {
       throw new TypeError('Assistant configuration update returned a read response.')
     }

@@ -158,6 +158,7 @@ export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
 }
 
 export function AuthDialog({
+  autoSendPastedPhoneNumber = false,
   inviteCode,
   methods = ["phone", "telegram", "email"],
   open,
@@ -169,6 +170,7 @@ export function AuthDialog({
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
+  autoSendPastedPhoneNumber?: boolean;
   inviteCode?: string | null;
   methods?: readonly ("phone" | "telegram" | "email")[];
   open: boolean;
@@ -231,6 +233,7 @@ export function AuthDialog({
   }
 
   const authPanelProps = {
+    autoSendPastedPhoneNumber,
     methods,
     onViewChange: setPanelView,
     requireLaunchConsentOnCompletion,

@@ -13,6 +13,7 @@ import { createDefaultLocalAssistantModelTarget } from "@murphai/operator-config
 import {
   buildHostedExecutionAssistantAskCompletedWake,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
 } from "@murphai/hosted-execution";
 
 import {
@@ -20,7 +21,7 @@ import {
 } from "../src/hosted-runtime/events/assistant-ask-completion.ts";
 
 describe("hosted Assistant Ask completion production", () => {
-  it("persists Telegram group authority through the real notification outbox path", async () => {
+  it("persists Telegram authority on the fixed non-disclosing fallback", async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), "hosted-assistant-ask-telegram-outbox-"),
     );
@@ -91,8 +92,8 @@ describe("hosted Assistant Ask completion production", () => {
           question: "Murph, tell them about my sleep.",
           requestId: "aask_req_telegram_completion_outbox",
           result: {
-            answer: "Your reviewed sleep summary.",
-            outcome: "answered",
+            answer: null,
+            outcome: "cannot_answer",
           },
           targetLabel: null,
         },
@@ -127,7 +128,7 @@ describe("hosted Assistant Ask completion production", () => {
             containerMemberId: "member-telegram-group-runtime",
             threadId,
           },
-          message: "Your reviewed sleep summary.",
+          message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
           reviewedAssistantAskCompletionExpiresAt:
             "2099-07-15T12:10:00.000Z",
           status: "pending",

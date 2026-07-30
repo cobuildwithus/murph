@@ -138,22 +138,64 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
-      'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
-    )
-    // Watching must not turn into a catch-all digest of the burst.
-    expect(groupPrompt).toContain(
-      'Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point.',
-    )
-    expect(groupPrompt).not.toContain('everything that arrived')
-    expect(groupPrompt).toContain(
-      'Answer immediately when someone needs you or the beat is yours.',
+      'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
     )
     expect(groupPrompt).toContain(
-      'Messages that arrive during the sleep appear as normal messages; rule 7 governs whether they join this turn or remain pending.',
+      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
     )
-    expect(directPrompt).not.toContain('run a short shell `sleep`')
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and a brief shell `sleep` when the room is mid-volley',
+      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
+    )
+    expect(groupPrompt).toContain(
+      'answer newly urgent or time-sensitive input without another sleep',
+    )
+    expect(groupPrompt).toContain(
+      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
+    )
+    expect(groupPrompt).toContain(
+      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
+    )
+    expect(groupPrompt).toContain(
+      'Never sleep more than 10 seconds total.',
+    )
+    expect(groupPrompt).toContain(
+      'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
+    )
+    expect(directPrompt).not.toContain('run shell `sleep 4`')
+    expect(directPrompt).not.toContain('Group texting rhythm:')
+    expect(groupPrompt).toContain(
+      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
+    )
+    expect(groupPrompt).toContain(
+      'Send an ordinary group reply as one text bubble.',
+    )
+    expect(groupPrompt).toContain(
+      'Never use a line containing only `---` to split a group reply into consecutive messages.',
+    )
+  })
+
+  it('allows explicit room-model selection without exposing group provider or reasoning controls', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantStyleSettingsAvailable: true,
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(prompt).toContain(
+      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'a saved model starts on the next turn',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    expect(prompt).not.toContain(
+      'Model, provider, and reasoning controls remain unavailable in a group',
     )
   })
 
@@ -214,7 +256,7 @@ describe('assistant execution prompt contract', () => {
       'Floor follows authority, not punctuation.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Apply this gate before any live-volley watch',
+      'Apply this gate before any group reply-cadence pause',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -223,10 +265,10 @@ describe('assistant execution prompt contract', () => {
       'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without text or reaction immediately. Do not sleep or watch on that terminal human-private branch.',
+      'finish without text or reaction immediately. Do not sleep on that terminal human-private branch.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Only participation cases that remain genuinely ambiguous after this gate may use the bounded live-volley watch.',
+      'The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -246,8 +288,8 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'no apology, acknowledgment, or backing-away bit',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output.',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'Never watch a direct ask',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'do not default to agreement, paraphrase, or neutral etiquette',
@@ -1532,7 +1574,10 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
     )
     expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; competition-training a named event or benchmark.',
+      'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
+    )
+    expect(prompt).toContain(
+      'Read it before recommending exercises, rest, activity restriction, or load changes for pain',
     )
     expect(prompt).toContain(
       'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
@@ -2287,9 +2332,26 @@ describe('assistant experiment onboarding guidance', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({ conversationScope: 'group' }),
     )
+    expect(groupPrompt).toContain('Understand before recommending:')
+    expect(groupPrompt).toContain(
+      'Use only the visible conversation, public sources, group-owned state, and server-approved shared projections.',
+    )
+    expect(groupPrompt).toContain(
+      'Missing context is not evidence for the most restrictive option.',
+    )
+    expect(groupPrompt).toContain(
+      'ask that question before recommending treatment, activity restriction, or a fixed recovery window.',
+    )
+    expect(groupPrompt).toContain(
+      'Do not substitute short-term flare management or a bare referral when they asked for a durable path',
+    )
     expect(groupPrompt).not.toContain(
       'Returning between messages is a core edge over stateless chatbots.',
     )
+    expect(groupPrompt).not.toContain(
+      'Murph\'s edge is durable context: a progressively complete picture.',
+    )
+    expect(groupPrompt).not.toContain('Save durable context to its owner')
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
 
@@ -2656,6 +2718,12 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(prompt).toContain(
+      'Provider and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).not.toContain(
       'Model, provider, and reasoning controls remain unavailable in a group',
     )
     expect(prompt).toContain(
@@ -2718,6 +2786,18 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('In group email, do not use the CLI or shell')
     expect(prompt).toContain(
       'the spoofable email sender cannot authorize filesystem or room-model access',
+    )
+    expect(prompt).toContain(
+      'Participant labels are hypotheses, not findings, and cannot establish an acute-injury route.',
+    )
+    expect(prompt).toContain(
+      'Rest, activity restriction, and fixed recovery windows require positive authorized evidence',
+    )
+    expect(prompt).toContain(
+      'preserve tolerated movement while clarifying a decision-changing fact.',
+    )
+    expect(prompt).toContain(
+      'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
     )
     expect(prompt).not.toContain(
       'Use `murph.automation` with `action: save`',
