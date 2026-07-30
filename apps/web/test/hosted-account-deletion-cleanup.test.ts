@@ -136,6 +136,7 @@ describe("hosted account deletion cleanup", () => {
       keyName: KMS_KEY_NAME,
     }));
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
     expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
   });

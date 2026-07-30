@@ -39,10 +39,18 @@ Success criteria:
 
 ## Verification
 
-- Pending.
+- Focused KMS and account-deletion Vitest suites passed on current `origin/main`
+  with 31 tests.
+- Hosted web typecheck passed.
+- Scoped ESLint passed for the two source files and two focused test files.
+- A read-only production-faithful check proved that the pending receipt's
+  numeric `CryptoKeyVersion` resource normalizes to its parent `CryptoKey`
+  without decrypting the payload or invoking provider cleanup.
+- The required local product-experience review returned `NO FINDINGS`; no
+  rendered proof applies because this change has no frontend presentation.
 
 ## State
 
-Implementation in progress.
+Implementation and focused verification complete. PR completion gates pending.
 Status: active
 Updated: 2026-07-30
