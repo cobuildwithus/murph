@@ -4257,6 +4257,79 @@ describe('assistant codex runtime', () => {
       .toHaveLength(2)
   })
 
+  it('keeps an output-only continuation on the resident Codex app-server', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-local-warm-thread-config-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-local-warm-thread-config-home-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockHostedCodexIdentityServer(spawnedChildren)
+
+    const baseInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      sandbox: 'read-only' as const,
+      workingDirectory,
+    }
+
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      prompt: 'ordinary resident turn',
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-1',
+    })
+
+    const restrictedThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.enable_mcp_apps': false,
+      'features.multi_agent': false,
+      'features.multi_agent_v2': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      'features.standalone_web_search': false,
+      'features.tool_suggest': false,
+      'features.web_search_request': false,
+      'memories.generate_memories': false,
+      'memories.use_memories': false,
+      web_search: 'disabled',
+    } as const
+
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      dynamicTools: [],
+      ephemeral: true,
+      prompt: 'assistant ask private continuation',
+      threadConfig: restrictedThreadConfig,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-warm-identity-1-2',
+    })
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const launchArgs = codexMocks.spawn.mock.calls[0]?.[1] ?? []
+    expect(launchArgs).not.toEqual(expect.arrayContaining([
+      'features.shell_tool=false',
+      'web_search="disabled"',
+    ]))
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    const threadStarts = readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'thread/start',
+    )
+    expect(threadStarts).toHaveLength(2)
+    const restrictedThreadStart = asRecord(threadStarts[1]?.params)
+    expect(restrictedThreadStart).toMatchObject({
+      dynamicTools: [],
+      ephemeral: true,
+    })
+    expect(restrictedThreadStart?.config).toEqual(restrictedThreadConfig)
+    expect(process.kill).not.toHaveBeenCalled()
+  })
+
   it('starts a fresh warm Codex app-server when local child env changes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-warm-noisy-work-')
     const codexHome = await createTempDir('assistant-codex-local-warm-noisy-home-')
