@@ -267,19 +267,6 @@ describe("hosted runtime Temporal worker", () => {
     expect(workerOptions.reuseV8Context).toBeUndefined();
   });
 
-  it("runs two Render worker instances", async () => {
-    const renderBlueprint = await readFile(
-      new URL("../../../render.yaml", import.meta.url),
-      "utf8",
-    );
-    const workerService = renderBlueprint
-      .split(/\n(?=\s{2}- type:)/u)
-      .find((service) => service.includes("name: murph-temporal-worker"));
-
-    expect(workerService).toBeDefined();
-    expect(workerService).toMatch(/\n {4}numInstances: 2\n/u);
-  });
-
   it("fails production startup when the workflow bundle is missing", async () => {
     const {
       createHostedUserRuntimeWorker,

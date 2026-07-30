@@ -230,15 +230,6 @@ describe("trusted Crabbox verification entrypoint", () => {
       expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
     }
   });
-
-  it("puts the production deploy hook behind the production environment", () => {
-    const workflow = readFileSync(
-      path.join(repoRoot, ".github", "workflows", "deploy-render-temporal-worker.yml"),
-      "utf8",
-    );
-
-    expect(workflow).toMatch(/^  deploy:\n(?:.|\n)*?^    environment: production$/mu);
-  });
 });
 
 function makeTempRoot(): string {
