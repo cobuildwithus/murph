@@ -193,15 +193,15 @@ must exactly match the `read_shared` member used for first-person references;
 display names, handles, and member order are never identity fallbacks. The
 paired mailbox rows are the only durable operation state, and the answer remains
 untrusted data when the private runtime composes its follow-up. A joined-group
-Ask request and its legacy private completion are safe to admit through the
-runtime's narrow pre-checkpoint system prefix because the detached read has no
-resident write or delivery authority and the completion can only use the
-existing output-only delivery surfaces. One shared import policy applies decoded
-adapter validation to every import in that pre-checkpoint pass, including
-follow-up imports and foreground reruns, so consented-member requests and
-reviewed completions remain on the ordinary checkpoint path. This starts the
-separate read or private continuation without publishing the routine idle
-snapshot early. Each joined-group completion that predates pending personal
+Ask request and every accepted-input completion are safe to admit through the
+runtime's narrow pre-checkpoint system prefix: the detached read has no resident
+write or delivery authority, and every completion can use only the existing
+output-only continuation or fixed fallback surface. Consented-member requests
+still wait for the ordinary checkpoint boundary before starting private work,
+but a completed reviewed answer no longer waits for a routine idle snapshot.
+The existing causal cutoff, session binding, deterministic outbox key, and
+provider-entry authority recheck own ordering and replay safety without a
+second checkpoint gate. Each joined-group completion that predates pending personal
 input owns one foreground-causal assistant pass and queues its response through
 the ordinary idempotent outbox. A progressed safe causal pass re-enters that
 same bounded pass loop so another already-imported safe item cannot fall back to
@@ -308,14 +308,18 @@ or general agent registry.
 
 For a consented member or one-time current-sender target, the private read-only
 child receives the exact permission context and produces a candidate from the
-member workspace. One
-separate fresh-context outgoing reviewer then receives only that immutable
+member workspace. One separate fresh-context outgoing reviewer receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
 history, application tools, network, or delivery authority and returns only `allow` or
 `deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
-placed on the bound group completion and delivered as the exact reviewed bytes
-without another model turn. Denial or a candidate-declared cannot-answer yields
-fixed non-disclosing copy. Invalid review output, provider failure, or stale
+placed on the bound group completion as untrusted data. For accepted-input
+requests, the caller group Murph runs one isolated output-only continuation with
+the existing room history, resolves references such as “that”, and writes the
+actual user-facing reply using only private facts present in the reviewed
+answer. The final outbox intent retains the completion id, expiry, and route
+proof for provider-entry revalidation. Denial or a candidate-declared
+cannot-answer yields fixed non-disclosing copy without another model turn.
+Invalid review output, provider failure, or stale
 authority discloses nothing and follows the existing retry, expiry, or terminal
 lifecycle. A denied candidate never becomes durable operation state. This adds no
 fan-out, scheduler, policy engine, result table, or second service.
@@ -574,8 +578,11 @@ enter later attended and scheduled hosted group turns, and saved room voice
 enters later generated voice
 output. They never read, inherit, or mutate a speaker's private Murph
 preferences. Group email may apply the room's already saved style but cannot
-mutate it. Model and reasoning controls remain unavailable to group runtimes and
-continue to use their separate relation-derived resolution.
+mutate it. Group provider and reasoning controls remain unavailable. The
+separate room-scoped `murph.assistant_configuration` contract may read or change
+only the synthetic room member's model from an authenticated, accepted Linq or
+Telegram group turn; it never reads or changes a participant's private
+configuration.
 
 Model and reasoning
 changes remain exclusively owned by `murph.assistant_configuration`. The
@@ -592,8 +599,13 @@ reasoning effort on that next turn's `turn/start`, matching Codex's native
 model-switch lifecycle instead of rebuilding context from a fresh thread.
 Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
-sole durable owner, and a later invocation rereads the preference there. Idle
-maintenance attributes compaction usage to the model actually bound to the
+sole durable owner, and a later invocation rereads the preference there.
+For a synthetic thread-container member, the same input-bound path accepts
+model changes only. Null retains the existing relation-derived Sol default,
+while explicit Luna or Terra choices use the member's existing nullable model
+field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
+identity, plan state, or private preference enters the room path.
+Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
 cannot be priced. The
 runtime and web control plane
@@ -698,12 +710,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   billing-gated control facts. Active personal members may select Luna or
   Terra; only an active paid Edge personal member may select Sol. The common
   reasoning set is `low`/`medium`/`high`/`xhigh`, with Terra and low represented
-  by absent overrides. Synthetic thread-container members remain
-  non-configurable and derive a Sol invocation override from their existing
-  relation. The signed hosted-workspace read projects eligible non-default
-  values or that derived override to Cloudflare for the next invocation; a
-  running turn keeps the target it started with, and neither the vault nor the
-  hosted workspace snapshot stores a second preference.
+  by absent personal overrides. Synthetic thread-container members derive Sol
+  from their existing relation when the nullable model field is absent and may
+  store an explicit Luna or Terra room override through accepted group input.
+  Their provider and reasoning remain fixed to OpenAI and `low`. The signed
+  hosted-workspace read projects the resolved personal or room model to
+  Cloudflare for the next invocation; a running turn keeps the target it
+  started with, and neither the vault nor the hosted workspace snapshot stores
+  a second preference.
 
   Monthly and valid in-window trial allowance remain measured and noticed,
   retaining requested-model and served-model attribution. Subsequent
