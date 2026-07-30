@@ -423,7 +423,7 @@ describe('assistant group-chat style guidance', () => {
       'Never sleep more than 10 seconds total.',
     )
     expect(normalized).toContain(
-      'Human-owned and otherwise silent beats never sleep.',
+      'A beat already known to be human-owned or otherwise silent never sleeps; a refreshed beat that becomes one takes no further sleep.',
     )
     expect(normalized).toContain(
       'Do not answer each accepted message separately. Respond once to the current beat, never recap the burst point by point',

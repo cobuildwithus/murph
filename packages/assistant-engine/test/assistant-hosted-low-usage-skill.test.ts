@@ -80,6 +80,14 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'even when the underlying transport supports reply bubbles',
     )
+    expect(skill).toContain(
+      'The second is a one-bubble\n' +
+      'group example with no delimiter',
+    )
+    expect(skill).toContain(
+      "Maya won yesterday's step challenge with 14,320 steps. 🏆\n\n" +
+      "Heads-up: we're running low on Murph time",
+    )
     expect(skill).toContain('begins after one final `---` line')
     expect(skill).toContain('may still use earlier natural')
     expect(skill).toContain('current message already asks about usage')

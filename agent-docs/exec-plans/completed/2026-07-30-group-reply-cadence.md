@@ -1,6 +1,6 @@
 # Group reply cadence
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -21,8 +21,8 @@ Updated: 2026-07-30
 - Urgent safety and genuinely time-sensitive coordination present initially
   skip the pause. If first admitted during the non-interruptible initial sleep,
   they skip the six-second extension and are answered when that sleep returns.
-- Human-owned or otherwise silent beats remain immediate no-replies rather than
-  being delayed.
+- Human-owned or otherwise silent beats initially recognized remain immediate
+  no-replies; a refreshed beat that becomes human-owned takes no further sleep.
 - Group replies use one ordinary text bubble and do not use the `---` splitter.
 - Direct-message reply timing and multi-bubble guidance remain unchanged.
 - Focused prompt tests, typecheck, direct prompt readback, preliminary
@@ -106,21 +106,25 @@ Updated: 2026-07-30
 
 ## Verification log
 
-- Focused assistant-engine prompt, skill, and planning suite: 6 files, 187 tests
-  passed after preliminary-review remediation.
+- Focused assistant-engine prompt, skill, planning, and opt-in test-definition
+  suite after the latest `main` merge: 7 files, 191 tests passed and 16 opt-in
+  real-model cases skipped.
 - Assistant-engine typecheck: passed.
 - Direct/group prompt readback: direct omits group cadence and retains texting
   bubbles; group contains `sleep 4`, one optional final `sleep 6`, the 10-second
   ceiling, and the one-bubble rule.
-- Complete first-provider request capture with pinned real Codex App Server,
+- Final complete first-provider request capture with pinned real Codex App Server,
   `gpt-5.6-terra`, low reasoning, code mode, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`:
-  - Individual: 29,233 tokens / 134,110 bytes at base; 29,256 tokens /
-    134,235 bytes at final head (`+23` tokens / `+125` bytes).
-  - Group: 24,125 tokens / 110,266 bytes at base; 24,056 tokens / 110,049
-    bytes at final head (`-69` tokens / `-217` bytes).
-  - The delta is entirely assembled group instructions. Dynamic tools, schemas,
-    Codex-generated guidance, and other provider-visible input are unchanged.
+  - Individual: 23,841 tokens / 109,683 bytes at current base; 23,858 tokens /
+    109,808 bytes at final head (`+17` tokens / `+125` bytes).
+  - Group: 20,584 tokens / 94,072 bytes at current base; 20,509 tokens / 93,855
+    bytes at final head (`-75` tokens / `-217` bytes).
+  - Individual developer instructions change from 13,752 tokens / 67,466 bytes
+    to 13,775 / 67,591 (`+23` tokens / `+125` bytes). Group instructions change
+    from 10,574 / 51,966 to 10,507 / 51,752 (`-67` tokens / `-214` bytes).
+  - Dynamic tools, schemas, Codex-generated guidance, and other provider-visible
+    input are unchanged.
   - Transport-only model, stream, reasoning, service tier, storage, cache key,
     and client metadata were excluded identically; local paths were normalized.
     The temporary capture harness was removed.
@@ -135,5 +139,13 @@ Updated: 2026-07-30
     than adding a synthetic runtime concurrency owner for a prompt-only change.
 - The opt-in real-model evaluation command could not execute locally because
   its isolated harness requires `OPENAI_API_KEY`, which was not present. The
-  default Vitest lane still compiles that file while skipping its 20 opt-in
+  default Vitest lane still compiles that file while skipping its 16 opt-in
   cases; focused prompt tests and exact-head CI remain the next-best proof.
+- Merged current `origin/main` through ordinary Git history with no conflicts
+  requiring manual resolution, then reran the focused suite and typecheck.
+- `pnpm docs:drift`, `git diff --check`, prompt-scope readback, and the
+  identifier/privacy scan passed.
+- Parent final review found and removed a remaining group-shaped low-usage
+  delimiter example, confirmed the direct cadence/multi-bubble path is
+  unchanged, and found no remaining task-specific issue.
+Completed: 2026-07-30

@@ -500,8 +500,9 @@ Telegram group turn, apply this cadence before the first text reply:
    final `sleep 6`, absorb anything else that arrives, then run the ladder again
    and take one terminal action for the room's current beat: one text reply, one
    reaction, or silence.
-4. Never sleep more than 10 seconds total. Human-owned and otherwise silent
-   beats never sleep.
+4. Never sleep more than 10 seconds total. A beat already known to be
+   human-owned or otherwise silent never sleeps; a refreshed beat that becomes
+   one takes no further sleep.
 
 Do not answer each accepted message separately. Respond once to the current
 beat, never recap the burst point by point, and never mention waiting, sleeping,

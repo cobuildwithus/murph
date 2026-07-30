@@ -166,7 +166,9 @@ Use the current scenario:
   useful, then offer to help make the remaining usage last. Do not manufacture
   a commercial option.
 
-Natural examples of the final segment:
+Natural examples of the final segment follow. The first is a direct example
+whose reply style expressly permits the delimiter. The second is a one-bubble
+group example with no delimiter:
 
 ```text
 You walked 4.2 miles at an easy, steady pace.
@@ -176,7 +178,7 @@ Quick heads-up: our time may pause until August 3 if usage runs out. If you want
 
 ```text
 Maya won yesterday's step challenge with 14,320 steps. 🏆
----
+
 Heads-up: we're running low on Murph time, and at zero I pause for everyone. Who wants to sponsor the next round at https://www.withmurph.ai/groups/fund/example_join_code?
 ```
 
