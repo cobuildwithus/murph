@@ -111,8 +111,6 @@ function HostedSettingsIdentityMutationContent({
       ? Boolean(account.email.address)
       : Boolean(account.telegram.telegramUserId);
 
-  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
-
   if (!clientSessionMatchesAppSession) {
     return (
       <HostedSettingsIdentityDialogFrame
@@ -121,19 +119,9 @@ function HostedSettingsIdentityMutationContent({
         onOpenChange={onOpenChange}
       >
         {ready ? (
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-muted-foreground">
-              Your sign-in changed. Sign in again using a login method already linked
-              to this Murph account before changing a linked account.
-            </p>
-            <Button type="button" size="xl" className="w-full" onClick={onClientAuthRequired}>
-              Sign in again
-            </Button>
-          </div>
+          <HostedIdentitySessionMismatch onSignInAgain={onClientAuthRequired} />
         ) : (
-          <p aria-live="polite" className="text-sm text-muted-foreground">
-            Preparing secure account linking…
-          </p>
+          <HostedIdentitySessionLoading />
         )}
       </HostedSettingsIdentityDialogFrame>
     );
@@ -161,9 +149,7 @@ function HostedSettingsIdentityMutationContent({
       {initialMode === "phone" ? (
         <HostedPhoneSettings
           authenticated
-          autoOpen
           expectedPrivyUserId={expectedPrivyUserId}
-          initialPhoneNumber={account.phone.number}
           onLinked={onSynced}
           privySessionMatchesAppSession={privySessionMatchesAppSession}
         />
@@ -193,6 +179,42 @@ function HostedSettingsIdentityMutationContent({
         />
       ) : null}
     </HostedSettingsIdentityDialogFrame>
+  );
+}
+
+export function HostedIdentitySessionLoading() {
+  return (
+    <p aria-live="polite" className="text-sm text-muted-foreground">
+      Preparing secure account linking…
+    </p>
+  );
+}
+
+export function HostedIdentitySessionMismatch({
+  disabled = false,
+  onSignInAgain,
+  pending = false,
+}: {
+  disabled?: boolean;
+  onSignInAgain: () => Promise<void> | void;
+  pending?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-6 text-muted-foreground">
+        Your sign-in changed. Sign in again using a login method already linked
+        to this Murph account before changing a linked account.
+      </p>
+      <Button
+        type="button"
+        size="xl"
+        className="w-full"
+        disabled={disabled}
+        onClick={() => void onSignInAgain()}
+      >
+        {pending ? "Signing out…" : "Sign in again"}
+      </Button>
+    </div>
   );
 }
 

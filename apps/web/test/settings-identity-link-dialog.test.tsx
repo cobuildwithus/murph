@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
   openAuthDialog: vi.fn(),
   refresh: vi.fn(),
+  usePrivy: vi.fn(),
   useUser: vi.fn(),
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
@@ -19,10 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({
-    authenticated: true,
-    ready: true,
-  }),
+  usePrivy: mocks.usePrivy,
   useUser: mocks.useUser,
 }));
 
@@ -133,6 +131,10 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.telegramCardProps = [];
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    ready: true,
+  });
   mocks.useUser.mockReturnValue({
     user: {
       id: "privy-user-a",
@@ -234,6 +236,47 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).not.toContain("Privy hand-off child");
       expect(container.textContent).not.toContain("Link telegram child");
       expect(mocks.telegramCardProps).toEqual([]);
+
+      const signInAgainButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes("Sign in again"),
+      );
+      expect(signInAgainButton).toBeTruthy();
+
+      await act(async () => {
+        signInAgainButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("shows a loading state before Privy is ready without mounting mutation children", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      ready: false,
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "phone",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+      { requireButton: false },
+    );
+
+    try {
+      expect(container.textContent).toContain("Preparing secure account linking");
+      expect(container.textContent).not.toContain("Link phone child");
+      expect(container.textContent).not.toContain("Sign in again");
     } finally {
       await cleanup();
     }

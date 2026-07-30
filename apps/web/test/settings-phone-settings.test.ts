@@ -1,5 +1,4 @@
 import { act, createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -97,94 +96,23 @@ describe("HostedPhoneSettings", () => {
     }
   });
 
-  it("renders the member's routed Murph SMS link when available", async () => {
-    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-
-    const markup = renderToStaticMarkup(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: "+15550100002",
-        murphPhoneNumber: "+15550100001",
-        privySessionMatchesAppSession: true,
-      }),
-    );
-
-    expect(markup).toContain("•••• 0002");
-    expect(markup).toContain("Text Murph");
-    expect(markup).toContain('href="sms:+15550100001"');
-  });
-
-  it("omits the Murph SMS link when no routed number is available", async () => {
-    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-
-    const markup = renderToStaticMarkup(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: "+15550100002",
-        murphPhoneNumber: null,
-        privySessionMatchesAppSession: true,
-      }),
-    );
-
-    expect(markup).not.toContain("href=\"sms:");
-  });
-
-  it("keeps an unconnected phone number compact until the member opens Privy linking", async () => {
+  it("renders the provider action directly with a stable status region", async () => {
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
 
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
       }),
     );
     cleanupRender = cleanup;
 
-    expect(container.textContent).toContain("Phone");
-    expect(container.textContent).toContain("Not connected");
-    expect(container.textContent).toContain("Link phone");
-    expect(container.textContent).not.toContain("Verify phone");
-
-    const linkButton = findButton(container, "Link phone");
-    expect(linkButton).toBeTruthy();
-
-    await act(async () => {
-      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
-    });
-
     expect(container.textContent).toContain("Verify phone");
-    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Not connected");
+    expect(container.querySelector('[aria-live="polite"]')).toBeTruthy();
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe("");
   });
-
-  it.each([
-    [null, "Verify phone"],
-    ["+15550100002", "Verify a new phone"],
-  ] as const)(
-    "opens the dialog phone action directly without a duplicate account card for %s",
-    async (initialPhoneNumber, actionLabel) => {
-      const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-
-      const { cleanup, container } = await renderClientComponent(
-        createElement(HostedPhoneSettings, {
-          authenticated: true,
-          autoOpen: true,
-          expectedPrivyUserId: "privy-user-a",
-          initialPhoneNumber,
-          privySessionMatchesAppSession: true,
-        }),
-        { requireButton: false },
-      );
-      cleanupRender = cleanup;
-
-      expect(container.textContent).toContain(actionLabel);
-      expect(container.textContent).not.toContain("Not connected");
-      expect(container.textContent).not.toContain("•••• 0002");
-    },
-  );
 
   it("uses Privy's link-phone flow and syncs the linked account exactly once", async () => {
     const onLinked = vi.fn();
@@ -192,9 +120,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        autoOpen: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         onLinked,
         privySessionMatchesAppSession: true,
       }),
@@ -207,6 +133,7 @@ describe("HostedPhoneSettings", () => {
 
     expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
     expect(mocks.updatePhone).not.toHaveBeenCalled();
+    expect(findButton(container, "Opening")?.getAttribute("aria-busy")).toBe("true");
 
     await act(async () => {
       mocks.linkAccountCallbacks?.onSuccess?.({
@@ -258,9 +185,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        autoOpen: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: "+15550100002",
         privySessionMatchesAppSession: true,
       }),
     );
@@ -294,29 +219,6 @@ describe("HostedPhoneSettings", () => {
     });
   });
 
-  it("uses link-phone when only the Murph snapshot has a phone", async () => {
-    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-    const { cleanup, container } = await renderClientComponent(
-      createElement(HostedPhoneSettings, {
-        authenticated: true,
-        autoOpen: true,
-        expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: "+15550100002",
-        privySessionMatchesAppSession: true,
-      }),
-    );
-    cleanupRender = cleanup;
-
-    await act(async () => {
-      findButton(container, "Verify a new phone")?.dispatchEvent(
-        new Event("click", { bubbles: true }),
-      );
-    });
-
-    expect(mocks.linkPhone).toHaveBeenCalledTimes(1);
-    expect(mocks.updatePhone).not.toHaveBeenCalled();
-  });
-
   it("blocks provider mutation when the client Privy user differs from the app session", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
@@ -330,9 +232,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        autoOpen: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
       }),
     );
@@ -353,9 +253,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        autoOpen: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         privySessionMatchesAppSession: false,
       }),
     );
@@ -376,9 +274,7 @@ describe("HostedPhoneSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        autoOpen: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
       }),
     );
@@ -397,7 +293,7 @@ describe("HostedPhoneSettings", () => {
     expect(mocks.finalizeHostedPhoneLink).not.toHaveBeenCalled();
   });
 
-  it("does not use Privy client phone state as the displayed phone authority", async () => {
+  it("does not infer an update flow from linked-account projections alone", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: {
@@ -413,17 +309,17 @@ describe("HostedPhoneSettings", () => {
     });
 
     const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
-    const markup = renderToStaticMarkup(
+    const { cleanup, container } = await renderClientComponent(
       createElement(HostedPhoneSettings, {
         authenticated: true,
         expectedPrivyUserId: "privy-user-a",
-        initialPhoneNumber: null,
         privySessionMatchesAppSession: true,
       }),
     );
+    cleanupRender = cleanup;
 
-    expect(markup).toContain("Not connected");
-    expect(markup).not.toContain("•••• 0002");
+    expect(findButton(container, "Verify phone")).toBeTruthy();
+    expect(findButton(container, "Verify a new phone")).toBeUndefined();
   });
 });
 
