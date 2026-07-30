@@ -260,7 +260,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overall AI usage, credits, and missions">
+      <StudySection title="Overall AI usage, referral details, and history">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
