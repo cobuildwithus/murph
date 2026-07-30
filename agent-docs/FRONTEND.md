@@ -81,7 +81,6 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Before implementation, think deeply about the UX and choose the simplest complete experience. Remove anything unnecessary; the bar is something Steve Jobs would be proud of.
 - Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, the separate UI double-check, and any applicable final ReviewGPT gate.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.

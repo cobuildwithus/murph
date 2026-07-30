@@ -13,13 +13,12 @@ Updated: 2026-07-30
 
 - `AGENTS.md` tells frontend implementers to think deeply about UX and build the
   simplest complete version.
-- `agent-docs/FRONTEND.md` repeats the rule at the implementation boundary.
-- The frontend specialist lens uses the same simplicity bar.
+- The frontend specialist lens enforces the same simplicity bar without
+  second-guessing product-owned requirements.
 
 ## Scope
 
-- In scope: `AGENTS.md`, `agent-docs/FRONTEND.md`, and the frontend specialist
-  lens.
+- In scope: `AGENTS.md` and the frontend specialist lens.
 - Out of scope: new checklists, artifacts, tooling, or workflow machinery.
 
 ## Constraints
@@ -29,12 +28,13 @@ Updated: 2026-07-30
 
 ## Risks and mitigations
 
-1. Risk: The instruction gets buried in process language.
-   Mitigation: use the same direct sentence in the three existing owners.
+1. Risk: Simplicity language could encourage removal of required UX.
+   Mitigation: explicitly preserve required behavior, states, accessibility,
+   responsiveness, and recovery.
 
 ## Tasks
 
-1. Add the rule to the three existing owners.
+1. Add the rule to the two existing owners.
 2. Read back the diff and run text-only verification.
 3. Complete the prompt-primary review and commit path.
 
