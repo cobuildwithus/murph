@@ -29,6 +29,7 @@ interface SharedFlowProps {
   phoneFieldDescription?: string | null;
   phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
+  phoneInputDisabled: boolean;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
   sendCodeDisabled: boolean;
@@ -128,6 +129,7 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
       phoneFieldDescription={props.phoneFieldDescription}
       phoneFieldLabel={props.phoneFieldLabel}
       phoneInputAutoFocus={props.phoneInputAutoFocus}
+      phoneInputDisabled={props.phoneInputDisabled}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
       phoneNumber={props.phoneNumber}

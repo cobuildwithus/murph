@@ -53,6 +53,8 @@ interface HostedPhoneAuthControllerInput {
   intent?: HostedPhoneAuthIntent;
   interactionGated?: boolean;
   onAuthCancel?: () => void;
+  onAuthQueue?: () => boolean;
+  onAuthQueueCancel?: () => void;
   onAuthStart?: () => boolean;
   onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
@@ -70,6 +72,8 @@ export function useHostedPhoneAuthController({
   intent = "auth",
   interactionGated = false,
   onAuthCancel,
+  onAuthQueue,
+  onAuthQueueCancel,
   onAuthStart,
   onAuthenticated,
   onCodeSent,
@@ -103,6 +107,7 @@ export function useHostedPhoneAuthController({
   const lastAutoSubmittedCodeRef = useRef<string | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
   const phoneCodeSendInFlightRef = useRef(false);
+  const queuedPhoneCodeSendRef = useRef<string | null>(null);
   const interactionGatedRef = useRef(interactionGated);
   interactionGatedRef.current = interactionGated;
 
@@ -145,10 +150,21 @@ export function useHostedPhoneAuthController({
     ? null
     : pendingAction;
 
+  const activeQueuedPhoneCodeSend =
+    intent !== "link" && authenticated ? null : queuedPhoneCodeSend;
+  const presentedPendingAction =
+    activeQueuedPhoneCodeSend !== null
+      ? "send-code"
+      : effectivePendingAction;
   const flowDisabled =
-    interactionGated || !ready || effectivePendingAction !== null;
+    interactionGated
+    || activeQueuedPhoneCodeSend !== null
+    || effectivePendingAction !== null;
   const phoneEntrySendCodeDisabled =
-    interactionGated || effectivePendingAction !== null || !normalizedPhoneNumber;
+    interactionGated
+    || activeQueuedPhoneCodeSend !== null
+    || effectivePendingAction !== null
+    || !normalizedPhoneNumber;
   const keepDelegatedVerificationMounted =
     onAuthenticated !== undefined
     && effectivePendingAction === "verify-code"
@@ -193,7 +209,8 @@ export function useHostedPhoneAuthController({
     intent,
     phoneFieldDescription: null,
     phoneFieldLabel: null,
-    pendingAction: effectivePendingAction,
+    phoneInputDisabled: interactionGated,
+    pendingAction: presentedPendingAction,
     phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
     phoneNumber,
     sendCodeDisabled: phoneEntrySendCodeDisabled,
@@ -204,13 +221,13 @@ export function useHostedPhoneAuthController({
       setCode(normalizeHostedPhoneVerificationCode(value));
     },
     onPhoneCountryChange: (code: string) => {
-      if (interactionGatedRef.current) return;
-      setQueuedPhoneCodeSend(null);
+      if (interactionGatedRef.current || phoneCodeSendInFlightRef.current) return;
+      cancelQueuedPhoneCodeSend();
       setPhoneCountryCode(code);
     },
     onPhoneNumberChange: (value: string) => {
-      if (interactionGatedRef.current) return;
-      setQueuedPhoneCodeSend(null);
+      if (interactionGatedRef.current || phoneCodeSendInFlightRef.current) return;
+      cancelQueuedPhoneCodeSend();
       setPhoneNumber(value);
     },
     onResendCode: handleResendCode,
@@ -230,7 +247,7 @@ export function useHostedPhoneAuthController({
     updateFinalizationState("idle");
     setCode("");
     setPhoneVerificationAttempt(null);
-    setQueuedPhoneCodeSend(null);
+    clearQueuedPhoneCodeSend();
   }
 
   const submitVerificationCodeEffect = useEffectEvent((submittedCode: string) => {
@@ -241,8 +258,15 @@ export function useHostedPhoneAuthController({
       resetAuthenticatedSessionRestart: true,
     });
   });
-  const activeQueuedPhoneCodeSend =
-    intent !== "link" && authenticated ? null : queuedPhoneCodeSend;
+  const dropQueuedPhoneCodeSendEffect = useEffectEvent(() => {
+    if (queuedPhoneCodeSendRef.current === null) return;
+    clearQueuedPhoneCodeSend();
+    if (onAuthQueueCancel) {
+      onAuthQueueCancel();
+      return;
+    }
+    onAuthCancel?.();
+  });
 
   useEffect(() => {
     if (!authenticated) {
@@ -273,6 +297,12 @@ export function useHostedPhoneAuthController({
     normalizedVerificationCode,
     phoneVerificationAttempt,
   ]);
+
+  useEffect(() => {
+    if (queuedPhoneCodeSend && !activeQueuedPhoneCodeSend) {
+      dropQueuedPhoneCodeSendEffect();
+    }
+  }, [activeQueuedPhoneCodeSend, queuedPhoneCodeSend]);
 
   useEffect(() => {
     if (
@@ -314,9 +344,7 @@ export function useHostedPhoneAuthController({
     }
 
     if (!ready) {
-      setErrorMessage(null);
-      setRequiresAuthenticatedSessionRestart(false);
-      setQueuedPhoneCodeSend(nextPhoneNumber);
+      queuePhoneCodeSend(nextPhoneNumber);
       return;
     }
 
@@ -336,13 +364,16 @@ export function useHostedPhoneAuthController({
     if (
       interactionGatedRef.current
       || phoneCodeSendInFlightRef.current
-      || (onAuthStart && !onAuthStart())
     ) {
+      return;
+    }
+    if (onAuthStart && !onAuthStart()) {
+      cancelQueuedPhoneCodeSend();
       return;
     }
 
     phoneCodeSendInFlightRef.current = true;
-    setQueuedPhoneCodeSend(null);
+    clearQueuedPhoneCodeSend();
 
     try {
       await runHostedPhonePendingAction({
@@ -403,8 +434,7 @@ export function useHostedPhoneAuthController({
 
     if (resendTarget.kind === "active-attempt") {
       if (!ready) {
-        setErrorMessage(null);
-        setQueuedPhoneCodeSend(resendTarget.phoneNumber);
+        queuePhoneCodeSend(resendTarget.phoneNumber);
         return;
       }
 
@@ -525,7 +555,11 @@ export function useHostedPhoneAuthController({
 
   function handleResetPhoneAuthFlow() {
     if (interactionGatedRef.current) return;
-    onAuthCancel?.();
+    if (queuedPhoneCodeSendRef.current !== null) {
+      cancelQueuedPhoneCodeSend();
+    } else {
+      onAuthCancel?.();
+    }
     resetPhoneAuthFlow();
   }
 
@@ -567,6 +601,41 @@ export function useHostedPhoneAuthController({
       setPendingAction,
       updateFinalizationState,
     });
+  }
+
+  function queuePhoneCodeSend(nextPhoneNumber: string) {
+    if (
+      interactionGatedRef.current
+      || phoneCodeSendInFlightRef.current
+      || queuedPhoneCodeSendRef.current !== null
+      || (onAuthQueue
+        ? !onAuthQueue()
+        : onAuthStart
+          ? !onAuthStart()
+          : false)
+    ) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setRequiresAuthenticatedSessionRestart(false);
+    queuedPhoneCodeSendRef.current = nextPhoneNumber;
+    setQueuedPhoneCodeSend(nextPhoneNumber);
+  }
+
+  function clearQueuedPhoneCodeSend() {
+    queuedPhoneCodeSendRef.current = null;
+    setQueuedPhoneCodeSend(null);
+  }
+
+  function cancelQueuedPhoneCodeSend() {
+    if (queuedPhoneCodeSendRef.current === null) return;
+    clearQueuedPhoneCodeSend();
+    if (onAuthQueueCancel) {
+      onAuthQueueCancel();
+      return;
+    }
+    onAuthCancel?.();
   }
 
   return {

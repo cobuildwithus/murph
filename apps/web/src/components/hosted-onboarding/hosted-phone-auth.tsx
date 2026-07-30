@@ -14,6 +14,8 @@ interface HostedPhoneAuthProps {
   intent?: HostedPhoneAuthIntent;
   interactionGated?: boolean;
   onAuthCancel?: () => void;
+  onAuthQueue?: () => boolean;
+  onAuthQueueCancel?: () => void;
   onAuthStart?: () => boolean;
   onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
@@ -32,6 +34,8 @@ export function HostedPhoneAuth({
   intent = "auth",
   interactionGated = false,
   onAuthCancel,
+  onAuthQueue,
+  onAuthQueueCancel,
   onAuthStart,
   onAuthenticated,
   onCodeSent,
@@ -49,6 +53,8 @@ export function HostedPhoneAuth({
     intent,
     interactionGated,
     onAuthCancel,
+    onAuthQueue,
+    onAuthQueueCancel,
     onAuthStart,
     onAuthenticated,
     onCodeSent,

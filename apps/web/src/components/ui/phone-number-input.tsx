@@ -109,6 +109,7 @@ export function PhoneNumberInput({
   autoComplete = "tel",
   autoFocus = false,
   className,
+  disabled = false,
   id,
   inputClassName,
   inputMode = "tel",
@@ -123,6 +124,7 @@ export function PhoneNumberInput({
   autoComplete?: string;
   autoFocus?: boolean;
   className?: string;
+  disabled?: boolean;
   id: string;
   inputClassName?: string;
   inputMode?: "decimal" | "email" | "numeric" | "search" | "tel" | "text" | "url";
@@ -137,6 +139,7 @@ export function PhoneNumberInput({
   return (
     <div className={cn("flex gap-3", className)}>
       <CountryCodePicker
+        disabled={disabled}
         options={options}
         selectedCountry={selectedCountry}
         onCountryChange={onCountryChange}
@@ -144,8 +147,9 @@ export function PhoneNumberInput({
       <Input
         id={id}
         type="tel"
-        autoFocus={autoFocus}
+        autoFocus={autoFocus && !disabled}
         autoComplete={autoComplete}
+        disabled={disabled}
         inputMode={inputMode}
         name={inputName}
         placeholder={selectedCountry.placeholder}
@@ -181,10 +185,12 @@ const COUNTRY_TRIGGER_CLASS = cn(
 );
 
 function CountryCodePicker({
+  disabled,
   options,
   selectedCountry,
   onCountryChange,
 }: {
+  disabled: boolean;
   options: PhoneNumberCountryOption[];
   selectedCountry: PhoneNumberCountryOption;
   onCountryChange: (code: string) => void;
@@ -194,6 +200,7 @@ function CountryCodePicker({
   if (isMobile) {
     return (
       <CountryCodeDrawer
+        disabled={disabled}
         options={options}
         selectedCountry={selectedCountry}
         onCountryChange={onCountryChange}
@@ -203,6 +210,7 @@ function CountryCodePicker({
 
   return (
     <Combobox
+      disabled={disabled}
       items={options}
       value={selectedCountry}
       itemToStringValue={(option) =>
@@ -217,6 +225,7 @@ function CountryCodePicker({
       <ComboboxTrigger
         aria-label={`Country or region, ${selectedCountry.label} ${selectedCountry.dialCode}`}
         className={COUNTRY_TRIGGER_CLASS}
+        disabled={disabled}
       >
         {selectedCountry.dialCode}
       </ComboboxTrigger>
@@ -240,10 +249,12 @@ function CountryCodePicker({
 }
 
 function CountryCodeDrawer({
+  disabled,
   options,
   selectedCountry,
   onCountryChange,
 }: {
+  disabled: boolean;
   options: PhoneNumberCountryOption[];
   selectedCountry: PhoneNumberCountryOption;
   onCountryChange: (code: string) => void;
@@ -265,6 +276,7 @@ function CountryCodeDrawer({
     <Drawer
       open={open}
       onOpenChange={(next) => {
+        if (disabled && next) return;
         setOpen(next);
         if (!next) setSearch("");
       }}
@@ -274,6 +286,7 @@ function CountryCodeDrawer({
           type="button"
           aria-label={`Country or region, ${selectedCountry.label} ${selectedCountry.dialCode}`}
           className={COUNTRY_TRIGGER_CLASS}
+          disabled={disabled}
         >
           {selectedCountry.dialCode}
           <ChevronDownIcon className="pointer-events-none size-4 text-stone-500" />

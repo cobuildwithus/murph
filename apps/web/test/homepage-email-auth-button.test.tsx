@@ -1,4 +1,8 @@
-import { act, createElement, useState } from "react";
+import {
+  act,
+  createElement,
+  useState,
+} from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -132,6 +136,150 @@ test("HomepageEmailAuthButton prefills an initial email address", async () => {
   ) as HTMLInputElement | null;
 
   expect(emailInput?.value).toBe("buddy@example.com");
+});
+
+test("HostedEmailAuthButton queues one valid send and shows busy feedback until Privy is ready", async () => {
+  const queueAuth = vi.fn(() => true);
+  const startAuth = vi.fn(() => true);
+  let privyReady = false;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: false,
+    ready: privyReady,
+  }));
+
+  function ReadyEmailHarness() {
+    return (
+      <HostedEmailAuthButton
+        active
+        inline
+        onAuthQueue={queueAuth}
+        onAuthQueueCancel={() => {}}
+        onAuthStart={startAuth}
+        onAuthenticated={mocks.onAuthenticated}
+      />
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(ReadyEmailHarness),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  const emailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = rendered.container.querySelector("form");
+  expect(emailInput).toBeTruthy();
+  expect(emailForm).toBeTruthy();
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(rendered.window, emailInput, "user@example.com");
+    }
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  const pendingButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.includes("Sending..."));
+  expect(queueAuth).toHaveBeenCalledTimes(1);
+  expect(startAuth).not.toHaveBeenCalled();
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(pendingButton?.disabled).toBe(true);
+  expect(pendingButton?.getAttribute("aria-busy")).toBe("true");
+  expect(pendingButton?.querySelector('[data-slot="spinner"]')).toBeTruthy();
+
+  privyReady = true;
+  await rendered.rerender(createElement(ReadyEmailHarness));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(startAuth).toHaveBeenCalledTimes(1);
+  expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+  expect(mocks.sendCode).toHaveBeenCalledWith({
+    email: "user@example.com",
+  });
+  expect(rendered.container.textContent).toContain("Verify email");
+});
+
+test("HostedEmailAuthButton releases a queued send when shared ownership is denied", async () => {
+  const queueAuth = vi.fn(() => true);
+  const releaseQueue = vi.fn();
+  const startAuth = vi.fn(() => false);
+  let privyReady = false;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: false,
+    ready: privyReady,
+  }));
+
+  function DeniedEmailHarness() {
+    return (
+      <HostedEmailAuthButton
+        active
+        inline
+        onAuthQueue={queueAuth}
+        onAuthQueueCancel={releaseQueue}
+        onAuthStart={startAuth}
+        onAuthenticated={mocks.onAuthenticated}
+      />
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(DeniedEmailHarness),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  const emailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = rendered.container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(rendered.window, emailInput, "user@example.com");
+    }
+    emailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  expect(queueAuth).toHaveBeenCalledTimes(1);
+  expect(rendered.container.textContent).toContain("Sending...");
+
+  privyReady = true;
+  await rendered.rerender(createElement(DeniedEmailHarness));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  const sendButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.includes("Email me a code"));
+  expect(startAuth).toHaveBeenCalledTimes(1);
+  expect(releaseQueue).toHaveBeenCalledTimes(1);
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(sendButton?.disabled).toBe(false);
+  expect(sendButton?.getAttribute("aria-busy")).toBe("false");
 });
 
 test("HostedEmailAuthButton locks the invite email and sends the code to it", async () => {
