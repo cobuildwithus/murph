@@ -10,40 +10,27 @@ import { useRef, useState } from "react";
 
 import { finalizeHostedPhoneLink } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
 import { Button } from "@/src/components/ui/button";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
-import {
-  ConnectedAccountCard,
-  SettingsContactLink,
-  SettingsStatusLine,
-} from "./connected-account-card";
+import { SettingsStatusLine } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-import {
-  formatMaskedPhoneNumber,
-  toErrorMessage,
-} from "./hosted-settings-utils";
+import { toErrorMessage } from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
   authenticated: boolean;
-  autoOpen?: boolean;
   expectedPrivyUserId: string | null;
-  initialPhoneNumber?: string | null;
-  murphPhoneNumber?: string | null;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   privySessionMatchesAppSession: boolean;
 }) {
   const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser, user: privyUser } = useUser();
-  const [expanded, setExpanded] = useState(Boolean(props.autoOpen));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [linkedPhoneOverride, setLinkedPhoneOverride] = useState<HostedPhoneLinkPayload | null>(null);
   const providerCompletionHandledRef = useRef(false);
 
-  const currentPhoneNumber = linkedPhoneOverride?.phoneNumber ?? props.initialPhoneNumber ?? null;
-  const showLinkForm = expanded;
   const clientSessionMatchesAppSession =
     props.privySessionMatchesAppSession
     && props.expectedPrivyUserId !== null
@@ -93,11 +80,9 @@ export function HostedPhoneSettings(props: {
   async function handleLinked(payload: HostedPhoneLinkPayload) {
     setErrorMessage(null);
     setSuccessMessage("Phone connected.");
-    setLinkedPhoneOverride(payload);
 
     try {
       await props.onLinked?.(payload);
-      setExpanded(false);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "Your number was saved, but the page didn't refresh. Reload to see it."));
     }
@@ -181,64 +166,17 @@ export function HostedPhoneSettings(props: {
         ? "Opening secure phone verification…"
         : sessionIssueMessage);
 
-  const isDialogFlow = Boolean(props.autoOpen);
-  const isChangeFlow = Boolean(isDialogFlow && currentPhoneNumber);
-
   return (
     <div className="space-y-5">
-      {isDialogFlow ? null : (
-        <div className="space-y-2">
-          <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
-        </div>
-      )}
+      <HostedPhoneLinkAction
+        disabled={isLinking || isSyncing || !privyReady || !canLinkPhone}
+        isChangeFlow={shouldUpdatePhone}
+        isLinking={isLinking}
+        isSyncing={isSyncing}
+        onClick={handleLinkPhone}
+      />
 
-      {isDialogFlow ? null : currentPhoneNumber ? (
-        <ConnectedAccountCard
-          value={formatMaskedPhoneNumber(currentPhoneNumber)}
-          action={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setExpanded((value) => !value)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {showLinkForm ? "Cancel" : "Change"}
-            </Button>
-          }
-        />
-      ) : (
-        <ConnectedAccountCard
-          value="Not connected"
-          variant="empty"
-          action={
-            <Button type="button" size="sm" onClick={() => setExpanded(true)}>
-              Link phone
-            </Button>
-          }
-        />
-      )}
-
-      {props.murphPhoneNumber && !isDialogFlow ? (
-        <SettingsContactLink
-          href={`sms:${props.murphPhoneNumber}`}
-          label="Text Murph"
-        >
-          Text Murph
-        </SettingsContactLink>
-      ) : null}
-
-      {showLinkForm ? (
-        <HostedPhoneLinkAction
-          disabled={isLinking || isSyncing || !privyReady || !canLinkPhone}
-          isChangeFlow={isChangeFlow}
-          isLinking={isLinking}
-          isSyncing={isSyncing}
-          onClick={handleLinkPhone}
-        />
-      ) : null}
-
-      {statusMessage ? <SettingsStatusLine message={statusMessage} tone={statusTone} /> : null}
+      <SettingsStatusLine message={statusMessage} tone={statusTone} />
     </div>
   );
 }
@@ -254,10 +192,12 @@ export function HostedPhoneLinkAction(props: {
     <Button
       type="button"
       size="xl"
-      className="w-full"
+      className="w-full disabled:bg-primary disabled:text-primary-foreground disabled:opacity-100"
+      aria-busy={props.isLinking || props.isSyncing}
       disabled={props.disabled}
       onClick={props.onClick}
     >
+      {props.isLinking || props.isSyncing ? <Spinner aria-hidden="true" /> : null}
       {props.isSyncing
         ? "Saving…"
         : props.isLinking

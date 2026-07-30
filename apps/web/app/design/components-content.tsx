@@ -29,6 +29,10 @@ import {
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import { HostedPhoneLinkAction } from "@/src/components/settings/hosted-phone-settings";
 import {
+  HostedIdentitySessionLoading,
+  HostedIdentitySessionMismatch,
+} from "@/src/components/settings/hosted-settings-identity-link-dialog";
+import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
@@ -1486,17 +1490,13 @@ export function ComponentsContent() {
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 Session mismatch
               </p>
-              <HostedPhoneLinkAction
-                disabled
-                isChangeFlow={false}
-                isLinking={false}
-                isSyncing={false}
-                onClick={() => {}}
-              />
-              <p className="text-sm leading-6 text-muted-foreground">
-                Your sign-in changed. Sign in again using a login method already
-                linked to this Murph account before changing a linked account.
+              <HostedIdentitySessionMismatch onSignInAgain={() => {}} />
+            </div>
+            <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Provider loading
               </p>
+              <HostedIdentitySessionLoading />
             </div>
           </div>
         </Section>
