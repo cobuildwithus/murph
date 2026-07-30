@@ -241,7 +241,8 @@ function isNonVisualVercelTelemetryOnlyDiff(diff) {
     .map((line) => ({
       line: line.slice(1).trim(),
       operation: line[0],
-    }));
+    }))
+    .filter(({ line }) => line.length > 0);
 
   const [first, second] = changes;
   return changes.length === 2

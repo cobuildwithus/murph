@@ -231,6 +231,7 @@ diff --git a/apps/web/app/clubs/page.tsx b/apps/web/app/clubs/page.tsx
 +++ b/apps/web/app/clubs/page.tsx
 @@ -4,0 +5 @@
 +import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
++
 @@ -43,0 +45 @@
 +      <VercelTelemetry />
 `;
