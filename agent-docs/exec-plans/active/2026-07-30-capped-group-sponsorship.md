@@ -104,7 +104,16 @@ group's existing capacity owner says more credit is needed.
   suite passes against it. The replacement active-payer index is created
   before the legacy index is dropped, and the predeploy exception is limited
   to the proved check/index relaxation.
-- Pending desktop and mobile design-catalog evidence.
+- The production-component design study was captured at desktop and mobile
+  viewports with synthetic data and uploaded through the design-proof path for
+  PR review. The desktop proof covers the primary activation dialog; the mobile
+  proof covers activation, ordinary participant, active, paused, payment
+  recovery, and one-time recovery states.
+- The required Claude UI double-check was attempted from the task checkout.
+  Opus produced no usable result and was stopped after remaining silent; the
+  prescribed Fable retry reported explicit usage-credit exhaustion. Per the
+  completion workflow this is recorded as a non-blocking gap, not a passed
+  review.
 - Pending preliminary specialist pass, final ReviewGPT pass, exact-head CI, and
   PR-head preflight.
 
