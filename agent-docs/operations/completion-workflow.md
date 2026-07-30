@@ -40,7 +40,8 @@ trigger applies, use local `deep-review` instead. After focused local proof and
 the parent's candidate review, the final gate may establish its immutable
 round-one baseline concurrently with the preliminary specialist pass on the
 same exact pushed head. If either stage finds an accepted issue, later final
-rounds verify the combined remediation delta without resetting that baseline.
+rounds verify only the combined remediation delta and directly affected paths
+without resetting that baseline.
 
 Final review is not a spawned subagent pass. The parent runs an explicit local
 final review after all accepted preliminary and final-gate findings are
