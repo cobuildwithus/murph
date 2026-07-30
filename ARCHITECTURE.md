@@ -61,13 +61,25 @@ synthetic comma-joined handle label is returned as no name rather than exposing
 phone or email handles. The result contains only bounded untrusted display text
 with `ok`, `none`, or `unavailable` status; it grants no authority and creates
 no cache, retry, reconciliation, wake field, or new state owner. New-group setup
-may pass the exact immediately preceding `ok` result into the existing
-`create_join_link` or `post_join_offer` display-name field.
+may pass the exact immediately preceding `ok` result into the model-facing
+`offer_access` action.
+
+`offer_access` is a semantic facade over the existing Web-owned access
+operations, not a new service or state owner. Assistant-engine maps the model's
+exact display name and projection scopes to the trusted runtime. The runtime
+selects `post_join_offer` only for an exact interactive iMessage route and uses
+`create_join_link` for SMS, Telegram, explicit standalone-link requests, and
+scheduled group routes whose durable Linq binding lacks a service subtype. The
+model receives only normalized `native` or `link` presentation semantics; Web
+continues to own group creation, consent copy, dedupe, join URLs, and grants. An
+explicit native offer is suppressed only by a covering active offer, never by
+the scopes already granted by current members, because access may be intended
+for a provider-room participant who has not joined the hosted group yet.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
-the bounded, route-authorized current-turn Linq sender handles already visible
-in the prompt. Web matches those handles against verified phone and email blind
+the bounded, route-authorized current-turn iMessage or SMS sender handles
+already visible in the prompt. Web matches those handles against verified phone and email blind
 indexes selected by the existing group query. A handle appears only in the
 matching member's bounded `currentTurnHandles` array and only when it resolves
 to exactly one current membership; the same row carries the group-scoped
