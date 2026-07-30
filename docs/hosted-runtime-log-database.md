@@ -119,6 +119,24 @@ HOSTED_RUNTIME_LOG_DATABASE_URL
 HOSTED_RUNTIME_LOG_DATABASE_POOL_MAX=5
 ```
 
+The dedicated runtime login role must enforce the server-side query bound:
+
+```sql
+ALTER ROLE <runtime-role> SET statement_timeout = '10s';
+```
+
+The migration preflight verifies that the pooled endpoint reports a positive
+`statement_timeout` no greater than ten seconds. The node-postgres pool uses a
+slightly longer twelve-second client query timeout and deliberately does not
+send `statement_timeout` as a startup parameter: PlanetScale's
+[transaction-mode PgBouncer](https://planetscale.com/docs/postgres/connecting/pgbouncer)
+rejects unallowlisted startup parameters. This follows PlanetScale's
+[connection-resilience guidance](https://planetscale.com/docs/postgres/connection-resilience):
+enforce the database timeout at the role and keep the client timeout slightly
+longer. Do not add `statement_timeout` to PgBouncer's
+`ignore_startup_parameters`, because that would accept the connection while
+silently discarding the server-side bound.
+
 Migration traffic:
 
 ```text
@@ -164,7 +182,8 @@ verifies the canonical schema owner before invoking Prisma.
 
 ## Deployment
 
-1. Provision the isolated Postgres project or cluster and its direct migration
+1. Provision the isolated Postgres project or cluster, its dedicated runtime
+   role with the ten-second `statement_timeout`, and its direct migration
    endpoint.
 2. Set the runtime/direct URLs, pool size, and
    `HOSTED_RUNTIME_LOG_STORAGE=primary` in Vercel production.

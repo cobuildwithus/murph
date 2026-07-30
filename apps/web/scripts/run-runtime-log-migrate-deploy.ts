@@ -55,6 +55,8 @@ export type HostedRuntimeLogEndpointProbeClientFactory = (
   databaseUrl: string,
 ) => HostedRuntimeLogEndpointProbeClient;
 
+const HOSTED_RUNTIME_LOG_MAX_STATEMENT_TIMEOUT_MS = 10_000;
+
 export const hostedRuntimeLogMigrateDeployCommand = {
   args: [
     "--dir",
@@ -195,6 +197,19 @@ async function verifyHostedRuntimeLogPooledDirectIdentity(
     leftConnected = true;
     await right.connect();
     rightConnected = true;
+    const timeoutProbe = await left.query(
+      `SELECT (
+        current_setting('statement_timeout')::interval > interval '0 seconds'
+        AND current_setting('statement_timeout')::interval
+          <= ($1::bigint * interval '1 millisecond')
+      ) AS "configured"`,
+      [HOSTED_RUNTIME_LOG_MAX_STATEMENT_TIMEOUT_MS],
+    );
+    if (timeoutProbe.rows[0]?.configured !== true) {
+      throw new Error(
+        "HOSTED_RUNTIME_LOG_DATABASE_URL must use a role with statement_timeout set to a positive value no greater than 10 seconds.",
+      );
+    }
     await left.query("BEGIN");
     leftTransaction = true;
     await left.query(
