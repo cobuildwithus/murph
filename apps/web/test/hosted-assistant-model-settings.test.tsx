@@ -20,6 +20,19 @@ const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
 }));
 
+vi.mock("next/image", () => ({
+  default(props: {
+    alt: string;
+    "aria-hidden"?: boolean;
+    className?: string;
+    height: number;
+    src: string;
+    width: number;
+  }) {
+    return createElement("img", props);
+  },
+}));
+
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
     readonly code: string | null;
@@ -181,13 +194,38 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Direct managed inference/u,
+    /Direct inference through OpenAI/u,
   );
   await act(async () => {
     findButton(view.container, "Change").click();
   });
-  assert.match(view.document.body.textContent ?? "", /Choose model provider/u);
-  assert.match(view.document.body.textContent ?? "", /Direct managed inference/u);
+  assert.match(view.document.body.textContent ?? "", /Choose provider/u);
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Direct inference through OpenAI/u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Privacy-first routing through Venice/u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /This only changes core replies\. Image generation, voice, search, and other tools still use their specialized providers\./u,
+  );
+  const providerDialog = view.document.querySelector<HTMLElement>(
+    '[role="dialog"]',
+  );
+  assert.ok(providerDialog);
+  assert.ok(
+    providerDialog.querySelector(
+      'img[src="/brand-logos/assistant-providers/openai-light.svg"]',
+    ),
+  );
+  assert.ok(
+    providerDialog.querySelector(
+      'img[src="/brand-logos/assistant-providers/venice-light.svg"]',
+    ),
+  );
   const veniceControl = findProviderRadio(
     view.document,
     HOSTED_ASSISTANT_VENICE_PROVIDER,
@@ -992,7 +1030,7 @@ test("members without active personal access see both provider and model control
   );
   assert.match(markup, /Core replies use.*OpenAI/su);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
-  assert.doesNotMatch(markup, /Choose model provider/u);
+  assert.doesNotMatch(markup, /Choose provider/u);
 });
 
 function findModelRadio(

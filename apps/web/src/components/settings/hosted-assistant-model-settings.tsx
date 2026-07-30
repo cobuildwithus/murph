@@ -12,6 +12,7 @@ import {
   type HostedAssistantProductModel,
   type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
+import Image from "next/image";
 import { useState } from "react";
 
 import {
@@ -83,17 +84,32 @@ const MODEL_OPTIONS = [
 
 const PROVIDER_OPTIONS = [
   {
-    description: "Direct managed inference",
+    description: "Direct inference through OpenAI",
+    logo: {
+      height: 180,
+      src: "/brand-logos/assistant-providers/openai-light.svg",
+      width: 180,
+    },
     name: "OpenAI",
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Managed inference through Venice",
+    description: "Privacy-first routing through Venice",
+    logo: {
+      height: 356,
+      src: "/brand-logos/assistant-providers/venice-light.svg",
+      width: 319,
+    },
     name: "Venice",
     provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
   },
 ] as const satisfies ReadonlyArray<{
   description: string;
+  logo: {
+    height: number;
+    src: string;
+    width: number;
+  };
   name: string;
   provider: HostedAssistantProvider;
 }>;
@@ -189,19 +205,18 @@ export function AssistantProviderDialog({
 }: AssistantProviderDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(28rem,calc(100vw-2rem))] gap-6 overflow-y-auto border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[28rem] md:p-7">
-        <DialogHeader className="gap-2 pr-10">
-          <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal">
-            Choose model provider
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(27rem,calc(100vw-2rem))] gap-5 overflow-y-auto border border-border/80 bg-popover p-5 text-popover-foreground ring-border sm:max-w-[27rem] sm:p-6">
+        <DialogHeader className="gap-1.5 pr-9">
+          <DialogTitle className="font-serif text-xl/7 font-semibold tracking-normal">
+            Choose provider
           </DialogTitle>
           <DialogDescription className="max-w-[38ch] text-sm/6">
-            Choose where Murph runs core assistant inference. Your choice is
-            applied when you save this form.
+            Core replies use this provider after you save.
           </DialogDescription>
         </DialogHeader>
         <RadioGroup
           aria-label="Model provider"
-          className="divide-y divide-border border-y border-border"
+          className="gap-2"
           value={provider}
           onValueChange={(value) => {
             if (!isHostedAssistantProvider(value)) {
@@ -217,10 +232,20 @@ export function AssistantProviderDialog({
               `assistant-provider-${option.provider}-description`;
             return (
               <label
-                className="flex min-h-16 cursor-pointer items-center gap-4 py-3 text-left hover:text-foreground has-[:focus-visible]:rounded-lg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                className="flex min-h-[4.5rem] cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/45 has-[[data-checked]]:border-primary/35 has-[[data-checked]]:bg-primary/[0.035] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
                 htmlFor={`assistant-provider-${option.provider}`}
                 key={option.provider}
               >
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-white/80">
+                  <Image
+                    alt=""
+                    aria-hidden="true"
+                    className="size-8 object-contain [color-scheme:light]"
+                    height={option.logo.height}
+                    src={option.logo.src}
+                    width={option.logo.width}
+                  />
+                </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span
                     className="text-sm font-medium text-foreground"
@@ -229,7 +254,7 @@ export function AssistantProviderDialog({
                     {option.name}
                   </span>
                   <span
-                    className="text-sm text-muted-foreground"
+                    className="text-xs/5 text-muted-foreground"
                     id={descriptionId}
                   >
                     {option.description}
@@ -238,6 +263,7 @@ export function AssistantProviderDialog({
                 <RadioGroupItem
                   aria-describedby={descriptionId}
                   aria-labelledby={titleId}
+                  className="size-5"
                   id={`assistant-provider-${option.provider}`}
                   value={option.provider}
                 />
@@ -245,8 +271,9 @@ export function AssistantProviderDialog({
             );
           })}
         </RadioGroup>
-        <p className="text-sm/6 text-pretty text-muted-foreground">
-          Specialized tools can continue using their own managed providers.
+        <p className="px-1 text-xs/5 text-pretty text-muted-foreground">
+          This only changes core replies. Image generation, voice, search, and
+          other tools still use their specialized providers.
         </p>
       </DialogContent>
     </Dialog>
