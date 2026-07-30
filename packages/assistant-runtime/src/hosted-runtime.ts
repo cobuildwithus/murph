@@ -3195,7 +3195,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const runPreCheckpointConversationWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
-        options: {
+        wakeOptions: {
           shouldContinue?: () => boolean;
           signal?: AbortSignal;
         } = {},
@@ -3217,12 +3217,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
               )
             ),
-          shouldContinue: options.shouldContinue,
-          signal: options.signal,
+          shouldContinue: wakeOptions.shouldContinue,
+          signal: wakeOptions.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
         if (ran) {
           imageAssistantWakePending = false;
+        } else if (
+          latencySeed !== null
+          && !assistantProviderHandoffRequested
+          && !runtimeAbortController.signal.aborted
+          && options.shutdownSignal?.aborted !== true
+        ) {
+          try {
+            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
+              markIdleCheckpointTimerAfterDirtyWork();
+            }
+          } catch {
+            // A runtime wake is only a handoff hint. The provider-entry gate
+            // remains the fail-closed authority when the live read is
+            // temporarily unavailable.
+          }
         }
         return ran;
       };
@@ -3832,7 +3847,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleMaintenance.nextWakeReason === "inbox_media_retention"
           && idleMaintenance.nextWakeAt !== null;
         const immediateRecheckCandidate =
-          immediateDefaultWakeWasNotPresented
+          assistantProviderHandoffRequested
+          || immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
           {

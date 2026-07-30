@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
   transaction: vi.fn(),
   updateHostedMemberAssistantConfigurationTx: vi.fn(),
 }));
@@ -26,6 +27,11 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeRecheckRuntime:
+    mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -55,8 +61,13 @@ describe("assistant model settings route", () => {
     mocks.getPrisma.mockReturnValue({
       $transaction: mocks.transaction,
     });
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_edge",
+    });
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
+      effectiveProviderUpdated: false,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
       provider: "venice",
@@ -102,10 +113,20 @@ describe("assistant model settings route", () => {
       model: "gpt-5.6-sol",
       prisma: { tx: true },
     });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
   it("persists Venice alongside the same Terra product model", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
+      dormantSolPreference: false,
+      effectiveProviderUpdated: true,
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      provider: "venice",
+      solAvailable: true,
+      updated: true,
+    });
     const response = await route.POST(jsonRequest({
       model: "gpt-5.6-terra",
       provider: "venice",
@@ -126,12 +147,17 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      userId: "member_edge",
+    });
   });
 
   it("persists a provider-only change without rewriting model intent", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: true,
+      effectiveProviderUpdated: true,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
       provider: "venice",
@@ -157,6 +183,35 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a committed provider change successful when the recheck signal fails", async () => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      new Error("orchestration unavailable"),
+    );
+    mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
+      dormantSolPreference: false,
+      effectiveProviderUpdated: true,
+      hostedAssistantProviderOverride: "venice",
+      model: "gpt-5.6-terra",
+      provider: "venice",
+      solAvailable: true,
+      updated: true,
+    });
+
+    const response = await route.POST(jsonRequest({
+      provider: "venice",
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      provider: "venice",
+      updated: true,
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
   });
 
   it("rejects Venice before the rollout gate opens", async () => {
@@ -184,6 +239,7 @@ describe("assistant model settings route", () => {
   it("returns the canonical idempotent result", async () => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
+      effectiveProviderUpdated: false,
       hostedAssistantProviderOverride: "venice",
       model: "gpt-5.6-terra",
       provider: "openai",
@@ -204,6 +260,7 @@ describe("assistant model settings route", () => {
       solAvailable: true,
       updated: false,
     });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
   it("returns the stable Edge entitlement error", async () => {

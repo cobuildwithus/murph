@@ -68,6 +68,18 @@ The live ownership split is:
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
 
+Authenticated Settings provider changes reuse that ownership split without
+adding mailbox work. Web commits the provider preference to Postgres, then sends
+the existing payloadless `runtime_recheck_requested` Temporal signal only when
+the effective provider changed. If a warm invocation receives that wake and
+finds no foreground mailbox work, it compares its invocation provider with the
+live Web-owned preference. A mismatch makes the current dirty workspace
+checkpoint immediately and returns the existing `immediateRecheckRequested`
+edge so Cloudflare releases the provider-specific invocation and starts a fresh
+one. A failed best-effort signal leaves the durable preference intact; the next
+invocation and the mandatory provider-entry revalidation remain the recovery
+path. The signal carries no provider value or credential.
+
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
@@ -95,6 +107,9 @@ while dirty and before the idle floor, service fresh foreground input, the
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
+for an otherwise-unserviced runtime wake, compare the invocation provider with
+  the live Web-owned preference; on mismatch, checkpoint immediately and request
+  a fresh invocation before another provider turn
 if the default-mode runtime remains live, import that ahead input immediately;
   during retention-only work or shutdown, leave the durable mailbox row for
   web/Temporal reconciliation

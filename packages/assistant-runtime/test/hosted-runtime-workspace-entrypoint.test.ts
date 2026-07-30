@@ -6515,7 +6515,27 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("waits for the idle window when an external runtime wake has no foreground work", async () => {
+  test.each([
+    {
+      expectImmediateRecheck: false,
+      expectedElapsedBoundaryMs: 850,
+      label: "keeps the idle window when the provider still matches",
+      liveProvider: "openai" as const,
+      slug: "matching_provider",
+    },
+    {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      label: "hands off immediately when the provider changed",
+      liveProvider: "venice" as const,
+      slug: "changed_provider",
+    },
+  ])("$label after an external runtime wake with no foreground work", async ({
+    expectImmediateRecheck,
+    expectedElapsedBoundaryMs,
+    liveProvider,
+    slug,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -6523,6 +6543,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const dirtyWaitStarted = createDeferred<void>();
     let assistantPhaseFinished = false;
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let providerReadCount = 0;
     let snapshotCount = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
@@ -6573,8 +6594,8 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
-          idleCheckpointDelayMs: 500,
+          attemptId: `attempt_synthetic_external_wake_${slug}`,
+          idleCheckpointDelayMs: 1_000,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -6587,7 +6608,7 @@ describe("hosted workspace runtime entrypoint", () => {
           return {
             snapshotRef: createBundleRef({
               hash: "f".repeat(64),
-              key: "users/bundles/member-synthetic/phase-checkpoint-external-wake.bundle.json",
+              key: `users/bundles/member-synthetic/external-wake-${slug}.bundle.json`,
               size: 512,
             }),
           };
@@ -6596,6 +6617,25 @@ describe("hosted workspace runtime entrypoint", () => {
           throw new Error("External wake without foreground work should not import mailbox items.");
         },
         platform: createPlatform({
+          assistantConfigurationToolPort: {
+            async request() {
+              providerReadCount += 1;
+              return {
+                action: "read",
+                result: {
+                  availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                  availableProviders: ["openai", "venice"],
+                  availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                  configurationAvailable: true,
+                  dormantSolPreference: false,
+                  model: "gpt-5.6-terra",
+                  provider: liveProvider,
+                  reasoningEffort: "low",
+                  solAvailable: false,
+                },
+              };
+            },
+          },
           mailboxPort: createMailboxPort({
             events: [],
             items: [],
@@ -6626,9 +6666,10 @@ describe("hosted workspace runtime entrypoint", () => {
       runtimeWakeSignal.notify();
 
       const result = await resultPromise;
+      const elapsedAfterWakeMs = Date.now() - wakeNotifiedAt;
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
-        attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
+        attemptId: `attempt_synthetic_external_wake_${slug}`,
         spy: consoleInfo,
       });
       expect(
@@ -6641,9 +6682,18 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeWakePendingAtCheckpoint: true,
       }));
       assert.equal(snapshotCount, 1);
-      assert.ok(Date.now() - wakeNotifiedAt >= 450);
+      assert.equal(providerReadCount, 1);
+      if (expectImmediateRecheck) {
+        assert.ok(elapsedAfterWakeMs < expectedElapsedBoundaryMs);
+      } else {
+        assert.ok(elapsedAfterWakeMs >= expectedElapsedBoundaryMs);
+      }
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
+      assert.equal(
+        result.immediateRecheckRequested === true,
+        expectImmediateRecheck,
+      );
       assert.equal(result.status, "idle");
     } finally {
       if (previousStdIoLogSetting === undefined) {

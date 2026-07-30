@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Current Guardrails
 
@@ -16,6 +16,14 @@ Last verified: 2026-07-29
   fail closed before provider egress. Rollback removes Web exposure first; it
   does not add a queue, repair pass, provider fallback, or second preference
   owner.
+- An authenticated Settings provider change commits Postgres first and then
+  sends the existing bounded Temporal runtime-recheck signal. A warm invocation
+  uses an otherwise-unserviced wake to compare its provider snapshot with the
+  live preference, checkpoints immediately on mismatch, and returns the
+  existing immediate-recheck edge. Signal failure preserves the durable save;
+  the next invocation and the provider-entry gate remain the fail-closed
+  backstop. This adds no mailbox item, direct wake, provider fallback, queue, or
+  second preference owner.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
   another executor or runs local and remote copies together; an operator may
   retry the same head only after recording a concrete infrastructure failure.

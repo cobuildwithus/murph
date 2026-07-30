@@ -313,7 +313,7 @@ function HostedAssistantModelSettingsForm(
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{
     message: string;
-    tone: "destructive" | "neutral" | "success";
+    tone: "destructive" | "neutral";
   } | null>(null);
   const controlsDisabled = isSaving || !props.configurationAvailable;
   const hasChanges =
@@ -365,12 +365,6 @@ function HostedAssistantModelSettingsForm(
       setDraftProvider(provider);
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
-      setStatus({
-        message: veniceAvailable
-          ? `Saved. New core replies will use ${readProductModelName(response.model)} through ${readProviderName(provider)}. A reply already in progress may finish with your previous choice.`
-          : `Saved. Future core replies will use ${readModelName(response.model)}. An active conversation may take up to three minutes to switch.`,
-        tone: "success",
-      });
     } catch (error) {
       const solNoLongerAvailable =
         error instanceof HostedOnboardingApiError &&
@@ -528,10 +522,12 @@ function HostedAssistantModelSettingsForm(
           {isSaving ? <Spinner aria-hidden="true" /> : null}
           {isSaving ? "Saving…" : "Save change"}
         </Button>
-        <SettingsStatusLine
-          message={status?.message ?? null}
-          tone={status?.tone ?? "neutral"}
-        />
+        {status ? (
+          <SettingsStatusLine
+            message={status.message}
+            tone={status.tone}
+          />
+        ) : null}
       </div>
     </form>
   );

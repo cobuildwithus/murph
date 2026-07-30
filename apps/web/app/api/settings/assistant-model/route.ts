@@ -10,6 +10,13 @@ import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboa
 import {
   updateHostedMemberAssistantConfigurationTx,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "@/src/lib/hosted-onboarding/bounded-post-commit";
+import {
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -44,6 +51,9 @@ export const POST = withJsonError(async (request: Request) => {
     }),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
+  if (result.effectiveProviderUpdated) {
+    await signalHostedProviderChangeBestEffort(auth.member.id);
+  }
 
   return jsonOk({
     dormantSolPreference: result.dormantSolPreference,
@@ -95,4 +105,23 @@ function parseAssistantModelRequestBody(
     ...(body.model === undefined ? {} : { model: body.model }),
     ...(body.provider === undefined ? {} : { provider: body.provider }),
   };
+}
+
+async function signalHostedProviderChangeBestEffort(
+  userId: string,
+): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(undefined);
+  try {
+    await waitForHostedPostCommitOperation({
+      deadlineMs,
+      operation: (abortSignal) =>
+        signalHostedRuntimeRecheckRuntime({
+          abortSignal,
+          userId,
+        }),
+    });
+  } catch {
+    // The durable preference remains authoritative. A later invocation and
+    // the provider-entry gate still revalidate it if this wake is unavailable.
+  }
 }

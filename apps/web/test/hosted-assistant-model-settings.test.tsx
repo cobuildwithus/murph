@@ -251,12 +251,12 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Terra through Venice/u);
   assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
+    /Saved\.|New core replies|reply already in progress/u,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
   assert.ok(isRadioChecked(findModelRadio(
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
@@ -332,10 +332,11 @@ test("a model-only save adopts the server's canonical provider", async () => {
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /New core replies will use Luna through OpenAI\./u,
+    /Saved\.|New core replies|reply already in progress/u,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
 
   view.cleanup();
 });
@@ -457,13 +458,8 @@ test("a combined provider and model save preserves both choices for retry", asyn
     payload: combinedPayload,
     url: "/api/settings/assistant-model",
   });
-  const statusLine = view.container.querySelector<HTMLElement>(
-    '[aria-live="polite"]',
-  );
-  assert.ok(statusLine);
-  assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
   assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
-  assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -505,10 +501,11 @@ test("non-Edge members can explicitly save Luna as their default model", async (
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Luna\./,
+    /Saved\.|Future core replies|active conversation may take/i,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
   assert.ok(isRadioChecked(lunaInput));
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -573,10 +570,11 @@ test("Edge members can explicitly save Sol as their default model", async () => 
     payload: { model: HOSTED_ASSISTANT_SOL_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Sol\./,
+    /Saved\.|Future core replies|active conversation may take/i,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -623,10 +621,11 @@ test("a generic save failure keeps the selected model available to retry", async
     await Promise.resolve();
   });
 
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Sol\./,
+    /Saved\.|Future core replies|active conversation may take/i,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
   assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
 
@@ -940,10 +939,11 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_TERRA_MODEL));
   assert.ok(isRadioChecked(lunaInput));
-  assert.match(
+  assert.doesNotMatch(
     view.container.textContent ?? "",
-    /Future core replies will use GPT-5\.6 Luna\./,
+    /Saved\.|Future core replies|active conversation may take/i,
   );
+  assert.equal(view.container.querySelector('[aria-live="polite"]'), null);
 
   view.cleanup();
 });
