@@ -884,14 +884,17 @@ name, may reach the owner-contact lookup; ambiguous or suspended matches remain
 unnamed. A profile name therefore wins over a conflicting contact label.
 
 Participant selection remains independent of durable `hasOwnMurph` activation.
-Roster matches remain current-turn `unverifiedOwnerContactLabel` text;
-automatic transcript matches carry explicit `unverified-owner-contact`
-provenance; participant-change labels remain weak one-shot context. None is
-identity, membership, consent, routing, profile, invite, signup, delivery, or
-effect authority, and none can override a registered participant's Murph
-identity. Failures omit optional text without changing the truthful roster,
-signed participant-change fact, or accepted conversation. The full boundary,
-deadline, cache, and rollout contract is recorded in
+Roster matches are exposed to the model as current-turn participant
+`displayName` text. Automatic transcript matches keep explicit internal
+`unverified-owner-contact` provenance but render to the model as
+`Address-book name (display only):`; participant-change labels remain weak
+one-shot context. The stable group prompt treats these values as familiar names
+for natural conversational reference without turning them into identity,
+membership, consent, routing, profile, invite, signup, delivery, or effect
+authority, and they cannot override a registered participant's Murph identity.
+Failures omit optional text without changing the truthful roster, signed
+participant-change fact, or accepted conversation. The full boundary, deadline,
+cache, and rollout contract is recorded in
 `agent-docs/product-specs/ios-address-book-advisory-names.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.

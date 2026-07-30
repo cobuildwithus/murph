@@ -4,29 +4,41 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
+  acceptHostedMemberStripeCheckoutCompletionTx: vi.fn(),
   activateHostedMemberForPositiveSourceTx: vi.fn(),
+  clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  readActiveHostedFamilySponsorship: vi.fn(),
+  lookupHostedAccountGroupIdByStripeSubscriptionId: vi.fn(),
+  readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
+  readHostedMemberPulseTrialBillingDecisionSnapshot: vi.fn(),
+  readHostedMemberStripeBillingLookupState: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   cancelStripeSubscription: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
+  upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
+  updateHostedMemberCoreState: vi.fn(),
+  writeAcceptedHostedMemberPulseTrialBillingTx: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/member-access")
-  >("@/src/lib/hosted-onboarding/member-access");
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
 
   return {
     ...actual,
-    readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
+    lookupHostedAccountGroupIdByStripeSubscriptionId:
+      mocks.lookupHostedAccountGroupIdByStripeSubscriptionId,
+    readHostedMemberFamilyBillingClaim:
+      mocks.readHostedMemberFamilyBillingClaim,
   };
 });
 
@@ -41,6 +53,14 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
 
   return {
     ...actual,
+    acceptHostedMemberStripeCheckoutCompletionTx:
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    clearHostedMemberStripeCheckoutAttemptForSessionTx:
+      mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    readHostedMemberStripeBillingLookupState:
+      mocks.readHostedMemberStripeBillingLookupState,
+    writeAcceptedHostedMemberPulseTrialBillingTx:
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
     writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
   };
 });
@@ -53,6 +73,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   return {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+    readHostedMemberPulseTrialBillingDecisionSnapshot:
+      mocks.readHostedMemberPulseTrialBillingDecisionSnapshot,
+    updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
+    upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx:
+      mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
     upsertHostedMemberStripeCheckoutEmailIfFreshTx:
       mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
   };
@@ -103,11 +129,79 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  applyStripeCheckoutCompleted,
+  applyStripeCheckoutCompleted as applyStripeCheckoutCompletedImpl,
   applyStripeSubscriptionUpdated,
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
+import {
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+
+async function applyStripeCheckoutCompleted(
+  ...args: Parameters<typeof applyStripeCheckoutCompletedImpl>
+): ReturnType<typeof applyStripeCheckoutCompletedImpl> {
+  const session = args[0];
+  const stripeCustomerId =
+    typeof session.customer === "string" ? session.customer : session.customer?.id;
+  const stripeSubscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id;
+  const isDirectCheckout =
+    session.metadata?.kind !== "hosted_family_plan";
+  const isPulseTrialCheckout =
+    session.metadata?.checkoutOffer === "pulse_trial_7d";
+  const stripeCheckoutEmail = (
+    session.customer_details?.email ?? session.customer_email
+  )?.trim().toLowerCase() ?? null;
+  const canonicalSubscription =
+    isDirectCheckout && stripeSubscriptionId
+      ? (
+          !isPulseTrialCheckout
+          && typeof session.subscription === "object"
+            ? session.subscription
+            : await mocks.retrieveStripeSubscription(stripeSubscriptionId)
+        )
+      : null;
+  const preparedCheckoutCompletion =
+    args[4]
+    ?? (
+      isDirectCheckout
+        ? {
+            billingCompletion:
+              stripeCustomerId && stripeSubscriptionId
+                ? {
+                    memberId: "member_123",
+                    stripeCustomerId,
+                    stripeCustomerIdEncrypted: "encrypted-customer",
+                    stripeCustomerLookupKey: "customer-lookup",
+                    stripeSubscriptionId,
+                    stripeSubscriptionIdEncrypted: "encrypted-subscription",
+                    stripeSubscriptionLookupKey: "subscription-lookup",
+                  }
+                : null,
+            canonicalSubscription,
+            memberId: "member_123",
+            stripeCheckoutEmail: stripeCheckoutEmail
+              ? {
+                  address: stripeCheckoutEmail,
+                  addressEncrypted: "encrypted-checkout-email",
+                  memberId: "member_123",
+                }
+              : null,
+          }
+        : undefined
+    );
+  return applyStripeCheckoutCompletedImpl(
+    session,
+    args[1],
+    args[2],
+    args[3],
+    preparedCheckoutCompletion,
+  );
+}
 
 describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
@@ -122,8 +216,30 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue(makeMemberSnapshot());
     mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
+      null,
+    );
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
+    mocks.readHostedMemberCoreState.mockResolvedValue(
+      makeMemberSnapshot().core,
+    );
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot.mockResolvedValue(
+      makePulseTrialDecisionSnapshot(),
+    );
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
+    mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue({
+      stripeCustomerLookupKey:
+        createHostedStripeCustomerLookupKey("cus_123"),
+      stripeSubscriptionLookupKey:
+        createHostedStripeSubscriptionLookupKey("sub_123"),
+    });
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
+      billingRef: {},
+      kind: "accepted",
+    });
+    mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx.mockResolvedValue(
+      true,
+    );
     mocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
         cancel: mocks.cancelStripeSubscription,
@@ -144,6 +260,8 @@ describe("applyStripeCheckoutCompleted", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     });
+    mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx
+      .mockResolvedValue(undefined);
     mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx.mockResolvedValue({
       directPublicSender: null,
       memberId: "member_123",
@@ -153,6 +271,12 @@ describe("applyStripeCheckoutCompleted", () => {
       },
       verifiedEmail: null,
     });
+    mocks.updateHostedMemberCoreState.mockResolvedValue(
+      makeMemberSnapshot({
+        billingStatus: HostedBillingStatus.active,
+      }).core,
+    );
+    mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mockResolvedValue(true);
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeMemberSnapshot({
       billingRef: {
         currentBillingPhase: "trial",
@@ -201,24 +325,42 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledWith(expect.objectContaining({
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_123",
       currentCheckoutOffer: "standard",
       memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeEventCreatedAt: new Date(1_744_416_000 * 1000),
-      stripeSubscriptionId: "sub_123",
+      eventCreatedAt: new Date(1_744_416_000 * 1000),
+      preparedCompletion: expect.objectContaining({
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
       tx: {},
     }));
-    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
-      address: "payer@example.com",
+    expect(
+      mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx,
+    ).toHaveBeenCalledWith({
       collectedAt: new Date(1_744_416_000 * 1000),
       memberId: "member_123",
-      prisma: {},
+      preparedEmail: {
+        address: "payer@example.com",
+        addressEncrypted: "encrypted-checkout-email",
+        memberId: "member_123",
+      },
+      tx: {},
     });
+    expect(
+      mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("cancels rather than binds a direct checkout completed after Family sponsorship", async () => {
-    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
 
     await expect(applyStripeCheckoutCompleted({
       created: 1_744_416_000,
@@ -231,16 +373,25 @@ describe("applyStripeCheckoutCompleted", () => {
       },
       subscription: "sub_superseded",
     } as never, {} as never)).resolves.toMatchObject({
-      cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_superseded",
       welcomeEmailMemberId: null,
     });
 
-    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("cancels a direct subscription event received after Family sponsorship", async () => {
-    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(
+      makeMemberSnapshot(),
+    );
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
     const subscription = {
       ...makePulseTrialSubscription(),
       id: "sub_superseded",
@@ -266,7 +417,268 @@ describe("applyStripeCheckoutCompleted", () => {
       subscriptionCancellationEmail: null,
     });
 
-    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledWith({
+      prisma: {},
+      subscription,
+    });
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("preserves the accepted direct subscription across a later Family claim", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(
+      makeMemberSnapshot(),
+    );
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_123",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    };
+
+    await expect(applyStripeSubscriptionUpdated(
+      subscription as never,
+      {
+        eventCreatedAt: new Date("2025-04-12T00:00:01.000Z"),
+        occurredAt: "2025-04-12T00:00:01.000Z",
+        sourceEventId: "evt_subscription_updated_123",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      subscriptionCancellationEmail: null,
+    });
+
+    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a direct subscription handed to Family across browser and webhook replay", async () => {
+    const clearedDirectProjection = {
+      ...makeMemberSnapshot(),
+      billingRef: null,
+    };
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_123",
+    });
+    mocks.lookupHostedAccountGroupIdByStripeSubscriptionId.mockResolvedValue(
+      "hbag_family",
+    );
+    mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
+    const session = {
+      created: 1_744_416_000,
+      customer: "cus_123",
+      id: "cs_accepted_before_family",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      subscription: "sub_123",
+    };
+
+    for (const sourceEventId of [
+      "checkout-success:cs_accepted_before_family",
+      "evt_checkout_redelivery",
+    ]) {
+      await expect(applyStripeCheckoutCompleted(
+        session as never,
+        {} as never,
+        {
+          eventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
+          occurredAt: "2025-04-12T00:00:00.000Z",
+          sourceEventId,
+          sourceType: "stripe.checkout.session.completed",
+        },
+      )).resolves.toEqual({
+        activatedMemberId: null,
+        activatedMembers: [],
+        hostedExecutionEventId: null,
+        welcomeEmailMemberId: null,
+      });
+    }
+
+    expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["canceled", "incomplete_expired"] as const)(
+    "preserves a terminal Family handoff after %s across browser and webhook replay",
+    async (terminalStatus) => {
+      const clearedDirectProjection = makeMemberSnapshot({
+        billingRef: {
+          checkoutAttemptId: null,
+          checkoutCreatedAt: null,
+          checkoutIntentHash: null,
+          currentCheckoutOffer: null,
+          lastStripeEventCreatedAt: new Date("2025-04-12T00:30:00.000Z"),
+          memberId: "member_123",
+          stripeCheckoutSessionId: null,
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+        },
+      });
+      const canonicalFamilySubscription = {
+        customer: "cus_123",
+        id: "sub_123",
+        metadata: {
+          accountGroupId: "hbag_family",
+          billingPlanCode: "launch_family_monthly",
+          kind: "hosted_family_plan",
+          ownerMemberId: "member_123",
+        },
+        status: terminalStatus,
+      };
+      const tx = {
+        hostedAccountGroup: {
+          findUnique: vi.fn().mockResolvedValue({ ownerMemberId: "member_123" }),
+        },
+      };
+      mocks.findMemberForStripeCheckoutSession.mockResolvedValue(
+        clearedDirectProjection,
+      );
+      mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+        clearedDirectProjection,
+      );
+      mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
+        groupId: "hbag_family",
+        kind: "bound_subscription",
+        ownerMemberId: "member_123",
+      });
+      mocks.readHostedMemberStripeBillingLookupState.mockResolvedValue(null);
+
+      for (const source of ["browser", "webhook"] as const) {
+        if (source === "webhook") {
+          mocks.retrieveStripeSubscription.mockResolvedValueOnce(
+            canonicalFamilySubscription,
+          );
+        }
+        const session = {
+          created: 1_744_416_000,
+          customer: "cus_123",
+          id: "cs_accepted_before_family",
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutAttemptId: "attempt_accepted_before_family",
+            checkoutIntentHash: "intent_accepted_before_family",
+            checkoutOffer: "standard",
+            memberId: "member_123",
+          },
+          subscription:
+            source === "browser" ? canonicalFamilySubscription : "sub_123",
+        };
+
+        const outcome = await applyStripeCheckoutCompleted(
+          session as never,
+          tx as never,
+          {
+            eventCreatedAt: new Date("2025-04-12T00:00:00.000Z"),
+            occurredAt: "2025-04-12T00:00:00.000Z",
+            sourceEventId:
+              source === "browser"
+                ? "checkout-success:cs_accepted_before_family"
+                : "evt_checkout_redelivery",
+            sourceType: "stripe.checkout.session.completed",
+          },
+          undefined,
+        );
+        expect(outcome).toEqual({
+          activatedMemberId: null,
+          activatedMembers: [],
+          hostedExecutionEventId: null,
+          welcomeEmailMemberId: null,
+        });
+        // The reconciliation owner only starts loser cancel/refund cleanup when
+        // this identifier is returned.
+        expect(outcome).not.toHaveProperty(
+          "cleanupStandardCheckoutStripeSubscriptionId",
+        );
+      }
+
+      expect(tx.hostedAccountGroup.findUnique).toHaveBeenCalledTimes(2);
+      expect(mocks.retrieveStripeSubscription).toHaveBeenCalledOnce();
+      expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
+      expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+      expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx)
+        .toHaveBeenCalledTimes(2);
+      expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).not.toHaveBeenCalled();
+      expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
+      expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+      expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+      expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx)
+        .not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a different terminal Family replay on the existing loser-cleanup path", async () => {
+    const clearedDirectProjection = makeMemberSnapshot({
+      billingRef: {
+        checkoutAttemptId: "attempt_new_retry",
+        currentCheckoutOffer: null,
+        lastStripeEventCreatedAt: new Date("2025-04-12T00:30:00.000Z"),
+        memberId: "member_123",
+        stripeCheckoutSessionId: "cs_new_retry",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+      },
+    });
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      clearedDirectProjection,
+    );
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+      kind: "cleanup_superseded",
+    });
+    mocks.retrieveStripeSubscription.mockResolvedValueOnce({
+      customer: "cus_123",
+      id: "sub_different",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    });
+    await expect(applyStripeCheckoutCompleted(
+      {
+        created: 1_744_416_000,
+        customer: "cus_123",
+        id: "cs_different_after_family",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutAttemptId: "attempt_different_after_family",
+          checkoutIntentHash: "intent_different_after_family",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        subscription: "sub_different",
+      } as never,
+      {} as never,
+    )).resolves.toMatchObject({
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_different",
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledOnce();
+    expect(mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx).not.toHaveBeenCalled();
+    expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_different");
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
@@ -283,7 +695,10 @@ describe("applyStripeCheckoutCompleted", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("ignores stale checkout billing refs without dropping the email hint", async () => {
+  it("keeps stale checkout refs from replacing the winner or storing a loser email", async () => {
+    mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValueOnce({
+      kind: "cleanup_superseded",
+    });
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
       billingRef: {
         lastStripeEventCreatedAt: new Date("2026-04-12T02:00:00.000Z"),
@@ -304,19 +719,17 @@ describe("applyStripeCheckoutCompleted", () => {
         } as never,
         {} as never,
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       activatedMemberId: null,
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_old",
       hostedExecutionEventId: null,
-      welcomeEmailMemberId: "member_123",
+      welcomeEmailMemberId: null,
     });
 
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
-      address: "old-payer@example.com",
-      collectedAt: new Date(1_744_412_400 * 1000),
-      memberId: "member_123",
-      prisma: {},
-    });
+    expect(
+      mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("activates a metadata-gated Pulse Trial checkout when the expanded subscription is trialing", async () => {
@@ -337,19 +750,26 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      billingStatus: HostedBillingStatus.active,
-      canonicalBillingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
       currentCheckoutOffer: "pulse_trial_7d",
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      freshnessPolicy: "trial-checkout-entitlement",
+      memberId: "member_123",
       pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
-      pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
+    }));
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      checkoutSessionId: "cs_trial_123",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      preparedCompletion: expect.objectContaining({
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -361,6 +781,22 @@ describe("applyStripeCheckoutCompleted", () => {
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });
+  });
+
+  it("preserves an accepted Pulse Trial owner across a later Family attempt", async () => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
+    });
+
+    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
   });
 
   it("accepts legacy seven-day Pulse Trial checkout metadata for in-flight sessions", async () => {
@@ -385,10 +821,10 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      currentBillingPhase: "trial",
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
       pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
-      stripeSubscriptionId: "sub_123",
     }));
   });
 
@@ -409,10 +845,9 @@ describe("applyStripeCheckoutCompleted", () => {
     });
 
     expect(mocks.retrieveStripeSubscription).toHaveBeenCalledWith("sub_123");
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
-      currentBillingPhase: "trial",
-      stripeSubscriptionId: "sub_123",
-    }));
+    expect(
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx,
+    ).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -481,15 +916,14 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    const [writeInput] =
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mock.calls[0] ?? [];
     expect(writeInput).toEqual(expect.objectContaining({
-      currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentPeriodEnd: null,
       currentPeriodStart: null,
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeSubscriptionId: "sub_123",
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -524,15 +958,14 @@ describe("applyStripeCheckoutCompleted", () => {
       welcomeEmailMemberId: "member_123",
     });
 
-    const [writeInput] = mocks.writeHostedMemberStripeBillingTx.mock.calls[0] ?? [];
+    const [writeInput] =
+      mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mock.calls[0] ?? [];
     expect(writeInput).toEqual(expect.objectContaining({
-      currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
       currentPeriodEnd: null,
       currentPeriodStart: null,
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
-      stripeSubscriptionId: "sub_123",
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
@@ -653,40 +1086,60 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
-  it("does not activate Pulse Trial checkout after a trial has already been redeemed", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        memberId: "member_123",
-        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_123",
-      },
-    }));
+  it("revalidates a core-only Pulse lookup against the redeemed billing identity under lock", async () => {
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(
+      makeMemberSnapshot({
+        billingRef: null,
+        billingStatus: HostedBillingStatus.incomplete,
+      }),
+    );
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          pulseTrialRedeemedAt:
+            new Date("2025-04-12T00:00:00.000Z"),
+          stripeSubscriptionId: "sub_auto_trial",
+        }),
+      );
 
     await expect(
       applyStripeCheckoutCompleted(
-        makePulseTrialCheckoutSession() as never,
+        {
+          ...makePulseTrialCheckoutSession(),
+          subscription: "sub_delayed_checkout",
+        } as never,
         {} as never,
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: "sub_delayed_checkout",
       hostedExecutionEventId: null,
-      welcomeEmailMemberId: "member_123",
+      welcomeEmailMemberId: null,
     });
 
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith({}, "member_123");
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0])
+      .toBeLessThan(
+        mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+          .mock.invocationCallOrder[0] ?? 0,
+      );
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("returns a valid delayed Pulse Trial checkout subscription for loser cleanup", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        memberId: "member_123",
-        pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_auto_trial",
-      },
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          pulseTrialRedeemedAt:
+            new Date("2025-04-12T00:00:00.000Z"),
+          stripeSubscriptionId: "sub_auto_trial",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -714,15 +1167,13 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("returns an exact Pulse Trial checkout for cleanup when active non-trial access has no subscription", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: null,
-      },
-      billingStatus: HostedBillingStatus.active,
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.active,
+          stripeSubscriptionId: null,
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -744,16 +1195,13 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("allows an incomplete member to replace a stale incomplete subscription with a new Pulse Trial", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        pulseTrialRedeemedAt: null,
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_incomplete_old",
-      },
-      billingStatus: HostedBillingStatus.incomplete,
-    }));
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          stripeSubscriptionId: "sub_incomplete_old",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_trial_replacement",
@@ -770,11 +1218,53 @@ describe("applyStripeCheckoutCompleted", () => {
     );
 
     expect(outcome).not.toHaveProperty("cleanupPulseTrialStripeSubscriptionId");
-    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+    expect(mocks.acceptHostedMemberStripeCheckoutCompletionTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        stripeSubscriptionId: "sub_trial_replacement",
+        allowBillingIdentityReplacement: true,
+        preparedCompletion: expect.objectContaining({
+          stripeSubscriptionId: "sub_trial_replacement",
+        }),
       }),
     );
+  });
+
+  it("aborts after acceptance when the billing policy changes unexpectedly", async () => {
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.incomplete,
+          stripeSubscriptionId: "sub_incomplete",
+        }),
+      );
+    mocks.writeAcceptedHostedMemberPulseTrialBillingTx.mockResolvedValueOnce(
+      false,
+    );
+
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          metadata: {
+            ...makePulseTrialMetadata(),
+            checkoutAttemptId: "attempt_123",
+            checkoutIntentHash: "intent_123",
+          },
+          subscription: "sub_trial_replacement",
+        } as never,
+        {} as never,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_POLICY_CHANGED",
+      retryable: true,
+    });
+
+    expect(
+      mocks.acceptHostedMemberStripeCheckoutCompletionTx,
+    ).toHaveBeenCalledOnce();
+    expect(
+      mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("ignores and returns a subscription-created Pulse Trial loser for cleanup", async () => {
@@ -856,25 +1346,61 @@ describe("applyStripeCheckoutCompleted", () => {
     expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
   });
 
-  it("cancels a loser when the locked reread confirms active non-trial access without a subscription", async () => {
-    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: null,
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: null,
+  it("validates and cancels a loser outside the short owner-revalidation transaction", async () => {
+    let transactionActive = false;
+    const prisma = {
+      $transaction: async (run: (tx: object) => Promise<unknown>) => {
+        transactionActive = true;
+        try {
+          return await run({});
+        } finally {
+          transactionActive = false;
+        }
       },
-      billingStatus: HostedBillingStatus.active,
-    }));
+    };
+    mocks.retrieveStripeSubscription.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(false);
+      return {
+        ...makePulseTrialSubscription(),
+        id: "sub_delayed_checkout",
+      };
+    });
+    mocks.readHostedMemberBillingSnapshot.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(true);
+      return makeMemberSnapshot({
+        billingRef: {
+          currentBillingPhase: null,
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: null,
+        },
+        billingStatus: HostedBillingStatus.active,
+      });
+    });
+    mocks.cancelStripeSubscription.mockImplementationOnce(async () => {
+      expect(transactionActive).toBe(false);
+      return {
+        id: "sub_delayed_checkout",
+        status: "canceled",
+      };
+    });
 
     await expect(cancelHostedPulseTrialCheckoutLoserSubscription({
       memberId: "member_123",
-      prisma: {
-        $transaction: async (run: (tx: object) => Promise<unknown>) => run({}),
-      } as never,
+      prisma: prisma as never,
       subscriptionId: "sub_delayed_checkout",
     })).resolves.toBeUndefined();
 
+    expect(
+      mocks.retrieveStripeSubscription.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readHostedMemberBillingSnapshot.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.readHostedMemberBillingSnapshot.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.cancelStripeSubscription.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.cancelStripeSubscription).toHaveBeenCalledWith("sub_delayed_checkout");
   });
 
@@ -990,18 +1516,14 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("does not let a stale trial checkout overwrite an already paid billing phase", async () => {
-    mocks.findMemberForStripeCheckoutSession.mockResolvedValueOnce(makeMemberSnapshot({
-      billingRef: {
-        currentBillingPhase: "paid",
-        currentBillingPlanCode: "launch_monthly",
-        currentCheckoutOffer: "standard",
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_paid_123",
-      },
-      billingStatus: HostedBillingStatus.active,
-    }));
-    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+    mocks.readHostedMemberPulseTrialBillingDecisionSnapshot
+      .mockResolvedValueOnce(
+        makePulseTrialDecisionSnapshot({
+          billingStatus: HostedBillingStatus.active,
+          currentBillingPhase: "paid",
+          stripeSubscriptionId: "sub_paid_123",
+        }),
+      );
     const session = {
       ...makePulseTrialCheckoutSession(),
       subscription: "sub_delayed_checkout",
@@ -1101,5 +1623,28 @@ function makeMemberSnapshot(overrides?: {
       suspendedAt: null,
       updatedAt: new Date("2025-04-12T00:00:00.000Z"),
     },
+  };
+}
+
+function makePulseTrialDecisionSnapshot(input?: {
+  billingStatus?: HostedBillingStatus;
+  currentBillingPhase?: string | null;
+  pulseTrialRedeemedAt?: Date | null;
+  stripeSubscriptionId?: string | null;
+}) {
+  const stripeSubscriptionId =
+    input && "stripeSubscriptionId" in input
+      ? input.stripeSubscriptionId
+      : "sub_123";
+  return {
+    core: makeMemberSnapshot({
+      ...(input?.billingStatus
+        ? { billingStatus: input.billingStatus }
+        : {}),
+    }).core,
+    currentBillingPhase: input?.currentBillingPhase ?? null,
+    pulseTrialRedeemedAt: input?.pulseTrialRedeemedAt ?? null,
+    stripeSubscriptionLookupKey:
+      createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
   };
 }

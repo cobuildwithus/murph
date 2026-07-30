@@ -2833,7 +2833,7 @@ describe("Linq explicit external-thread routing", () => {
       routeContainerMemberId: "member_thread_container_123",
     });
     const participantContext =
-      "Participant +15551234567 (unverified owner contact label: Taylor R.) was removed from the group.";
+      "Participant +15551234567 (address-book name: Taylor R.) was removed from the group.";
     await expect(
       prisma.$transaction((transaction) =>
         appendHostedLinqThreadRouteParticipantContextTx({
@@ -4237,8 +4237,6 @@ describe("Linq group chat auto-provision", () => {
       select: { phoneNumberLookupKey: true },
       where: {
         configuredAt: { not: null },
-        egressPolicy: "enabled",
-        healthStatus: { in: ["healthy", "unknown"] },
         phoneNumberEncrypted: { not: null },
         phoneNumberLookupKey: {
           in: createHostedPhoneLookupKeyReadCandidates(phoneNumber),

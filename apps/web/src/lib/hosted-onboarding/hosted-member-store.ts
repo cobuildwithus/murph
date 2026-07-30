@@ -117,6 +117,12 @@ export interface HostedMemberStripeCheckoutEmailFact {
   collectedAt: Date;
 }
 
+export interface PreparedHostedMemberStripeCheckoutEmail {
+  address: string;
+  addressEncrypted: string;
+  memberId: string;
+}
+
 export interface HostedMemberEmailAuthorizationState {
   directPublicSender: HostedMemberDirectPublicSenderAuthorizationFact | null;
   memberId: string;
@@ -390,6 +396,52 @@ export async function readHostedMemberBillingSnapshot(input: {
   );
 }
 
+export interface HostedMemberPulseTrialBillingDecisionSnapshot {
+  core: HostedMemberCoreState;
+  currentBillingPhase: string | null;
+  pulseTrialRedeemedAt: Date | null;
+  stripeSubscriptionLookupKey: string | null;
+}
+
+/**
+ * Reads only the durable fields needed to classify a Pulse completion. Stripe
+ * identity comparison uses the deterministic lookup key, so this locked read
+ * never needs a KMS unwrap.
+ */
+export async function readHostedMemberPulseTrialBillingDecisionSnapshot(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPulseTrialBillingDecisionSnapshot | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      ...hostedMemberCoreStateSelect,
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          pulseTrialRedeemedAt: true,
+          stripeSubscriptionLookupKey: true,
+        },
+      },
+    },
+  });
+  if (!memberRecord) {
+    return null;
+  }
+
+  return {
+    core: projectHostedMemberCoreState(memberRecord),
+    currentBillingPhase:
+      memberRecord.billingRef?.currentBillingPhase ?? null,
+    pulseTrialRedeemedAt:
+      memberRecord.billingRef?.pulseTrialRedeemedAt ?? null,
+    stripeSubscriptionLookupKey:
+      memberRecord.billingRef?.stripeSubscriptionLookupKey ?? null,
+  };
+}
+
 export async function readHostedMemberEmailAuthorization(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -507,6 +559,74 @@ export async function upsertHostedMemberStripeCheckoutEmailIfFreshTx(input: {
     stripeCheckoutEmail: {
       address: input.address,
       collectedAt: input.collectedAt,
+    },
+  });
+}
+
+export async function prepareHostedMemberStripeCheckoutEmail(input: {
+  address: string;
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<PreparedHostedMemberStripeCheckoutEmail> {
+  if (!createHostedEmailLookupKey(input.address)) {
+    throw new TypeError("Hosted Stripe checkout email must be a valid email address.");
+  }
+  const addressEncrypted = await encryptHostedWebNullableString({
+    field: HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    value: input.address,
+  });
+  if (!addressEncrypted) {
+    throw new TypeError("Hosted Stripe checkout email encryption failed.");
+  }
+  return {
+    address: input.address,
+    addressEncrypted,
+    memberId: input.memberId,
+  };
+}
+
+export async function upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx(
+  input: {
+    collectedAt: Date;
+    memberId: string;
+    preparedEmail: PreparedHostedMemberStripeCheckoutEmail;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  if (input.preparedEmail.memberId !== input.memberId) {
+    throw new TypeError("Prepared Stripe checkout email has a different owner.");
+  }
+  const current = await input.tx.hostedMemberEmailAuthorization.findUnique({
+    select: {
+      stripeCheckoutEmailCollectedAt: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  if (
+    current?.stripeCheckoutEmailCollectedAt
+    && input.collectedAt.getTime() <=
+      current.stripeCheckoutEmailCollectedAt.getTime()
+  ) {
+    return;
+  }
+  await input.tx.hostedMemberEmailAuthorization.upsert({
+    create: {
+      memberId: input.memberId,
+      stripeCheckoutEmailAddressEncrypted:
+        input.preparedEmail.addressEncrypted,
+      stripeCheckoutEmailCollectedAt: input.collectedAt,
+    },
+    update: {
+      stripeCheckoutEmailAddressEncrypted:
+        input.preparedEmail.addressEncrypted,
+      stripeCheckoutEmailCollectedAt: input.collectedAt,
+    },
+    where: {
+      memberId: input.memberId,
     },
   });
 }

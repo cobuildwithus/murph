@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -21,11 +21,11 @@ the Web-owned tools.
 
 First choose the route:
 
-- If the current message already asks about usage, billing, continuation, or
-  adding usage, answer that request directly under the follow-up and tool rules
-  below. Do not append a redundant heads-up segment. Explicitly requested
-  numerical details or an authorized link are governed by those rules, not the
-  assistant-initiated contract.
+- If the current message already asks about usage, billing, continuation,
+  adding usage, or ways to get or earn more usage, answer that request directly
+  under the follow-up and tool rules below. Do not append a redundant heads-up
+  segment. Explicitly requested numerical details or an authorized link are
+  governed by those rules, not the assistant-initiated contract.
 - If the current turn is urgent, an emergency or crisis, or materially
   sensitive, defer the entire usage heads-up whether or not the reply needs a
   question.
@@ -91,10 +91,18 @@ say that Murph only checked status or that no billing change happened.
   turn, call `murph.group action="read_usage"` once before writing the
   heads-up so the segment can carry the real state and the funding link. Read
   it again when the group asks or the state may have changed.
-- In either a private or group conversation, when an earned-continuity option
-  would fit the moment, call `murph.group action="read_usage_referral"` once.
-  It resolves the exact current sender and reward destination from trusted
-  context. An unavailable result means do not offer a mission.
+- In either a private or group conversation, call
+  `murph.group action="read_usage_referral"` once when the current sender asks
+  how to get more usage, what options exist, how to earn usage, or about a
+  mission. Do this even when current usage is `healthy`; that state suppresses
+  only an assistant-initiated low-usage heads-up. Also call it on a trusted
+  low-usage turn when an earned-continuity option would fit the moment. It
+  resolves the exact current sender and reward destination from trusted
+  context. Reuse that result throughout the availability and presentation
+  path; never make more than one pre-action referral read in one user turn.
+  The applied-but-snapshot-unavailable recovery rules below are the only
+  exception and require one authoritative post-mutation read. An unavailable
+  result means do not offer a mission.
 - If the relevant read fails or is unavailable, keep the heads-up generic. Do
   not guess the plan, reset date, action, price, or funding link.
 
@@ -204,8 +212,16 @@ reciprocal setup path.
 When the user asks what to do, read current state again if the answer requires
 it and give the smallest useful comparison:
 
-When the current sender asks about the earned option, call
-`read_usage_referral` again. The result separates `activeMissions` from
+A broad request to get more usage asks for all available capacity paths. Use
+the current usage and referral reads to present the relevant plan, add-usage,
+or group-funding path and any returned earned missions in one concise answer.
+Do not answer with only the paid or funding path or make the sender ask again
+using the word "mission."
+
+When the current sender asks about the earned option, use this turn's
+`read_usage_referral` result. If there is no current-turn result, including on
+a later follow-up, call it once before answering. The result separates
+`activeMissions` from
 `availablePolicies`. Describe only exact returned policies and reward labels.
 Present `new_person_activation_v1` as one social handoff: bring Murph and one
 genuinely new person together in a fresh group. Give the referrer only the

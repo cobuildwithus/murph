@@ -56,6 +56,7 @@ export type HostedThreadRouteChannel = Extract<
 export type HostedThreadRouteOwnerState = HostedMemberCoreState & HostedMemberPersonAccessState;
 
 export interface HostedThreadRouteSnapshot {
+  accountLookupKey?: string;
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
@@ -94,6 +95,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
   const rows = await input.prisma.hostedThreadRoute.findMany({
     orderBy: { createdAt: "asc" },
     select: {
+      accountLookupKey: true,
       channel: true,
       container: {
         select: {
@@ -174,6 +176,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
       : null;
 
   return {
+    ...(row.accountLookupKey ? { accountLookupKey: row.accountLookupKey } : {}),
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,

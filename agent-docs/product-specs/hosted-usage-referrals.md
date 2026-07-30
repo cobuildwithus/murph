@@ -10,10 +10,18 @@ must call that same boundary; it does not justify speculative channel code.
 ## Product behavior
 
 When trusted usage context says a personal or group Murph is running low, Murph
-may offer the exact current sender earned-continuity missions. Describing a
-mission is not consent. Murph arms each mission only after that person explicitly
-chooses the exact server-returned policy. Different policies are independent and
-may be active at the same time.
+may offer the exact current sender earned-continuity missions. When the current
+sender explicitly asks how to get more usage or what options exist, Murph treats
+that as an all-options request: it checks referral availability even when current
+usage is healthy and presents any returned earned paths beside the separately
+authorized plan, top-up, or group-funding path. The sender does not need to know
+the feature name or explicitly ask for a mission. Murph makes at most one
+pre-action referral-availability read per user turn and reuses that result
+throughout the answer. The only extra read is the authoritative recovery
+required after an arm or cancellation commits but its refreshed snapshot is
+unavailable. Describing missions is not consent. Murph arms each mission only
+after that person explicitly chooses its exact server-returned policy. Different
+policies are independent and may be active at the same time.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |
