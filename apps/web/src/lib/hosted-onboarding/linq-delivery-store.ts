@@ -22,6 +22,10 @@ import {
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+  parseHostedLinqGroupLineRecoverySourceRef,
+} from "./linq-group-line-recovery";
+import {
   compareHostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
 } from "./linq-provider-event-progress";
@@ -326,16 +330,87 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(
   );
 }
 
-export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
-  idempotencyKey: string;
-  prisma: HostedLinqDeliveryClient;
-}): Promise<{
+export type HostedLinqDeliveryProviderDispatchIntent = {
   id: string;
   groupJoinOutreachId: string | null;
   groupJoinReplyOccurredAt: Date | null;
+  lastProviderEventId: string | null;
+  phoneNumberLookupKey: string | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
-} | null> {
+  status: string;
+  targetKind: string | null;
+  template: string | null;
+};
+
+export type HostedLinqDeliveryIndexedProviderDispatchIntent =
+  HostedLinqDeliveryProviderDispatchIntent & {
+    attemptedAt: Date;
+    idempotencyLookupKey: string;
+  };
+
+export async function readHostedLinqDeliveryProviderDispatchIntentsTx(input: {
+  idempotencyKeys: readonly string[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<HostedLinqDeliveryIndexedProviderDispatchIntent[]> {
+  const idempotencyKeys = [
+    ...new Set(
+      input.idempotencyKeys
+        .map(createHostedLinqDeliveryIdempotencyLookupKey)
+        .filter((key): key is string => key !== null),
+    ),
+  ];
+  if (idempotencyKeys.length === 0) {
+    return [];
+  }
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      idempotencyKey: {
+        in: idempotencyKeys,
+      },
+    },
+    select: {
+      acceptedAt: true,
+      attemptedAt: true,
+      deliveredAt: true,
+      groupJoinOutreachId: true,
+      groupJoinReplyOccurredAt: true,
+      id: true,
+      idempotencyKey: true,
+      lastProviderEventId: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      phoneNumberLookupKey: true,
+      sourceRef: true,
+      status: true,
+      targetKind: true,
+      template: true,
+    },
+  });
+  return deliveries.flatMap((delivery) =>
+    delivery.idempotencyKey
+      ? [{
+          attemptedAt: delivery.attemptedAt,
+          id: delivery.id,
+          idempotencyLookupKey: delivery.idempotencyKey,
+          groupJoinOutreachId: delivery.groupJoinOutreachId,
+          groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
+          lastProviderEventId: delivery.lastProviderEventId,
+          phoneNumberLookupKey: delivery.phoneNumberLookupKey,
+          providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
+          sourceRef: delivery.sourceRef,
+          status: delivery.status,
+          targetKind: delivery.targetKind,
+          template: delivery.template,
+        }]
+      : []
+  );
+}
+
+export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<HostedLinqDeliveryProviderDispatchIntent | null> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     input.idempotencyKey,
   );
@@ -350,21 +425,31 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
       groupJoinOutreachId: true,
       groupJoinReplyOccurredAt: true,
       id: true,
+      lastProviderEventId: true,
       lastReceiptAt: true,
       messageLookupKey: true,
+      phoneNumberLookupKey: true,
       sourceRef: true,
       status: true,
+      targetKind: true,
+      template: true,
     },
   });
-  return delivery
-    ? {
-        id: delivery.id,
-        groupJoinOutreachId: delivery.groupJoinOutreachId,
-        groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
-        providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
-        sourceRef: delivery.sourceRef,
-      }
-    : null;
+  if (!delivery) {
+    return null;
+  }
+  return {
+    id: delivery.id,
+    groupJoinOutreachId: delivery.groupJoinOutreachId,
+    groupJoinReplyOccurredAt: delivery.groupJoinReplyOccurredAt,
+    lastProviderEventId: delivery.lastProviderEventId,
+    phoneNumberLookupKey: delivery.phoneNumberLookupKey,
+    providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
+    sourceRef: delivery.sourceRef,
+    status: delivery.status,
+    targetKind: delivery.targetKind,
+    template: delivery.template,
+  };
 }
 
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
@@ -2467,7 +2552,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       )
     )
     || (
-      isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+      isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
       && (
         input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
         || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
@@ -2488,7 +2573,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     return {
       claimed: false,
       id: input.delivery.id,
-      ...(isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+      ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
     };
@@ -2833,6 +2918,12 @@ function normalizeHostedLinqDeliverySourceRef(input: {
   ) {
     return sourceRef;
   }
+  if (
+    input.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    && parseHostedLinqGroupLineRecoverySourceRef(sourceRef)
+  ) {
+    return sourceRef;
+  }
 
   return createHostedLinqDeliverySourceRefLookupKey(sourceRef);
 }
@@ -2841,6 +2932,13 @@ function isHostedLinqInviteSignupDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return template === "invite_signup" || template === "invite_signup_fallback";
+}
+
+function isHostedLinqPinnedTargetDeliveryTemplate(
+  template: string | null | undefined,
+): boolean {
+  return isHostedLinqInviteSignupDeliveryTemplate(template)
+    || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
 }
 
 function assertHostedLinqDeliveryGroupJoinContext(input: {

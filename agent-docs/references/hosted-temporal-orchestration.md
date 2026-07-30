@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-07-22
+Last verified: 2026-07-30
 
 ## Decision
 
@@ -22,6 +22,13 @@ The final ownership split is:
 - `apps/cloudflare` owns only container execution: Durable Object routing,
   active runtime write fence, container invoke or wake, runtime callback
   authorization, R2/snapshot transport plumbing, and cleanup.
+
+The public Murph repository owns the released orchestration contracts,
+hosted-local harness, and architecture guardrails. The private
+`cobuildwithus/murph-cloud` repository owns the production Temporal worker,
+Render Blueprint, deploy workflow, and operational runbook. The public
+implementation remains only as a temporary rollback reference during the
+source cutover and must not own a second production deployment path.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -117,8 +124,13 @@ Allowed Temporal state is tiny and pointer-only:
 - Latest opaque mailbox pointer fields: mailbox item pointer, lane, and lane
   sequence.
 - Source-less mailbox and recheck wake hints. Manual runs, browser-vault
-  refreshes, and device-sync requests are durable system-mailbox rows; Temporal
-  signals only wake the reconciliation loop.
+  refreshes, and device-sync requests are durable system-mailbox rows; their
+  Temporal signals only wake the reconciliation loop. A payload-free
+  `runtime_wake_requested` signal may additionally set one coalesced boolean
+  that calls the existing Cloudflare processing adapter when facts are idle. It
+  carries no provider value or credential, is discarded while facts are
+  blocked, and is cleared after accepted processing only when no newer wake
+  arrived.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
@@ -164,11 +176,13 @@ selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
-Legacy direct demand signals and the old demand Activity are not replay
-compatibility paths in this hard cut. Operators must stop old workers,
-terminate existing `hosted-user-runtime:*` histories, deploy web and Temporal
-together, ensure Cloudflare uses the matching source-less contract, and reseed
-new histories with `runtime_recheck_requested` or mailbox signals.
+Legacy direct demand signals and the old demand Activity were not replay
+compatibility paths in the completed hard cut. Operators stopped the old
+workers, terminated the incompatible `hosted-user-runtime:*` histories,
+deployed the matching web, Temporal, and Cloudflare contract set, and reseeded
+new histories with `runtime_recheck_requested` or mailbox signals. Do not repeat
+that history reset for the repository relocation: the current public and
+private workers retain the same Workflow code and identities.
 
 Workflow implementations must version-gate future command-order changes around
 awaited facts reads and execution calls unless the deployment is another
@@ -178,6 +192,12 @@ of clearing state derived from a stale read. Workflow timers that should be
 preempted by fresh signals, including owner-recheck waits after accepted
 processing, must use a signal-aware `condition()` timeout instead of a bare
 timer sleep.
+
+`runtime_wake_requested` adds a command path only after that new signal event;
+older histories cannot contain it, and carry-forward state defaults its
+coalesced bit to false. This preserves replay determinism without a history
+reset. Roll out Cloudflare runtime support first, then the Temporal worker, and
+deploy Web last so no producer can send the signal to an older workflow bundle.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming
@@ -350,10 +370,11 @@ again. Runtime wake and retry facts that matter to product behavior must be
 reflected in durable web/runtime state, not returned as the command result.
 
 Legacy direct device-sync recovery signals, old demand Activity inputs, and old
-demand results are physically removed in this hard cut. Do not run this worker
-against existing histories that recorded those commands or signals. Stop old
-workers, terminate existing `hosted-user-runtime:*` workflows, deploy the
-matching web/Temporal/Cloudflare contract set, then reseed new histories.
+demand results were physically removed in the completed hard cut. The
+incompatible histories were terminated before the current workflow lineage was
+deployed. Moving the identical current worker to Murph Cloud uses rolling
+replacement on the existing Task Queue and must not terminate or reset current
+histories.
 
 ## Cloudflare Execution Adapter Contract
 

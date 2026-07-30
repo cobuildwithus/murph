@@ -19,6 +19,9 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 import {
   planHostedLinqPermanentHomeRouteRecovery,
 } from "./linq-home-route-recovery";
+import {
+  HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+} from "./linq-group-line-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedLinqMessageEditedWebhook,
@@ -638,22 +641,48 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
-      const pendingRequiredSignup = drainResult.skipped.find(
+      const pendingRequiredDelivery = drainResult.skipped.find(
         (skip) =>
           (
             skip.template === "invite_signup"
             || skip.template === "invite_signup_fallback"
+            || skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
           )
           && skip.reason === "notice_in_flight",
       );
-      if (pendingRequiredSignup) {
+      if (pendingRequiredDelivery) {
+        const groupLineRecoveryInFlight =
+          pendingRequiredDelivery.template
+            === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
         throw hostedOnboardingError({
-          code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          code: groupLineRecoveryInFlight
+            ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
+            : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
           httpStatus: 503,
-          message:
-            "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          message: groupLineRecoveryInFlight
+            ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
+            : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
           retryable: true,
         });
+      }
+      const decidedUnsentGroupLineRecovery = drainResult.skipped.find(
+        (skip) =>
+          skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+          && (
+            skip.reason === "effect_unresolved"
+            || skip.reason === "notice_target_unauthorized"
+          ),
+      );
+      if (decidedUnsentGroupLineRecovery && drainResult.sentCount === 0) {
+        plan = {
+          ...plan,
+          desiredSideEffects: [],
+          response: {
+            ignored: true,
+            ok: true,
+            reason: "group-chat-line-unavailable",
+          },
+        };
       }
       const decidedUnsentSignup = drainResult.skipped.find(
         (skip) =>

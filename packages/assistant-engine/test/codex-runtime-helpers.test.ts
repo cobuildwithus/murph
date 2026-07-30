@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
+  preinitializeCodexAppServer: vi.fn(),
   readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -14,6 +15,8 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+  preinitializeCodexAppServer:
+    codexAppServerMocks.preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext:
     codexAppServerMocks.readCodexAppServerTurnFailureContext,
 }))
@@ -33,6 +36,9 @@ import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assis
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
+import {
+  assistantModelTargetToProviderConfigInput,
+} from '@murphai/operator-config/assistant-backend'
 import {
   createAssistantBinding,
   getAssistantBindingContextLines,
@@ -58,6 +64,7 @@ import {
   executeCodexAssistantTurnFromInput,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
+  prepareHostedCodexAssistantProcess,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexStaticModels,
@@ -67,6 +74,9 @@ import {
   MURPH_DYNAMIC_TOOLS,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  executeGenerateSongTool,
+} from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionInput,
@@ -119,6 +129,7 @@ function executeCodexAssistantTurnAttempt(
 
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
+  codexAppServerMocks.preinitializeCodexAppServer.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()
@@ -182,6 +193,78 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
+  it('derives hosted process preparation from the same launch input as a real turn', async () => {
+    const target = {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: '/runtime/bin/codex',
+      codexHome: '/runtime/codex-home',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'hosted-openai',
+      oss: false,
+      profile: 'hosted',
+      reasoningEffort: 'low',
+      sandbox: 'danger-full-access',
+    } as const
+    const env = {
+      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+      CODEX_HOME: '/runtime/codex-home',
+      HOME: '/runtime/home',
+      PATH: '/usr/bin',
+    }
+    const signal = new AbortController().signal
+    codexAppServerMocks.preinitializeCodexAppServer.mockResolvedValue(null)
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-preinitialized',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-preinitialized',
+      turnId: 'turn-preinitialized',
+    })
+
+    await prepareHostedCodexAssistantProcess({
+      env,
+      signal,
+      target,
+      workingDirectory: '/runtime/vault',
+    })
+    await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: assistantModelTargetToProviderConfigInput(target),
+      turn: {
+        dynamicTools: [],
+        env,
+        prompt: 'Answer the current message.',
+        workingDirectory: '/runtime/vault',
+      },
+    })
+
+    const preparationInput =
+      codexAppServerMocks.preinitializeCodexAppServer.mock.calls[0]?.[0]
+    const turnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    for (const key of [
+      'codexCommand',
+      'codexHome',
+      'configOverrides',
+      'env',
+      'oss',
+      'profile',
+      'workingDirectory',
+    ] as const) {
+      expect(preparationInput?.[key]).toEqual(turnInput?.[key])
+    }
+    expect(preparationInput?.signal).toBe(signal)
+    expect(preparationInput).not.toHaveProperty('prompt')
+    expect(preparationInput).not.toHaveProperty('resumeSessionId')
+    expect(preparationInput).not.toHaveProperty('dynamicTools')
+  })
+
   it('finish_without_reply description does not claim to withdraw completed replies', () => {
     const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
       (tool) => tool.name === 'finish_without_reply',
@@ -2120,6 +2203,118 @@ describe('Codex assistant registry helpers', () => {
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
   })
 
+  it('reuses the application public fetch inside the Linq media tool', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-song-upload',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-song-upload',
+      turnId: 'turn-song-upload',
+    })
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/v1/music')) {
+        return new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
+        return new Response(JSON.stringify({
+          attachment_id: 'attachment_sponsor_song',
+          download_url: 'https://cdn.example.test/sponsor-song.mp3',
+          expires_at: '2026-07-29T21:00:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+          },
+          upload_url: 'https://uploads.example.test/sponsor-song',
+        }), {
+          headers: {
+            'content-type': 'application/json',
+          },
+        })
+      }
+      throw new Error(`Unexpected provider request: ${url}`)
+    })
+    const applicationPublicFetch = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe(
+        'https://uploads.example.test/sponsor-song',
+      )
+      expect(init?.method).toBe('PUT')
+      expect(init?.body).toBeInstanceOf(Blob)
+      return new Response(null, { status: 204 })
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: { provider: 'codex-cli' },
+      turn: {
+        codexThreadConfig: {
+          'features.shell_tool': false,
+          web_search: 'disabled',
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          progressUpdatesAvailable: false,
+        }),
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        prompt: 'generate one sponsor song',
+        providerFetch,
+        publicInternetFetch: applicationPublicFetch,
+        voiceMemoDeliveryChannel: 'linq',
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      publicInternetFetch: applicationPublicFetch,
+      threadConfig: {
+        'features.shell_tool': false,
+        web_search: 'disabled',
+      },
+      voiceMemoRuntime: {
+        kind: 'linq',
+      },
+    })
+    if (appServerInput?.voiceMemoRuntime?.kind !== 'linq') {
+      throw new Error('Expected a Linq voice memo runtime')
+    }
+
+    await expect(executeGenerateSongTool({
+      args: {
+        durationSeconds: 5,
+        instrumental: false,
+        prompt: 'A five-second thank-you song.',
+      },
+      runtime: appServerInput.voiceMemoRuntime,
+    })).resolves.toMatchObject({
+      responseMedia: [
+        {
+          kind: 'voice_memo',
+          transport: {
+            attachmentId: 'attachment_sponsor_song',
+            kind: 'linq_attachment',
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+    expect(providerFetch).toHaveBeenCalledTimes(2)
+    expect(applicationPublicFetch).toHaveBeenCalledOnce()
+  })
+
   it('forwards message-target tools and their authorizer to Codex execution', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
     const authorizeAcceptedMessageTarget = vi.fn(async () => null)
@@ -2569,6 +2764,45 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
+  it('closes active input admission through the production provider adapter', async () => {
+    const closeInputAdmission = vi.fn()
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Final answer.',
+      transcriptMessage: 'Final answer.',
+      jsonEvents: [],
+      precedingAgentMessageSegments: [],
+      providerActionCount: 0,
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [],
+      sessionId: 'provider-session-admission',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-admission',
+      turnId: 'turn-admission',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      activeTurnSteering: {
+        closeInputAdmission,
+        registerLiveProviderTurn: vi.fn(() => () => {}),
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput?.onFirstAssistantResponseCompleted).toEqual(
+      expect.any(Function),
+    )
+    appServerInput?.onFirstAssistantResponseCompleted?.()
+    expect(closeInputAdmission).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves response delivery ordinals across the provider adapter', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
@@ -2712,6 +2946,46 @@ describe('Codex assistant registry helpers', () => {
         (override: string) => override.includes('multi_agent'),
       ) ?? false,
     ).toBe(false)
+  })
+
+  it('forwards the selected hosted provider credential to the Codex process', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed hosted Venice turn.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed hosted Venice turn.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'hosted-venice-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'hosted-venice-thread',
+      turnId: 'turn-hosted-venice',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      env: {
+        [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+        HOSTED_ASSISTANT_PROVIDER: 'venice',
+        PATH: '/usr/bin',
+        VENICE_API_KEY: 'signed-venice-egress-credential',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'venice-model',
+        modelProvider: 'venice',
+      }),
+      userPrompt: 'Run hosted Venice turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.env,
+    ).toMatchObject({
+      HOSTED_ASSISTANT_PROVIDER: 'venice',
+      VENICE_API_KEY: 'signed-venice-egress-credential',
+    })
   })
 
   it('appends turn-local memory isolation after provider overrides', async () => {

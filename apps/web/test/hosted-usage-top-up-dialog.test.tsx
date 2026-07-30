@@ -451,9 +451,9 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /How many messages do you want to sponsor\?/,
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Sponsor more messages",
     );
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
@@ -466,9 +466,9 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       rendered.container.textContent ?? "",
       /one-time contribution to keep Murph talking for everyone here\./,
     );
-    assert.match(
+    assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /saved card when available/,
+      /We’ll use your saved card when available and ask only when card details or verification are needed\./,
     );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
@@ -531,7 +531,7 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Make it funny/);
+    assert.match(rendered.container.textContent ?? "", /Add a note/);
     assert.ok(rendered.container.querySelector(".h-auto"));
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
     assert.equal(
@@ -545,6 +545,18 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
       "#group-sponsor-bit",
     );
     assert.ok(runningBit);
+    const sponsorAlias = rendered.container.querySelector<HTMLInputElement>(
+      "#group-sponsor-alias",
+    );
+    const sponsorMessage = rendered.container.querySelector<HTMLTextAreaElement>(
+      "#group-sponsor-message",
+    );
+    assert.ok(sponsorAlias);
+    assert.ok(sponsorMessage);
+    for (const field of [sponsorAlias, sponsorMessage, runningBit]) {
+      assert.equal(field.classList.contains("focus-visible:ring-0"), true);
+      assert.equal(field.classList.contains("focus-visible:ring-3"), false);
+    }
     assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-alias"),
@@ -751,7 +763,7 @@ test(
     );
 
     try {
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Make it funny/);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/);
       assert.equal(
         rendered.container.querySelector("#group-sponsor-alias"),
         null,
@@ -1591,6 +1603,78 @@ test("restarts polling when a frozen retry advances the same purchase", async ()
     assert.equal(statusReadCount, 2);
     assert.match(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("removes frozen sponsor recovery details once group usage is fulfilled", async () => {
+  const status = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(status.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_frozen_fulfilled",
+        retryAllowed: true,
+        status: "reconciling",
+      },
+      customizationAllowed: false,
+      frozenSponsorship: {
+        publicAlias: "Sunday sleep crew",
+        runningBitRequest: "Keep the recovery jokes going.",
+        sponsorMessage: "More room for the group.",
+      },
+      offers: [],
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your original sponsor details are still attached/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Cancel this payment before changing them\./,
+    );
+
+    await act(async () => {
+      status.resolve({
+        purchaseId: "hucp_group_frozen_fulfilled",
+        status: "fulfilled",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /This group has more Murph/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /original sponsor details|Cancel this payment/,
+    );
+    const contactLink = rendered.container.querySelector("a");
+    assert.ok(contactLink);
+    assert.equal(contactLink.textContent, "Open Messages");
+    assert.equal(contactLink.getAttribute("href"), "sms:");
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
+    await clickButton(rendered.container, rendered.window, "Done");
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
   } finally {
     await rendered.cleanup();
   }
@@ -4138,17 +4222,29 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.match(rendered.container.textContent ?? "", /Nice one/);
     assert.match(
       rendered.container.textContent ?? "",
-      /This group's available usage has been updated\./,
+      /This group has more Murph/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your contribution landed\. The group has more room to talk\./,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Messages will open\. Choose this group to keep going\./,
     );
     const contactLink = rendered.container.querySelector("a");
     assert.ok(contactLink);
     assert.equal(contactLink.textContent, "Open Messages");
     assert.equal(contactLink.getAttribute("href"), "sms:");
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
+    assert.equal(buttonByText(rendered.container, "Done").disabled, false);
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
   } finally {
     await rendered.cleanup();
   }

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 
 describe("parseHostedLinqPhoneNumberInventory", () => {
-  it("normalizes the documented provider response shape and deduplicates phone numbers", () => {
+  it("keeps line service and reputation independent", () => {
     expect(
       parseHostedLinqPhoneNumberInventory({
         phone_numbers: [
@@ -11,27 +11,27 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
             id: "line_1",
             phone_number: "+1 (555) 000-0001",
             reputation: {
-              reason: "warmup",
+              doc_url: "https://docs.example.test/reputation",
               status: "AT_RISK",
             },
+            status: "ACTIVE",
           },
           {
             id: "duplicate",
             phone_number: "+15550000001",
-            reputation: {
-              status: "HEALTHY",
-            },
+            reputation: { status: "HEALTHY" },
           },
           {
-            health_status: "HEALTHY",
+            health_status: {
+              status: "HEALTHY",
+            },
             id: "line_2",
             phone_number: "+15550000002",
+            status: "FLAGGED",
           },
           {
             phone_number: "not-a-phone",
-            reputation: {
-              status: "HEALTHY",
-            },
+            reputation: { status: "HEALTHY" },
           },
         ],
       }),
@@ -39,16 +39,32 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
       {
         phoneNumber: "+15550000001",
         providerPhoneNumberId: "line_1",
-        providerReason: "warmup",
-        providerStatus: "AT_RISK",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550000002",
         providerPhoneNumberId: "line_2",
-        providerReason: null,
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "FLAGGED",
       },
     ]);
+  });
+
+  it("does not coerce unknown provider states", () => {
+    expect(parseHostedLinqPhoneNumberInventory({
+      phone_numbers: [{
+        id: "line_future",
+        phone_number: "+15550000003",
+        reputation: { status: "PAUSED" },
+        status: "WARMING",
+      }],
+    })).toEqual([{
+      phoneNumber: "+15550000003",
+      providerPhoneNumberId: "line_future",
+      providerReputationStatus: null,
+      providerServiceStatus: null,
+    }]);
   });
 
   it("does not accept ad hoc collection or phone field aliases", () => {
@@ -68,14 +84,8 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
   it("fails visibly when provider inventory exceeds the configured sync limit", () => {
     expect(() => parseHostedLinqPhoneNumberInventory({
       phone_numbers: [
-        {
-          id: "line_1",
-          phone_number: "+15550000001",
-        },
-        {
-          id: "line_2",
-          phone_number: "+15550000002",
-        },
+        { id: "line_1", phone_number: "+15550000001" },
+        { id: "line_2", phone_number: "+15550000002" },
       ],
     }, {
       maxLines: 1,

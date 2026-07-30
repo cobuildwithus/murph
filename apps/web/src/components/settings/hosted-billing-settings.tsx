@@ -16,7 +16,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
-import { HostedFamilyStartButton } from "./hosted-family-settings-actions";
+import { HostedFamilyStartButton } from "./hosted-family-start-button";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
@@ -77,6 +77,7 @@ export function HostedBillingSettings(props: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   pulseTrialBillingContinuationPending?: boolean;
+  usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -206,6 +207,7 @@ export function HostedBillingSettings(props: {
         payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
+      {props.usageActivityDetail}
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <PlanCard key={card.key} card={card} />

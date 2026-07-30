@@ -12,6 +12,10 @@ import type {
   HostedRuntimeNewsletterScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
+import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from '@murphai/hosted-execution/routes'
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
@@ -36,7 +40,10 @@ import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
 } from '../automation/shared.js'
-import type { AssistantExecutionContext } from '../execution-context.js'
+import {
+  appendAssistantHostedDynamicContextPrompt,
+  type AssistantExecutionContext,
+} from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
   resolveMurphManagedAutomationOwnerScope,
@@ -50,6 +57,12 @@ import {
 import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
+import {
+  buildAssistantLinqDeliveryPosturePrompt,
+} from '../linq-delivery-posture.js'
+import {
+  findAssistantNewsletterParentIntent,
+} from '../newsletter-outbox.js'
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
@@ -522,6 +535,7 @@ export async function executeClaimedAssistantCronJob(
   let outcome: AssistantCronRunOutcome = 'failed'
   let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
+  let newsletterRecoveryAuthorized = false
   let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
   let canonicalSourceSkipReason: string | null = null
   let managedOwnerAuthorization: AssistantCronManagedOwnerAuthorization = {
@@ -549,6 +563,12 @@ export async function executeClaimedAssistantCronJob(
         ) ??
         startedAt
       : claimedJob.state.nextRunAt ?? startedAt
+  const scheduledNewsletterAuthority =
+    resolveAssistantCronScheduledNewsletterAuthority({
+      job: input.job,
+      occurrenceAt,
+      trigger: input.trigger,
+    })
   const yieldCancellation = createAssistantCronBackgroundMaintenanceCancellation({
     job: input.job,
     signal: foregroundPreemption.signal ?? null,
@@ -590,11 +610,24 @@ export async function executeClaimedAssistantCronJob(
         canonicalSourceDisposition = authority.kind
         canonicalSourceSkipReason = authority.reason
       }
+      if (
+        canonicalSourceSkipReason === null
+        && scheduledNewsletterAuthority
+      ) {
+        newsletterRecoveryAuthorized = true
+        pendingDeliveryIntentId = (
+          await findAssistantNewsletterParentIntent({
+            authority: scheduledNewsletterAuthority,
+            vault: input.vault,
+          })
+        )?.intentId ?? null
+      }
     }
 
     if (
       deviceActivityAuthority.error === null &&
-      canonicalSourceSkipReason === null
+      canonicalSourceSkipReason === null &&
+      pendingDeliveryIntentId === null
     ) {
       managedOwnerAuthorization =
         await resolveAssistantCronManagedOwnerAuthorization({
@@ -618,6 +651,7 @@ export async function executeClaimedAssistantCronJob(
       deviceActivityAuthority.error === null &&
       canonicalSourceSkipReason === null &&
       managedOwnerSkipReason === null &&
+      pendingDeliveryIntentId === null &&
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
@@ -663,6 +697,9 @@ export async function executeClaimedAssistantCronJob(
       outcome = 'skipped_gate'
       reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
+    } else if (pendingDeliveryIntentId !== null) {
+      outcome = 'delivery_pending'
+      reason = 'delivery_pending'
     } else if (managedOwnerSkipReason !== null) {
       outcome = 'skipped_gate'
       reason = managedOwnerSkipReason ===
@@ -742,11 +779,7 @@ export async function executeClaimedAssistantCronJob(
             deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
-          scheduledAutomationAuthority: resolveAssistantCronScheduledNewsletterAuthority({
-            job: input.job,
-            occurrenceAt,
-            trigger: input.trigger,
-          }),
+          scheduledAutomationAuthority: scheduledNewsletterAuthority,
           scheduledInvocationAuthority,
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
@@ -772,6 +805,7 @@ export async function executeClaimedAssistantCronJob(
           const authorizedDelivery = maintenanceJob
             ? {
                 conversationThreadId: null,
+                deliveryPosture: null,
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
@@ -783,10 +817,18 @@ export async function executeClaimedAssistantCronJob(
                   target: claimedJob.target,
                 })
           const deliveryRoute = authorizedDelivery.route
+          const postureExecutionContext =
+            appendAssistantHostedDynamicContextPrompt({
+              executionContext:
+                automationTurn.executionContext ?? { hosted: null },
+              prompt: buildAssistantLinqDeliveryPosturePrompt(
+                authorizedDelivery.deliveryPosture,
+              ),
+            })
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
-              executionContext: automationTurn.executionContext,
+              executionContext: postureExecutionContext,
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
@@ -899,6 +941,9 @@ export async function executeClaimedAssistantCronJob(
             channel: claimedJob.target.channel,
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
+            onNewsletterPendingDeliveryIntentId: (intentId) => {
+              pendingDeliveryIntentId = intentId
+            },
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
             outboxExternalThreadRouteAuthority:
@@ -949,7 +994,13 @@ export async function executeClaimedAssistantCronJob(
               deliveryOutcome: result.deliveryOutcome ?? null,
               job: input.job,
             })
-          if (result.deliveryOutcome?.kind === 'queued') {
+          const newsletterPendingDeliveryIntentId =
+            resolveAssistantCronNewsletterPendingDeliveryIntentId(result)
+          if (newsletterPendingDeliveryIntentId) {
+            pendingDeliveryIntentId = newsletterPendingDeliveryIntentId
+            outcome = 'delivery_pending'
+            reason = 'delivery_pending'
+          } else if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
             outcome = 'delivery_pending'
             reason = 'delivery_pending'
@@ -977,6 +1028,24 @@ export async function executeClaimedAssistantCronJob(
       }
     }
   } catch (error) {
+    if (
+      pendingDeliveryIntentId === null
+      && newsletterRecoveryAuthorized
+      && scheduledNewsletterAuthority
+    ) {
+      try {
+        pendingDeliveryIntentId = (
+          await findAssistantNewsletterParentIntent({
+            authority: scheduledNewsletterAuthority,
+            vault: input.vault,
+          })
+        )?.intentId ?? null
+      } catch {
+        // Preserve the original failure. A failed recovery read leaves the
+        // occurrence retryable, and the next run checks durable outbox state
+        // before admitting the provider.
+      }
+    }
     const backgroundMaintenanceYielded =
       isAssistantCronBackgroundMaintenanceYieldError(error) ||
       yieldCancellation.yieldRequested()
@@ -1026,6 +1095,11 @@ export async function executeClaimedAssistantCronJob(
       errorCode = error.code
       outcome = 'skipped_gate'
       reason = 'managed_owner_scope_mismatch'
+    } else if (error instanceof AssistantCronLinqHealthPreflightBlockedError) {
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = 'linq_health_preflight'
     } else {
       const yieldedError =
         error instanceof AssistantCronForegroundYieldedError ||
@@ -1053,6 +1127,16 @@ export async function executeClaimedAssistantCronJob(
     foregroundPreemption.dispose()
     finishedAt = new Date().toISOString()
     yieldCancellation.dispose()
+  }
+
+  if (pendingDeliveryIntentId) {
+    foregroundYielded = false
+    outcome = 'delivery_pending'
+    reason = errorCode
+      ? `delivery_pending_after_${errorCode}`
+      : errorText
+        ? 'delivery_pending_after_error'
+        : 'delivery_pending'
   }
 
   const run = assistantCronRunRecordSchema.parse({
@@ -1539,8 +1623,23 @@ function resolveAssistantCronPostTurnDeliveryFailure(input: {
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
   return !newsletterSendResult
     || newsletterSendResult.status === 'unavailable'
-    || newsletterSendResult.status === 'accepted'
+    || (
+      newsletterSendResult.status === 'accepted'
+      && !resolveAssistantCronNewsletterPendingDeliveryIntentId(input.result)
+    )
     ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
+    : null
+}
+
+function resolveAssistantCronNewsletterPendingDeliveryIntentId(
+  result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>,
+): string | null {
+  const expectations = result.postTurnDeliveryExpectations
+  const intentId = expectations?.newsletterPendingDeliveryIntentId ?? null
+  return expectations?.newsletterSendResult?.status === 'accepted'
+    && intentId
+    && intentId.trim().length > 0
+    ? intentId
     : null
 }
 
@@ -2327,6 +2426,7 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
   } else {
     authorizedDelivery = {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route: declaredRoute,
     }
@@ -2409,6 +2509,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   target: AssistantCronJob['target']
 }): Promise<{
   conversationThreadId: string | null
+  deliveryPosture: HostedRuntimeLinqDeliveryPosture | null
   externalThreadRouteAuthority:
     AssistantOutboxIntent['externalThreadRouteAuthority']
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
@@ -2417,6 +2518,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route,
     }
@@ -2459,6 +2561,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     }
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: authority,
       route,
     }
@@ -2467,6 +2570,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   if (input.target.channel !== 'linq') {
     return {
       conversationThreadId: null,
+      deliveryPosture: null,
       externalThreadRouteAuthority: null,
       route,
     }
@@ -2497,11 +2601,20 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     )
   }
   const authority = await resolveScheduledLinqRoute({
+    fromPhoneNumber:
+      input.target.deliverySource?.kind === 'linq'
+        ? input.target.deliverySource.fromPhoneNumber
+        : null,
     homeRouteFallbackAllowed: route.threadIsDirect !== false,
     signal: input.signal,
     target,
     targetKind,
   })
+  if (authority.deliveryBlockCode) {
+    throw new AssistantCronLinqHealthPreflightBlockedError(
+      authority.deliveryBlockCode,
+    )
+  }
   const authorizedTarget = normalizeNullableString(authority.target)
   const conversationThreadId = normalizeNullableString(
     authority.conversationThreadId,
@@ -2532,12 +2645,22 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
 
   return {
     conversationThreadId,
+    deliveryPosture: authority.deliveryPosture ?? null,
     externalThreadRouteAuthority: null,
     route: {
       bindingDelivery,
       deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
       threadIsDirect: authority.threadIsDirect,
     },
+  }
+}
+
+class AssistantCronLinqHealthPreflightBlockedError extends VaultCliError {
+  constructor(blockCode: HostedRuntimeLinqDeliveryBlockCode) {
+    super(
+      `ASSISTANT_LINQ_EGRESS_${blockCode.toUpperCase()}`,
+      'Scheduled Linq delivery skipped by current line or chat health.',
+    )
   }
 }
 

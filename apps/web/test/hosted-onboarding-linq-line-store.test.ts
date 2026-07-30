@@ -4,13 +4,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   assertHostedLinqAssignableHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
+  hasActiveHostedLinqManagedLine,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqIncomingLineState,
+  readHostedLinqReceiptCorrelatedRecoveryLineTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -35,13 +39,15 @@ describe("listHostedLinqContactCardLines", () => {
       .mockResolvedValueOnce([
         buildLineRow("+15550100001", {
           providerLastSeenAt: new Date("2026-06-30T12:00:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
         }),
       ])
       .mockResolvedValueOnce([
         buildLineRow("+15550100002", {
           providerLastSeenAt: new Date("2026-06-30T12:10:00.000Z"),
-          providerStatus: "ACTIVE",
+          providerReputationStatus: "AT_RISK",
+          providerServiceStatus: "ACTIVE",
         }),
       ]);
     const prisma = {
@@ -59,10 +65,14 @@ describe("listHostedLinqContactCardLines", () => {
       {
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550100002",
         phoneNumberHint: "*** 0002",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
 
@@ -81,6 +91,30 @@ describe("listHostedLinqContactCardLines", () => {
         providerSeenAt: { not: null },
       },
     }));
+  });
+});
+
+describe("hasActiveHostedLinqManagedLine", () => {
+  it("recognizes configured inbound lines independently of outbound health", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: "lookup:line",
+    });
+
+    await expect(hasActiveHostedLinqManagedLine({
+      phoneNumberLookupKeys: ["lookup:line"],
+      prisma: {
+        hostedLinqLine: { findFirst },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: { in: ["lookup:line"] },
+      },
+    });
   });
 });
 
@@ -119,6 +153,20 @@ describe("listHostedLinqAssignableHomeLines", () => {
         egressPolicy: "enabled",
         healthStatus: { in: ["healthy", "unknown"] },
         phoneNumberEncrypted: { not: null },
+        AND: [
+          {
+            OR: [
+              { providerServiceStatus: null },
+              { providerServiceStatus: { not: "FLAGGED" } },
+            ],
+          },
+          {
+            OR: [
+              { providerReputationStatus: null },
+              { providerReputationStatus: { notIn: ["AT_RISK", "CRITICAL"] } },
+            ],
+          },
+        ],
       },
     }));
     expect(findMany).toHaveBeenCalledTimes(1);
@@ -148,40 +196,255 @@ describe("listHostedLinqAssignableHomeLines", () => {
   });
 });
 
-describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
-  it("passes when at least one configured assignable DB line exists", async () => {
-    const findFirst = vi.fn().mockResolvedValue({
-      phoneNumberLookupKey: "lookup:line",
-    });
+describe("readHostedLinqIncomingLineState", () => {
+  it("distinguishes assignable, exact at-risk, hard-blocked, and degraded line states", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerReputationStatus: "AT_RISK",
+          providerServiceStatus: "ACTIVE",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "healthy",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "FLAGGED",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          healthStatus: "warning",
+          providerReputationStatus: "HEALTHY",
+          providerServiceStatus: "ACTIVE",
+        }),
+      ]);
     const prisma = {
-      hostedLinqLine: {
-        findFirst,
-      },
+      hostedLinqLine: { findMany },
     } as never;
+    const phoneNumberLookupKeys =
+      createHostedPhoneLookupKeyReadCandidates("+15550100001");
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).resolves.toBeUndefined();
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "assignable" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "at_risk" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toMatchObject({ kind: "hard_blocked" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys,
+      prisma,
+    })).resolves.toEqual({ kind: "degraded_unavailable" });
   });
 
-  it("fails visibly when production cutover would leave the DB line pool empty", async () => {
-    const findFirst = vi.fn().mockResolvedValue(null);
+  it("fails closed for ambiguous or structurally unavailable incoming lines", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          phoneNumberLookupKey: "lookup:current",
+        }),
+        buildIncomingLineRow("+15550100001", {
+          phoneNumberLookupKey: "lookup:legacy",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildIncomingLineRow("+15550100001", {
+          configuredAt: null,
+          healthStatus: "unhealthy",
+          providerReputationStatus: "CRITICAL",
+        }),
+      ]);
+    const prisma = {
+      hostedLinqLine: { findMany },
+    } as never;
+
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys: ["lookup:current", "lookup:legacy"],
+      prisma,
+    })).resolves.toEqual({ kind: "conflicting" });
+    await expect(readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys: ["lookup:current"],
+      prisma,
+    })).resolves.toEqual({ kind: "structurally_unavailable" });
+  });
+});
+
+describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
+  const expectedFailureReceiptEventId =
+    "hbidx:linq-provider-event:failed-recovery";
+  const phoneNumber = "+15550100042";
+  const phoneNumberLookupKey =
+    createHostedPhoneLookupKey(phoneNumber) ?? "lookup:recovery";
+
+  it("allows the exact warning projection caused by the failed recovery receipt", async () => {
+    const findUnique = vi.fn().mockResolvedValue(
+      buildReceiptCorrelatedRecoveryLineRow(phoneNumber, {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      }),
+    );
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toEqual({
+      phoneNumber,
+      phoneNumberLookupKey,
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { phoneNumberLookupKey },
+      select: {
+        configuredAt: true,
+        egressPolicy: true,
+        healthStatus: true,
+        lastReceiptEventId: true,
+        phoneNumberEncrypted: true,
+        phoneNumberLookupKey: true,
+        providerReputationStatus: true,
+        providerServiceStatus: true,
+      },
+    });
+  });
+
+  it("continues to allow a healthy pinned line without requiring a stale receipt match", async () => {
     const prisma = {
       hostedLinqLine: {
-        findFirst,
+        findUnique: vi.fn().mockResolvedValue(
+          buildReceiptCorrelatedRecoveryLineRow(phoneNumber, {
+            healthStatus: "healthy",
+            lastReceiptEventId: "hbidx:linq-provider-event:later-success",
+          }),
+        ),
       },
     } as never;
 
-    await expect(
-      assertHostedLinqAssignableHomeLinePoolReady({
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
-      httpStatus: 500,
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toEqual({
+      phoneNumber,
+      phoneNumberLookupKey,
     });
+  });
+
+  it.each([
+    {
+      label: "a newer receipt replaced the failed recovery receipt",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: "hbidx:linq-provider-event:newer-failure",
+      },
+    },
+    {
+      label: "the provider reports the line at risk",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        providerReputationStatus: "AT_RISK",
+      },
+    },
+    {
+      label: "the provider hard-blocked the line",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        providerReputationStatus: "CRITICAL",
+      },
+    },
+    {
+      label: "the line became unhealthy",
+      overrides: {
+        healthStatus: "unhealthy",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line is disabled",
+      overrides: {
+        egressPolicy: "disabled",
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line is no longer configured",
+      overrides: {
+        configuredAt: null,
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+      },
+    },
+    {
+      label: "the line phone cannot be decrypted",
+      overrides: {
+        healthStatus: "warning",
+        lastReceiptEventId: expectedFailureReceiptEventId,
+        phoneNumberEncrypted: "not-an-encrypted-phone-envelope",
+      },
+    },
+  ])("fails closed when $label", async ({ overrides }) => {
+    const prisma = {
+      hostedLinqLine: {
+        findUnique: vi.fn().mockResolvedValue(
+          buildReceiptCorrelatedRecoveryLineRow(phoneNumber, overrides),
+        ),
+      },
+    } as never;
+
+    await expect(readHostedLinqReceiptCorrelatedRecoveryLineTx({
+      expectedFailureReceiptEventId,
+      phoneNumberLookupKey,
+      prisma,
+    })).resolves.toBeNull();
+  });
+});
+
+describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
+  it("passes when at least one configured provider-eligible line exists", async () => {
+    const prisma = {
+      hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([
+          buildAssignableLineRow("+15550100001"),
+        ]),
+      },
+    } as never;
+
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .resolves.toBeUndefined();
+  });
+
+  it("fails visibly when no provider-eligible configured line remains", async () => {
+    const prisma = {
+      hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    } as never;
+
+    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+      .rejects.toMatchObject({
+        code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+        httpStatus: 500,
+      });
   });
 });
 
@@ -260,6 +523,32 @@ describe("hosted Linq proactive-conversation capacity", () => {
     ).resolves.toBe(false);
 
     expect(updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("can require the selected line to remain healthy while claiming capacity", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+
+    await expect(
+      claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: 50,
+        phoneNumberLookupKey: "lookup:line-1",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+        requiredHealthStatus: "healthy",
+      }),
+    ).resolves.toBe(false);
+
+    for (const call of updateMany.mock.calls) {
+      expect(call[0].where).toMatchObject({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: "healthy",
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: "lookup:line-1",
+      });
+    }
   });
 });
 
@@ -406,7 +695,8 @@ function buildLineRow(
   phoneNumber: string,
   input: {
     providerLastSeenAt: Date;
-    providerStatus: string;
+    providerReputationStatus: string;
+    providerServiceStatus: string;
   },
 ) {
   return {
@@ -414,7 +704,8 @@ function buildLineRow(
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
     providerLastSeenAt: input.providerLastSeenAt,
-    providerStatus: input.providerStatus,
+    providerReputationStatus: input.providerReputationStatus,
+    providerServiceStatus: input.providerServiceStatus,
   };
 }
 
@@ -434,6 +725,71 @@ function buildAssignableLineRow(
     phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber) ?? `lookup:${phoneNumber}`,
     proactiveConversationCount: overrides.proactiveConversationCount ?? null,
     proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
+  };
+}
+
+function buildIncomingLineRow(
+  phoneNumber: string,
+  overrides: Partial<{
+    configuredAt: Date | null;
+    egressPolicy: string;
+    healthStatus: string;
+    phoneNumberEncrypted: string | null;
+    phoneNumberLookupKey: string;
+    providerReputationStatus: string | null;
+    providerServiceStatus: string | null;
+  }> = {},
+) {
+  return {
+    configuredAt:
+      overrides.configuredAt === undefined
+        ? new Date("2026-07-16T12:00:00.000Z")
+        : overrides.configuredAt,
+    egressPolicy: overrides.egressPolicy ?? "enabled",
+    healthStatus: overrides.healthStatus ?? "healthy",
+    phoneNumberEncrypted:
+      overrides.phoneNumberEncrypted === undefined
+        ? encryptHostedLinqLinePhoneNumber(phoneNumber)
+        : overrides.phoneNumberEncrypted,
+    phoneNumberLookupKey:
+      overrides.phoneNumberLookupKey
+      ?? createHostedPhoneLookupKey(phoneNumber)
+      ?? `lookup:${phoneNumber}`,
+    providerReputationStatus:
+      overrides.providerReputationStatus ?? "HEALTHY",
+    providerServiceStatus: overrides.providerServiceStatus ?? "ACTIVE",
+  };
+}
+
+function buildReceiptCorrelatedRecoveryLineRow(
+  phoneNumber: string,
+  overrides: Partial<{
+    configuredAt: Date | null;
+    egressPolicy: string;
+    healthStatus: string;
+    lastReceiptEventId: string | null;
+    phoneNumberEncrypted: string | null;
+    providerReputationStatus: string | null;
+    providerServiceStatus: string | null;
+  }> = {},
+) {
+  return {
+    configuredAt:
+      overrides.configuredAt === undefined
+        ? new Date("2026-07-29T12:00:00.000Z")
+        : overrides.configuredAt,
+    egressPolicy: overrides.egressPolicy ?? "enabled",
+    healthStatus: overrides.healthStatus ?? "healthy",
+    lastReceiptEventId: overrides.lastReceiptEventId ?? null,
+    phoneNumberEncrypted:
+      overrides.phoneNumberEncrypted === undefined
+        ? encryptHostedLinqLinePhoneNumber(phoneNumber)
+        : overrides.phoneNumberEncrypted,
+    phoneNumberLookupKey:
+      createHostedPhoneLookupKey(phoneNumber) ?? "lookup:recovery",
+    providerReputationStatus:
+      overrides.providerReputationStatus ?? "HEALTHY",
+    providerServiceStatus: overrides.providerServiceStatus ?? "ACTIVE",
   };
 }
 

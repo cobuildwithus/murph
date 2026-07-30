@@ -27,6 +27,7 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
+  listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
 import {
   buildHostedLinqAssignmentPlanningMessages,
@@ -264,6 +265,35 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
     prisma: input.prisma,
     reservationKind: "inbound",
   });
+}
+
+/**
+ * Claims one healthy line for a new participant-target conversation. The
+ * shared chooser, active-home load, UTC-day capacity, and atomic line counter
+ * remain owned here; callers receive no line unless capacity was reserved.
+ */
+export async function reserveHostedLinqHealthyProactiveLineTx(input: {
+  excludedPhoneNumberLookupKey?: string | null;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const healthyLines = await listHostedLinqHealthyProactiveLines({ prisma: input.prisma });
+  const lines = input.excludedPhoneNumberLookupKey
+    ? healthyLines.filter((line) =>
+        line.phoneNumberLookupKey !== input.excludedPhoneNumberLookupKey
+      )
+    : healthyLines;
+  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    lines,
+    ...(input.now ? { now: input.now } : {}),
+    preferredRecipientPhone: null,
+    prisma: input.prisma,
+    reservationKind: "required_proactive",
+  });
+
+  return reservation
+    ? { kind: "reserved", reservation }
+    : { kind: "capacity_exhausted" };
 }
 
 type HostedLinqHomeLineRouteBindingDecision =
@@ -573,7 +603,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
-  reservationKind: "inbound" | "signup_welcome";
+  reservationKind: "inbound" | "required_proactive" | "signup_welcome";
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
   const recipientPhones = input.lines.map((line) => line.phoneNumber);
 
@@ -668,6 +698,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
           limit,
           phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
           prisma: input.prisma,
+          ...(input.reservationKind === "required_proactive"
+            ? { requiredHealthStatus: "healthy" as const }
+            : {}),
         });
       if (proactiveConversationReserved) {
         break;
@@ -683,6 +716,10 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     }
 
     proactiveConversationCounts.set(proactiveLine.phoneNumber, limit);
+  }
+
+  if (input.reservationKind === "required_proactive") {
+    return null;
   }
 
   return preferredOrFallbackLine

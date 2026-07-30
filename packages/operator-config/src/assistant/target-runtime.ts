@@ -51,7 +51,12 @@ export const HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID = 'hosted-openai'
 // config when local development uses ChatGPT subscription auth.
 export const HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID =
   'hosted-chatgpt-openai'
+// Hosted-local sends multiple providers through one recorder origin. Keep
+// their reserved ids distinct so thread resume preserves production's provider
+// handoff boundary without registered-provider CLI overrides replacing it.
 export const HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID = 'openai-local-test'
+export const HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID =
+  'venice-local-test'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
@@ -59,6 +64,7 @@ export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   'ollama',
   'lmstudio',
 ] as const

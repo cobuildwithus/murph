@@ -154,6 +154,32 @@ afterEach(async () => {
   );
 });
 
+test("hosted Codex runtime config writes Venice Responses config without secret values", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      VENICE_API_KEY: "signed-venice-egress-credential",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "venice",
+  );
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /^model = "gpt-5\.6-terra"$/mu);
+  assert.match(config, /^model_provider = "venice"$/mu);
+  assert.match(config, /\[model_providers\."venice"\]/u);
+  assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
+  assert.match(config, /env_key = "VENICE_API_KEY"/u);
+  assert.match(config, /wire_api = "responses"/u);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.doesNotMatch(config, /signed-venice-egress-credential/u);
+});
+
 test("hosted Codex runtime config writes OpenAI Responses config without secret values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
@@ -480,6 +506,32 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
+});
+
+test("hosted Codex runtime config applies the local provider override to Venice", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "venice",
+      [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
+        "http://host.docker.internal:4567/v1",
+      NODE_ENV: "test",
+      VENICE_API_KEY: "signed-venice-egress-credential",
+    },
+  });
+
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "venice-local-test",
+  );
+
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /model_provider = "venice-local-test"/u);
+  assert.match(config, /\[model_providers\."venice-local-test"\]/u);
+  assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
+  assert.match(config, /env_key = "VENICE_API_KEY"/u);
+  assert.doesNotMatch(config, /https:\/\/api\.venice\.ai\/api\/v1/u);
 });
 
 test("hosted Codex runtime config accepts a Linux Docker bridge model provider override", async () => {

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -341,6 +341,16 @@ a redundant root `pnpm typecheck`.
 | Changes under `packages/cli` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/cli verify:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched CLI files. Otherwise run `pnpm --dir packages/cli verify:coverage` so the package stays on its prepared runtime and package-shape coverage lane instead of falling back to a no-coverage loop. Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`. The package-local `pnpm --dir packages/cli test` loop is source-first and no longer requires prepared runtime artifacts or package-shape verification just to start. `pnpm test:diff` keeps reverse-dependent CLI fanout on that same source-first lane by default and escalates into `pnpm verify:cli` only when the diff directly touches CLI artifact-sensitive surfaces such as the CLI package manifest/build/package-shape config, the CLI workspace Vitest configs, the prepared-runtime helper, or the root workspace manifests. Those built-runtime and package-shape checks live behind explicit acceptance commands (`pnpm --dir packages/cli verify`, `pnpm --dir packages/cli verify:coverage`, and the repo-composed `pnpm verify:cli`). The CLI Vitest surface runs through nine workspace buckets; the health-tail, read-model, assistant, and expansion buckets share the bounded root worker pool, while the five explicit `fileParallelism: false` smoke buckets retain separate serial phases. Local worker caps default to `MURPH_VITEST_MAX_WORKERS=75%` unless the environment overrides it, file-level Vitest parallelism is enabled locally by default but disabled in CI by default, and in-file suite concurrency is opt-in unless `MURPH_VITEST_SUITE_CONCURRENCY` explicitly enables it. `MURPH_VITEST_FILE_PARALLELISM` can force file parallelism, and `MURPH_VITEST_MAX_CONCURRENCY` / `MURPH_CLI_VITEST_MAX_CONCURRENCY` cap concurrent tests within a file when suite concurrency is enabled (default `2` locally, `1` in CI). The prepared acceptance lane still covers the required hosted-execution, runtime-state, core, importer, device-syncd, query, inboxd, parser, and CLI runtime artifacts, including the reusable `packages/cli/dist/cli-entry.js` module. The shared CLI runtime-artifact helper trusts a verified in-process artifact state instead of rechecking the full artifact set on every later invocation, and non-stdin CLI integration tests can reuse a persistent subprocess harness by default with `MURPH_CLI_TEST_PERSISTENT_HARNESS=0` as the escape hatch back to isolated per-command processes. |
 | User explicitly says to skip checks | Skip checks for that turn only. | User instruction takes precedence. |
 
+For hosted assistant-provider choice, the truthful diff lane must cover
+`packages/hosted-execution`, `packages/operator-config`,
+`packages/assistant-runtime`, `apps/web`, and `apps/cloudflare`. Focused
+iteration should include the provider contract/config suites, hosted Web
+preference/route/component/workspace tests, and Cloudflare egress plus deploy
+preflight tests. Final proof remains `pnpm test:diff ...` across the touched
+owners plus `pnpm verify:acceptance`, desktop/mobile design-catalog evidence,
+and the routed review gates. Routine verification uses synthetic credentials
+and must not call a paid provider.
+
 Saved-card group-funding changes stay on the full `apps/web` acceptance lane.
 Focused iteration must cover canonical card selection, durable PaymentIntent
 binding before confirmation, exact-intent recovery after ambiguous responses,
@@ -360,10 +370,9 @@ assistant-runtime bridge, and assistant-engine tool/prompt tests. Exact-head CI
 owns the broad diff and scenario-integrity surfaces; direct shared-default
 pushes use `pnpm verify:acceptance`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete the local
-`product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
-pass, the review-only Fable or Opus UI pass, and the separate final ReviewGPT gate
-before handoff.
+putting a real query or ZIP in a durable artifact. Complete the preliminary
+ReviewGPT product-experience/prompt/frontend/coverage pass, the review-only
+Fable or Opus UI pass, and the separate final ReviewGPT gate before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
@@ -568,16 +577,13 @@ the advisory budget.
   `pg_typeof(column)::text` when the column type matters, and only use
   `column AT TIME ZONE 'UTC'` when the query is intentionally converting a
   UTC-naive value into a PostgreSQL `timestamptz`.
-- The root `render.yaml` defines the hosted Temporal orchestration worker as two
-  Render Background Worker instances on one Task Queue. Each instance permits
-  100 concurrent Activity executions and 20 concurrent Workflow Task
-  executions, with Temporal autoscaling both poller types. It builds
-  `packages/hosted-orchestrator-temporal` and starts the built worker process;
-  account-specific Render, Temporal, hosted web, Cloudflare, and signing-secret
-  values must stay in Render environment variables, not repo files. The worker's
-  Render service keeps native auto-deploy disabled; `.github/workflows/deploy-render-temporal-worker.yml`
-  triggers the secret deploy hook for the exact current `main` commit only after
-  `Murph Host Support` and `Repo Hygiene` push CI are green.
+- The private `cobuildwithus/murph-cloud` repository owns the hosted Temporal
+  worker's Render Blueprint, deployment workflow, production configuration, and
+  integration check. This public repository retains the released contracts,
+  hosted-local harness, and temporary rollback implementation, but it must not
+  define or trigger the production Render deployment. Murph Cloud verifies the
+  private worker against the public hosted-local Temporal scenario before a
+  protected `main` deployment.
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `hosted-execution` and `runtime-state` packages, and build the CLI package through the same TypeScript workspace toolchain used for local development.
 - Existing supplement-label databases receive the payload constraint as `NOT VALID`, which enforces new writes without blocking the retained pre-repair corpus. The exact guarded July 2026 repair validates it after correcting the known legacy rows; fresh tables create it as valid. `apps/web/README.md` owns the restore sequence and importer rollback floor.
 - Shared `hosted-execution` helpers own the hosted control-plane auth/env/route/client seam plus phone-call start contracts between `apps/web` and `apps/cloudflare`, while `runtime-state` owns `.runtime` taxonomy/path resolution plus JSON/SQLite versioning defaults for query search, inboxd, device-syncd, and the CLI inbox/device layers.
@@ -622,8 +628,8 @@ the advisory budget.
   also fails closed when the Workflow bundle exceeds 2.25 MiB, loses inspectable
   inline source-map evidence, or pulls broad contracts/vault-share source
   closures into the Workflow graph. Production pins a 100-Workflow cache with
-  reusable V8 contexts, and the root Render Blueprint pins two worker instances
-  to the 2 GB Standard plan.
+  reusable V8 contexts, and the private Murph Cloud Render Blueprint pins two
+  worker instances to the 2 GB Standard plan.
 - `apps/cloudflare/wrangler.jsonc` remains the checked-in worker scaffold, but the generated deploy config from `apps/cloudflare/scripts/**` is authoritative for environment-specific bindings and required Worker secrets. The generated Worker secret list currently requires `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`, `HOSTED_LOG_FINGERPRINT_SECRET`, `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`, `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`, `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`, `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, and `OPENAI_API_KEY`; optional provider secrets include `ELEVENLABS_API_KEY` for generated voice memos. The checked-in scaffold keeps only a tight local placeholder list. The deploy vars require the direct-R2 presign account and bucket names, with an optional account-scoped R2 HTTPS endpoint override; hosted-local dev, worker-only, and E2E profiles use a Docker MinIO sidecar plus local-only presign endpoint flags instead of relying on `wrangler dev` to emulate the R2 S3 API. The repo also ships the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` transient-cleanup config plus `pnpm --dir apps/cloudflare r2:lifecycle:apply`, and the manual GitHub Actions workflow `.github/workflows/deploy-cloudflare-hosted.yml` for environment-driven config rendering, cached native runner base preparation, direct `wrangler deploy` execution, explicit `instance_type` pinning, and smoke checks that poll operator status until the Durable Object runner reaches idle and status exposes the latest workspace checkpoint ref. The deploy flow requires `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke workflow runs, expects operators to apply the checked-in transient R2 lifecycle rules to the real bundles buckets as part of deploy setup, treats `CF_PLATFORM_ENVELOPE_KEY_ID` as single-key metadata for the active platform envelope key, and uses `wrangler deploy` as the direct-cut default deploy path. The deploy helper validates generated config, secrets, and runner bundle artifacts, runs direct Wrangler deploy, then reads `wrangler deployments status --json` for the smoke version and final traffic summary. That deploy flow prepares `apps/cloudflare/.deploy/runner-bundle/` ahead of time as a runtime leaf artifact and prepares a stable local base image from `Dockerfile.cloudflare-hosted-runner-base`; hosted-local E2E lanes may reuse the matching GHCR fingerprinted base image, but production-capable deploy paths force a local base build from the protected checkout before Wrangler's final image build copies the prepared bundle. The bounded direct hosted workspace invocation core still lives in `packages/assistant-runtime`. Protected-main Cloudflare deploy workflow jobs run on Blacksmith: normal predeploy E2E gates, runner smoke, the hosted Codex auth guard, and the production deploy job. The `cf:deploy:immediate` path skips the slower E2E and runner smoke gates, while the production deploy job still builds the runner bundle and native base image directly from its verified protected-main checkout before rendering secrets, dry-running/deploying through Wrangler, and smoking deployed endpoints.
 - The same protected-main deploy workflow also exposes one reusable `preview`
   target through the existing GitHub `Preview` Environment. It keeps the

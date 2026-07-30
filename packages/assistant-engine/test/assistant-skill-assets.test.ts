@@ -845,7 +845,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('When the group tools are available')
     expect(raw).toContain('check the room once on your first reply')
     expect(raw).toContain('text you to get set up')
-    expect(raw).toContain('Use your own words,\n  not a fixed script')
+    expect(raw).toMatch(/come back and say hi\s+in the group once setup is done/u)
+    expect(raw).toMatch(/Use your own words,\s+not a fixed script/u)
     expect(raw).toContain('Do not repeat the invitation unprompted')
     expect(raw).toContain('when someone new joins later')
     expect(raw).toMatch(/if\s+someone asks you to resend or re-share the card, share it again/u)
@@ -902,11 +903,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
     expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
-    expect(raw).toContain('current local Monday through yesterday')
-    expect(raw).toMatch(/Exclude earlier\s+rolling-window dates and today/u)
-    expect(raw).toMatch(/only when every compared date\s+set is identical/u)
+    expect(raw).toContain('seven local calendar days before today')
+    expect(raw).toMatch(/Exclude today and\s+anything older than that rolling window/u)
+    expect(raw).toMatch(/only when every compared\s+date set is identical/u)
     expect(raw).toMatch(
-      /When coverage differs, report scoped values or an unranked\s+pattern\./u,
+      /When coverage differs, report scoped values or an\s+unranked pattern\./u,
     )
     expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
@@ -923,6 +924,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('After any email `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
+    expect(raw).toContain('never attribute the absence to sync or permissions')
+    expect(raw).toContain('authorized current permission or data-availability state')
+    expect(raw).toContain('do not present it as the historical cause')
+    expect(raw).toContain('The consented eight-record projection')
+    expect(raw).not.toContain('direct tool evidence')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).toContain('### Example 1: close race')
@@ -1749,6 +1755,35 @@ describe('assistant skill assets', () => {
     )
     expect(referenceText).not.toContain('$murph-exercise-images')
     expect(referenceText).not.toContain('exercise-image skill')
+  })
+
+  it('keeps pain-driven restrictions evidence-gated and durable-rehab answers durable', async () => {
+    const physicalTherapy = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'physical-therapy',
+    )
+    expect(physicalTherapy).toBeTruthy()
+    if (!physicalTherapy) {
+      return
+    }
+
+    expect(physicalTherapy.triggerHint).toContain(
+      'Read before recommending exercises, rest, activity restriction, or load changes',
+    )
+
+    const raw = await readSkillFile(physicalTherapy)
+
+    expect(raw).toContain(
+      "Do not anchor on the user's label or let it choose an acute-injury branch.",
+    )
+    expect(raw).toContain(
+      'do not answer mainly with short-term flare management or a bare referral',
+    )
+    expect(raw).toContain(
+      'Rest, activity restriction, and fixed recovery windows are interventions, not neutral defaults while clarifying.',
+    )
+    expect(raw).toContain(
+      'ask that question before restricting activity; preserve tolerated movement in the meantime.',
+    )
   })
 
   it('keeps exercise lookup and presentation in one shared domain reference', async () => {

@@ -4,8 +4,10 @@ import path from "node:path";
 
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
+  HOSTED_ASSISTANT_VENICE_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -16,6 +18,19 @@ import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-a
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
+}));
+
+vi.mock("next/image", () => ({
+  default(props: {
+    alt: string;
+    "aria-hidden"?: boolean;
+    className?: string;
+    height: number;
+    src: string;
+    width: number;
+  }) {
+    return createElement("img", props);
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -39,6 +54,59 @@ vi.mock("@/src/components/ui/button", () => ({
 vi.mock("@/src/components/ui/badge", () => ({
   Badge({ children, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
     return createElement("span", props, children);
+  },
+}));
+
+vi.mock("@/src/components/ui/dialog", () => ({
+  Dialog({
+    children,
+    onOpenChange,
+    open,
+  }: {
+    children?: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+  }) {
+    return open
+      ? createElement(
+          "div",
+          { role: "dialog" },
+          children,
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "true",
+              onClick: () => onOpenChange?.(false),
+              type: "button",
+            },
+            "Dismiss dialog",
+          ),
+        )
+      : null;
+  },
+  DialogContent({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement>) {
+    return createElement("div", props, children);
+  },
+  DialogDescription({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLParagraphElement>) {
+    return createElement("p", props, children);
+  },
+  DialogHeader({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement>) {
+    return createElement("div", props, children);
+  },
+  DialogTitle({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLHeadingElement>) {
+    return createElement("h2", props, children);
   },
 }));
 
@@ -103,6 +171,326 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
   assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
+test("members can switch the provider without changing Terra, Luna, or Sol", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: false,
+    model: HOSTED_ASSISTANT_TERRA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    solAvailable: true,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /No chat history saved\./u,
+  );
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  assert.match(view.document.body.textContent ?? "", /Choose provider/u);
+  assert.match(
+    view.document.body.textContent ?? "",
+    /No chat history saved\./u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Privacy-first inference\./u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Murph uses this provider after you save\./u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /This only changes core replies\. Image generation, voice, search, and other tools still use their specialized providers\./u,
+  );
+  const providerDialog = view.document.querySelector<HTMLElement>(
+    '[role="dialog"]',
+  );
+  assert.ok(providerDialog);
+  assert.ok(
+    providerDialog.querySelector(
+      'img[src="/brand-logos/assistant-providers/openai-light.svg"]',
+    ),
+  );
+  assert.ok(
+    providerDialog.querySelector(
+      'img[src="/brand-logos/assistant-providers/venice-light.svg"]',
+    ),
+  );
+  const veniceControl = findProviderRadio(
+    view.document,
+    HOSTED_ASSISTANT_VENICE_PROVIDER,
+  );
+  await act(async () => {
+    veniceControl.click();
+  });
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Terra through Venice is your default\./u,
+  );
+  assert.ok(isRadioChecked(findModelRadio(
+    view.container,
+    HOSTED_ASSISTANT_TERRA_MODEL,
+  )));
+  view.cleanup();
+});
+
+test("closing the provider dialog leaves the draft unchanged", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const saveButton = findButton(view.container, "Save change");
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  const dismissButton = view.document.querySelector<HTMLButtonElement>(
+    '[data-dialog-dismiss="true"]',
+  );
+  assert.ok(dismissButton);
+  await act(async () => {
+    dismissButton.click();
+  });
+
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assert.ok(saveButton.disabled);
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+  view.cleanup();
+});
+
+test("a model-only save adopts the server's canonical provider", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: false,
+    model: HOSTED_ASSISTANT_LUNA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+    solAvailable: true,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+
+  await act(async () => {
+    findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
+  );
+
+  view.cleanup();
+});
+
+test("a provider-only save preserves a dormant Sol preference", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    dormantSolPreference: true,
+    model: HOSTED_ASSISTANT_TERRA_MODEL,
+    ok: true,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    solAvailable: false,
+    updated: true,
+  });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: true,
+      configurationAvailable: true,
+      initialDormantSolPreference: true,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+  const announcement = findHiddenSaveAnnouncement(view.container);
+  assert.equal(announcement.textContent, "");
+  assert.match(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Active/u,
+  );
+  assert.doesNotMatch(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Default/u,
+  );
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+    },
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
+  assert.match(
+    announcement.textContent ?? "",
+    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+  );
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  view.cleanup();
+});
+
+test("a combined provider and model save preserves both choices for retry", async () => {
+  const combinedPayload = {
+    model: HOSTED_ASSISTANT_SOL_MODEL,
+    provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+  };
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("temporary failure"))
+    .mockResolvedValueOnce({
+      dormantSolPreference: false,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
+      ok: true,
+      provider: HOSTED_ASSISTANT_VENICE_PROVIDER,
+      solAvailable: true,
+      updated: true,
+    });
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
+    solInput.click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  assert.equal(
+    view.container.querySelector('[role="alert"]')?.textContent,
+    "We couldn’t save this change. Try again.",
+  );
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
+  assert.ok(isRadioChecked(solInput));
+  assert.equal(findButton(view.container, "Save change").disabled, false);
+
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith({
+    method: "POST",
+    payload: combinedPayload,
+    url: "/api/settings/assistant-model",
+  });
+  assert.match(view.container.textContent ?? "", /New core replies use Venice\./u);
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through Venice is your default\./u,
+  );
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("non-Edge members can explicitly save Luna as their default model", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
@@ -139,9 +527,9 @@ test("non-Edge members can explicitly save Luna as their default model", async (
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
-    view.container.textContent ?? "",
-    /GPT-5\.6 Luna is now Murph’s default\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
   assert.ok(isRadioChecked(lunaInput));
   assert.ok(findButton(view.container, "Save change").disabled);
@@ -189,7 +577,7 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   assert.ok(isRadioChecked(solInput));
   assert.match(
     findModelLabel(view.container, HOSTED_ASSISTANT_TERRA_MODEL).textContent ?? "",
-    /Current/,
+    /Default/,
   );
   assert.match(
     findModelLabel(view.container, HOSTED_ASSISTANT_SOL_MODEL).textContent ?? "",
@@ -207,9 +595,9 @@ test("Edge members can explicitly save Sol as their default model", async () => 
     payload: { model: HOSTED_ASSISTANT_SOL_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(
-    view.container.textContent ?? "",
-    /GPT-5\.6 Sol is now Murph’s default\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -257,9 +645,9 @@ test("a generic save failure keeps the selected model available to retry", async
     await Promise.resolve();
   });
 
-  assert.match(
-    view.container.textContent ?? "",
-    /GPT-5\.6 Sol is now Murph’s default\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Sol through OpenAI is your default\./u,
   );
   assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -460,6 +848,52 @@ test("a stale Edge page removes Sol without changing the saved model", async () 
   view.cleanup();
 });
 
+test("a stale Venice page falls back to OpenAI and removes the unavailable choice", async () => {
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE",
+      message: "unavailable",
+    }),
+  );
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
+  });
+  await act(async () => {
+    submitForm(view.container);
+    await Promise.resolve();
+  });
+
+  assert.match(
+    view.container.textContent ?? "",
+    /Venice is no longer available\. Murph will keep using OpenAI\./,
+  );
+  assert.doesNotMatch(view.container.textContent ?? "", /Core replies/u);
+  assert.equal(findOptionalButton(view.container, "Change"), undefined);
+  assert.ok(findButton(view.container, "Save change").disabled);
+
+  view.cleanup();
+});
+
 test("refreshed eligibility resets the client state after an Edge upgrade", async () => {
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
@@ -528,9 +962,9 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
   assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_TERRA_MODEL));
   assert.ok(isRadioChecked(lunaInput));
-  assert.match(
-    view.container.textContent ?? "",
-    /GPT-5\.6 Luna is now Murph’s default\./,
+  assertHiddenSaveAnnouncement(
+    view.container,
+    /Saved\. Luna through OpenAI is your default\./u,
   );
 
   view.cleanup();
@@ -599,6 +1033,28 @@ test("members without active personal access see read-only model controls", () =
   assert.doesNotMatch(markup, /Sol requires an active Edge plan/);
 });
 
+test("members without active personal access see both provider and model controls explained", () => {
+  const markup = renderToStaticMarkup(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: false,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: false,
+      veniceAvailable: true,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /Provider and model choices are read-only until personal Murph access is active\./,
+  );
+  assert.match(markup, /New core replies use.*OpenAI/su);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
+  assert.doesNotMatch(markup, /Choose provider/u);
+});
+
 function findModelRadio(
   container: HTMLElement,
   model: string,
@@ -608,6 +1064,26 @@ function findModelRadio(
   );
   assert.ok(radio);
   return radio;
+}
+
+function assertHiddenSaveAnnouncement(
+  container: HTMLElement,
+  expected: RegExp,
+): void {
+  const announcement = findHiddenSaveAnnouncement(container);
+  assert.match(announcement.textContent ?? "", expected);
+  assert.equal(
+    container.querySelector('[aria-live="polite"]:not(.sr-only)'),
+    null,
+  );
+}
+
+function findHiddenSaveAnnouncement(container: HTMLElement): HTMLElement {
+  const announcement = container.querySelector<HTMLElement>(
+    '[aria-live="polite"].sr-only',
+  );
+  assert.ok(announcement);
+  return announcement;
 }
 
 function isRadioChecked(radio: HTMLInputElement): boolean {
@@ -622,12 +1098,30 @@ function findModelLabel(container: HTMLElement, model: string): HTMLLabelElement
   return label;
 }
 
-function findButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent === label,
+function findProviderRadio(
+  container: ParentNode,
+  provider: string,
+): HTMLElement {
+  const radio = container.querySelector<HTMLElement>(
+    `[id="assistant-provider-${provider}"]`,
   );
+  assert.ok(radio);
+  return radio;
+}
+
+function findButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = findOptionalButton(container, label);
   assert.ok(button);
   return button;
+}
+
+function findOptionalButton(
+  container: ParentNode,
+  label: string,
+): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
 }
 
 function submitForm(container: HTMLElement) {
@@ -661,6 +1155,7 @@ async function renderClient(element: ReactNode) {
       activeCleanups.delete(cleanupGlobals);
     },
     container,
+    document,
     rerender: async (nextElement: ReactNode) => {
       await act(async () => {
         root?.render(nextElement);

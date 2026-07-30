@@ -193,6 +193,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const created = await store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "oura",
       externalAccountId: "acct_456",
       displayName: "Oura ring",
@@ -270,6 +271,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const created = await store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "demo",
       externalAccountId: "acct_demo",
       displayName: "Demo provider",
@@ -326,6 +328,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const created = await store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "junction",
       externalAccountId: "junction-user-123",
       displayName: "Junction",
@@ -568,6 +571,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "junction",
       externalAccountId: "junction-user-123",
       displayName: "Junction",
@@ -643,6 +647,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "junction",
       externalAccountId: "junction-user-123",
       displayName: "Junction",
@@ -729,6 +734,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     const result = await store.upsertConnectionWithPrevious({
       ownerId: "user-123",
+      existingAccountPolicy: "preserve_established",
       provider: "junction",
       externalAccountId: "junction-user-123",
       displayName: "Junction",
@@ -740,7 +746,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         providerConfigKey: "junction",
       },
       metadata: {},
-      reuseEstablishedConnection: true,
       connectedAt: "2026-03-25T01:00:00.000Z",
       nextReconcileAt: "2026-03-25T02:00:00.000Z",
     });
@@ -806,6 +811,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "whoop",
       externalAccountId: "acct_456",
       displayName: "WHOOP",
@@ -883,6 +889,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "whoop",
       externalAccountId: "acct_456",
       displayName: "WHOOP",
@@ -941,6 +948,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "whoop",
       externalAccountId: "acct_456",
       displayName: "WHOOP",
@@ -993,6 +1001,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "whoop",
       externalAccountId: "acct_456",
       displayName: "WHOOP",
@@ -1050,6 +1059,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.upsertConnection({
       ownerId: "user-123",
+      existingAccountPolicy: "replace",
       provider: "junction",
       externalAccountId: "acct_456",
       displayName: "Garmin",

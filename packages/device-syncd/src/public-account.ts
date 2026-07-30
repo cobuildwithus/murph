@@ -1,4 +1,7 @@
-import type { PublicDeviceSyncAccount } from "./types.ts";
+import type {
+  PublicDeviceSyncAccount,
+  UpsertPublicDeviceSyncExistingAccountPolicy,
+} from "./types.ts";
 
 export const DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE =
   "HISTORICAL_DATA_RECONNECT_REQUIRED";
@@ -44,6 +47,18 @@ export function isEstablishedDeviceSyncConnection(connection: {
   return connection.status === "active" && isDeviceSyncConnectionSetupConfirmed(connection);
 }
 
+export function shouldPreserveEstablishedDeviceSyncConnection(
+  connection: {
+    setupPhase?: string | null;
+    status?: string | null;
+  } | null,
+  policy: UpsertPublicDeviceSyncExistingAccountPolicy,
+): boolean {
+  return policy === "preserve_established"
+    && connection !== null
+    && isEstablishedDeviceSyncConnection(connection);
+}
+
 export function isDeviceSyncDisconnectInProgress(connection: {
   lastErrorCode?: string | null;
   status?: string | null;
@@ -56,6 +71,13 @@ export function isDeviceSyncConnectionSetupConfirmed(connection: {
   setupPhase?: string | null;
 }): boolean {
   return connection.setupPhase === "source_confirmed";
+}
+
+export function isDeviceSyncConnectionSetupPending(connection: {
+  setupPhase?: string | null;
+}): boolean {
+  return connection.setupPhase === "pending_link"
+    || connection.setupPhase === "link_returned";
 }
 
 // Provider/account metadata can include raw profile payloads, body measurements, or

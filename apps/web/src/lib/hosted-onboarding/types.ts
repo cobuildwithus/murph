@@ -6,6 +6,7 @@ import type {
   HostedBillingPlanCode,
   HostedBillingPlanPresentation,
 } from "./billing-plans";
+import type { HostedConsentStatus } from "../legal/consent";
 
 export const HOSTED_PRIVY_AUTH_METHODS = ["phone", "email", "telegram"] as const;
 
@@ -72,6 +73,7 @@ export interface HostedPrivyCompletionPayload {
   inviteCode: string;
   joinUrl: string;
   launchConsentGranted?: boolean;
+  launchConsentStatus?: HostedConsentStatus;
   messagingSetupRequired: boolean;
   stage: HostedPostVerificationStage;
   status: HostedInviteStatusPayload;

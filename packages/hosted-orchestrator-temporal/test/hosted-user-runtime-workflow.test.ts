@@ -169,6 +169,84 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
+  it("executes one coalesced runtime wake when reconciliation facts are idle", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts());
+    runtime.executions.push(processingAccepted());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(runtimeWakeSignal());
+    machine.applySignal(runtimeWakeSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+    expect(continued.state?.runtimeWakeRequested).toBe(false);
+  });
+
+  it("preserves a runtime wake that arrives during accepted processing", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts(), reconciliationFacts());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.executions.push(
+      async () => {
+        machine.applySignal(runtimeWakeSignal());
+        return processingAccepted();
+      },
+      processingAccepted(),
+    );
+    machine.applySignal(runtimeWakeSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toHaveLength(2);
+    expect(continued.state?.runtimeWakeRequested).toBe(false);
+  });
+
+  it("keeps runtime rechecks facts-only when reconciliation remains idle", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts());
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(runtimeRecheckSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([]);
+  });
+
+  it("drops runtime wakes while reconciliation blocks runtime execution", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "user_not_active",
+        retryAt: null,
+      },
+    }));
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(runtimeWakeSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([]);
+    expect(continued.state?.runtimeWakeRequested).toBe(false);
+  });
+
   it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {
     const runtime = new FakeWorkflowRuntime();
     const machine = createMachine(runtime, {
@@ -699,6 +777,7 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     lastRuntimeStatus: null,
     latestMailboxPointer: null,
     mailboxSignalCount: 0,
+    runtimeWakeRequested: false,
     signalVersion: 0,
   };
 }
@@ -718,6 +797,12 @@ function mailboxSignal(
 function runtimeRecheckSignal(): HostedRuntimeSignal {
   return {
     kind: "runtime_recheck_requested",
+  };
+}
+
+function runtimeWakeSignal(): HostedRuntimeSignal {
+  return {
+    kind: "runtime_wake_requested",
   };
 }
 

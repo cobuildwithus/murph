@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-29
+Last verified: 2026-07-30
 
 ## Current Repo Checks
 
@@ -67,6 +67,17 @@ Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or
 failure; a later run recovers only old marked roots whose owner is gone and
 which no current-user process uses as its working directory.
+
+Hosted assistant-provider choice coverage is split across existing owners.
+Hosted-execution locks the closed OpenAI/Venice contract and additive workspace
+field; operator-config and assistant-runtime prove Venice Codex configuration
+without forwarding raw Worker credentials. Hosted Web tests cover the nullable
+preference, rollout flag, Settings route/component, workspace projection, and
+expand-only migration. Cloudflare tests cover signed credential minting,
+all-or-none deploy preflight, exact Responses path/method allowlisting, bounded
+body parsing, canonical product-model validation, fixed model rewriting, and
+real-key injection only at Worker egress. Routine tests use synthetic keys and
+do not call Venice.
 
 Clinical-record execution coverage is split at its owners: hosted-execution
 tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove
@@ -275,7 +286,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `.github/workflows/web-viewport-overflow.yml` runs the `pnpm --dir apps/web test:viewport-overflow` Playwright gate on GitHub-hosted `ubuntu-24.04` for every pull request and `main` push. It installs only Chromium (`playwright install --with-deps chromium`); Playwright's `webServer` boots the hosted-web dev server with the placeholder smoke env, so the job needs no Postgres service or real secrets. On failure it uploads the Playwright HTML report as an artifact.
 - `.github/workflows/host-support.yml` runs a host-support matrix on GitHub-hosted `ubuntu-24.04` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` and `packages/cli/test/inbox-service-boundaries.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The macOS host leg serializes package-script workspace builds so sibling `tsc -b --force` package scripts do not rewrite shared project-reference declarations at once while the Linux leg keeps the normal package-build fanout. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, hosted device routing, contact privacy, hosted mailbox fingerprinting, and the public Privy app id so its Linux release shards can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also preserves the Ubuntu `pnpm release:check` surface without running it as one long job: release metadata/build/typecheck, package coverage shards, app verification, and fixture coverage run as parallel jobs, then a final `Release checks (ubuntu)` aggregator preserves the required-check name. The app-verification shard provisions an isolated loopback PostgreSQL 17 service and sets the dedicated supplement-search test database variable, so its rollback-only 100+ query PostgreSQL corpus runs on pull requests and `main` while the ordinary hosted-web build database remains the unreachable CI placeholder. This keeps Linux bootstrap and release packaging exercised in CI while avoiding the serial package-coverage wall clock.
-- `.github/workflows/deploy-render-temporal-worker.yml` runs after successful `Murph Host Support` push runs on `main`, waits for both `Murph Host Support` and `Repo Hygiene` to be successful for the same current `main` commit, then calls the Render Temporal worker deploy hook with that exact commit `ref`. The hook URL lives only in the `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` GitHub Actions secret. This replaces Render's native `checksPass` auto-deploy gate for the worker so stale third-party check suites cannot block production deploys.
+- The private `cobuildwithus/murph-cloud` repository owns the Temporal worker's
+  cross-repository hosted-local integration check and protected post-CI Render
+  deploy. This public repository intentionally contains neither the Render
+  Blueprint nor the deploy-hook workflow; its CI continues to build and test
+  the temporary rollback implementation until that package is removed.
 - The hosted-orchestrator-temporal package build is a production-bundle memory
   gate in the host-support workspace build: it rejects a Workflow bundle above
   2.25 MiB, missing inline source-map dependency evidence, or containing the
@@ -465,6 +480,29 @@ not enter evidence; and attachment-only input fails closed before provider work.
   one attachment delivery with no duplicate or mailbox lag. The phase-one
   reader-compatible release remains the rollback floor after producer activation.
 
+Authenticated Linq group speaker-label coverage is split across the existing
+owners. Hosted-execution parser tests lock the additive provenance enum, legacy
+profile default, explicit non-overlapping name-miss evidence, exact response
+keys, and rejection of private participant ids.
+Hosted Web tests prove exact current-membership/profile candidates, pre-group
+and unmatched canonical-phone fallback, ambiguous/suspended-member omission,
+pending-profile-snapshot recovery, profile-over-contact precedence, fail-soft
+advisory outcomes, one set-based profile/contact lookup, and operation-local
+overflow beyond the 16-phone contact bound. Assistant-runtime tests prove the operation-local
+reader memo, bounded private file-backed profile/contact-positive and
+valid-negative cache, operation-only policy omissions, reuse across fresh
+module instances, exact runtime and
+route scope isolation, the 14-day positive and six-hour true-miss boundaries,
+non-sliding FIFO eviction, failure-only operation suppression,
+corruption recovery, opaque keys, private permissions where portable, provenance
+preservation, duplicate
+rejection, malformed-batch rejection, and mixed batch miss behavior.
+Assistant-engine tests prove one four-handle reader call for a 20-message
+initial burst, delegation during separate live admissions, direct-Linq
+exclusion, Telegram ingress-name preservation, explicit prompt semantics, and
+absence of hosted member or participant ids. Cloudflare group-tool-port tests
+keep the one-second presentation-only deadline and late-result rejection.
+
 ## Current Gaps
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
@@ -502,9 +540,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:scenario-integrity` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - Hosted Temporal orchestration has package, route, focused web/Cloudflare
-  coverage, a local Signal-With-Start smoke script, and a root Render
-  Background Worker Blueprint for two worker processes on one Task Queue. The
-  hosted-local E2E
+  coverage and a local Signal-With-Start smoke script. Private Murph Cloud owns
+  the Render Blueprint and verifies its worker against the public hosted-local
+  Temporal scenario before deployment. The hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
   reaches Cloudflare ensure-processing. The hosted Temporal package has retired
@@ -514,13 +552,14 @@ not enter evidence; and attachment-only input fails closed before provider work.
   and CI package-coverage entry to remain present, and the host-support package
   coverage shard runs `packages/hosted-orchestrator-temporal`. The ordinary
   package build also verifies the exact production Workflow bundle byte budget
-  and source graph before host-support CI can admit a Render deploy. Future
+  and source graph; private Murph Cloud CI separately gates Render deployment.
+  Future
   command-ordering edits to `hosted-user-runtime.ts` still require Worker
   Versioning/deployment pinning, `patched()` / `deprecatePatch()`, or a replay
   test against representative captured or synthetic pre-change histories for
   the newly affected path. Routine repo checks still do not validate a live
   Render deploy or a production Temporal Cloud namespace.
-- Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
+- Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. The opt-in `linq-group-ios-app-download` scenario uses an authenticated live provider turn through the canonical hosted Linq group route and asserts the delivered public App Store link, final-line formatting, single-bubble delivery, and personal-setup boundary; it is manual-only so routine verification never spends provider credits. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
 - Production-path hosted-local waiters are observational: completion, progress,
   and provider-output waits may read status or recorded stub requests and sleep,
   but must not invoke ensure-processing, alarms, activity expiry, or direct

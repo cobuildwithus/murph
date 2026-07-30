@@ -28,6 +28,8 @@ export interface HostedTelegramWebhookSummary {
   isDirect: boolean;
   occurredAt: string;
   senderTelegramUserId: string | null;
+  /** Presentation-only name from the webhook-authenticated Telegram sender. */
+  senderTelegramDisplayName: string | null;
   /** Lookup-normalized (lowercased, 5-32 chars) for identity matching. */
   senderTelegramUsername: string | null;
   /**
@@ -108,6 +110,10 @@ export async function summarizeHostedTelegramWebhook(
     isDirect: summary.thread.isDirect,
     occurredAt: summary.occurredAt,
     senderTelegramUserId: summary.actor.senderTelegramUserId,
+    senderTelegramDisplayName: normalizeHostedTelegramDisplayName([
+      message?.from?.first_name,
+      message?.from?.last_name,
+    ]),
     senderTelegramDisplayUsername: normalizeHostedTelegramUsernameForDisplay(
       message?.from?.username ?? null,
     ),
@@ -115,6 +121,26 @@ export async function summarizeHostedTelegramWebhook(
       message?.from?.username ?? null,
     ),
   };
+}
+
+const HOSTED_TELEGRAM_DISPLAY_NAME_MAX_LENGTH = 120;
+
+function normalizeHostedTelegramDisplayName(
+  parts: readonly (string | null | undefined)[],
+): string | null {
+  const normalized = parts
+    .map((part) => normalizeNullableString(part))
+    .filter((part): part is string => part !== null)
+    .join(" ")
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!normalized) {
+    return null;
+  }
+  return Array.from(normalized)
+    .slice(0, HOSTED_TELEGRAM_DISPLAY_NAME_MAX_LENGTH)
+    .join("");
 }
 
 const HOSTED_TELEGRAM_DISPLAY_USERNAME_MAX_LENGTH = 32;

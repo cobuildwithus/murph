@@ -31,7 +31,13 @@ import {
 
 const runId = Date.now();
 const userId = `member_local_usage_limit_ambiguous_${runId}`;
+const groupOwnerUserId = `member_local_usage_limit_group_owner_${runId}`;
+const guestUserId = `guest_local_usage_limit_group_${runId}`;
 const chatId = `chat_local_usage_limit_ambiguous_${runId}`;
+const groupChatId = `chat_local_usage_limit_group_${runId}`;
+const memberPhone = buildLinqRecipientPhoneNumber(userId);
+const groupOwnerPhone = buildLinqRecipientPhoneNumber(groupOwnerUserId);
+const guestPhone = buildLinqRecipientPhoneNumber(guestUserId);
 const linqApiToken = "linq-local-usage-limit-token";
 const linqWebhookSecret = "linq-local-usage-limit-webhook-secret";
 const assistantModel = "gpt-5.6-terra";
@@ -39,6 +45,11 @@ const firstInboundText = "Can you help me plan tomorrow's workout?";
 const secondInboundText = "Can you also update the plan for Saturday?";
 const firstAssistantReply = "Absolutely — here's a focused plan for tomorrow.";
 const secondAssistantReply = "I've updated the Saturday plan too.";
+const groupBootstrapText = "Create the group usage backlog fixture.";
+const groupBootstrapReply = "The group fixture is ready.";
+const groupSecondTurnText = "Add a second group reply context.";
+const groupSecondTurnReply = "The second group context is ready.";
+const groupBacklogReply = "I caught up with the whole group in one reply.";
 const usageLimitNoticeUrl =
   "https://www.withmurph.ai/settings?addUsage=true#subscription";
 
@@ -68,7 +79,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-          buildLinqRecipientPhoneNumber(userId),
+          [memberPhone, groupOwnerPhone, guestPhone].join(","),
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD:
           "price_local_usage_limit_5",
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -85,10 +96,6 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenarioLabel: "Local hosted usage-limit ambiguous send e2e",
       streamLogs: streamDevLogs,
     });
-  }, 300_000);
-
-  it("keeps one durable crossing notice while later over-limit work remains blocked", async () => {
-    const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       billingPlanCode: "launch_monthly",
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -99,6 +106,17 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(), userId);
     await requireScenario().waitForHostedCompletion(userId);
+    await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
+      homePhone: buildLinqHomePhoneNumber(groupOwnerUserId),
+      memberId: groupOwnerUserId,
+      memberPhone: groupOwnerPhone,
+      stripeCustomerId: `cus_local_usage_group_owner_${runId}`,
+      stripeSubscriptionId: `sub_local_usage_group_owner_${runId}`,
+    });
+  }, 300_000);
+
+  it("keeps one durable crossing notice while later over-limit work remains blocked", async () => {
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId,
       memberId: userId,
@@ -393,6 +411,244 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       template: "ai_usage_quota",
     })).resolves.toEqual(blockedDeliveries);
   }, 420_000);
+
+  it("releases one multi-sender group backlog as one attributable reply", async () => {
+    requireLinqStub().setChatIsGroup(groupChatId, true);
+
+    const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
+    const bootstrapSendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
+    requireScenario().queueAssistantResponses([groupBootstrapReply], {
+      matchInputContains: groupBootstrapText,
+    });
+    const bootstrapResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(groupOwnerUserId, groupChatId, {
+        eventId: `evt_usage_group_bootstrap_${runId}`,
+        isGroup: true,
+        messageId: `msg_usage_group_bootstrap_${runId}`,
+        service: "iMessage",
+        text: groupBootstrapText,
+      }),
+    );
+    expect(bootstrapResponse.status).toBe(202);
+    await expect(bootstrapResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    const routedState = await vi.waitFor(async () => {
+      const state = await requireScenario().readHostedLinqWorkspaceIsolationState({
+        chatId: groupChatId,
+        memberId: userId,
+      });
+      expect(state.thread?.containerMemberId).toEqual(expect.any(String));
+      return state;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    const containerMemberId = routedState.thread?.containerMemberId;
+    if (!containerMemberId) {
+      throw new Error("Expected the group route to create a container workspace.");
+    }
+
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: bootstrapSendBaseline + 1,
+      expectedPath: groupReplyPath,
+      matchRequest: (request) =>
+        requireLinqStub().readObservedMessageText(request) === groupBootstrapReply,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    await requireScenario().waitForHostedCompletion(containerMemberId);
+    const bootstrapReplyMessageId =
+      requireAcceptedLinqMessageIdByText(groupChatId, groupBootstrapReply);
+
+    const { periodEnd, periodStart } = buildCurrentUtcCalendarMonthPeriod();
+    const secondTurnReplyMatcher = (request: ObservedLinqRequest): boolean =>
+      requireLinqStub().readObservedMessageText(request)
+        === groupSecondTurnReply;
+    const secondTurnSendBaseline = requireLinqStub().countObservedSends(
+      groupReplyPath,
+      secondTurnReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([groupSecondTurnReply], {
+      matchInputContains: groupSecondTurnText,
+    });
+    const secondTurnResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(groupOwnerUserId, groupChatId, {
+        eventId: `evt_usage_group_second_turn_${runId}`,
+        isGroup: true,
+        messageId: `msg_usage_group_second_turn_${runId}`,
+        service: "iMessage",
+        text: groupSecondTurnText,
+      }),
+    );
+    expect(secondTurnResponse.status).toBe(202);
+    await expect(secondTurnResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: secondTurnSendBaseline + 1,
+      expectedPath: groupReplyPath,
+      matchRequest: secondTurnReplyMatcher,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    await requireScenario().waitForHostedIdle(containerMemberId);
+    const secondTurnReplyMessageId =
+      requireAcceptedLinqMessageIdByText(groupChatId, groupSecondTurnReply);
+    await seedHostedAiUsageLimitPeriodForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: containerMemberId,
+      periodEnd,
+      periodStart,
+      remainingUsdMicros: 0n,
+    });
+    await expect(readHostedAiUsageLimitPeriodForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: containerMemberId,
+      periodStart,
+    })).resolves.toMatchObject({
+      blockedAt: expect.any(Date),
+    });
+
+    const backlogInputs = [
+      {
+        eventId: `evt_usage_group_backlog_owner_one_${runId}`,
+        messageId: `msg_usage_group_backlog_owner_one_${runId}`,
+        replyToMessageId: bootstrapReplyMessageId,
+        senderUserId: groupOwnerUserId,
+        text: `GROUP_BACKLOG_OWNER_ONE_${runId}`,
+      },
+      {
+        eventId: `evt_usage_group_backlog_guest_${runId}`,
+        messageId: `msg_usage_group_backlog_guest_${runId}`,
+        replyToMessageId: secondTurnReplyMessageId,
+        senderUserId: guestUserId,
+        text: `GROUP_BACKLOG_GUEST_${runId}`,
+      },
+      {
+        eventId: `evt_usage_group_backlog_owner_two_${runId}`,
+        messageId: `msg_usage_group_backlog_owner_two_${runId}`,
+        replyToMessageId: secondTurnReplyMessageId,
+        senderUserId: groupOwnerUserId,
+        text: `GROUP_BACKLOG_OWNER_TWO_${runId}`,
+      },
+    ] as const;
+    const providerBaseline = countAssistantResponseRequests();
+    requireScenario().queueAssistantResponses([groupBacklogReply], {
+      matchInputContains: backlogInputs.map((input) => input.text),
+    });
+
+    for (const input of backlogInputs) {
+      const response = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(input.senderUserId, groupChatId, {
+          eventId: input.eventId,
+          isGroup: true,
+          messageId: input.messageId,
+          recipientUserId: groupOwnerUserId,
+          replyToMessageId: input.replyToMessageId,
+          service: "iMessage",
+          text: input.text,
+        }),
+      );
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      });
+    }
+
+    const blockedStatus = await vi.waitFor(async () => {
+      const status = await requireScenario().harness.readUserStatus(
+        containerMemberId,
+      );
+      expect(status.inFlight).toBe(false);
+      expect(readConversationMailboxLag(status)).not.toBe("0");
+      return status;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    expect(blockedStatus.lastErrorCode ?? null).toBeNull();
+    expect(countAssistantResponseRequests()).toBe(providerBaseline);
+    for (const input of backlogInputs) {
+      await expect(readHostedMailboxItemForTest({
+        dedupeKey: input.eventId,
+        environment: requireScenario().runtimeEnv,
+        userId: containerMemberId,
+      })).resolves.toMatchObject({
+        consumedAt: null,
+      });
+    }
+
+    const postReleaseSendBaseline =
+      requireLinqStub().countObservedSends(groupReplyPath);
+    const backlogReplyBaseline = requireLinqStub().countObservedSends(
+      groupReplyPath,
+      (request) =>
+        requireLinqStub().readObservedMessageText(request) === groupBacklogReply,
+    );
+    await grantHostedUsageCreditForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: containerMemberId,
+      purchaseId: `hucp_local_usage_group_resume_${runId}`,
+    });
+    await expect(signalHostedRuntimeRecheckRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      userId: containerMemberId,
+    })).resolves.toMatchObject({
+      signalAccepted: true,
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: backlogReplyBaseline + 1,
+      expectedPath: groupReplyPath,
+      matchRequest: (request) =>
+        requireLinqStub().readObservedMessageText(request) === groupBacklogReply,
+      scenario: requireScenario(),
+      userId: containerMemberId,
+    });
+    const completedStatus = await requireScenario().waitForHostedCompletion(
+      containerMemberId,
+    );
+
+    expect(completedStatus.lastErrorCode ?? null).toBeNull();
+    expect(readConversationMailboxLag(completedStatus)).toBe("0");
+    expect(requireLinqStub().countObservedSends(groupReplyPath)).toBe(
+      postReleaseSendBaseline + 1,
+    );
+    const resumedProviderRequests = requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .slice(providerBaseline);
+    expect(resumedProviderRequests).toHaveLength(1);
+    const resumedPrompt = requireJsonStringContainingAll(
+      resumedProviderRequests[0]?.body ?? "",
+      backlogInputs.map((input) => input.text),
+    );
+    for (const input of backlogInputs) {
+      expect(resumedPrompt).toContain(input.text);
+    }
+    expect(resumedPrompt).toContain(`Sender: ${groupOwnerPhone}`);
+    expect(resumedPrompt).toContain(`Sender: ${guestPhone}`);
+    expect(resumedPrompt).toContain(groupBootstrapReply);
+    expect(resumedPrompt).toContain(groupSecondTurnReply);
+    expect(
+      resumedPrompt.match(/Message ref: ain_[0-9a-f]{32}/gu),
+    ).toHaveLength(backlogInputs.length);
+    for (const input of backlogInputs) {
+      await expect(readHostedMailboxItemForTest({
+        dedupeKey: input.eventId,
+        environment: requireScenario().runtimeEnv,
+        userId: containerMemberId,
+      })).resolves.toMatchObject({
+        consumedAt: expect.any(String),
+      });
+    }
+  }, 600_000);
 });
 
 function buildActivationWake() {
@@ -423,6 +679,50 @@ function countAssistantResponseRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
+}
+
+function requireAcceptedLinqMessageIdByText(chatId: string, text: string): string {
+  const acceptedGroupSends = requireLinqStub().acceptedSendRequests.filter(
+    (request) =>
+      request.method === "POST"
+      && request.url === `/chats/${encodeURIComponent(chatId)}/messages`,
+  );
+  const acceptedIndex = acceptedGroupSends.findIndex((request) =>
+    requireLinqStub().readObservedMessageText(request) === text
+  );
+  const messageId = requireLinqStub().listObservedMessageIds(chatId)[acceptedIndex];
+  if (acceptedIndex < 0 || !messageId) {
+    throw new Error(`Missing accepted Linq message id for ${text}.`);
+  }
+  return messageId;
+}
+
+function requireJsonStringContainingAll(
+  jsonText: string,
+  expectedValues: readonly string[],
+): string {
+  const parsed: unknown = JSON.parse(jsonText);
+  const candidates = collectJsonStrings(parsed)
+    .filter((value) => expectedValues.every((expected) => value.includes(expected)))
+    .sort((left, right) => left.length - right.length);
+  const [candidate] = candidates;
+  if (!candidate) {
+    throw new Error("Assistant provider request omitted the compound group prompt.");
+  }
+  return candidate;
+}
+
+function collectJsonStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(collectJsonStrings);
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectJsonStrings);
+  }
+  return [];
 }
 
 function readConversationMailboxLane(

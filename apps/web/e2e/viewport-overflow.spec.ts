@@ -146,6 +146,114 @@ for (const route of ROUTES) {
   }
 }
 
+test("home onboarding steps keep equal cards across dashboard widths", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto(
+    "/design?tab=sections#home-onboarding-steps",
+    { waitUntil: "load" },
+  );
+  expect(response?.status(), "onboarding study should respond 200").toBe(200);
+
+  const study = page.locator(
+    '[data-design-section="home-onboarding-steps"]',
+  );
+  const track = study.locator("[data-onboarding-steps]");
+  await expect(track).toBeVisible();
+
+  for (const viewportWidth of [1023, 1024, 1050, 1280, 1440] as const) {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    const dashboardContentWidth = viewportWidth - 256 - 112;
+    await study.evaluate((element, width) => {
+      element.style.maxWidth = `${width}px`;
+      element.style.width = `${width}px`;
+    }, dashboardContentWidth);
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const layout = await track.evaluate((element, tolerance) => {
+      const cards = Array.from(
+        element.querySelectorAll<HTMLElement>("[data-onboarding-step]"),
+      );
+      const trackRect = element.getBoundingClientRect();
+      const measureCards = () => {
+        const withinTrack = (rect: DOMRect) =>
+          rect.left >= trackRect.left - tolerance
+          && rect.right <= trackRect.right + tolerance;
+        return {
+          actionsContained: cards.every((card) => {
+            const cardRect = card.getBoundingClientRect();
+            const actionRect = card.querySelector<HTMLElement>(
+              "a, button",
+            )?.getBoundingClientRect();
+            return Boolean(
+              actionRect
+              && actionRect.left >= cardRect.left - tolerance
+              && actionRect.right <= cardRect.right + tolerance,
+            );
+          }),
+          visibleCards: cards.filter((card) =>
+            withinTrack(card.getBoundingClientRect())
+          ).length,
+          widths: cards.map((card) => card.getBoundingClientRect().width),
+        };
+      };
+
+      element.scrollLeft = 0;
+      const start = measureCards();
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      const end = measureCards();
+
+      return {
+        actionsContained: start.actionsContained,
+        clientWidth: element.clientWidth,
+        display: window.getComputedStyle(element).display,
+        documentOverflow:
+          document.documentElement.scrollWidth
+          - document.documentElement.clientWidth,
+        endVisibleCards: end.visibleCards,
+        maxCardWidthDelta:
+          Math.max(...start.widths) - Math.min(...start.widths),
+        scrollWidth: element.scrollWidth,
+        startVisibleCards: start.visibleCards,
+      };
+    }, OVERFLOW_TOLERANCE_PX);
+
+    expect(layout.documentOverflow).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+
+    if (viewportWidth < 1024) {
+      expect(layout.display).toBe("grid");
+      expect(layout.scrollWidth).toBeLessThanOrEqual(
+        layout.clientWidth + OVERFLOW_TOLERANCE_PX,
+      );
+      continue;
+    }
+
+    expect(layout.display).toBe("flex");
+    expect(layout.scrollWidth).toBeGreaterThan(layout.clientWidth);
+    expect(layout.maxCardWidthDelta).toBeLessThanOrEqual(
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(layout.actionsContained).toBe(true);
+    expect(layout.startVisibleCards).toBe(3);
+    expect(layout.endVisibleCards).toBe(3);
+  }
+});
+
 test("clubs stays reachable through the global navigation at every breakpoint", async ({
   page,
 }) => {

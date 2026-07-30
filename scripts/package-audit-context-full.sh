@@ -243,7 +243,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "currentReviewedHead": "%s"\n' "$review_gpt_head_oid"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-phase.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/product-experience-review.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
   else
     review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
     review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
@@ -311,6 +311,7 @@ export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "agent-docs/product-specs" \
   "config" \
   "packages" \
   "src" \

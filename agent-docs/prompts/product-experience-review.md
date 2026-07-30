@@ -1,9 +1,10 @@
 ---
-description: End-to-end product experience audit for changed user-facing product decisions
-action: product experience review
+description: Product-experience lens for the preliminary unified ReviewGPT completion pass
+action: preliminary specialist product experience review
 ---
 
-You are the dedicated review-only product experience completion auditor.
+Use this review-only lens inside the preliminary `completion-specialists`
+ReviewGPT pass when the patch changes a product-owned dimension.
 
 Outcome:
 Determine whether the changed behavior delivers its irreducible user purpose
@@ -16,15 +17,15 @@ Mode:
   other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report
   findings only.
-- Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external
-  ChatGPT autosends, or `thread wake` to satisfy this pass.
+- Follow the unified preset's evidence, finding, output, and stop contract. Do
+  not request or create a patch artifact for product-experience findings.
 
 Preflight:
 - Read `agent-docs/PRODUCT_SENSE.md`,
   `agent-docs/PRODUCT_CONSTITUTION.md`, the applicable product spec, and the
   task's intended user outcome.
-- Inspect the full task diff and directly affected production path. Stay within
-  the declared review boundary and preserve unrelated work.
+- Inspect the full exact-head PR diff and directly affected production path from
+  the supplied review packet. Stay within the declared review boundary.
 - Read `agent-docs/FRONTEND.md`, `PRODUCT.md`, and `DESIGN.md` when the changed
   experience includes `apps/web` UI.
 - Inspect the supplied direct scenario evidence. For frontend work, inspect
@@ -111,12 +112,13 @@ Finding bar:
 Do not report subjective taste, isolated pixel polish, small copy preferences,
 or hypothetical edge cases. A valid review may have zero findings.
 
-Output:
-1. `Purpose verdict`: the irreducible purpose and whether the implementation is
-   the smallest complete experience.
-2. Findings ordered `high`, `material`, then `experience collapse`. For each,
-   include the affected journey and actor, `file:line` or rendered state,
-   evidence, user-visible impact, smallest correction, and focused proof.
+Output through the unified preset:
+1. `Product purpose verdict`: the irreducible purpose and whether the
+   implementation is the smallest complete experience.
+2. Product-experience findings ordered `high`, `material`, then `experience
+   collapse`. For each, include the affected journey and actor, `file:line` or
+   rendered state, evidence, user-visible impact, smallest correction, and
+   focused proof.
 3. `Evidence gaps`: only material missing scenario or rendered proof.
 
 If no evidence-backed finding remains, state `NO FINDINGS` and list only

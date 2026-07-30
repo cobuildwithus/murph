@@ -1,0 +1,465 @@
+import { act, createElement, useState } from "react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
+
+const mocks = vi.hoisted(() => ({
+  authenticated: false,
+  completeHostedPrivyAuth: vi.fn(),
+  isMobile: false,
+  loginWithCode: vi.fn(),
+  loginWithTelegram: vi.fn(),
+  privyReady: false,
+  sendCode: vi.fn(),
+  user: null as { linkedAccounts?: unknown } | null,
+}));
+
+vi.mock("@privy-io/react-auth", () => ({
+  Captcha() {
+    return createElement("div", { "data-privy-captcha": "mounted" });
+  },
+  useLoginWithEmail() {
+    return {
+      loginWithCode: mocks.loginWithCode,
+      sendCode: mocks.sendCode,
+      state: { status: "initial" },
+    };
+  },
+  useLoginWithSms() {
+    return {
+      loginWithCode: mocks.loginWithCode,
+      sendCode: mocks.sendCode,
+    };
+  },
+  useLoginWithTelegram() {
+    return {
+      login: mocks.loginWithTelegram,
+      state: { status: "initial" },
+    };
+  },
+  usePrivy() {
+    return {
+      authenticated: mocks.authenticated,
+      logout: vi.fn(),
+      ready: mocks.privyReady,
+    };
+  },
+  useUser() {
+    return {
+      user: mocks.user,
+    };
+  },
+}));
+
+vi.mock("@vercel/analytics", () => ({
+  track: vi.fn(),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
+  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
+}));
+
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => mocks.isMobile,
+}));
+
+import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import { HostedAuthPanelWithinPrivy } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.authenticated = false;
+  mocks.isMobile = false;
+  mocks.privyReady = false;
+  mocks.user = null;
+  mocks.completeHostedPrivyAuth.mockResolvedValue({
+    payload: {},
+    redirectUrl: "/home",
+  });
+  mocks.loginWithCode.mockResolvedValue(undefined);
+  mocks.loginWithTelegram.mockResolvedValue(undefined);
+  mocks.sendCode.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+test("HostedAuthPanel releases the real phone controls at Telegram's trusted-click handoff", async () => {
+  const renderPanel = () => createElement(HostedAuthPanelHarness);
+  const rendered = await renderClientComponent(renderPanel(), {
+    matchMedia: createDesktopMatchMedia(),
+    requireButton: false,
+  });
+
+  try {
+    const phoneInput = readPhoneInput(rendered.container);
+    const countryTrigger = readCountryTrigger(rendered.container);
+    const telegramButton = readButton(rendered.container, "Telegram");
+
+    expect(phoneInput.disabled).toBe(false);
+    expect(countryTrigger.disabled).toBe(false);
+    expect(telegramButton.disabled).toBe(false);
+
+    await act(async () => {
+      telegramButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(readButton(rendered.container, "Connecting...").disabled).toBe(true);
+    expect(phoneInput.disabled).toBe(true);
+    expect(countryTrigger.disabled).toBe(true);
+    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+
+    mocks.privyReady = true;
+    installTelegramLoginWidget(rendered.window);
+    await rendered.rerender(renderPanel());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const continueButton = readButton(rendered.container, "Continue");
+    expect(continueButton.disabled).toBe(false);
+    expect(continueButton.textContent).toContain("Continue with Telegram");
+    expect(rendered.container.textContent).toContain(
+      "Telegram is ready. Continue to open sign in.",
+    );
+    expect(phoneInput.disabled).toBe(false);
+    expect(countryTrigger.disabled).toBe(false);
+    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("HostedAuthPanel keeps real phone controls enabled for their own queued send", async () => {
+  const renderPanel = () => createElement(HostedAuthPanelHarness);
+  const rendered = await renderClientComponent(renderPanel(), {
+    matchMedia: createDesktopMatchMedia(),
+    requireButton: false,
+  });
+
+  try {
+    const phoneInput = readPhoneInput(rendered.container);
+    const countryTrigger = readCountryTrigger(rendered.container);
+    const phoneForm = phoneInput.closest("form");
+    expect(phoneForm).not.toBeNull();
+
+    await act(async () => {
+      setInputValue(rendered.window, phoneInput, "4155552671");
+      phoneForm?.dispatchEvent(
+        new rendered.window.Event("submit", {
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect(readButton(rendered.container, "Sending code...").disabled).toBe(true);
+    expect(phoneInput.disabled).toBe(false);
+    expect(countryTrigger.disabled).toBe(false);
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("HostedAuthPanel disables the real mobile country trigger while Telegram waits", async () => {
+  mocks.isMobile = true;
+  const rendered = await renderClientComponent(
+    createElement(HostedAuthPanelHarness),
+    { requireButton: false },
+  );
+
+  try {
+    const countryTrigger = readCountryTrigger(rendered.container);
+    const telegramButton = readButton(rendered.container, "Telegram");
+    expect(countryTrigger.disabled).toBe(false);
+
+    await act(async () => {
+      telegramButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(readButton(rendered.container, "Connecting...").disabled).toBe(true);
+    expect(countryTrigger.disabled).toBe(true);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("HostedAuthPanel gates method actions until an authenticated session snapshot resolves", async () => {
+  const renderPanel = () =>
+    createElement(HostedAuthPanelWithinPrivyHarness);
+  const rendered = await renderClientComponent(renderPanel(), {
+    matchMedia: createDesktopMatchMedia(),
+    requireButton: false,
+  });
+
+  try {
+    await act(async () => {
+      readButton(rendered.container, "Email").dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    expect(
+      rendered.container.querySelector('input[id="homepage-email-address"]'),
+    ).toBeTruthy();
+
+    mocks.privyReady = true;
+    await rendered.rerender(renderPanel());
+
+    expect(
+      rendered.container.querySelector('input[id="homepage-email-address"]'),
+    ).toBeTruthy();
+
+    mocks.authenticated = true;
+    await rendered.rerender(renderPanel());
+
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+    expect(
+      rendered.container.querySelector('input[name="phone-number"]'),
+    ).toBeNull();
+    expect(
+      rendered.container.querySelector('input[id="homepage-email-address"]'),
+    ).toBeNull();
+    expect(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (candidate) =>
+          candidate.textContent?.includes("Continue")
+          || candidate.textContent?.includes("Email")
+          || candidate.textContent?.includes("Telegram"),
+      ),
+    ).toBe(false);
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+    expect(mocks.loginWithCode).not.toHaveBeenCalled();
+    expect(mocks.loginWithTelegram).not.toHaveBeenCalled();
+    expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
+
+    mocks.user = {};
+    await rendered.rerender(renderPanel());
+
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+    expect(rendered.container.querySelector("button")).toBeNull();
+
+    mocks.user = {
+      linkedAccounts: [
+        {
+          address: "member@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+    };
+    await rendered.rerender(renderPanel());
+
+    expect(rendered.container.textContent).toContain("Continue with email");
+    expect(rendered.container.textContent).not.toContain(
+      "You already started logging in or signing up.",
+    );
+
+    await act(async () => {
+      readButton(rendered.container, "Continue").dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ authMethod: "email" }),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("HostedAuthPanel keeps an indeterminate authenticated session gated across a provider restart", async () => {
+  vi.useFakeTimers();
+  mocks.authenticated = true;
+  mocks.privyReady = true;
+  mocks.user = null;
+
+  const renderPanel = () =>
+    createElement(RestartableHostedAuthPanelWithinPrivyHarness);
+  const rendered = await renderClientComponent(renderPanel(), {
+    matchMedia: createDesktopMatchMedia(),
+    requireButton: false,
+  });
+
+  try {
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    mocks.privyReady = false;
+    await act(async () => {
+      readButton(rendered.container, "Restart sign in").dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+    expect(
+      rendered.container.querySelector('input[name="phone-number"]'),
+    ).toBeNull();
+    expect(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (candidate) =>
+          candidate.textContent?.includes("Continue")
+          || candidate.textContent?.includes("Email")
+          || candidate.textContent?.includes("Telegram"),
+      ),
+    ).toBe(false);
+    expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
+
+    mocks.privyReady = true;
+    mocks.user = {
+      linkedAccounts: [
+        {
+          address: "member@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+    };
+    await rendered.rerender(renderPanel());
+
+    expect(rendered.container.textContent).toContain("Continue with email");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+function HostedAuthPanelWithinPrivyHarness() {
+  installDomGlobals();
+
+  return createElement(HostedAuthPanelWithinPrivy, {
+    methods: ["phone", "telegram", "email"] as const,
+    onCompleted: () => {},
+    onRestartPrivy: vi.fn(),
+    privyAttempt: 1,
+  });
+}
+
+function RestartableHostedAuthPanelWithinPrivyHarness() {
+  const [privyAttempt, setPrivyAttempt] = useState(1);
+  installDomGlobals();
+
+  return createElement(HostedAuthPanelWithinPrivy, {
+    key: privyAttempt,
+    methods: ["phone", "telegram", "email"] as const,
+    onCompleted: () => {},
+    onRestartPrivy: () => setPrivyAttempt((current) => current + 1),
+    privyAttempt,
+  });
+}
+
+function HostedAuthPanelHarness() {
+  installDomGlobals();
+
+  return createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram"] as const,
+  });
+}
+
+function installDomGlobals() {
+  if (typeof window === "undefined") return;
+
+  vi.stubGlobal("Element", window.Element);
+  vi.stubGlobal("FormData", TestFormData);
+}
+
+class TestFormData {
+  readonly form: HTMLFormElement | undefined;
+
+  constructor(form?: HTMLFormElement) {
+    this.form = form;
+  }
+
+  get(name: string): string | null {
+    const field = (
+      this.form?.querySelector(`[name="${name}"]`)
+      ?? document.querySelector(`[name="${name}"]`)
+    );
+
+    return field instanceof window.HTMLInputElement ? field.value : null;
+  }
+}
+
+function readPhoneInput(container: HTMLElement): HTMLInputElement {
+  const input = container.querySelector<HTMLInputElement>(
+    'input[name="phone-number"][type="tel"]',
+  );
+  expect(input).not.toBeNull();
+  if (!input) throw new Error("Expected the real phone input.");
+  return input;
+}
+
+function readCountryTrigger(container: HTMLElement): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(
+    'button[aria-label^="Country or region,"]',
+  );
+  expect(button).not.toBeNull();
+  if (!button) throw new Error("Expected the real country trigger.");
+  return button;
+}
+
+function readButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes(label),
+  );
+  expect(button).toBeDefined();
+  if (!button) throw new Error(`Expected a button containing "${label}".`);
+  return button;
+}
+
+function installTelegramLoginWidget(targetWindow: Window & typeof globalThis) {
+  Reflect.set(targetWindow, "Telegram", {
+    Login: {
+      auth: vi.fn(),
+    },
+  });
+}
+
+function createDesktopMatchMedia(): typeof window.matchMedia {
+  return vi.fn((query: string) => ({
+    addEventListener: vi.fn(),
+    addListener: vi.fn(),
+    dispatchEvent: vi.fn(() => true),
+    matches: false,
+    media: query,
+    onchange: null,
+    removeEventListener: vi.fn(),
+    removeListener: vi.fn(),
+  }));
+}
+
+function setInputValue(
+  targetWindow: Window & typeof globalThis,
+  input: HTMLInputElement,
+  value: string,
+) {
+  const valueDescriptor = Object.getOwnPropertyDescriptor(
+    targetWindow.HTMLInputElement.prototype,
+    "value",
+  );
+  valueDescriptor?.set?.call(input, value);
+  input.dispatchEvent(new targetWindow.Event("input", { bubbles: true }));
+  input.dispatchEvent(new targetWindow.Event("change", { bubbles: true }));
+}

@@ -14,9 +14,14 @@ import type {
 import worker, {
   type VitestDatabaseHealthDurableObject,
 } from "./worker-entry.ts";
+import {
+  readDatabaseHealthMessageRequests,
+  resetDatabaseHealthMessageRequests,
+} from "./database-health-fetch.ts";
 
 describe("database health scheduled Worker path", () => {
   it("dispatches through the real SQLite Durable Object and persists the sample", async () => {
+    resetDatabaseHealthMessageRequests();
     const scheduledAtMs = Date.now();
     const context = createExecutionContext();
     worker.scheduled(createScheduledController({
@@ -50,5 +55,20 @@ describe("database health scheduled Worker path", () => {
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });
+    const messageRequests = readDatabaseHealthMessageRequests();
+    expect(messageRequests).toHaveLength(2);
+    const primary = messageRequests.find(
+      (request) => request.recipient === "+12025550123",
+    );
+    const secondary = messageRequests.find(
+      (request) => request.recipient === "+12025550124",
+    );
+    expect(primary).toMatchObject({
+      idempotencyKey: "murph-db-1-1",
+    });
+    expect(secondary).toMatchObject({
+      idempotencyKey: "murph-db-1-1-recipient-2",
+    });
+    expect(secondary?.messageParts).toEqual(primary?.messageParts);
   });
 });

@@ -19,7 +19,10 @@ import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-servic
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
-import { readHostedConsentStatus } from "@/src/lib/legal/consent";
+import {
+  readHostedConsentStatus,
+  type HostedConsentStatus,
+} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   remapHostedPrivyCompletionLagError,
@@ -49,12 +52,12 @@ export const POST = withJsonError(async (request: Request) => {
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });
-    const [status, launchConsentGranted] = await Promise.all([
+    const [status, launchConsent] = await Promise.all([
       getHostedInviteStatus({
         authenticatedMember: result.member,
         inviteCode: result.inviteCode,
       }),
-      readHostedCompletionLaunchConsentGranted(result.memberId),
+      readHostedCompletionLaunchConsent(result.memberId),
     ]);
     const appSession = await issueHostedAppSession({
       memberId: result.memberId,
@@ -70,7 +73,10 @@ export const POST = withJsonError(async (request: Request) => {
       ...(result.initialVisitEligible ? { initialVisitEligible: true } : {}),
       inviteCode: result.inviteCode,
       joinUrl: `/join/${encodeURIComponent(result.inviteCode)}`,
-      launchConsentGranted,
+      launchConsentGranted: launchConsent.granted,
+      ...(launchConsent.status && !launchConsent.granted
+        ? { launchConsentStatus: launchConsent.status }
+        : {}),
       messagingSetupRequired: result.messagingSetupRequired,
       ok: true,
       stage: result.stage,
@@ -86,15 +92,24 @@ export const POST = withJsonError(async (request: Request) => {
   }
 });
 
-async function readHostedCompletionLaunchConsentGranted(memberId: string): Promise<boolean> {
+async function readHostedCompletionLaunchConsent(memberId: string): Promise<{
+  granted: boolean;
+  status: HostedConsentStatus | null;
+}> {
   try {
     const status = await readHostedConsentStatus({
       memberId,
       prisma: getPrisma(),
     });
-    return status.launchGranted;
+    return {
+      granted: status.launchGranted,
+      status,
+    };
   } catch {
-    return false;
+    return {
+      granted: false,
+      status: null,
+    };
   }
 }
 

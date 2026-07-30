@@ -291,6 +291,15 @@ interface HostedMemberRoutingStoreModule {
 }
 
 interface HostedLinqLineStoreModule {
+  projectHostedLinqLineForDeliveryReceiptTx(input: {
+    deliveryStatus: "delivered" | "failed";
+    eventId: string;
+    failureCode: string | null;
+    failureReason: string | null;
+    lineLookupKey: string;
+    prisma: unknown;
+    providerCreatedAt: Date;
+  }): Promise<boolean>;
   upsertHostedLinqLineForPhoneTx(input: {
     activeMemberLimit?: number | null;
     observedAt: Date;
@@ -298,7 +307,7 @@ interface HostedLinqLineStoreModule {
     prisma: unknown;
     providerStatus?: string | null;
     source: "configured";
-  }): Promise<unknown>;
+  }): Promise<{ phoneNumberLookupKey: string }>;
 }
 
 interface HostedLinqDailyStateModule {
@@ -321,6 +330,7 @@ interface HostedDeviceSyncControlPlaneStore {
       providerConfigKey: "junction";
     };
     displayName: string;
+    existingAccountPolicy: "replace";
     externalAccountId: string;
     metadata?: Record<string, unknown>;
     nextReconcileAt?: string | null;
@@ -379,6 +389,8 @@ interface HostedMemberSeedModules {
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
   incrementHostedLinqInboundDailyState:
     HostedLinqDailyStateModule["incrementHostedLinqInboundDailyState"];
+  projectHostedLinqLineForDeliveryReceiptTx:
+    HostedLinqLineStoreModule["projectHostedLinqLineForDeliveryReceiptTx"];
   upsertHostedLinqLineForPhoneTx:
     HostedLinqLineStoreModule["upsertHostedLinqLineForPhoneTx"];
   writeHostedMemberStripeBillingRefTx:
@@ -631,19 +643,35 @@ export async function seedHostedLinqFirstContactFallbackLines(
     try {
       await prisma.$transaction(async (tx) => {
         const observedAt = new Date();
-        await modules.upsertHostedLinqLineForPhoneTx({
+        const incomingLine = await modules.upsertHostedLinqLineForPhoneTx({
           observedAt,
           phoneNumber: input.incomingPhone,
           prisma: tx,
-          providerStatus: "degraded",
           source: "configured",
         });
-        await modules.upsertHostedLinqLineForPhoneTx({
+        const fallbackLine = await modules.upsertHostedLinqLineForPhoneTx({
           observedAt,
           phoneNumber: input.fallbackPhone,
           prisma: tx,
-          providerStatus: "active",
           source: "configured",
+        });
+        await modules.projectHostedLinqLineForDeliveryReceiptTx({
+          deliveryStatus: "failed",
+          eventId: "e2e-incoming-line-delivery-failed",
+          failureCode: "e2e_seed",
+          failureReason: null,
+          lineLookupKey: incomingLine.phoneNumberLookupKey,
+          prisma: tx,
+          providerCreatedAt: observedAt,
+        });
+        await modules.projectHostedLinqLineForDeliveryReceiptTx({
+          deliveryStatus: "delivered",
+          eventId: "e2e-fallback-line-delivered",
+          failureCode: null,
+          failureReason: null,
+          lineLookupKey: fallbackLine.phoneNumberLookupKey,
+          prisma: tx,
+          providerCreatedAt: observedAt,
         });
       });
     } finally {
@@ -980,6 +1008,7 @@ async function seedHostedJunctionDeviceSyncConnectionWithStore(input: {
     },
     nextReconcileAt: null,
     ownerId: input.input.memberId,
+    existingAccountPolicy: "replace",
     provider: "junction",
     scopes: [],
     setupPhase: "source_confirmed",
@@ -1135,6 +1164,8 @@ async function loadHostedMemberSeedModules(
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
     incrementHostedLinqInboundDailyState:
       typedHostedLinqDailyStateModule.incrementHostedLinqInboundDailyState,
+    projectHostedLinqLineForDeliveryReceiptTx:
+      typedHostedLinqLineStoreModule.projectHostedLinqLineForDeliveryReceiptTx,
     upsertHostedLinqLineForPhoneTx:
       typedHostedLinqLineStoreModule.upsertHostedLinqLineForPhoneTx,
     writeHostedMemberStripeBillingRefTx:

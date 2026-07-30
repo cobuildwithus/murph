@@ -9,6 +9,12 @@ import { promisify } from 'node:util'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import type {
+  HostedRuntimeAssistantConfigurationSnapshot,
+} from '@murphai/hosted-execution/runtime-control'
+import {
+  createDefaultLocalAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -21,6 +27,7 @@ import {
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -33,6 +40,13 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
+import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
+import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { resolveAssistantSession } from '../src/assistant/store.ts'
+import {
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -165,6 +179,112 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('composes a reviewed group continuation through the real provider and queues one reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue({
+      text: 'First reviewed fact.\n---\nSecond reviewed fact.',
+    })
+    const target = {
+      ...createDefaultLocalAssistantModelTarget(),
+      codexCommand: scenario.turnInput.codexCommand,
+      codexHome: scenario.turnInput.codexHome,
+      model: scenario.turnInput.model,
+      modelProvider: null,
+      reasoningEffort: 'low' as const,
+      sandbox: 'read-only' as const,
+    }
+    const participantId = 'participant-reviewed-continuation'
+    const laterParticipantId = 'participant-later-speaker'
+    const threadId = 'thread-reviewed-continuation'
+    const resolved = await resolveAssistantSession({
+      actorId: participantId,
+      bindingDeliveryTarget: threadId,
+      channel: 'telegram',
+      target,
+      threadId,
+      threadIsDirect: false,
+      vault: scenario.turnInput.workingDirectory,
+    })
+    const currentSpeaker = await resolveAssistantSession({
+      actorId: laterParticipantId,
+      bindingDeliveryTarget: threadId,
+      channel: 'telegram',
+      target,
+      threadId,
+      threadIsDirect: false,
+      vault: scenario.turnInput.workingDirectory,
+    })
+    expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
+    expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+
+    const result = await sendAssistantAskContinuationLocal({
+      actorId: currentSpeaker.session.binding.actorId,
+      answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
+      bindingDeliveryTarget: threadId,
+      canCommit: () => true,
+      channel: 'telegram',
+      conversation: conversationRefFromBinding(currentSpeaker.session.binding),
+      deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
+      deliveryReplyToMessageId: 'message-reviewed-continuation',
+      deliveryTarget: threadId,
+      executionContext: {
+        hosted: {
+          defaultTarget: target,
+          memberId: 'member-reviewed-continuation',
+          userEnvKeys: [],
+        },
+      },
+      expectedConversationScope: 'group',
+      instructions: 'Reply naturally using only the reviewed private result quoted here.',
+      originAssistantInputId: `ain_${'c'.repeat(32)}`,
+      participantId: currentSpeaker.session.binding.actorId,
+      requestId: 'aask_req_reviewed_continuation',
+      reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
+      sessionId: resolved.session.sessionId,
+      threadId,
+      threadIsDirect: false,
+      turnEnvironment: {
+        currentWorkingDirectory: scenario.turnInput.workingDirectory,
+        env: scenario.turnInput.env,
+      },
+      vault: scenario.turnInput.workingDirectory,
+      workingDirectory: scenario.turnInput.workingDirectory,
+    })
+
+    expect(result).toMatchObject({
+      response: 'First reviewed fact.\n---\nSecond reviewed fact.',
+      status: 'completed',
+    })
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+      expect.objectContaining({
+        providerRequestDiagnostics: expect.objectContaining({
+          includesAutomation: false,
+          includesGroup: false,
+          includesReadShared: false,
+          includesToolSearch: false,
+        }),
+      }),
+    ])
+    expect(await listAssistantOutboxIntents(
+      scenario.turnInput.workingDirectory,
+    )).toEqual([
+      expect.objectContaining({
+        answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
+        deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
+        message: 'First reviewed fact.\n\nSecond reviewed fact.',
+        reviewedAssistantAskCompletionExpiresAt:
+          '2099-01-01T00:00:00.000Z',
+        status: 'pending',
+        threadId,
+        threadIsDirect: false,
+      }),
+    ])
   })
 
   it('defers broad Murph schemas through native Codex code-mode discovery', {
@@ -449,6 +569,160 @@ text(JSON.stringify(result));
     expect(groupOutput).toContain('none')
     expect(result.finalMessage).toBe('EAGER_GROUP_READ_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('applies an explicit group-room model request on the next provider turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const assistantInputId = `ain_${'g'.repeat(32)}`
+    const configurationRequests: unknown[] = []
+    const groupSnapshot = (
+      model: 'gpt-5.6-sol' | 'gpt-5.6-terra',
+    ): HostedRuntimeAssistantConfigurationSnapshot => ({
+      availableModels: [
+        'gpt-5.6-luna',
+        'gpt-5.6-terra',
+        'gpt-5.6-sol',
+      ],
+      availableProviders: ['openai'],
+      availableReasoningEfforts: ['low'],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model,
+      provider: 'openai' as const,
+      reasoningEffort: 'low' as const,
+      solAvailable: true,
+    })
+    const currentSnapshot = groupSnapshot('gpt-5.6-sol')
+    const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const groupDeveloperInstructions = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: true,
+      assistantStyleSettingsAvailable: true,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'group',
+      currentLocalDate: '2026-07-30',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      turnTrigger: null,
+    })
+    expect(groupDeveloperInstructions).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(groupDeveloperInstructions).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__assistant_configuration({
+  action: "update",
+  model: "gpt-5.6-terra",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'GROUP_MODEL_SWITCH_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
+      dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
+      hostedToolContext: {
+        assistantConfigurationTool: {
+          request: async (request) => {
+            configurationRequests.push(request)
+            return request.action === 'read'
+              ? { action: 'read', result: currentSnapshot }
+              : {
+                  action: 'update',
+                  result: {
+                    ...updatedSnapshot,
+                    appliesAt: 'next_turn',
+                    requiredPlan: null,
+                    status: 'updated',
+                  },
+                }
+          },
+        },
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => assistantInputId,
+        currentAssistantTarget: () => ({
+          model: 'gpt-5.6-sol',
+          provider: 'openai',
+          reasoningEffort: 'low',
+        }),
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentUserActionScope: () => ({
+          acceptedInputIds: [assistantInputId],
+          conversationId: 'conversation-group',
+          conversationScope: 'group',
+          inboundMailboxItemIds: ['mailbox-group'],
+          originSessionId: 'session-group',
+          recipientKey: 'group:current',
+        }),
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: 'gpt-5.6-sol',
+      prompt:
+        'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
+    })
+
+    expect(configurationRequests).toEqual([
+      {
+        action: 'update',
+        assistantInputId,
+        model: 'gpt-5.6-terra',
+      },
+    ])
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.model).toBe('gpt-5.6-sol')
+    expect(summaries[1]?.model).toBe('gpt-5.6-sol')
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+    })
+    const groupConfigurationOutput =
+      summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(groupConfigurationOutput).toContain('gpt-5.6-sol')
+    expect(groupConfigurationOutput).toContain('gpt-5.6-terra')
+    expect(groupConfigurationOutput).toContain('next_turn')
+    expect(groupConfigurationOutput).toContain('updated')
+    expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
+
+    scenario.stub.queue({ text: 'GROUP_MODEL_NEXT_TURN_OK' })
+    const nextTurn = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
+      dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
+      model: updatedSnapshot.model,
+      prompt: 'Reply exactly GROUP_MODEL_NEXT_TURN_OK.',
+      resumeSessionId: result.sessionId,
+    })
+
+    expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
+      'gpt-5.6-terra',
+    )
+    expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
+    expect(nextTurn.sessionId).toBe(result.sessionId)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {
@@ -1013,9 +1287,252 @@ text(JSON.stringify(result));
     const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.functionCallOutputs ?? [])
     expect(functionCallOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('"unverifiedOwnerContactLabel":"Alex R."'),
+      expect.stringContaining('"displayName":"Alex R."'),
     ]))
     expect(functionCallOutputs.join('\n')).not.toContain('ownerAdvisoryName')
+    expect(functionCallOutputs.join('\n')).not.toContain('unverifiedOwnerContactLabel')
+  })
+
+  it('threads exact participant authority through the real group-effect dispatcher', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const messageRef = `ain_${'d'.repeat(32)}`
+    const participant = {
+      assistantInputId: messageRef,
+      senderHandle: '+15550100201',
+      source: 'linq' as const,
+    }
+    const authorizations: unknown[] = []
+    const groupRequests: unknown[] = []
+    const phoneCallStarts: unknown[] = []
+    const previewAuthorityChecks: unknown[] = []
+    const userActionScope = {
+      acceptedInputIds: [messageRef],
+      conversationId: 'conversation_group_effect',
+      conversationScope: 'group' as const,
+      inboundMailboxItemIds: ['mailbox_group_effect'],
+      originSessionId: 'session_group_effect',
+      recipientKey: 'recipient_group_effect',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentGroupPhoneCallPreviewAuthority: async (input) => {
+        previewAuthorityChecks.push(input)
+        return input?.confirmationInputId === messageRef
+          ? { assistantInputId: messageRef }
+          : null
+      },
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => userActionScope,
+      groupTool: {
+        request: async (request) => {
+          groupRequests.push(request)
+          return {
+            action: 'revoke_own_email_share',
+            result: { revokedCount: 1, status: 'revoked' },
+          }
+        },
+      },
+      phoneCalls: {
+        start: async (input) => {
+          phoneCallStarts.push(input)
+          return {
+            phoneCallId: 'hpc_group_effect',
+            status: 'calling',
+          }
+        },
+      },
+      sendVaultFile: async () => {
+        throw new Error('Vault-file sending is unavailable for this turn.')
+      },
+      vaultFileSendAvailable: false,
+    }
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: messageRef,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            allowTransferToUser: false,
+            callerName: 'Murph',
+            goal: 'Confirm the office opening time.',
+            instructions: ['Ask only for the opening time.'],
+            message_ref: messageRef,
+            shareableFacts: {},
+            successCriteria: 'The office states its opening time.',
+            timeZone: 'America/New_York',
+            to: {
+              label: 'The office',
+              phoneNumber: '+12125550123',
+            },
+          },
+          name: 'create_phone_call',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: `ain_${'f'.repeat(32)}`,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      { text: 'PARTICIPANT_EFFECTS_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      authorizeAcceptedMessageTarget: async (input) => {
+        authorizations.push(input)
+        if (input.messageRef !== messageRef) {
+          return null
+        }
+        return {
+          participant,
+          targetInputId: messageRef,
+        }
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        messageTargetingAvailable: true,
+        phoneCallsAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext,
+      prompt: 'Revoke email sharing and place the approved group call.',
+    })
+
+    expect(result.finalMessage).toBe('PARTICIPANT_EFFECTS_OK')
+    expect(authorizations).toEqual([
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef,
+      },
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef,
+      },
+      {
+        action: 'participant-effect',
+        deliveryContextOrdinal: 0,
+        messageRef: `ain_${'f'.repeat(32)}`,
+      },
+    ])
+    expect(groupRequests).toEqual([{
+      action: 'revoke_own_email_share',
+      participant,
+    }])
+    expect(previewAuthorityChecks).toEqual([{
+      brief: {
+        allowTransferToUser: false,
+        callerName: 'Murph',
+        goal: 'Confirm the office opening time.',
+        instructions: ['Ask only for the opening time.'],
+        shareableFacts: {},
+        successCriteria: 'The office states its opening time.',
+        timeZone: 'America/New_York',
+        to: {
+          label: 'The office',
+          phoneNumber: '+12125550123',
+        },
+      },
+      confirmationInputId: messageRef,
+    }])
+    expect(phoneCallStarts).toEqual([
+      expect.objectContaining({
+        groupRequester: participant,
+        requestKey: expect.stringMatching(/^phone_call_[a-f0-9]{64}$/u),
+      }),
+    ])
+  })
+
+  it('uses the live-steered delivery ordinal for exact participant authority', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const messageRef = `ain_${'e'.repeat(32)}`
+    const authorizations: unknown[] = []
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_PARTICIPANT_FIRST_REPLY',
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'revoke_own_email_share',
+            message_ref: messageRef,
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      { text: 'STEER_PARTICIPANT_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      authorizeAcceptedMessageTarget: async (input) => {
+        authorizations.push(input)
+        return {
+          participant: {
+            assistantInputId: messageRef,
+            senderHandle: '+15550100202',
+            source: 'linq',
+          },
+          targetInputId: messageRef,
+        }
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        messageTargetingAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'revoke_own_email_share',
+          result: { revokedCount: 1, status: 'revoked' },
+        })),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [messageRef],
+          conversationId: 'conversation_live_group_effect',
+          conversationScope: 'group',
+          inboundMailboxItemIds: ['mailbox_live_group_effect'],
+          originSessionId: 'session_live_group_effect',
+          recipientKey: 'recipient_live_group_effect',
+        }),
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({ prompt: 'The group participant now requests revocation.' }))
+      },
+      prompt: 'Wait for the group participant request.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(result.finalMessage).toBe('STEER_PARTICIPANT_OK')
+    expect(authorizations).toEqual([{
+      action: 'participant-effect',
+      deliveryContextOrdinal: 1,
+      messageRef,
+    }])
   })
 
   it('captures scripted reaction tool calls from the real app-server protocol', {

@@ -113,6 +113,7 @@ const wrapperCases = [
       'createAssistantOutboxIntent',
       'openAssistantConversation',
       'getAssistantStatus',
+      'prepareHostedCodexAssistantProcess',
       'redactAssistantStateString',
     ],
   ],

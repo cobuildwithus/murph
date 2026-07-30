@@ -90,6 +90,7 @@ const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_DATABASE_ALERT_PLANETSCALE_DATABASE_NAME",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",
   "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
+  "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN",
   "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID",
   "LINQ_API_TOKEN",
@@ -100,6 +101,13 @@ const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_ENV",
   "JUNCTION_REGION",
+] as const;
+
+const VENICE_RUNTIME_REQUIRED_ENV_NAMES = [
+  "VENICE_API_KEY",
+  "HOSTED_VENICE_LUNA_MODEL",
+  "HOSTED_VENICE_TERRA_MODEL",
+  "HOSTED_VENICE_SOL_MODEL",
 ] as const;
 
 const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
@@ -270,6 +278,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
       "HOSTED_DATABASE_ALERT_ENABLED must be unset outside production.",
     );
   }
+  const primaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
+  );
+  const secondaryDatabaseAlertChatId = normalizeOptionalString(
+    source.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
+  );
+  if (
+    primaryDatabaseAlertChatId
+    && secondaryDatabaseAlertChatId
+    && primaryDatabaseAlertChatId === secondaryDatabaseAlertChatId
+  ) {
+    errors.push("Database health alert chat IDs must be distinct.");
+  }
 
   const privateMediaCapabilitySecret = normalizeOptionalString(
     source.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
@@ -405,6 +426,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
+  const missingVeniceEnv = listMissingPartialGroupEnvNames(
+    source,
+    VENICE_RUNTIME_REQUIRED_ENV_NAMES,
+  );
+  if (
+    missingVeniceEnv.length > 0
+    && missingVeniceEnv.length < VENICE_RUNTIME_REQUIRED_ENV_NAMES.length
+  ) {
+    errors.push(
+      `Venice runtime env must set ${VENICE_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
+    );
+  }
+
   if (deployContext === "preview") {
     appendPreviewDeployInvariantErrors(source, errors);
     return errors;
@@ -465,13 +499,23 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
-  const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;
-  const productionWebBaseUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL")?.normalized;
-  if (hostedWebBaseUrl && productionWebBaseUrl && hostedWebBaseUrl !== productionWebBaseUrl) {
+  const hostedWebUrl = productionUrls.get("HOSTED_WEB_BASE_URL");
+  const productionWebUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL");
+  if (
+    hostedWebUrl
+    && productionWebUrl
+    && hostedWebUrl.normalized !== productionWebUrl.normalized
+  ) {
     errors.push(
       "production deploys must set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
     );
   }
+  appendHostedDeviceSyncCallbackHostnameInvariantError({
+    callbackUrl: productionUrls.get("DEVICE_SYNC_PUBLIC_BASE_URL"),
+    deployContext: "production",
+    errors,
+    hostedWebUrl,
+  });
 
   return errors;
 }
@@ -766,15 +810,29 @@ function appendPreviewDeployInvariantErrors(
       requireOriginOnly: false,
       errors,
     });
-    if (
-      callbackUrl
-      && productionWebUrl
-      && new URL(callbackUrl.normalized).origin === productionWebUrl.normalized
-    ) {
-      errors.push(
-        `${label} must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.`,
-      );
-    }
+    appendHostedDeviceSyncCallbackHostnameInvariantError({
+      callbackUrl: callbackUrl ?? undefined,
+      deployContext: "preview",
+      errors,
+      hostedWebUrl: previewWebUrl,
+    });
+  }
+}
+
+function appendHostedDeviceSyncCallbackHostnameInvariantError(input: {
+  callbackUrl: ProductionDeployUrlValidation | undefined;
+  deployContext: "preview" | "production";
+  errors: string[];
+  hostedWebUrl: ProductionDeployUrlValidation | undefined;
+}): void {
+  if (
+    input.callbackUrl
+    && input.hostedWebUrl
+    && input.callbackUrl.hostname !== input.hostedWebUrl.hostname
+  ) {
+    input.errors.push(
+      `DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname in ${input.deployContext} deploys.`,
+    );
   }
 }
 

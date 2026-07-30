@@ -10,6 +10,9 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import {
+  createHostedStripeSubscriptionLookupKeyReadCandidates,
+} from "./contact-privacy";
+import {
   HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
   HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
 } from "./legacy-usage-price";
@@ -35,7 +38,52 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
   pulseTrialRedeemedAt: Date | null;
   subscriptionId: string;
 }): HostedPulseTrialCandidateDisposition {
-  if (input.currentStripeSubscriptionId === input.subscriptionId) {
+  return classifyHostedPulseTrialCandidateDispositionForIdentity({
+    billingStatus: input.billingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentSubscriptionIdentity:
+      input.currentStripeSubscriptionId === input.subscriptionId
+        ? "candidate"
+        : input.currentStripeSubscriptionId
+          ? "different"
+          : "none",
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+  });
+}
+
+export function classifyHostedPulseTrialCandidateDispositionByLookupKey(input: {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  currentStripeSubscriptionLookupKey: string | null;
+  pulseTrialRedeemedAt: Date | null;
+  subscriptionId: string;
+}): HostedPulseTrialCandidateDisposition {
+  const candidateLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.subscriptionId,
+    );
+  return classifyHostedPulseTrialCandidateDispositionForIdentity({
+    billingStatus: input.billingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentSubscriptionIdentity:
+      input.currentStripeSubscriptionLookupKey === null
+        ? "none"
+        : candidateLookupKeys.includes(
+            input.currentStripeSubscriptionLookupKey,
+          )
+          ? "candidate"
+          : "different",
+    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+  });
+}
+
+function classifyHostedPulseTrialCandidateDispositionForIdentity(input: {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  currentSubscriptionIdentity: "candidate" | "different" | "none";
+  pulseTrialRedeemedAt: Date | null;
+}): HostedPulseTrialCandidateDisposition {
+  if (input.currentSubscriptionIdentity === "candidate") {
     return "current";
   }
   if (
@@ -45,7 +93,7 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
       input.billingStatus === HostedBillingStatus.active &&
       (
         input.currentBillingPhase !== "trial" ||
-        Boolean(input.currentStripeSubscriptionId)
+        input.currentSubscriptionIdentity === "different"
       )
     )
   ) {
@@ -151,14 +199,31 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
     return;
   }
 
-  const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+  const cleanupSubscriptionIds: string[] = [];
+  for (const subscriptionId of subscriptionIds) {
+    const subscription = await retrieveHostedPulseTrialCleanupTarget({
+      memberId: input.memberId,
+      priceId: input.priceId,
+      ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+      stripe: input.stripe,
+      subscriptionId,
+    });
+    if (subscription) {
+      cleanupSubscriptionIds.push(subscriptionId);
+    }
+  }
+  if (cleanupSubscriptionIds.length === 0) {
+    return;
+  }
+
+  const revalidate = async (tx: Prisma.TransactionClient): Promise<void> => {
     const currentMember = await readHostedMemberBillingSnapshot({
       memberId: input.memberId,
       prisma: tx,
     });
     if (
       !currentMember ||
-      subscriptionIds.some((subscriptionId) =>
+      cleanupSubscriptionIds.some((subscriptionId) =>
         classifyHostedPulseTrialCandidateDisposition({
           billingStatus: currentMember.core.billingStatus,
           currentBillingPhase: currentMember.billingRef?.currentBillingPhase ?? null,
@@ -177,24 +242,6 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
         retryable: true,
       });
     }
-
-    for (const subscriptionId of subscriptionIds) {
-      const subscription = await retrieveHostedPulseTrialCleanupTarget({
-        memberId: input.memberId,
-        priceId: input.priceId,
-        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-        stripe: input.stripe,
-        subscriptionId,
-      });
-      if (!subscription) {
-        continue;
-      }
-      await cancelHostedPulseTrialLoserSubscription({
-        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-        stripe: input.stripe,
-        subscriptionId,
-      });
-    }
   };
 
   if (input.lockBudget) {
@@ -202,17 +249,24 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
       acquisitionTimeoutMs: input.lockBudget.acquisitionTimeoutMs,
       memberId: input.memberId,
       prisma: input.prisma,
-      run,
+      run: revalidate,
       transactionTimeoutMs: input.lockBudget.transactionTimeoutMs,
     });
-    return;
+  } else {
+    await withHostedMemberStripeMutationLock({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      run: revalidate,
+    });
   }
 
-  await withHostedMemberStripeMutationLock({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    run,
-  });
+  for (const subscriptionId of cleanupSubscriptionIds) {
+    await cancelHostedPulseTrialLoserSubscription({
+      ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+      stripe: input.stripe,
+      subscriptionId,
+    });
+  }
 }
 
 export async function retrieveHostedPulseTrialCleanupTarget(input: {

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-27
+Last verified: 2026-07-30
 
 ## Decision
 
@@ -68,6 +68,23 @@ The live ownership split is:
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
 
+Authenticated Settings provider changes reuse that ownership split without
+adding mailbox work. Web commits the provider preference to Postgres, then sends
+the payloadless `runtime_wake_requested` Temporal signal only when the effective
+provider changed. The per-user workflow coalesces duplicate wakes as one
+boolean and invokes its existing Cloudflare processing adapter even when Web
+reconciliation facts are idle. Blocked facts discard the wake; accepted
+processing clears it only when no newer wake arrived during that call. A warm
+invocation compares its invocation provider with the live Web-owned preference.
+A mismatch stops that invocation from servicing further wakes, makes its dirty
+workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
+so Cloudflare releases the provider-specific invocation and starts a fresh one.
+A failed best-effort signal
+leaves the durable preference intact; the next invocation and the mandatory
+provider-entry revalidation remain the recovery path. The signal carries no
+provider value or credential, and `runtime_recheck_requested` remains a
+facts-read-only signal for its existing callers.
+
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
@@ -95,6 +112,9 @@ while dirty and before the idle floor, service fresh foreground input, the
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
+for an otherwise-unserviced runtime wake, compare the invocation provider with
+  the live Web-owned preference; on mismatch, checkpoint immediately and request
+  a fresh invocation before another provider turn
 if the default-mode runtime remains live, import that ahead input immediately;
   during retention-only work or shutdown, leave the durable mailbox row for
   web/Temporal reconciliation
@@ -118,6 +138,16 @@ interrupts the active background-work boundary and synchronously stops the exact
 owned App Server before it releases the job slot for another invocation. A stop
 failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
+
+After restore and final Codex config/auth preparation, only the first fresh
+auto-reply-enabled conversation candidate staged during the pre-pass may decide
+speculative process initialization. Linq and Telegram may admit process-only
+initialization while remaining mailbox projection and bookkeeping continue;
+email, self-authored Linq, bootstrap, system, maintenance, replay, and
+active-turn imports do not. Speculation starts no thread or turn and never
+replaces a healthy claimable resident with another launch identity. Before snapshot
+construction or invocation release, the runtime disables and joins this
+asynchronous admission and cancels its exact pending process handle.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
@@ -263,16 +293,29 @@ existing accepted-input and route-binding work is unchanged. The only Web read
 occurs inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
-Interactive Linq and Telegram group turns are actor-scoped. The importer
-derives blinded `actorId` from the same trimmed sender value stored for the
-prompt; initial batching splits on actor change, and pre-provider plus live
-admission stop at a foreign group actor. Telegram supplies that sender only on
-route-authorized non-direct inbound whose webhook-authenticated user id already
-resolved to exactly one active linked member, so anonymous administrators,
-`sender_chat` messages, bots, and unlinked senders stay unattributed.
-Attribution therefore remains bound to the scanner-selected durable operation
-contexts, and active steering cannot add a second participant's identity
-authority to the turn.
+Interactive Linq and Telegram group turns are room-scoped for batching while
+participant authority remains message-scoped. The importer derives blinded
+`actorId` from the same trimmed sender value stored for per-message prompt
+attribution, but an authenticated non-direct exact-successor burst may batch
+and steer across actor and native reply-anchor changes when its room, account,
+delivery route, audience, projection readiness, reaction rules, and 50-input
+bound remain stable. Telegram supplies sender evidence only on route-authorized
+non-direct inbound whose webhook-authenticated user id already resolved to
+exactly one active linked member, so anonymous administrators, `sender_chat`
+messages, bots, and unlinked senders stay unattributed. Every admitted message
+keeps its own opaque accepted-message ref and reply context. A participant
+effect reloads that exact accepted input and derives provider sender evidence;
+the compound turn's actor is never participant authority.
+
+The accepted-message participant wire is an expand/contract rollout. Deploy
+Web first: its phone-call endpoint accepts the new `groupRequester` evidence
+and the legacy `inboundMailboxItemIds` fallback, and its group-tool parser
+accepts the new `participant` evidence and the legacy `selfOptOut` fallback.
+Both legacy fallbacks revalidate their existing server-owned evidence and exist
+only at this runner-facing compatibility boundary. Then deploy the Worker and
+runner; new runners send only exact accepted-message participant evidence.
+Roll back runner/Worker before Web. Remove the legacy fields only after all
+warm old runners have drained and deployed smoke proves the new runner bundle.
 
 Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
 existing meaning and `telegramSenderHandles` is a separate optional field, so a
@@ -500,15 +543,15 @@ requester membership `participantId`; first-person references map only to the
 `read_shared` member with that exact id. Display name, handle, or member order
 cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request or legacy joined-group completion reaches a dirty
-warm runtime, the mailbox prefetch may import it before the routine idle
-checkpoint only when the entire fetched prefix contains pre-checkpoint-safe
-system wakes. One shared import context revalidates the decoded adapter shape
+When a joined-group request or accepted-input completion reaches a dirty warm
+runtime, the mailbox prefetch may import it before the routine idle checkpoint
+only when the entire fetched prefix contains pre-checkpoint-safe system wakes.
+One shared import context revalidates the decoded request adapter shape
 throughout that pre-checkpoint pass, including pre-assistant follow-up imports
-and foreground reruns; a consented-member request or reviewed completion
-remains checkpoint-gated regardless of which import observes it. Request import
-kicks the existing detached controller; completion import uses the existing
-foreground-causal delivery path. Neither starts or advances the
+and foreground reruns. A consented-member request remains checkpoint-gated;
+every accepted-input completion is admitted without a completion-kind context.
+Request import kicks the existing detached controller; completion import uses
+the existing foreground-causal delivery path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
@@ -598,6 +641,11 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
+The one-time `group_sender` adapter instead derives the target and fixed
+self-only permission from one exact authenticated current-sender group input.
+Every request requires fresh exact-message authority and grants no standing
+access.
+
 Prepare revalidates the same authority immediately before private context is
 read and returns the exact immutable permission to the runtime. The personal
 read-only child proposes one candidate under that permission. There is no
@@ -612,10 +660,14 @@ On an allow, the completion control path revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
-discriminant owns what happens next. `accepted_input` bypasses a provider
-continuation and delivers the reviewed answer byte-for-byte on the revalidated
-original group route through the existing outbox. `automation_occurrence` does
-not wake the group runtime or create a delivery. The live scheduled Codex turn
+discriminant owns what happens next. `accepted_input` immediately starts one
+isolated output-only continuation in the bound caller group. The group Murph
+receives the reviewed answer as bounded untrusted data plus its existing room
+history, may resolve public references, and has no target private read or tool
+authority. Its ordinary outbox intent retains the completion id, expiry,
+deterministic delivery key, and route proof for provider-entry revalidation.
+`automation_occurrence` does not wake the group runtime or create a delivery.
+The live scheduled Codex turn
 starts every selected ask, then uses ordinary shell waits and exact replay to
 poll each accepted `ask_member` call until it returns completed or unavailable.
 The existing request expiry bounds the loop. Web returns a flat completed
@@ -735,14 +787,15 @@ workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
 keep old histories replaying the old invalid/no-op signal behavior.
 
-The PR65+PR66 runtime reconciliation change is an explicit hard-cut exception to
-the tolerant deploy sequence above. It deletes the old demand Activity and
-legacy direct demand signals, so operators must stop old Temporal workers,
-terminate old `hosted-user-runtime:*` workflows, deploy matching web,
-Temporal, and Cloudflare builds together, then reseed new histories. Existing
-Cloudflare Durable Object state is not canonical product truth for this
-cutover; the new runner schema drops the retired `runner_bundle_slots` table
-during schema migration instead of requiring a manual Durable Object wipe.
+The completed PR65+PR66 runtime reconciliation change was an explicit hard-cut
+exception to the tolerant deploy sequence above. It deleted the old demand
+Activity and legacy direct demand signals; operators stopped the old workers,
+terminated the incompatible histories, deployed the matching web, Temporal,
+and Cloudflare builds, and reseeded the current lineage. Do not repeat that
+history reset for repository relocation. Existing Cloudflare Durable Object
+state was not canonical product truth for that historical cutover; the runner
+schema dropped the retired `runner_bundle_slots` table during schema migration
+instead of requiring a manual Durable Object wipe.
 
 Hosted producers for exact user-visible events append one `HostedMailboxItem` in
 the same transaction as the product/control-plane mutation that made work
@@ -906,7 +959,18 @@ be labeled row-insert or commit latency. The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. It projects
+first locally observed Codex output/text. An accepted ephemeral Linq progress
+send emits `progress_update_accepted` at the provider-acceptance boundary; a
+failed or merely attempted send emits no progress milestone. Progress snapshots
+the active provider request's accepted input ids when Linq accepts the send; it
+does not infer turn membership from the workspace phase's initial mailbox
+batch. The reply-latency monitor groups completed traces by their shared Linq
+delivery and unresolved traces by their exact provider request, then measures
+the earliest accepted visible response across progress and final delivery. A
+progress update before the fixed 30-second boundary therefore suppresses the
+latency incident, while a late update does not hide the breached wait.
+Scheduled automation turns, including Flex-tier turns, have no user-ingress
+reply trace and stay outside this monitor. It projects
 `terminal_non_reply_committed` only from the assistant engine's existing durable
 `suppressed` terminal evidence for the named input set, either immediately after
 that write succeeds or when a replay reads the completed evidence. That marker
@@ -1070,10 +1134,12 @@ Those watermarks live in the bounded canonical companion document
 value document. The canonical selector admits a bounded, cursor-ordered compound
 batch. Foreground begins with the oldest fresh input in the current wake and
 considers only later fresh siblings; background begins with the oldest replyable
-pending input. The batch continues only across the same canonical conversation,
-the same provider-native reply anchor, and exact-successor positive per-member
-causal sequences. A gap, missing or legacy sequence, boundary change, or the
-50-input bound ends the batch and leaves the remainder pending. During that
+pending input. The batch continues only across exact-successor positive
+per-member causal sequences and either one direct-conversation actor/provider-
+native reply anchor or one authenticated non-direct room with stable account,
+delivery route, audience, projection readiness, and reaction boundary. A gap,
+missing or legacy sequence, boundary change, or the 50-input bound ends the
+batch and leaves the remainder pending. During that
 turn, the accepted-input boundary passes the terminal provider input id to the
 private hosted style operation. The signed Web transaction binds that id to the
 member's live conversation row and derives the compound turn frontier; the
@@ -1331,11 +1397,34 @@ owning service primitive rather than hand-writing persisted runtime rows. Linq
 group-thread containers are no longer operator-provisioned: the Linq webhook
 planner auto-provisions the thread-container route through
 `ensureHostedThreadContainerRouteTx` when an attested group message arrives from
-an active member through a configured, enabled managed Linq line whose health
-is `healthy` or `unknown`. The webhook recipient only identifies the candidate
-line; the existing `HostedLinqLine` projection grants new-route authority.
-Established thread routes remain authoritative independently of current
-line-pool eligibility.
+an active member through a configured, enabled managed Linq line whose health is
+`healthy` or `unknown`. A member's exact assigned `AT_RISK` iMessage group line
+is also admitted because the member initiated that group. A hard-blocked exact
+assigned group line is not provisioned: Web plans a private group-line recovery
+intent, and transport revalidates member access, participant identity, hard
+blocked incoming-line state, current assignment, healthy backup sender capacity,
+and persisted delivery shape before creating the private Linq chat. The webhook
+recipient only identifies the candidate line; the existing `HostedLinqLine`
+projection grants new-route or recovery authority. Established thread routes
+remain authoritative independently of current line-pool eligibility.
+Recovery deliveries use a finite five-attempt sequence within the existing
+`HostedLinqDelivery` owner. A live or successful attempt converges every source
+event for that member, failed line, and group thread. Provider-correlated failed
+receipts are not treated as irrevocably final because a later delivered receipt
+may win ordering. Only a different source event may advance the provider
+attempt key after failure, and it must reuse the same pinned sender, rendered
+backup number, deterministic copy, and original proactive-conversation capacity
+reservation. That exact line may be healthy or may retain the `warning`
+projection written by the same failed receipt: its latest receipt event must
+equal the delivery's hashed last-provider-event identity. Any newer receipt,
+provider degradation or hard block, disabled or unconfigured egress, unreadable
+phone envelope, or other unhealthy state fails closed without selecting a
+replacement. Replay of the exact failed event cannot create another provider
+request. A late success can therefore duplicate only the same instruction,
+never direct the member to a conflicting number or claim another capacity slot.
+Safe structured digests in `sourceRef` preserve source-event
+identity without storing raw contacts, group identifiers, or provider event
+identifiers.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
@@ -1573,6 +1662,80 @@ rebuildable best-effort state rather than a reason to take another workspace
 checkpoint or create a durable retry queue. Successful attachment projection
 may make raw paths, image evidence, or audio/video transcript evidence
 available to the same assistant turn.
+Authenticated group transcript rendering keeps the opaque assistant input
+reference and server-derived sender handle authoritative. Telegram may carry a
+bounded display name from trusted ingress. After durable Linq import, prompt
+preparation may call the Web-owned `read_participant_display_names` boundary
+with one bounded unique-handle set. Web matches each handle to exactly one
+current joined, unsuspended membership and decrypts only its
+membership-implied `profile-name.v0` snapshot; it never traverses selectable
+health grants or device state. The synthetic runtime must remain active, but a
+connected room with no hosted-group row is treated as an empty profile-
+membership set so presentation does not depend on unrelated group setup. An
+authorized profile name wins. A canonical phone with no member match, or with
+one unsuspended matched member but no profile name, may reuse the existing human
+owner address-book advisory reader; an ambiguous or suspended member match
+remains unnamed. The advisory reader rechecks owner existence, suspension,
+launch consent, projection enablement, safe uniqueness, and its KMS/storage
+boundaries. A granted profile share with a null, not-yet-materialized snapshot
+is unavailable instead of profileless. The advisory reader admits at most 16
+phones; only that exact prefix may produce contact labels or miss evidence, and
+overflow handles remain operation-local. A successful response returns labeled entries with only
+`senderHandle`, `displayName`, and `displayNameSource` (`profile-name` or
+`unverified-owner-contact`). Its optional `nameMissSenderHandles` contains only
+exact requested handles for which every applicable authorized profile/contact
+source was successfully checked and no safe label exists. Pending snapshots,
+bounded-lookup overflow, policy, ambiguity, suspension, authorization, and
+rollout omissions are excluded. The response
+never returns a hosted member id or participant id.
+
+The assistant-runtime presentation reader owns one operation-local memo and one
+bounded versioned file cache at
+`.runtime/cache/assistant-runtime/group-participant-display-names.json` for those
+results. Initial prompt preparation reads unresolved unique handles once,
+including a 20-message/four-sender burst as one four-handle request. Later live
+admissions reuse operation-local positive, negative, and fail-soft entries and
+batch only newly unresolved handles. Across ordinary turns and fresh reader or
+process instances sharing one local workspace, a validated profile or
+owner-shared contact entry has a fixed 14-day TTL and only an explicit
+`nameMissSenderHandles` entry has a fixed six-hour TTL. An omitted handle
+without that evidence remains operation-local. The
+2,048-entry insertion-ordered file uses opaque SHA-256 keys binding the
+callback-bound runtime member, exact accepted-input route conversation key,
+channel, and normalized handle; hits neither slide expiry nor reorder eviction.
+The fixed-path JSON is atomically replaced under `0700`/`0600` permissions and
+rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
+ordinary misses. Failures, policy-limited reads, and malformed or unauthorized
+responses are operation-local only and never written. There are no timers,
+resident mirror,
+single-flight, mutation invalidation, locks, or distributed cache owners.
+`.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
+same surviving local workspace can reuse the file; cold restore or replacement
+re-reads Web. Neither cache layer becomes profile or contact state. Profile names render as display-only profile text; owner-contact labels render
+explicitly as unverified display-only text. Neither label nor the raw handle
+authorizes participant selection or an effect. Only an accepted opaque message
+ref plus trusted server derivation can authorize a participant-scoped action.
+
+The Cloudflare group-tool adapter caps only this presentation action at a
+one-second soft deadline, bounded further by the configured control timeout.
+The runtime therefore stops waiting before the address-book helper's own
+two-second deadline; a later Web completion is ignored. Timeout, abort,
+ambiguity, invalid or unauthorized state, suspension,
+consent loss, KMS/storage failure, parser skew, or any other failure returns no
+label, ignores late completion, and does not block or acknowledge conversation
+work. Every other group-tool action keeps the configured timeout.
+
+`displayNameSource` is an additive response field. New parsers accept an omitted
+field from an older Web deployment as `profile-name`; old parsers reject the new
+field, after which the existing fail-soft reader leaves the transcript unnamed
+while normal conversation continues. The enclosing participant-evidence
+contract requires a Web-first rollout: deploy Web's backward-compatible reader
+before the runner and Cloudflare release. During that brief skew, an old runner
+may omit a label when Web emits contact provenance, but normal conversation and
+participant authorization remain available. Roll back the runner and Cloudflare
+before Web. After the fleet converges, verify one profile label, one owner-
+contact label, and one participant-scoped action from an opaque accepted-message
+ref. No database, workspace, mailbox, or input-event migration is required.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -1612,20 +1775,29 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only when the stored event is
-the next positive causal-sequence successor and preserves the conversation,
-delivery route, native reply anchor, account/audience, and group actor. A
+may join through the generic live-steering path only before the first completed
+assistant response, only while the turn remains below the cumulative 50-message
+initial-plus-live bound, and only when the stored event is the next positive
+causal-sequence successor and preserves the direct actor and native reply
+anchor, or for an authenticated non-direct group preserves the room, delivery
+route, account/audience, projection readiness, and reaction boundary. Every
+completed provider text or media segment remains deliverable; the group audience
+does not create a latest-response replacement rule. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. After the provider
 acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
-before any hosted tool effect or final delivery may proceed. Missing input, a
-causal gap, a boundary change, or a missed live window remains pending for a normal later
-assistant turn. Strict active-turn-targeted input still fails closed instead of
-falling through, and the assistant engine does not synthesize another provider
-request inside the same assistant turn. Final-delivery and hosted-tool effect
+before any hosted tool effect or final delivery may proceed. First-response
+closure removes the conversation registration and starts no further steer, but
+retains the existing provider-turn correlation until the one steer already
+started under that exact key settles; a rejected steer is not acknowledged and
+its input remains pending. Missing input, a causal gap, a boundary change,
+capacity overflow, or input arriving after the first completed response remains
+pending for a normal later assistant turn. Strict active-turn-targeted input
+still fails closed instead of falling through, and the assistant engine does
+not synthesize another provider request inside the same assistant turn. Final-delivery and hosted-tool effect
 keys use the newest accepted causal input as the stable replay anchor while the
 full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
