@@ -41,6 +41,7 @@ import {
 
 const KMS_KEY_NAME =
   "projects/test/locations/global/keyRings/test/cryptoKeys/account-cleanup";
+const KMS_KEY_VERSION_NAME = `${KMS_KEY_NAME}/cryptoKeyVersions/7`;
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -79,6 +80,10 @@ beforeEach(() => {
 describe("hosted account deletion cleanup", () => {
   it("encrypts only the identifiers needed for cleanup with receipt-bound AAD", async () => {
     const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.kmsEncrypt.mockImplementationOnce(async (input: { plaintext: Uint8Array }) => ({
+      ciphertext: Buffer.from(input.plaintext).toString("base64"),
+      keyName: KMS_KEY_VERSION_NAME,
+    }));
     const cleanup = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: "privy_user_1",
@@ -102,6 +107,71 @@ describe("hosted account deletion cleanup", () => {
       stripeCustomerIds: ["cus_1"],
     });
     expect(cleanup.payloadCiphertext).not.toContain("privy_user_1");
+    expect(cleanup.kmsKeyName).toBe(KMS_KEY_NAME);
+  });
+
+  it("repairs a legacy versioned KMS receipt before provider cleanup starts", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const deleteStripeCustomer = vi.fn(async () => ({ deleted: true }));
+    mocks.getHostedOnboardingStripe.mockReturnValue({
+      customers: { del: deleteStripeCustomer },
+    });
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = { ...store.row, kmsKeyName: KMS_KEY_VERSION_NAME };
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(mocks.kmsDecrypt).toHaveBeenCalledWith(expect.objectContaining({
+      keyName: KMS_KEY_NAME,
+    }));
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+    expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on malformed persisted KMS resource names", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+    if (!store.row) {
+      throw new Error("Expected a persisted cleanup receipt.");
+    }
+    store.row = {
+      ...store.row,
+      kmsKeyName: `${KMS_KEY_NAME}/cryptoKeyVersions/latest`,
+    };
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).rejects.toThrow(/CryptoKey or CryptoKeyVersion resource name/u);
+
+    expect(mocks.kmsDecrypt).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(mocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
+    expect(store.row).toMatchObject({
+      attemptCount: 1,
+      lastErrorCode: "TypeError",
+      leaseToken: null,
+    });
+    expect(store.row?.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
   });
 
   it("persists target progress and retries only unfinished targets", async () => {

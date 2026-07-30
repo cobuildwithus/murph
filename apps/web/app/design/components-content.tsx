@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  type HostedAssistantProvider,
+} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -27,6 +31,10 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
+import {
+  AssistantProviderDialog,
+  AssistantProviderSummary,
+} from "@/src/components/settings/hosted-assistant-model-settings";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -110,6 +118,7 @@ import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-
 import {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
@@ -496,6 +505,10 @@ export function ComponentsContent() {
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+    HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  );
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -909,7 +922,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group & Choice Cards">
+        <Section title="Radio Group, Choice Cards & Provider Dialog">
           <p className="max-w-2xl text-sm text-muted-foreground">
             Choose the intelligence behind your personal health assistant.
           </p>
@@ -948,6 +961,17 @@ export function ComponentsContent() {
               value="sol"
             />
           </RadioGroup>
+          <AssistantProviderSummary
+            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftProvider={providerValue}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
+          <AssistantProviderDialog
+            onOpenChange={setProviderDialogOpen}
+            onProviderChange={setProviderValue}
+            open={providerDialogOpen}
+            provider={providerValue}
+          />
         </Section>
 
         <Separator />
@@ -1347,9 +1371,8 @@ export function ComponentsContent() {
 
         <Section title="Hosted AI usage credits and missions">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail for one-time usage credits and explicit
-            referral missions. The production component keeps a single semantic
-            table tree for desktop and mobile layouts.
+            Read-only Settings detail with missions first, optional mission
+            details on demand, and a compact purchased-credit ledger.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
@@ -1362,19 +1385,32 @@ export function ComponentsContent() {
                 activity: DESIGN_AI_USAGE_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
                 label: "Active and completed missions",
+                state: "active-and-completed",
               },
               {
                 activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
                 label: "Mission selected, waiting for a new group",
+                state: "waiting-for-group",
+              },
+              {
+                activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Missions available, none selected",
+                state: "empty",
               },
               {
                 activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
                 contactOption: null,
                 label: "New missions disabled, existing history retained",
+                state: "disabled-history",
               },
             ].map((preview) => (
-              <div className="flex flex-col gap-3" key={preview.label}>
+              <div
+                className="flex flex-col gap-3"
+                data-design-state={preview.state}
+                key={preview.label}
+              >
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                   {preview.label}
                 </p>
