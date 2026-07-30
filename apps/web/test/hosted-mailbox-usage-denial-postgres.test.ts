@@ -32,6 +32,8 @@ describe.skipIf(!runPostgresProof)(
   () => {
     it("marks only the observed sequence window with valid database chronology", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback mailbox usage-denial PostgreSQL proof.");
+      let proofCompleted = false;
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -68,11 +70,11 @@ describe.skipIf(!runPostgresProof)(
               updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ON COMMIT DROP
           `);
-          await tx.$executeRaw(Prisma.sql`
-            CREATE TEMP TABLE hosted_linq_alert (
-              LIKE public.hosted_linq_alert INCLUDING ALL
-            ) ON COMMIT DROP
-          `);
+          await tx.hostedLinqAlert.deleteMany({
+            where: {
+              id: "hosted-runtime-latency-monitor:v1",
+            },
+          });
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_mailbox_item (
               id,
@@ -206,19 +208,6 @@ describe.skipIf(!runPostgresProof)(
               ${historicalAcceptedAt}
             )
           `);
-          await expect(deleteExpiredIngressLatencyTraces({
-            now: monitorNow,
-            prisma: tx,
-          })).resolves.toBe(1);
-          await expect(readHostedRuntimeLatencyHealth({
-            now: monitorNow,
-            prisma: tx,
-          })).resolves.toMatchObject({
-            anomalous: true,
-            oldestUnresolvedAgeMs: 5 * 60_000,
-            unresolvedReplyCount: 1,
-          });
-
           const sendAlert = vi.fn(async () => ({
             providerMessageId: "resend-usage-resume-proof",
           }));
@@ -238,6 +227,18 @@ describe.skipIf(!runPostgresProof)(
             outcome: "deferred_quiet_hours",
           });
           expect(sendAlert).not.toHaveBeenCalled();
+          await expect(deleteExpiredIngressLatencyTraces({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toBe(1);
+          await expect(readHostedRuntimeLatencyHealth({
+            now: monitorNow,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestUnresolvedAgeMs: 5 * 60_000,
+            unresolvedReplyCount: 1,
+          });
           await expect(runHostedRuntimeLatencyAlertMonitor({
             env: alertEnv,
             now: new Date("2026-07-30T22:00:00.000Z"),
@@ -385,7 +386,14 @@ describe.skipIf(!runPostgresProof)(
           expect(secondPass[1]?.aiUsageDeniedAt?.getTime()).toBeGreaterThanOrEqual(
             secondPass[1]?.createdAt.getTime() ?? Number.POSITIVE_INFINITY,
           );
+          proofCompleted = true;
+          throw rollback;
+        }).catch((error: unknown) => {
+          if (error !== rollback) {
+            throw error;
+          }
         });
+        expect(proofCompleted).toBe(true);
       } finally {
         await prisma.$disconnect();
       }
