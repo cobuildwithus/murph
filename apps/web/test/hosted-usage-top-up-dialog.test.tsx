@@ -451,9 +451,9 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /How many messages do you want to sponsor\?/,
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Sponsor more messages",
     );
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
@@ -466,9 +466,9 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       rendered.container.textContent ?? "",
       /one-time contribution to keep Murph talking for everyone here\./,
     );
-    assert.match(
+    assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /saved card when available/,
+      /We’ll use your saved card when available and ask only when card details or verification are needed\./,
     );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
@@ -545,6 +545,18 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
       "#group-sponsor-bit",
     );
     assert.ok(runningBit);
+    const sponsorAlias = rendered.container.querySelector<HTMLInputElement>(
+      "#group-sponsor-alias",
+    );
+    const sponsorMessage = rendered.container.querySelector<HTMLTextAreaElement>(
+      "#group-sponsor-message",
+    );
+    assert.ok(sponsorAlias);
+    assert.ok(sponsorMessage);
+    for (const field of [sponsorAlias, sponsorMessage, runningBit]) {
+      assert.equal(field.classList.contains("focus-visible:ring-0"), true);
+      assert.equal(field.classList.contains("focus-visible:ring-3"), false);
+    }
     assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
     await setTextInput(
       rendered.container.querySelector("#group-sponsor-alias"),

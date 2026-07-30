@@ -106,21 +106,21 @@ const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
-const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-  'features.shell_tool=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
+const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
 const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
   'memories.generate_memories=false',
   'web_search="disabled"',
@@ -143,13 +143,9 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
-  nativeCapabilitiesRestrictedTurn: boolean
   readOnlyAutomationTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (input.nativeCapabilitiesRestrictedTurn) {
-    return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
-  }
   if (input.readOnlyAutomationTurn) {
     return ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES
   }
@@ -534,10 +530,12 @@ async function executeAssistantCodexAttempt(input: {
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          nativeCapabilitiesRestrictedTurn,
           readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
+        codexThreadConfig: nativeCapabilitiesRestrictedTurn
+          ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
+          : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -587,7 +585,7 @@ async function executeAssistantCodexAttempt(input: {
           productFeedbackCandidateSink:
             executionPlan.executionContext?.hosted?.productFeedbackCandidateSink ?? null,
         }),
-        providerThreadEphemeral: restrictedOneShotTurn
+        providerThreadEphemeral: systemNotificationTurn || restrictedOneShotTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
@@ -600,7 +598,7 @@ async function executeAssistantCodexAttempt(input: {
             : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : null,
-        ...(systemNotificationTurn || restrictedOneShotTurn
+        ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
         providerFetch: outputOnlyTurn || readOnlyAutomationTurn
@@ -608,7 +606,7 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
         publicInternetFetch:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          outputOnlyTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
