@@ -44,6 +44,59 @@ vi.mock("@/src/components/ui/badge", () => ({
   },
 }));
 
+vi.mock("@/src/components/ui/dialog", () => ({
+  Dialog({
+    children,
+    onOpenChange,
+    open,
+  }: {
+    children?: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+  }) {
+    return open
+      ? createElement(
+          "div",
+          { role: "dialog" },
+          children,
+          createElement(
+            "button",
+            {
+              "data-dialog-dismiss": "true",
+              onClick: () => onOpenChange?.(false),
+              type: "button",
+            },
+            "Dismiss dialog",
+          ),
+        )
+      : null;
+  },
+  DialogContent({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement>) {
+    return createElement("div", props, children);
+  },
+  DialogDescription({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLParagraphElement>) {
+    return createElement("p", props, children);
+  },
+  DialogHeader({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement>) {
+    return createElement("div", props, children);
+  },
+  DialogTitle({
+    children,
+    ...props
+  }: React.HTMLAttributes<HTMLHeadingElement>) {
+    return createElement("h2", props, children);
+  },
+}));
+
 vi.mock("@/src/components/settings/hosted-plan-upgrade-button", () => ({
   UpgradeToEdgeButton({ children }: { children?: ReactNode }) {
     return createElement("button", { type: "button" }, children ?? "Upgrade to Edge");
@@ -125,13 +178,29 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
       veniceAvailable: true,
     }),
   );
-  const veniceInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /Direct managed inference/u,
   );
-  assert.ok(veniceInput);
   await act(async () => {
-    veniceInput.click();
+    findButton(view.container, "Change").click();
   });
+  assert.match(view.document.body.textContent ?? "", /Choose model provider/u);
+  assert.match(view.document.body.textContent ?? "", /Direct managed inference/u);
+  const veniceControl = findProviderRadio(
+    view.document,
+    HOSTED_ASSISTANT_VENICE_PROVIDER,
+  );
+  await act(async () => {
+    veniceControl.click();
+  });
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await act(async () => {
     submitForm(view.container);
     await Promise.resolve();
@@ -145,6 +214,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Terra through Venice/u);
+  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
   assert.match(
     view.container.textContent ?? "",
     /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
@@ -153,6 +223,39 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
   )));
+  view.cleanup();
+});
+
+test("closing the provider dialog leaves the draft unchanged", async () => {
+  const view = await renderClient(
+    createElement(HostedAssistantModelSettings, {
+      canUpgradeToEdge: false,
+      configurationAvailable: true,
+      initialDormantSolPreference: false,
+      initialModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      initialProvider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
+      solAvailable: true,
+      veniceAvailable: true,
+    }),
+  );
+  const saveButton = findButton(view.container, "Save change");
+
+  await act(async () => {
+    findButton(view.container, "Change").click();
+  });
+  const dismissButton = view.document.querySelector<HTMLButtonElement>(
+    '[data-dialog-dismiss="true"]',
+  );
+  assert.ok(dismissButton);
+  await act(async () => {
+    dismissButton.click();
+  });
+
+  assert.equal(view.document.querySelector('[role="dialog"]'), null);
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
+  assert.ok(saveButton.disabled);
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
   view.cleanup();
 });
 
@@ -190,11 +293,7 @@ test("a model-only save adopts the server's canonical provider", async () => {
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  const openAiInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_OPENAI_PROVIDER}"]`,
-  );
-  assert.ok(openAiInput);
-  assert.ok(isRadioChecked(openAiInput));
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
   assert.match(
     view.container.textContent ?? "",
     /New core replies will use Luna through OpenAI\./u,
@@ -223,13 +322,14 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
       veniceAvailable: true,
     }),
   );
-  const veniceInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
-  );
-  assert.ok(veniceInput);
-
   await act(async () => {
-    veniceInput.click();
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -275,14 +375,16 @@ test("a combined provider and model save preserves both choices for retry", asyn
       veniceAvailable: true,
     }),
   );
-  const veniceInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
-  );
   const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
-  assert.ok(veniceInput);
 
   await act(async () => {
-    veniceInput.click();
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
     solInput.click();
   });
   await act(async () => {
@@ -299,7 +401,10 @@ test("a combined provider and model save preserves both choices for retry", asyn
     view.container.querySelector('[role="alert"]')?.textContent,
     "We couldn’t save this change. Try again.",
   );
-  assert.ok(isRadioChecked(veniceInput));
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
   assert.ok(isRadioChecked(solInput));
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -319,6 +424,7 @@ test("a combined provider and model save preserves both choices for retry", asyn
   );
   assert.ok(statusLine);
   assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
+  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
   assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -703,13 +809,14 @@ test("a stale Venice page falls back to OpenAI and removes the unavailable choic
       veniceAvailable: true,
     }),
   );
-  const veniceInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
-  );
-  assert.ok(veniceInput);
-
   await act(async () => {
-    veniceInput.click();
+    findButton(view.container, "Change").click();
+  });
+  await act(async () => {
+    findProviderRadio(
+      view.document,
+      HOSTED_ASSISTANT_VENICE_PROVIDER,
+    ).click();
   });
   await act(async () => {
     submitForm(view.container);
@@ -720,12 +827,8 @@ test("a stale Venice page falls back to OpenAI and removes the unavailable choic
     view.container.textContent ?? "",
     /Venice is no longer available\. Murph will keep using OpenAI\./,
   );
-  assert.equal(
-    view.container.querySelector(
-      `input[value="${HOSTED_ASSISTANT_VENICE_PROVIDER}"]`,
-    ),
-    null,
-  );
+  assert.doesNotMatch(view.container.textContent ?? "", /Core replies/u);
+  assert.equal(findOptionalButton(view.container, "Change"), undefined);
   assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
@@ -887,6 +990,9 @@ test("members without active personal access see both provider and model control
     markup,
     /Provider and model choices are read-only until personal Murph access is active\./,
   );
+  assert.match(markup, /Core replies use.*OpenAI/su);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
+  assert.doesNotMatch(markup, /Choose model provider/u);
 });
 
 function findModelRadio(
@@ -912,12 +1018,30 @@ function findModelLabel(container: HTMLElement, model: string): HTMLLabelElement
   return label;
 }
 
-function findButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent === label,
+function findProviderRadio(
+  container: ParentNode,
+  provider: string,
+): HTMLElement {
+  const radio = container.querySelector<HTMLElement>(
+    `[id="assistant-provider-${provider}"]`,
   );
+  assert.ok(radio);
+  return radio;
+}
+
+function findButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const button = findOptionalButton(container, label);
   assert.ok(button);
   return button;
+}
+
+function findOptionalButton(
+  container: ParentNode,
+  label: string,
+): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
 }
 
 function submitForm(container: HTMLElement) {
@@ -951,6 +1075,7 @@ async function renderClient(element: ReactNode) {
       activeCleanups.delete(cleanupGlobals);
     },
     container,
+    document,
     rerender: async (nextElement: ReactNode) => {
       await act(async () => {
         root?.render(nextElement);
