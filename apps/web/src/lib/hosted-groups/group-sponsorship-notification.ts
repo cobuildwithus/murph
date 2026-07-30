@@ -188,7 +188,8 @@ function buildInstructions(
 ): string {
   return [
     "Generate one short, original sponsorship song for this existing group conversation by calling murph.generate_song exactly once.",
-    "Keep it to 5–15 seconds and at most four short lyric lines. Do not call any other tool.",
+    "Build it around the current group conversation: choose one vivid, recent, non-sensitive detail, exchange, or room dynamic and transform it into a surprising hook that could only belong to this group. Do not merely summarize the chat or write generic sponsor lyrics.",
+    "Write enough lyrics for roughly 15 seconds, with at most four short lyric lines. Do not call any other tool.",
     "If recent group history is urgent, medical, serious, sensitive, or conflict-heavy, keep the song gentle, respectful, and non-comedic.",
     "Use recent group history for tone, but never disclose private health or account details.",
     "Do not mention payment infrastructure, tokens, internal accounting, or the exact amount.",

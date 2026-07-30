@@ -145,6 +145,16 @@ describe("group sponsorship notification", () => {
       "calling murph.generate_song exactly once",
     );
     expect(envelope.notification.instructions).toContain(
+      "current group conversation",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "a surprising hook that could only belong to this group",
+    );
+    expect(envelope.notification.instructions).toContain(
+      "roughly 15 seconds",
+    );
+    expect(envelope.notification.instructions).not.toContain("5–15 seconds");
+    expect(envelope.notification.instructions).toContain(
       "gentle, respectful, and non-comedic",
     );
     expect(JSON.stringify(envelope)).not.toContain("purchase_private_123");
