@@ -116,6 +116,10 @@ import {
   requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import {
+  recordHostedAssistantMilestonesBestEffort,
+  type HostedAssistantMilestoneTraceContext,
+} from "./assistant-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
@@ -1667,6 +1671,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome" | "sendEmail"
   > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1706,6 +1711,24 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      onProviderAccepted: ({
+        acceptedAssistantInputIds,
+        acceptedAt,
+      }) => {
+        recordHostedAssistantMilestonesBestEffort({
+          context:
+            input.latencyTrace && acceptedAssistantInputIds.length > 0
+              ? {
+                  ...input.latencyTrace,
+                  assistantInputIds: acceptedAssistantInputIds,
+                }
+              : null,
+          milestones: [{
+            at: acceptedAt.toISOString(),
+            milestone: "progress_update_accepted",
+          }],
+        });
+      },
       providerFetch: input.providerFetch ?? null,
       publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
@@ -3440,6 +3463,10 @@ function createHostedAssistantLinqSendDependency(input: {
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
+  onProviderAccepted?: (input: {
+    acceptedAssistantInputIds: readonly string[];
+    acceptedAt: Date;
+  }) => void;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -3683,10 +3710,15 @@ function createHostedAssistantLinqSendDependency(input: {
       });
       throw error;
     }
+    const acceptedAt = new Date();
+    input.onProviderAccepted?.({
+      acceptedAssistantInputIds: request.acceptedAssistantInputIds ?? [],
+      acceptedAt,
+    });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-        acceptedAt: new Date(),
+        acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,

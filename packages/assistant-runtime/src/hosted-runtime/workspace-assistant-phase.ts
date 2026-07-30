@@ -387,12 +387,17 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
           input.currentDeliveryRoute,
           input.linqService,
         );
-        const referralRequest = request.action === "arm_usage_referral"
-          ? {
+        const referralRequest = request.action === "read_usage_referral"
+          ? { action: request.action }
+          : request.action === "arm_usage_referral"
+            ? {
+              action: request.action,
+              policyCodes: request.policyCodes,
+            }
+            : {
               action: request.action,
               policyCode: request.policyCode,
-            }
-          : { action: request.action };
+            };
         return await input.groupToolPort.request({
           ...referralRequest,
           ...senderHandles,
@@ -1505,6 +1510,12 @@ export async function runHostedWorkspaceAssistantPhase(
     resolveHostedClinicalRecordsConnectLinkTool(input.runtime.platform.clinicalRecordsPort);
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
+  const initialLinqLatencyTraceContext = {
+    assistantInputIds: initialAssistantInputIds,
+    latencyTracePort: input.runtime.platform.latencyTracePort,
+    runtimeAttemptId: input.request.attemptId,
+    source: "linq" as const,
+  };
   const productFeedbackCandidates = new Map<
     string,
     HostedRuntimeProductFeedbackRecord
@@ -1546,6 +1557,11 @@ export async function runHostedWorkspaceAssistantPhase(
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
+          latencyTrace: {
+            latencyTracePort: input.runtime.platform.latencyTracePort,
+            runtimeAttemptId: input.request.attemptId,
+            source: "linq",
+          },
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1556,12 +1572,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv,
-          latencyTraceContext: {
-            assistantInputIds: initialAssistantInputIds,
-            latencyTracePort: input.runtime.platform.latencyTracePort,
-            runtimeAttemptId: input.request.attemptId,
-            source: "linq",
-          },
+          latencyTraceContext: initialLinqLatencyTraceContext,
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
