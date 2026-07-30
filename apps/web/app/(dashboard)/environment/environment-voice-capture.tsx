@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleStop,
@@ -20,9 +21,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
-
 const MAX_RECORDING_MS = 3 * 60 * 1_000;
+const RECORDING_AUDIO_BITS_PER_SECOND = 64_000;
 const AUDIO_METER_BAR_COUNT = 12;
 const AUDIO_NOISE_FLOOR = 0.025;
 const RESTING_AUDIO_LEVELS = Array.from(
@@ -63,14 +63,17 @@ const VOICE_TOPICS = [
   },
 ] as const;
 
-type RecordingState = "idle" | "recording" | "ready" | "sending";
+type RecordingState =
+  | "idle"
+  | "recording"
+  | "ready"
+  | "uploading"
+  | "sent";
 
 export function EnvironmentVoiceCapture({
-  contactAction,
   compact = false,
   triggerLabel = "Tell Murph by voice",
 }: {
-  contactAction: MurphContactOption | null;
   compact?: boolean;
   triggerLabel?: string;
 }) {
@@ -239,7 +242,7 @@ export function EnvironmentVoiceCapture({
       !navigator.mediaDevices?.getUserMedia
     ) {
       setNotice(
-        "This browser cannot record audio here. Send Murph a voice memo in Messages or Telegram instead.",
+        "This browser cannot record audio here. Open this page in a current version of Chrome or Safari and try again.",
       );
       return;
     }
@@ -248,8 +251,13 @@ export function EnvironmentVoiceCapture({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = preferredMimeType();
       const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
+        ? new MediaRecorder(stream, {
+            audioBitsPerSecond: RECORDING_AUDIO_BITS_PER_SECOND,
+            mimeType,
+          })
+        : new MediaRecorder(stream, {
+            audioBitsPerSecond: RECORDING_AUDIO_BITS_PER_SECOND,
+          });
       streamRef.current = stream;
       recorderRef.current = recorder;
       chunksRef.current = [];
@@ -327,32 +335,39 @@ export function EnvironmentVoiceCapture({
     return file;
   };
 
-  const shareRecording = async (file: File) => {
-    setState("sending");
+  const uploadRecording = async (file: File) => {
+    setState("uploading");
     setNotice(null);
     try {
-      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-        await navigator.share({
-          files: [file],
-          title: "My home environment for Murph",
-          text: "Please extract the clear facts from this voice memo and save them to my Habitat record. Skip anything uncertain.",
-        });
-        setState("ready");
-        setNotice("Your recording was shared.");
-        return;
+      const bytes = await file.arrayBuffer();
+      const captureId = await sha256Hex(bytes);
+      const response = await fetch("/api/environment/voice", {
+        body: bytes,
+        credentials: "same-origin",
+        headers: {
+          "content-type": file.type,
+          "x-murph-environment-voice-capture-id": captureId,
+          "x-murph-environment-voice-captured-at": new Date(
+            file.lastModified,
+          ).toISOString(),
+          "x-murph-environment-voice-duration-ms": String(
+            Math.max(1_000, Math.min(MAX_RECORDING_MS, Math.round(elapsedMs))),
+          ),
+        },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(await readEnvironmentVoiceUploadError(response));
       }
-
-      setState("ready");
-      setNotice(
-        "This browser cannot send the recording directly. Download it, then attach it in your Murph chat.",
-      );
+      setState("sent");
+      setNotice(null);
     } catch (error) {
       setState("ready");
-      if (isShareDismissal(error)) {
-        setNotice("The recording is still ready whenever you want to send it.");
-      } else {
-        setNotice(shareFailureNotice(error));
-      }
+      setNotice(
+        error instanceof Error && error.message
+          ? error.message
+          : "Murph could not receive the recording. It is still safe in this browser.",
+      );
     }
   };
 
@@ -386,7 +401,7 @@ export function EnvironmentVoiceCapture({
   });
 
   const onOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen && state === "recording") {
+    if (!nextOpen && (state === "recording" || state === "uploading")) {
       return;
     }
     setOpen(nextOpen);
@@ -397,9 +412,6 @@ export function EnvironmentVoiceCapture({
 
   const topic = VOICE_TOPICS[topicIndex];
   const elapsedLabel = formatElapsed(elapsedMs);
-  const canSendRecording =
-    recordingFile !== null && canShareRecording(recordingFile);
-
   return (
     <>
       <Button
@@ -414,11 +426,13 @@ export function EnvironmentVoiceCapture({
       <Dialog
         open={open}
         onOpenChange={onOpenChange}
-        disablePointerDismissal={state === "recording"}
+        disablePointerDismissal={
+          state === "recording" || state === "uploading"
+        }
       >
         <DialogContent
           className="flex max-h-[calc(100dvh-1rem)] min-h-[min(700px,calc(100dvh-1rem))] flex-col overflow-y-auto p-0 sm:max-h-[calc(100dvh-3rem)] sm:min-h-[min(620px,calc(100dvh-3rem))] sm:max-w-4xl sm:overflow-hidden"
-          showCloseButton={state !== "recording"}
+          showCloseButton={state !== "recording" && state !== "uploading"}
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
@@ -463,6 +477,28 @@ export function EnvironmentVoiceCapture({
                     Start recording
                   </Button>
                 </>
+              ) : state === "sent" ? (
+                <div className="flex h-full flex-col">
+                  <CheckCircle2
+                    className="size-7 text-primary"
+                    aria-hidden="true"
+                  />
+                  <h2 className="mt-5 text-balance font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
+                    Sent securely
+                  </h2>
+                  <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground">
+                    Murph is transcribing this in the background and will add
+                    only clear facts to your report. The audio is deleted after
+                    processing.
+                  </p>
+                  <Button
+                    className="mt-6 self-start lg:mt-auto"
+                    size="lg"
+                    onClick={() => setOpen(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
               ) : (
                 <>
                   <div
@@ -475,7 +511,11 @@ export function EnvironmentVoiceCapture({
                       }`}
                       aria-hidden="true"
                     />
-                    {state === "recording" ? "Recording" : "Recording ready"}
+                    {state === "recording"
+                      ? "Recording"
+                      : state === "uploading"
+                        ? "Sending securely"
+                        : "Recording ready"}
                   </div>
                   <p className="mt-3 font-mono text-lg tabular-nums text-foreground">
                     {elapsedLabel}
@@ -576,66 +616,22 @@ export function EnvironmentVoiceCapture({
                           </div>
                         ) : null}
 
-                        {canSendRecording ? (
-                          <Button
-                            type="button"
-                            size="lg"
-                            className="mt-4 w-full min-w-0"
-                            disabled={!recordingFile || state === "sending"}
-                            onClick={() =>
-                              recordingFile
-                                ? void shareRecording(recordingFile)
-                                : undefined
-                            }
-                          >
-                            <Send data-icon="inline-start" aria-hidden="true" />
-                            {state === "sending"
-                              ? "Sending…"
-                              : "Send to Murph"}
-                          </Button>
-                        ) : (
-                          <div className="mt-4">
-                            <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
-                              This browser cannot attach the recording to your
-                              Murph chat directly yet.
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={!recordingFile}
-                                onClick={() =>
-                                  recordingFile
-                                    ? downloadRecording(recordingFile)
-                                    : undefined
-                                }
-                              >
-                                <Download
-                                  data-icon="inline-start"
-                                  aria-hidden="true"
-                                />
-                                Download
-                              </Button>
-                              {contactAction ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  render={
-                                    <a
-                                      href={contactAction.href}
-                                      target={contactAction.target}
-                                      rel={contactAction.rel}
-                                    />
-                                  }
-                                  nativeButton={false}
-                                >
-                                  Open Murph
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        )}
+                        <Button
+                          type="button"
+                          size="lg"
+                          className="mt-4 w-full min-w-0"
+                          disabled={!recordingFile || state === "uploading"}
+                          onClick={() =>
+                            recordingFile
+                              ? void uploadRecording(recordingFile)
+                              : undefined
+                          }
+                        >
+                          <Send data-icon="inline-start" aria-hidden="true" />
+                          {state === "uploading"
+                            ? "Sending securely…"
+                            : "Send to Murph"}
+                        </Button>
                       </>
                     )}
                   </div>
@@ -648,8 +644,8 @@ export function EnvironmentVoiceCapture({
                   role="status"
                 >
                   <p>{notice}</p>
-                  {recordingFile && canSendRecording ? (
-                    <div className="mt-3 flex flex-wrap gap-3">
+                  {recordingFile ? (
+                    <div className="mt-3">
                       <Button
                         type="button"
                         size="sm"
@@ -659,39 +655,7 @@ export function EnvironmentVoiceCapture({
                         <Download data-icon="inline-start" aria-hidden="true" />
                         Download
                       </Button>
-                      {contactAction ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          render={
-                            <a
-                              href={contactAction.href}
-                              target={contactAction.target}
-                              rel={contactAction.rel}
-                            />
-                          }
-                          nativeButton={false}
-                        >
-                          Open Murph
-                        </Button>
-                      ) : null}
                     </div>
-                  ) : contactAction ? (
-                    <Button
-                      className="mt-3"
-                      size="sm"
-                      variant="outline"
-                      render={
-                        <a
-                          href={contactAction.href}
-                          target={contactAction.target}
-                          rel={contactAction.rel}
-                        />
-                      }
-                      nativeButton={false}
-                    >
-                      Open Murph
-                    </Button>
                   ) : null}
                 </div>
               ) : null}
@@ -806,34 +770,19 @@ function AudioActivityMeter({ levels }: { levels: readonly number[] }) {
   );
 }
 
-function canShareRecording(file: File): boolean {
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.share ||
-    !navigator.canShare
-  ) {
-    return false;
-  }
-  try {
-    return navigator.canShare({ files: [file] });
-  } catch {
-    return false;
-  }
-}
-
 export function microphoneAccessNotice(error: unknown): string {
   const name = errorName(error);
 
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return "Microphone access is blocked for this site. Allow it in your browser's site settings, then try again — or send Murph a voice memo in your usual chat.";
+    return "Microphone access is blocked for this site. Allow it in your browser's site settings, then try again.";
   }
   if (name === "NotFoundError") {
-    return "No microphone was found. Connect one, then try again — or send Murph a voice memo in your usual chat.";
+    return "No microphone was found. Connect one, then try again.";
   }
   if (name === "NotReadableError" || name === "AbortError") {
-    return "The microphone is unavailable, possibly because another app is using it. Close the other app and try again — or send Murph a voice memo in your usual chat.";
+    return "The microphone is unavailable, possibly because another app is using it. Close the other app and try again.";
   }
-  return "Murph could not access the microphone. Try again or send a voice memo in your usual chat.";
+  return "Murph could not access the microphone. Check your browser's microphone settings and try again.";
 }
 
 function formatElapsed(milliseconds: number): string {
@@ -855,24 +804,6 @@ function downloadRecording(file: File): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function isShareDismissal(error: unknown): boolean {
-  return errorName(error) === "AbortError";
-}
-
-function shareFailureNotice(error: unknown): string {
-  const name = errorName(error);
-  if (name === "NotAllowedError") {
-    return "Chrome blocked the sharing window. Try again, or download the recording and attach it in your Murph chat.";
-  }
-  if (name === "InvalidStateError") {
-    return "Another sharing window is already open. Close it, then try again.";
-  }
-  if (name === "TypeError") {
-    return "Chrome cannot share this audio format. Download the recording and attach it in your Murph chat.";
-  }
-  return "Chrome could not open the sharing window. Your recording is still safe here.";
-}
-
 function errorName(error: unknown): string | null {
   return error !== null &&
     typeof error === "object" &&
@@ -880,4 +811,35 @@ function errorName(error: unknown): string | null {
     typeof error.name === "string"
     ? error.name
     : null;
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+async function readEnvironmentVoiceUploadError(
+  response: Response,
+): Promise<string> {
+  try {
+    const payload: unknown = await response.json();
+    if (
+      payload
+      && typeof payload === "object"
+      && "error" in payload
+      && payload.error
+      && typeof payload.error === "object"
+      && "message" in payload.error
+      && typeof payload.error.message === "string"
+      && payload.error.message.trim()
+    ) {
+      return payload.error.message.trim();
+    }
+  } catch {
+    // The fallback below is intentionally generic and keeps response bodies
+    // out of the UI and logs.
+  }
+  return "Murph could not receive the recording. It is still safe in this browser.";
 }

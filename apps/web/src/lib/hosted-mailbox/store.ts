@@ -26,6 +26,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedExecutionConversationMessageWake,
+  HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
@@ -618,6 +619,56 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
     ...appended,
     claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
   };
+}
+
+export async function appendHostedEnvironmentVoiceMailboxEnvelopeTx(input: {
+  envelope: HostedExecutionEnvironmentVoiceCapturedWake;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult & { claimedAudioKey: string }> {
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey: input.envelope.eventId,
+    tx: input.tx,
+    userId: input.envelope.userId,
+  });
+  const existing = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.envelope.eventId,
+    prisma: input.tx,
+    userId: input.envelope.userId,
+  });
+  const canonicalEnvelope =
+    existing?.kind === "environment-voice.captured"
+    && hasSameEnvironmentVoiceCapture(existing, input.envelope)
+      ? existing
+      : input.envelope;
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: canonicalEnvelope,
+    tx: input.tx,
+  });
+  return {
+    ...appended,
+    claimedAudioKey: canonicalEnvelope.environmentVoice.audioKey,
+  };
+}
+
+function hasSameEnvironmentVoiceCapture(
+  existing: HostedExecutionEnvironmentVoiceCapturedWake,
+  requested: HostedExecutionEnvironmentVoiceCapturedWake,
+): boolean {
+  return existing.eventId === requested.eventId
+    && existing.userId === requested.userId
+    && existing.occurredAt === requested.occurredAt
+    && existing.environmentVoice.byteLength
+      === requested.environmentVoice.byteLength
+    && existing.environmentVoice.captureId
+      === requested.environmentVoice.captureId
+    && existing.environmentVoice.capturedAt
+      === requested.environmentVoice.capturedAt
+    && existing.environmentVoice.contentType
+      === requested.environmentVoice.contentType
+    && existing.environmentVoice.durationMs
+      === requested.environmentVoice.durationMs
+    && existing.environmentVoice.sha256
+      === requested.environmentVoice.sha256;
 }
 
 function hasSameMealPhotoCapture(

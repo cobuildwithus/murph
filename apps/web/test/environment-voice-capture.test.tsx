@@ -57,55 +57,33 @@ test("explains when the browser has blocked microphone permission", () => {
   );
 });
 
-test.each([
-  {
-    href: "sms:+15555550100?body=Home%20environment",
-    kind: "text" as const,
-  },
-  {
-    href: "https://t.me/withmurph_bot?text=Home%20environment",
-    kind: "telegram" as const,
-  },
-])(
-  "microphone recovery keeps the member's $kind channel",
-  async ({ href, kind }) => {
-    const rendered = await renderClientComponent(
-      createElement(EnvironmentVoiceCapture, {
-        contactAction: {
-          href,
-          kind,
-          label: kind === "text" ? "Text Murph" : "Telegram",
-        },
-      }),
+test("explains microphone failure without handing private audio to another app", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+
+  try {
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /could not access the microphone|cannot record audio here/,
     );
-
-    try {
-      await clickButton(rendered.window, "Tell Murph by voice");
-      await clickButton(rendered.window, "Start recording");
-
-      assert.match(
-        rendered.window.document.body.textContent ?? "",
-        /could not access the microphone|cannot record audio here/,
-      );
-      const openMurph = Array.from(
-        rendered.window.document.querySelectorAll("a"),
-      ).find((anchor) => anchor.textContent?.includes("Open Murph"));
-      assert.ok(openMurph);
-      assert.equal(openMurph.getAttribute("href"), href);
-      if (kind === "text") {
-        assert.doesNotMatch(openMurph.getAttribute("href") ?? "", /t\.me/);
-      }
-    } finally {
-      await rendered.cleanup();
-    }
-  },
-);
+    assert.equal(
+      Array.from(rendered.window.document.querySelectorAll("a")).some(
+        (anchor) => anchor.textContent?.includes("Open Murph"),
+      ),
+      false,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
 
 test("keeps the dialog open when a recording is in progress", async () => {
   const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture, {
-      contactAction: null,
-    }),
+    createElement(EnvironmentVoiceCapture),
   );
   const trackStop = vi.fn();
 
@@ -185,6 +163,140 @@ test("keeps the dialog open when a recording is in progress", async () => {
     } else {
       Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
     }
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a failed recording for retry and reuses its capture time", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentVoiceCapture),
+  );
+  const uploadRequests: RequestInit[] = [];
+  const trackStop = vi.fn();
+  let uploadAttempt = 0;
+
+  class FakeMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+
+    mimeType = "audio/webm";
+    state: RecordingState = "inactive";
+    private readonly listeners = new Map<string, EventListener[]>();
+
+    addEventListener(type: string, listener: EventListener) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      const dataEvent = new Event("dataavailable");
+      Object.defineProperty(dataEvent, "data", {
+        value: new Blob([
+          Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]),
+        ], { type: "audio/webm" }),
+      });
+      for (const listener of this.listeners.get("dataavailable") ?? []) {
+        listener(dataEvent);
+      }
+      this.state = "inactive";
+      for (const listener of this.listeners.get("stop") ?? []) {
+        listener(new Event("stop"));
+      }
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+  try {
+    const mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: trackStop }],
+      }),
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Object.defineProperty(rendered.window.navigator, "mediaDevices", {
+      configurable: true,
+      value: mediaDevices,
+    });
+    Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
+    Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
+    URL.createObjectURL = vi.fn(() => "blob:environment-recording");
+    URL.revokeObjectURL = vi.fn();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      uploadRequests.push(init ?? {});
+      uploadAttempt += 1;
+      return uploadAttempt === 1
+        ? Response.json(
+            { error: { message: "Murph cannot receive this recording right now." } },
+            { status: 503 },
+          )
+        : Response.json({ accepted: true }, { status: 202 });
+    });
+    globalThis.fetch = fetchMock;
+    rendered.window.fetch = fetchMock;
+
+    await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(rendered.window, "Start recording");
+    await clickButton(rendered.window, "Finish recording");
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+    await clickButton(rendered.window, "Send to Murph");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph cannot receive this recording right now/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Download/,
+    );
+
+    await clickButton(rendered.window, "Send to Murph");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Sent securely/,
+    );
+    assert.equal(uploadRequests.length, 2);
+    const firstHeaders = new Headers(uploadRequests[0]?.headers);
+    const secondHeaders = new Headers(uploadRequests[1]?.headers);
+    assert.equal(
+      firstHeaders.get("x-murph-environment-voice-captured-at"),
+      secondHeaders.get("x-murph-environment-voice-captured-at"),
+    );
+    assert.equal(
+      firstHeaders.get("x-murph-environment-voice-capture-id"),
+      secondHeaders.get("x-murph-environment-voice-capture-id"),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalMediaRecorder === undefined) {
+      Reflect.deleteProperty(globalThis, "MediaRecorder");
+    } else {
+      Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
+    }
+    URL.createObjectURL = originalCreateObjectUrl;
+    URL.revokeObjectURL = originalRevokeObjectUrl;
     await rendered.cleanup();
   }
 });

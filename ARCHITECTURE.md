@@ -1455,6 +1455,18 @@ input from the same conversation, only until the first completed assistant
 response, and to 50 admitted messages cumulatively. Later or overflow rows
 stay pending for the next ordinary turn.
 
+The Environment walkthrough reuses that execution plane without turning audio
+into a chat attachment. Authenticated Web validates and stages one bounded
+application-encrypted recording under the member's opaque R2 namespace, then
+appends a pointer-only `environment-voice.captured` system mailbox wake. The
+write-fenced runtime verifies the staged bytes, transcribes through the existing
+Worker-owned transcription effect, and gives the transcript only to a silent
+Habitat-scoped maintenance turn. Canonical Habitat writes checkpoint through the
+ordinary workspace owner before a post-checkpoint effect deletes the recording;
+failed work remains retryable and the 24-hour R2 lifecycle is only a cleanup
+backstop. Neither audio nor transcript becomes assistant conversation history,
+an outbound message, or Browser Vault product truth.
+
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while
 the canonical capture save waits for an invocation boundary and rebases its

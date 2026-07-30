@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-23
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 ## Goal
 
@@ -21,8 +21,11 @@ Updated: 2026-07-29
   recovery equipment can only appear as non-required positive context.
 - Every gradeable catalog condition has an evaluator, and visible mold or indoor
   smoking caps a sufficiently covered assessment at E.
-- A member can record one guided voice memo from the page and hand it to Murph
-  for transcription/extraction without reviewing a form.
+- A member can record one guided voice memo and upload it privately to Murph
+  for background transcription/extraction without a form or messaging handoff.
+- Voice audio is application-encrypted while staged, integrity-checked before
+  transcription, deleted after the updated vault checkpoint, and covered by a
+  24-hour lifecycle backstop.
 - Weather and outdoor air quality use a real city-level source when the stored
   location supports it, with a safe unavailable state otherwise.
 - Print/share paths do not leak private Habitat facts through a public URL.
@@ -72,6 +75,10 @@ Updated: 2026-07-29
 4. Risk: live provider failure blocks the whole page.
    Mitigation: weather/air quality are optional cards with bounded timeouts and
    honest unavailable states.
+5. Risk: a staged voice recording outlives processing or is deleted before the
+   extracted facts are durable.
+   Mitigation: delete through a retryable post-checkpoint effect, sweep the
+   member prefix on account deletion, and apply a 24-hour R2 lifecycle backstop.
 
 ## Tasks
 
@@ -95,18 +102,26 @@ Updated: 2026-07-29
   required and may only add positive context.
 - Voice capture auto-saves confident facts; correction is conversational rather
   than form-based.
+- Voice capture uploads through the authenticated app path, not iMessage,
+  Telegram, or a browser share sheet.
 - Recommendation dismissal changes future suggestions, not facts or grade.
 
 ## Verification
 
-- Commands to run:
-  - focused Environment/model/API tests during implementation;
-  - `pnpm test:diff` for every touched owner;
-  - `pnpm test:frontend-design-proof`;
-  - `pnpm verify:acceptance`;
-  - hosted desktop/mobile design-catalog screenshots and required review gates.
-- Expected outcomes:
-  - fixture data is absent from personal routes;
-  - sparse, optional-equipment, folded-fact, voice-failure, and provider-failure
-    cases are covered;
-  - no new privacy, type, lint, architecture, or acceptance failures.
+- Focused voice/API/mailbox tests passed: 85 tests across the Web route,
+  component, handoff, and mailbox owners.
+- Full owner tests passed: Assistant Engine 2,820; Assistant Runtime 1,957;
+  Cloudflare Node 2,106; Cloudflare Workers 3; Hosted Execution 433; Hosted
+  Control 49.
+- `pnpm --dir apps/web verify` passed: TypeScript, 7,384 tests, lint with zero
+  errors, dev smoke, and the production Next build.
+- `pnpm test:frontend-design-proof` passed 10/10.
+- `pnpm test:diff ...` reached an unrelated CLI experiment test timeout; its
+  isolated rerun passed in 610 ms.
+- `pnpm verify:acceptance` passed workspace typecheck and every completed
+  coverage owner, then stopped on an unrelated concurrent Clinical Records
+  preemption assertion; the same coverage test passed in isolation in 20 ms.
+- The embedded browser was unavailable for a fresh rendered smoke. The real
+  component remains represented in the design catalog, and the existing
+  desktop/mobile walkthrough proof plus focused interaction tests cover the
+  changed surface.

@@ -180,7 +180,6 @@ export function EnvironmentEmptyState({
 
           <div className="mt-8 flex flex-col items-start gap-4">
             <EnvironmentVoiceCapture
-              contactAction={contactAction}
               triggerLabel="Start the 2-minute walkthrough"
             />
             {contactAction ? (
@@ -331,7 +330,7 @@ export function EnvironmentCaptureCard({
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap gap-3">
-        <EnvironmentVoiceCapture compact contactAction={contactAction} />
+        <EnvironmentVoiceCapture compact />
         {contactAction ? (
           <Button
             size="sm"

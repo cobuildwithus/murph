@@ -171,7 +171,7 @@ export async function requeueClaimedHostedSystemMailboxItem(input: {
 export type HostedSystemMailboxRuntime = Pick<
   NormalizedHostedAssistantRuntimeConfig,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
->;
+> & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
 
 interface HostedSystemMailboxPostCheckpointRecordResult {
   nextWakeAt: string | null;
@@ -627,6 +627,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
+    || item.route.action === "run-environment-voice"
     || item.route.action === "apply-runtime-control-request"
   ) {
     return item.route.action;
@@ -705,6 +706,21 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       return {
         nextWakeAt: null,
         recorded: response.status === "superseded" ? 0 : 1,
+        stillDirty: false,
+      };
+    }
+    case "environment-voice.audio-delete": {
+      const deleteEnvironmentVoice =
+        input.runtime.platform.effectsPort.deleteEnvironmentVoice;
+      if (!deleteEnvironmentVoice) {
+        throw new Error(
+          "Hosted environment voice checkpoint requires an audio deletion port.",
+        );
+      }
+      await deleteEnvironmentVoice(input.record.audioKey);
+      return {
+        nextWakeAt: null,
+        recorded: 1,
         stillDirty: false,
       };
     }

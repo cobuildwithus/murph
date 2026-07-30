@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildHostedExecutionAssistantAskRequestedWake,
+  buildHostedExecutionEnvironmentVoiceCapturedWake,
   type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
@@ -16,6 +17,7 @@ import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
+  appendHostedEnvironmentVoiceMailboxEnvelopeTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
@@ -1762,6 +1764,51 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     );
   });
 
+  it("keeps the first staged object as the canonical exact-duplicate environment recording", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    const first = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
+      envelope: buildHostedEnvironmentVoiceEnvelope("a".repeat(40)),
+      tx,
+    });
+    const duplicate = await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
+      envelope: buildHostedEnvironmentVoiceEnvelope("b".repeat(40)),
+      tx,
+    });
+
+    expect(first).toMatchObject({
+      claimedAudioKey: "a".repeat(40),
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+    });
+    expect(duplicate).toMatchObject({
+      claimedAudioKey: "a".repeat(40),
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: { id: first.item.id },
+    });
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
   it("still rejects conflicting reuse of a meal-photo capture event", async () => {
     const rows: HostedMailboxItemRow[] = [];
     const hostedMailboxItem = createHostedMailboxItemDelegate({
@@ -3203,6 +3250,25 @@ function buildHostedMealPhotoEnvelope(
     occurredAt: "2026-07-12T16:30:45.000Z",
     userId: "member_mailbox_1",
   };
+}
+
+function buildHostedEnvironmentVoiceEnvelope(
+  audioKey: string,
+  capturedAt = "2026-07-30T12:00:00.000Z",
+) {
+  const captureId = "c".repeat(64);
+  return buildHostedExecutionEnvironmentVoiceCapturedWake({
+    audioKey,
+    byteLength: 64_000,
+    captureId,
+    capturedAt,
+    contentType: "audio/webm",
+    durationMs: 12_000,
+    eventId: `environment-voice:${captureId}`,
+    memberId: "member_mailbox_1",
+    occurredAt: capturedAt,
+    sha256: captureId,
+  });
 }
 
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {
