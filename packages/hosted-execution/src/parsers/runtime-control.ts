@@ -1239,6 +1239,7 @@ export function parseHostedRuntimeGroupToolRequest(
       new Set([
         "action",
         "linqSenderHandles",
+        "participant",
         "sourceConversation",
         "telegramSenderHandles",
       ]),
@@ -1246,6 +1247,14 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
+      ...(record.participant !== undefined && record.participant !== null
+        ? {
+          participant: parseHostedRuntimeGroupToolParticipant(
+            record.participant,
+            "Hosted runtime group tool read_usage_referral request participant",
+          ),
+        }
+        : {}),
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
       ...parseHostedRuntimeUsageReferralSourceContext(record),
     };

@@ -65,6 +65,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           directRecipientPhoneNumber: "+15550000001",
           routeAuthority: ROUTE_AUTHORITY,
         }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: EXACT_GROUP_PARTICIPANT.senderHandle,
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
       ],
     });
 
@@ -81,7 +85,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     expect(request).toHaveBeenLastCalledWith({
       action: "arm_usage_referral",
-      linqSenderHandles: ["+15550000001"],
+      linqSenderHandles: [
+        "+15550000001",
+        EXACT_GROUP_PARTICIPANT.senderHandle,
+      ],
       policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "linq",
@@ -93,6 +100,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_usage_referral",
+      participant: EXACT_GROUP_PARTICIPANT,
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"e".repeat(32)}`,
@@ -102,7 +110,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     expect(request).toHaveBeenLastCalledWith({
       action: "read_usage_referral",
-      linqSenderHandles: ["+15550000001"],
+      linqSenderHandles: [EXACT_GROUP_PARTICIPANT.senderHandle],
       sourceConversation: {
         channel: "linq",
         linqService: "imessage",
@@ -119,7 +127,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     expect(request).toHaveBeenLastCalledWith({
       action: "cancel_usage_referral",
-      linqSenderHandles: ["+15550000001"],
+      linqSenderHandles: [
+        "+15550000001",
+        EXACT_GROUP_PARTICIPANT.senderHandle,
+      ],
       policyCode: "new_person_activation_v1",
     });
   });
