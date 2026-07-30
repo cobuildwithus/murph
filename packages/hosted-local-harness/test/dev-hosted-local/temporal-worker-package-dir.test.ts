@@ -5,13 +5,11 @@ import {
 } from "../../src/dev-hosted-local/temporal.ts";
 
 describe("hosted-local Temporal worker package directory", () => {
-  it("keeps the in-repo worker as the default", () => {
-    expect(resolveHostedLocalTemporalWorkerPackageDir({})).toBe(
-      "packages/hosted-orchestrator-temporal",
-    );
+  it("requires an explicit external worker package", () => {
+    expect(resolveHostedLocalTemporalWorkerPackageDir({})).toBeNull();
     expect(resolveHostedLocalTemporalWorkerPackageDir({
       MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR: "   ",
-    })).toBe("packages/hosted-orchestrator-temporal");
+    })).toBeNull();
   });
 
   it("accepts one trimmed external package directory", () => {

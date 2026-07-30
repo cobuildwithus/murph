@@ -563,11 +563,8 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(React.Fragment, null,
-        React.createElement(HostedPhoneAuth, {
-        }),
-        React.createElement(HostedPhoneAuth, {
-          intent: "auth",
-        }),
+        React.createElement(HostedPhoneAuth),
+        React.createElement(HostedPhoneAuth),
       ),
     );
 
@@ -1215,137 +1212,6 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("drains queued manual link-phone sends when Privy initializes while authenticated", async () => {
-    vi.resetModules();
-    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
-      HostedPhoneAuthFlow(props: {
-        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
-        onPhoneNumberChange: (value: string) => void;
-        sendCodeDisabled: boolean;
-        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
-      }) {
-        return React.createElement(
-          "div",
-          {
-            "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
-            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
-          },
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-set-phone": "true",
-              onClick: () => props.onPhoneNumberChange("4155552671"),
-            },
-            "Set phone",
-          ),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              "data-send-code": "true",
-              disabled: props.sendCodeDisabled,
-              onClick: () => props.onSubmitPhoneEntry(),
-            },
-            "Send verification code",
-          ),
-        );
-      },
-      HostedPhoneAuthScaffold({
-        children,
-        view,
-      }: {
-        children: React.ReactNode;
-        view: string | null;
-      }) {
-        if (view) {
-          return React.createElement("div", { "data-auth-view": view });
-        }
-
-        return React.createElement(React.Fragment, null, children);
-      },
-    }));
-    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
-      HostedPrivyCaptcha() {
-        return React.createElement("div", { "data-privy-captcha": "mounted" });
-      },
-    }));
-    mocks.sendCode.mockResolvedValue(undefined);
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const readyHarnessState: {
-      setPrivyReady: React.Dispatch<React.SetStateAction<boolean>> | null;
-    } = {
-      setPrivyReady: null,
-    };
-    function ReadyHarness() {
-      const [privyReady, setReady] = React.useState(false);
-      readyHarnessState.setPrivyReady = setReady;
-      mocks.usePrivy.mockReturnValue({
-        authenticated: true,
-        logout: mocks.logout,
-        ready: privyReady,
-      });
-      return React.createElement(HostedPhoneAuth, {
-        intent: "link",
-      });
-    }
-
-    const { cleanup, container } = await renderClientComponent(
-      React.createElement(ReadyHarness),
-    );
-
-    try {
-      const setPhoneButton = container.querySelector(
-        "[data-set-phone]",
-      ) as HTMLButtonElement | null;
-      const sendCodeButton = container.querySelector(
-        "[data-send-code]",
-      ) as HTMLButtonElement | null;
-      assert.ok(setPhoneButton);
-      assert.ok(sendCodeButton);
-      assert.equal(container.querySelector("[data-auth-view]"), null);
-
-      await act(async () => {
-        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
-      });
-
-      assert.equal(
-        container.querySelector("[data-send-disabled]")?.getAttribute("data-send-disabled"),
-        "no",
-      );
-
-      await act(async () => {
-        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await flushHostedPhoneAuthEffects(2);
-      });
-
-      expect(mocks.sendCode).not.toHaveBeenCalled();
-
-      const updatePrivyReady = readyHarnessState.setPrivyReady;
-      assert.ok(updatePrivyReady);
-      await act(async () => {
-        updatePrivyReady(true);
-        await flushHostedPhoneAuthEffects();
-      });
-
-      expect(mocks.sendCode).toHaveBeenCalledTimes(1);
-      expect(mocks.sendCode).toHaveBeenCalledWith({
-        phoneNumber: "+14155552671",
-      });
-      assert.equal(
-        container.querySelector("[data-active-attempt]")?.getAttribute("data-active-attempt"),
-        "*** 2671",
-      );
-      assert.equal(container.querySelector("[data-auth-view]"), null);
-    } finally {
-      await cleanup();
-      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
-      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
-      vi.resetModules();
-    }
-  });
-
   it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -1428,7 +1294,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -1528,7 +1393,6 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disableSignup: true,
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -1563,7 +1427,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -1597,7 +1460,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -2509,9 +2371,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2593,9 +2453,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2726,9 +2584,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -2868,9 +2724,7 @@ describe("HostedPhoneAuth", () => {
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      }),
+      React.createElement(HostedPhoneAuth),
     );
 
     try {
@@ -3043,9 +2897,7 @@ describe("HostedPhoneAuth", () => {
     function PhoneAuthHarness() {
       const [, setRenderVersion] = React.useState(0);
       rerenderHarness = () => setRenderVersion((version) => version + 1);
-      return React.createElement(HostedPhoneAuth, {
-        intent: "auth",
-      });
+      return React.createElement(HostedPhoneAuth);
     }
 
     const { cleanup, container } = await renderClientComponent(
@@ -3471,7 +3323,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3505,7 +3356,6 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3533,7 +3383,6 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -3567,7 +3416,6 @@ describe("HostedPhoneAuth", () => {
     );
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneEntryStep, {
-        intent: "auth",
         pendingAction: "send-code",
         phoneCountryOptions: [US_PHONE_COUNTRY],
         phoneNumber: "4155552671",
@@ -4255,7 +4103,6 @@ function createHostedInvitePhoneAuthControllerHarness(
       activeAttempt,
       code: "",
       disabled: false,
-      intent: "auth" as const,
       onCodeChange: vi.fn(),
       onPhoneCountryChange: vi.fn(),
       onPhoneNumberChange: vi.fn(),

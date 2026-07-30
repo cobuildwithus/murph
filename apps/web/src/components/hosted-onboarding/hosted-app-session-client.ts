@@ -12,6 +12,25 @@ import { reloadCurrentHostedAuthDocument } from "./hosted-auth-navigation";
 export async function logoutHostedAppSession(input: {
   logoutPrivy?: () => Promise<void> | void;
 } = {}): Promise<void> {
+  return endHostedAppSession({
+    ...input,
+    url: "/api/hosted-onboarding/session/logout",
+  });
+}
+
+export async function declineHostedLaunchConsent(input: {
+  logoutPrivy?: () => Promise<void> | void;
+} = {}): Promise<void> {
+  return endHostedAppSession({
+    ...input,
+    url: "/api/legal/consent/decline",
+  });
+}
+
+async function endHostedAppSession(input: {
+  logoutPrivy?: () => Promise<void> | void;
+  url: string;
+}): Promise<void> {
   publishBrowserVaultSessionEnding();
   let receivedReplacementHeaders = false;
 
@@ -24,7 +43,7 @@ export async function logoutHostedAppSession(input: {
         publishBrowserVaultSessionInvalidation();
       },
       signal: AbortSignal.timeout(BROWSER_VAULT_SESSION_ENDING_LEASE_MS),
-      url: "/api/hosted-onboarding/session/logout",
+      url: input.url,
     });
   } catch (error) {
     if (!receivedReplacementHeaders) {

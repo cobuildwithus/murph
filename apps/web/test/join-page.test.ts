@@ -162,6 +162,7 @@ beforeEach(() => {
     },
     linkedAccounts: [],
     session: {
+      privyUserId: "test-privy-user",
       identity: {
         phone: {
           number: "+15550100271",
@@ -250,8 +251,10 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
   expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
     awaitingInviteSessionResolution: false,
+    expectedPrivyUserId: "test-privy-user",
     inviteCode: "invite code",
     preview: false,
+    privySessionMatchesAppSession: true,
     status: {
       stage: "verify",
     },
@@ -280,6 +283,7 @@ test.each([
         updatedAt: new Date("2026-07-13T08:00:00.000Z"),
       },
       session: {
+        privyUserId: "test-privy-user",
         identity: null,
         linkedAccounts: [],
         verifiedPrivyUser: { id: "test-privy-user" },
@@ -316,6 +320,7 @@ test("JoinInvitePage leaves a suspended paused member in the blocked flow", asyn
       updatedAt: new Date("2026-07-20T08:00:00.000Z"),
     },
     session: {
+      privyUserId: "test-privy-user",
       identity: null,
       linkedAccounts: [],
       verifiedPrivyUser: { id: "test-privy-user" },
@@ -438,6 +443,7 @@ test.each(["available", "checkout", "syncing"] as const)(
         updatedAt: new Date("2026-07-28T08:00:00.000Z"),
       },
       session: {
+        privyUserId: "test-privy-user",
         identity: null,
         linkedAccounts: [],
         verifiedPrivyUser: { id: "test-privy-user" },
@@ -505,7 +511,11 @@ test("JoinInvitePage keeps first-time checkout independent of Family recovery re
 test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   mocks.getHostedPrivySession.mockResolvedValueOnce({
-    identity: null,
+    identity: {
+      phone: null,
+      userId: "test-privy-user",
+      wallet: null,
+    },
     linkedAccounts: [
       {
         address: "hidden@example.test",
@@ -536,6 +546,7 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
     },
     linkedAccounts: [],
     session: {
+      privyUserId: "test-privy-user",
       identity: null,
       linkedAccounts: [],
       verifiedPrivyUser: {
@@ -566,6 +577,52 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
   expect(mocks.joinInvitePageViewProps?.model.telegramAccountForMessagingSetup).toEqual({
     telegramUserId: "telegram-test-user",
     username: "murph_test",
+  });
+});
+
+test("JoinInvitePage withholds Telegram seed when the fresh Privy user does not match", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPrivySession.mockResolvedValueOnce({
+    identity: {
+      phone: null,
+      userId: "different-privy-user",
+      wallet: null,
+    },
+    linkedAccounts: [
+      {
+        id: "telegram-test-user",
+        type: "telegram",
+        username: "murph_test",
+      },
+    ],
+    verifiedPrivyUser: {
+      id: "different-privy-user",
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    messagingSetupRequired: true,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  }));
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+
+  renderToStaticMarkup(
+    await JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    }),
+  );
+
+  expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
+    expectedPrivyUserId: "test-privy-user",
+    privySessionMatchesAppSession: false,
+    telegramAccountForMessagingSetup: null,
   });
 });
 

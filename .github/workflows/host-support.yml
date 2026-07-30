@@ -171,7 +171,6 @@ jobs:
               packages/inboxd
               packages/importers
               packages/runtime-state
-              packages/hosted-orchestrator-temporal
               packages/cloudflare-hosted-control
               packages/clinical-records
               packages/contracts
