@@ -560,6 +560,12 @@ Last verified: 2026-07-30
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- Cloudflare may exact-replay one Assistant Ask control request within the
+  original request deadline after a replay-safe transport ambiguity or HTTP
+  `5xx`. This applies only to group `ask`, `ask_member`, `ask_current_sender`,
+  and the dedicated `prepare` / `complete` control requests, whose stable
+  identities make identical replay idempotent. Caller cancellation, exhausted
+  deadlines, authority failures, and other `4xx` responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
