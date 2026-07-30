@@ -247,7 +247,7 @@ test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its 
   });
 
   expect(queued).toBe(true);
-  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(true);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith("action");
   expect(onViewChange).toHaveBeenLastCalledWith("auth");
   expect(readAlternateButton("Telegram")?.disabled).toBe(true);
   expect(readAlternateButton("Email")?.disabled).toBe(true);
@@ -259,7 +259,7 @@ test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its 
   });
 
   expect(started).toBe(true);
-  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(false);
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(null);
   expect(onViewChange).toHaveBeenLastCalledWith("auth-active");
 
   await act(async () => {
@@ -269,6 +269,30 @@ test("HostedAuthPanel keeps a pre-ready method queued and dismissible until its 
   expect(onViewChange).toHaveBeenLastCalledWith("auth");
   expect(readAlternateButton("Telegram")?.disabled).toBe(false);
   expect(readAlternateButton("Email")?.disabled).toBe(false);
+});
+
+test("HostedAuthPanel gates a warm authenticated session until its user snapshot resolves", async () => {
+  const onPrivyWaitChange = vi.fn();
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    logout: vi.fn(),
+    ready: true,
+  });
+  mocks.useUser.mockReturnValue({ user: null });
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onPrivyWaitChange,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector("button")).toBeNull();
+  expect(container.querySelector("[data-privy-captcha]")).toBeNull();
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith("session");
+  expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
 });
 
 test("HostedAuthPanel retires Telegram continuation when phone takes over", async () => {
@@ -382,6 +406,12 @@ test("HostedAuthPanel discards queued email when Privy hydrates an existing sess
 
   authenticated = true;
   ready = true;
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).not.toContain("Sending...");
+  expect(rendered.container.querySelector("button")).toBeNull();
+
   user = {
     linkedAccounts: [
       {
@@ -399,6 +429,170 @@ test("HostedAuthPanel discards queued email when Privy hydrates an existing sess
     "You're signed in as login@example.com.",
   );
   expect(rendered.container.textContent).not.toContain("Sending...");
+});
+
+test("HostedAuthPanel restores an existing email session over an unsubmitted pre-ready email selection", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  const onPrivyWaitChange = vi.fn();
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+    onPrivyWaitChange,
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const emailButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Email");
+  await act(async () => {
+    emailButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  ready = true;
+  await rendered.rerender(renderPanel());
+
+  expect(
+    rendered.container.querySelector('input[id="homepage-email-address"]'),
+  ).toBeTruthy();
+
+  authenticated = true;
+  await rendered.rerender(renderPanel());
+
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith("session");
+  expect(rendered.container.querySelector("button")).toBeNull();
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+
+  user = {
+    linkedAccounts: [
+      {
+        address: "login@example.com",
+        latest_verified_at: 1741194420,
+        type: "email",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(onPrivyWaitChange).toHaveBeenLastCalledWith(null);
+  const staleEmailInput = rendered.container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  await act(async () => {
+    if (staleEmailInput) {
+      setInputValue(rendered.window, staleEmailInput, "login@example.com");
+    }
+  });
+
+  const staleEmailForm = rendered.container.querySelector("form");
+  await act(async () => {
+    staleEmailForm?.dispatchEvent(
+      new rendered.window.Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(rendered.container.textContent).toContain("Continue with email");
+  expect(
+    rendered.container.querySelector('input[id="homepage-email-address"]'),
+  ).toBeNull();
+
+  const continueButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Continue");
+  await act(async () => {
+    continueButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authMethod: "email",
+    }),
+  );
+});
+
+test("HostedAuthPanel restores phone recovery once, then permits a deliberate email selection", async () => {
+  let authenticated = false;
+  let ready = false;
+  let user: { linkedAccounts?: unknown } | null = null;
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated,
+    logout: vi.fn(),
+    ready,
+  }));
+  mocks.useUser.mockImplementation(() => ({ user }));
+  const renderPanel = () => createElement(HostedAuthPanel, {
+    methods: ["phone", "telegram", "email"],
+  });
+  const rendered = await renderClientComponent(renderPanel(), {
+    requireButton: false,
+  });
+  cleanupRender = rendered.cleanup;
+
+  const preReadyEmailButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Email");
+  await act(async () => {
+    preReadyEmailButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(
+    rendered.container.querySelector('input[id="homepage-email-address"]'),
+  ).toBeTruthy();
+
+  authenticated = true;
+  ready = true;
+  user = {
+    linkedAccounts: [
+      {
+        latest_verified_at: 1741194420,
+        phone_number: "+14155552671",
+        type: "phone",
+      },
+    ],
+  };
+  await rendered.rerender(renderPanel());
+
+  expect(mocks.sendCode).not.toHaveBeenCalled();
+  expect(
+    rendered.container.querySelector('input[id="homepage-email-address"]'),
+  ).toBeNull();
+  expect(
+    rendered.container
+      .querySelector('[data-hosted-phone-auth="mounted"]')
+      ?.getAttribute("data-hosted-phone-auth-suppressed"),
+  ).toBe("no");
+
+  const postHydrationEmailButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((candidate) => candidate.textContent?.trim() === "Email");
+  await act(async () => {
+    postHydrationEmailButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(
+    rendered.container.querySelector('input[id="homepage-email-address"]'),
+  ).toBeTruthy();
 });
 
 test("HostedAuthPanel discards queued Telegram when Privy hydrates an existing session", async () => {
@@ -490,7 +684,8 @@ test("HostedAuthPanel restores phone session recovery after a queued alternate h
   user = {
     linkedAccounts: [
       {
-        number: "+14155552671",
+        latest_verified_at: 1741194420,
+        phone_number: "+14155552671",
         type: "phone",
       },
     ],
@@ -506,9 +701,10 @@ test("HostedAuthPanel restores phone session recovery after a queued alternate h
   expect(rendered.container.textContent).not.toContain("Connecting...");
 });
 
-test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", async () => {
+test("HostedAuthPanel keeps phone code entry mounted while an authenticated provider is not ready", async () => {
   let privyAuthenticated = false;
-  let privyUser: {
+  let privyReady = true;
+  const privyUser: {
     linkedAccounts?: unknown;
   } | null = null;
   let rerenderHarness: (() => void) | null = null;
@@ -516,7 +712,7 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   mocks.usePrivy.mockImplementation(() => ({
     authenticated: privyAuthenticated,
     logout: vi.fn(),
-    ready: true,
+    ready: privyReady,
   }));
   mocks.useUser.mockImplementation(() => ({
     user: privyUser,
@@ -545,21 +741,16 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   });
 
   privyAuthenticated = true;
-  privyUser = {
-    linkedAccounts: [
-      {
-        address: "login@example.com",
-        latest_verified_at: 1741194420,
-        type: "email",
-      },
-    ],
-  };
+  privyReady = false;
 
   await act(async () => {
     rerenderHarness?.();
   });
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(container.textContent).not.toContain(
+    "Secure sign in is checking your existing session.",
+  );
   expect(container.textContent).not.toContain("Continue with email");
 });
 

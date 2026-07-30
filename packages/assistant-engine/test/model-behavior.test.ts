@@ -2651,7 +2651,10 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
-      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` on a trusted low-usage turn or after the group asks',
+      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` only after someone asks for or accepts an explanation of the group\'s usage options',
+    )
+    expect(prompt).not.toContain(
+      'on a trusted low-usage turn or after the group asks',
     )
     expect(prompt).toContain(
       'Never describe the group funding link as a personal billing or account-management page.',

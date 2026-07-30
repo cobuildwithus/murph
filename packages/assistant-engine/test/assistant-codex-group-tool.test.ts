@@ -430,6 +430,67 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("binds a group referral read to the request-bearing accepted message", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_usage_referral",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const participant = {
+      assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+      vi.fn(async ({ messageRef }) =>
+        messageRef === FRESH_ASSISTANT_INPUT_ID
+          ? { participant, targetInputId: FRESH_ASSISTANT_INPUT_ID }
+          : null);
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "read_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "synthetic",
+      },
+    }));
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [EARLIER_ASSISTANT_INPUT_ID, FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_one", "mailbox_two"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: "participant-effect",
+      deliveryContextOrdinal: 0,
+      messageRef: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "read_usage_referral",
+      participant,
+    });
+  });
+
   it("selects the request-bearing message_ref from two accepted group senders", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",

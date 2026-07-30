@@ -1426,6 +1426,164 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
     },
     720_000,
   )
+
+  it(
+    'keeps the first group heads-up neutral and treats a bare yes as an all-options request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-low-usage-heads-up-e2e-'),
+      )
+      const groupActions: string[] = []
+      const fundingUrl =
+        'https://www.withmurph.ai/groups/fund/e2e_low_usage_options'
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all([
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'group-chat',
+          }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'hosted-low-usage',
+          }),
+        ])
+
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildHostedUsageOptionsDeveloperInstructions('group'),
+            'Hosted usage context:',
+            "This conversation's remaining Murph usage is running low.",
+          ].join('\n\n'),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupActions.push(request.action)
+                if (request.action === 'read_usage') {
+                  return {
+                    action: 'read_usage',
+                    result: {
+                      status: 'ok',
+                      usage: {
+                        capacityState: 'low',
+                        fundingUrl,
+                        periodEnd: '2026-08-29T00:00:00.000Z',
+                        remainingPercent: 12,
+                      },
+                    },
+                  }
+                }
+                if (request.action === 'read_usage_referral') {
+                  return {
+                    action: 'read_usage_referral',
+                    result: {
+                      outcome: 'read',
+                      referral: {
+                        activeMissions: [],
+                        availablePolicies: [
+                          {
+                            code: 'new_person_activation_v1',
+                            requirementsLabel:
+                              'Bring Murph and one genuinely new person together in a fresh group.',
+                            rewardLabel:
+                              'about 100 more messages on the model your Murph is using now',
+                          },
+                          {
+                            code: 'active_group_v1',
+                            requirementsLabel:
+                              'Start a fresh group and make it genuinely active, with multiple people actually talking.',
+                            rewardLabel:
+                              'about 140 more messages on the model your Murph is using now',
+                          },
+                        ],
+                        trialCreditNotice: null,
+                      },
+                      status: 'ok',
+                    },
+                  }
+                }
+                throw new Error(
+                  `Unexpected group low-usage action: ${request.action}`,
+                )
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Maya logged 14,320 steps, the highest total yesterday. Tell the room who won and the winning total.',
+        })
+
+        expect(groupActions).toEqual(['read_usage'])
+        expect(first.finalMessage).toMatch(/Maya/iu)
+        expect(first.finalMessage).toMatch(/14,?320/iu)
+        expect(first.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
+        expect(first.finalMessage).toMatch(/Murph time/iu)
+        expect(first.finalMessage).toMatch(/\?/u)
+        expect(first.finalMessage).not.toContain(fundingUrl)
+        expect(first.finalMessage).not.toMatch(
+          /sponsor|funding|referral|introduc/iu,
+        )
+
+        groupActions.length = 0
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Yes.',
+          resumeSessionId: first.sessionId,
+        })
+        const newPersonPathIndex = second.finalMessage.search(
+          /new person|introduc/iu,
+        )
+        const activeGroupPathIndex = second.finalMessage.search(
+          /genuinely active|multiple people|active group/iu,
+        )
+        const fundingUrlIndex = second.finalMessage.indexOf(fundingUrl)
+
+        expect(groupActions).toHaveLength(2)
+        expect(groupActions).toEqual(expect.arrayContaining([
+          'read_usage',
+          'read_usage_referral',
+        ]))
+        expect(newPersonPathIndex).toBeGreaterThanOrEqual(0)
+        expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
+        expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
+        expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
 })
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {
