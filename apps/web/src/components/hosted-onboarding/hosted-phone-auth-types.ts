@@ -26,3 +26,28 @@ export interface HostedPhoneLinkPayload {
   phoneNumber: string;
   phoneNumberHint: string;
 }
+
+export type HostedPhoneLinkSyncExpectation =
+  | {
+      kind: "changed-from";
+      phoneNumber: string | null;
+    }
+  | {
+      kind: "exact";
+      phoneNumber: string;
+    }
+  | {
+      kind: "prepare";
+    };
+
+export type HostedPhoneLinkSyncResult =
+  | {
+      phoneNumber: string | null;
+      status: "ready";
+    }
+  | {
+      status: "unchanged";
+    }
+  | (HostedPhoneLinkPayload & {
+      status: "synced";
+    });

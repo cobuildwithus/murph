@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   phoneSettingsProps: [] as Array<{
     autoOpen?: boolean;
     onAborted?: () => void;
-    syncExistingPhone?: boolean;
   }>,
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
@@ -73,12 +72,10 @@ vi.mock("@/src/components/settings/hosted-phone-settings", () => ({
     autoOpen?: boolean;
     onAborted?: () => void;
     onLinked?: (payload: { mode: string }) => void;
-    syncExistingPhone?: boolean;
   }) {
     mocks.phoneSettingsProps.push({
       autoOpen: props.autoOpen,
       onAborted: props.onAborted,
-      syncExistingPhone: props.syncExistingPhone,
     });
 
     return createElement(
@@ -227,7 +224,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).toContain("Link phone child");
       expect(mocks.phoneSettingsProps).toHaveLength(1);
       expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
-      expect(mocks.phoneSettingsProps[0]?.syncExistingPhone).toBe(false);
 
       const handOffButton = Array.from(container.querySelectorAll("button")).find(
         (candidate) => candidate.textContent?.includes("Link phone child"),
@@ -247,7 +243,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     }
   });
 
-  it("syncs an existing Privy phone when Murph's phone projection is missing", async () => {
+  it("hands projection recovery to the phone sync boundary", async () => {
     mocks.useUser.mockReturnValue({
       user: {
         id: "privy-user-a",
@@ -279,7 +275,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     try {
       expect(mocks.phoneSettingsProps).toHaveLength(1);
       expect(mocks.phoneSettingsProps[0]?.autoOpen).toBe(true);
-      expect(mocks.phoneSettingsProps[0]?.syncExistingPhone).toBe(true);
     } finally {
       await cleanup();
     }

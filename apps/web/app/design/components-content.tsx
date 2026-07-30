@@ -1449,10 +1449,11 @@ export function ComponentsContent() {
           <p className="text-sm leading-6 text-muted-foreground">
             Settings opens the authenticated identity provider directly, with
             no second Murph confirmation. After verification or an approved
-            account transfer, Murph saves the provider-owned result. If Privy
-            already has a verified phone that Murph has not recorded, Settings
-            repairs that projection directly. Existing phone accounts use the
-            same surface for replacement.
+            account transfer, Murph saves the exact provider-owned result. If
+            Privy already has a verified phone that Murph has not recorded,
+            Settings repairs that projection directly. A declined transfer
+            closes quietly, and a failed save retries without reopening Privy.
+            Existing phone accounts use the same surface for replacement.
           </p>
           <div className="grid gap-4 sm:grid-cols-2" inert>
             <div className="space-y-3 rounded-xl border border-border bg-card p-5">

@@ -19,7 +19,10 @@ import {
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Spinner } from "@/src/components/ui/spinner";
 
-import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
+import type {
+  HostedPhoneLinkPayload,
+  HostedPhoneLinkSyncExpectation,
+} from "../hosted-onboarding/hosted-phone-auth-types";
 import { SettingsStatusLine } from "./connected-account-card";
 import { toErrorMessage } from "./hosted-settings-utils";
 
@@ -27,15 +30,16 @@ export function HostedPhoneSettings(props: {
   autoOpen?: boolean;
   onAborted?: () => void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
-  syncExistingPhone?: boolean;
 }) {
-  const { refreshUser, user: privyUser } = useUser();
+  const { user: privyUser } = useUser();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const accountTransferPendingRef = useRef(false);
   const autoOpenStartedRef = useRef(false);
+  const pendingSyncExpectationRef = useRef<HostedPhoneLinkSyncExpectation | null>(null);
+  const providerPhoneBaselineRef = useRef<string | null>(null);
   const providerCompletionHandledRef = useRef(false);
 
   const shouldUpdatePhone = Boolean(privyUser?.phone?.number);
@@ -49,8 +53,11 @@ export function HostedPhoneSettings(props: {
       handleProviderError(error, "exited_link_flow");
     },
     onSuccess: (params) => {
-      if (params.linkMethod === "sms") {
-        void handlePrivyPhoneLinked();
+      if (params.linkMethod === "sms" && params.linkedAccount.type === "phone") {
+        void handlePrivyPhoneLinked({
+          kind: "exact",
+          phoneNumber: params.linkedAccount.number,
+        });
       }
     },
   });
@@ -63,8 +70,11 @@ export function HostedPhoneSettings(props: {
       handleProviderError(error, "exited_update_flow");
     },
     onSuccess: (params) => {
-      if (params.updateMethod === "sms") {
-        void handlePrivyPhoneLinked();
+      if (params.updateMethod === "sms" && params.updatedAccount.type === "phone") {
+        void handlePrivyPhoneLinked({
+          kind: "exact",
+          phoneNumber: params.updatedAccount.number,
+        });
       }
     },
   });
@@ -80,15 +90,26 @@ export function HostedPhoneSettings(props: {
     }
   }
 
-  async function syncPrivyPhone(options: { refreshBeforeSync: boolean }) {
+  async function syncPrivyPhone(expectation: HostedPhoneLinkSyncExpectation) {
+    pendingSyncExpectationRef.current = expectation;
     setIsLinking(false);
     setIsSyncing(true);
 
     try {
-      if (options.refreshBeforeSync) {
-        await refreshUser().catch(() => null);
+      const result = await finalizeHostedPhoneLink({
+        expectation,
+        onLinked: handleLinked,
+      });
+
+      if (result.status === "unchanged") {
+        pendingSyncExpectationRef.current = null;
+        props.onAborted?.();
+        return;
       }
-      await finalizeHostedPhoneLink({ onLinked: handleLinked });
+
+      if (result.status === "synced") {
+        pendingSyncExpectationRef.current = null;
+      }
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "Your phone was verified, but we could not save it. Try again."));
     } finally {
@@ -96,42 +117,14 @@ export function HostedPhoneSettings(props: {
     }
   }
 
-  async function handlePrivyPhoneLinked() {
+  async function handlePrivyPhoneLinked(expectation: HostedPhoneLinkSyncExpectation) {
     if (providerCompletionHandledRef.current) {
       return;
     }
 
     providerCompletionHandledRef.current = true;
     accountTransferPendingRef.current = false;
-    await syncPrivyPhone({ refreshBeforeSync: true });
-  }
-
-  async function handlePrivyAccountTransferExit() {
-    if (providerCompletionHandledRef.current) {
-      return;
-    }
-
-    providerCompletionHandledRef.current = true;
-    setIsLinking(false);
-    setIsSyncing(true);
-
-    let refreshedUser: Awaited<ReturnType<typeof refreshUser>>;
-    try {
-      refreshedUser = await refreshUser();
-    } catch {
-      // If the client refresh itself failed, the server sync is still the
-      // authoritative check for whether Privy completed the transfer.
-      await syncPrivyPhone({ refreshBeforeSync: false });
-      return;
-    }
-
-    if (!refreshedUser.phone?.number) {
-      setIsSyncing(false);
-      props.onAborted?.();
-      return;
-    }
-
-    await syncPrivyPhone({ refreshBeforeSync: false });
+    await syncPrivyPhone(expectation);
   }
 
   function handleProviderError(error: unknown, exitedFlowError: string) {
@@ -150,7 +143,10 @@ export function HostedPhoneSettings(props: {
 
       if (accountTransferPendingRef.current) {
         accountTransferPendingRef.current = false;
-        void handlePrivyAccountTransferExit();
+        void handlePrivyPhoneLinked({
+          kind: "changed-from",
+          phoneNumber: providerPhoneBaselineRef.current,
+        });
         return;
       }
 
@@ -163,21 +159,48 @@ export function HostedPhoneSettings(props: {
     setErrorMessage(toPhoneLinkErrorMessage(error));
   }
 
-  function handleLinkPhone() {
+  async function handleLinkPhone() {
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    const pendingExpectation = pendingSyncExpectationRef.current;
+    if (pendingExpectation) {
+      await syncPrivyPhone(pendingExpectation);
+      return;
+    }
 
     accountTransferPendingRef.current = false;
     providerCompletionHandledRef.current = false;
     setIsLinking(true);
 
-    if (props.syncExistingPhone) {
-      void handlePrivyPhoneLinked();
+    let preparation: Awaited<ReturnType<typeof finalizeHostedPhoneLink>>;
+    try {
+      preparation = await finalizeHostedPhoneLink({
+        expectation: {
+          kind: "prepare",
+        },
+        onLinked: handleLinked,
+      });
+    } catch (error) {
+      setIsLinking(false);
+      setErrorMessage(toPhoneLinkErrorMessage(error));
       return;
     }
 
+    if (preparation.status === "synced") {
+      setIsLinking(false);
+      return;
+    }
+    if (preparation.status === "unchanged") {
+      setIsLinking(false);
+      props.onAborted?.();
+      return;
+    }
+
+    providerPhoneBaselineRef.current = preparation.phoneNumber;
+
     try {
-      if (shouldUpdatePhone) {
+      if (preparation.phoneNumber) {
         updatePhone();
       } else {
         linkPhone();
@@ -194,11 +217,11 @@ export function HostedPhoneSettings(props: {
     }
 
     autoOpenStartedRef.current = true;
-    handleLinkPhone();
+    void handleLinkPhone();
     // The provider hooks recreate their launch functions as state changes.
     // autoOpenStartedRef keeps this hand-off one-shot for this mounted action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.autoOpen, props.syncExistingPhone]);
+  }, [props.autoOpen]);
 
   const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
   const statusMessage =

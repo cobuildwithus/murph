@@ -174,7 +174,6 @@ function HostedSettingsIdentityMutationContent({
         autoOpen
         onAborted={() => onOpenChange(false)}
         onLinked={onSynced}
-        syncExistingPhone={!account.phone.number && Boolean(user?.phone?.number)}
       />
     );
   }
