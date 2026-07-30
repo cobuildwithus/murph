@@ -124,6 +124,63 @@ interface AssistantProviderDialogProps {
   provider: HostedAssistantProvider;
 }
 
+interface AssistantProviderSummaryProps {
+  currentProvider: HostedAssistantProvider;
+  disabled?: boolean;
+  draftProvider: HostedAssistantProvider;
+  onChangeClick: () => void;
+}
+
+export function AssistantProviderSummary({
+  currentProvider,
+  disabled = false,
+  draftProvider,
+  onChangeClick,
+}: AssistantProviderSummaryProps) {
+  const currentProviderName = readProviderName(currentProvider);
+  const draftProviderName = readProviderName(draftProvider);
+  const hasPendingChange = currentProvider !== draftProvider;
+
+  return (
+    <div className="flex w-full items-center gap-2 px-1">
+      <p className="text-sm text-muted-foreground">
+        {hasPendingChange ? (
+          <>
+            Core replies switch to{" "}
+            <span className="font-medium text-foreground">
+              {draftProviderName}
+            </span>{" "}
+            after Save.
+          </>
+        ) : (
+          <>
+            Core replies use{" "}
+            <span className="font-medium text-foreground">
+              {currentProviderName}
+            </span>
+            .
+          </>
+        )}
+      </p>
+      <Button
+        aria-label={
+          hasPendingChange
+            ? `Change model provider. Core replies will switch to ${draftProviderName} after Save.`
+            : `Change model provider. Core replies currently use ${currentProviderName}.`
+        }
+        className="text-muted-foreground"
+        disabled={disabled}
+        onClick={onChangeClick}
+        size="xs"
+        type="button"
+        variant="ghost"
+      >
+        Change
+      </Button>
+    </div>
+  );
+}
+
 export function AssistantProviderDialog({
   onOpenChange,
   onProviderChange,
@@ -406,25 +463,12 @@ function HostedAssistantModelSettingsForm(
 
       {veniceAvailable ? (
         <>
-          <div className="flex w-full items-center gap-2 px-1">
-            <p className="text-sm text-muted-foreground">
-              Served on{" "}
-              <span className="font-medium text-foreground">
-                {readProviderName(draftProvider)}
-              </span>
-            </p>
-            <Button
-              aria-label={`Change model provider. Current selection: ${readProviderName(draftProvider)}`}
-              className="text-muted-foreground"
-              disabled={controlsDisabled}
-              onClick={() => setProviderDialogOpen(true)}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              Change
-            </Button>
-          </div>
+          <AssistantProviderSummary
+            currentProvider={currentProvider}
+            disabled={controlsDisabled}
+            draftProvider={draftProvider}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
           <AssistantProviderDialog
             onOpenChange={setProviderDialogOpen}
             onProviderChange={(provider) => {

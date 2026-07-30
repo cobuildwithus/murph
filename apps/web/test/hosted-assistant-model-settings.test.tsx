@@ -178,7 +178,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
       veniceAvailable: true,
     }),
   );
-  assert.match(view.container.textContent ?? "", /Served on OpenAI/u);
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
     /Direct managed inference/u,
@@ -196,7 +196,11 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     veniceControl.click();
   });
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
-  assert.match(view.container.textContent ?? "", /Served on Venice/u);
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await act(async () => {
     submitForm(view.container);
     await Promise.resolve();
@@ -210,6 +214,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Terra through Venice/u);
+  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
   assert.match(
     view.container.textContent ?? "",
     /New core replies will use Terra through Venice\. A reply already in progress may finish with your previous choice\./u,
@@ -247,7 +252,7 @@ test("closing the provider dialog leaves the draft unchanged", async () => {
   });
 
   assert.equal(view.document.querySelector('[role="dialog"]'), null);
-  assert.match(view.container.textContent ?? "", /Served on OpenAI/u);
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
   assert.ok(saveButton.disabled);
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 
@@ -288,7 +293,7 @@ test("a model-only save adopts the server's canonical provider", async () => {
     payload: { model: HOSTED_ASSISTANT_LUNA_MODEL },
     url: "/api/settings/assistant-model",
   });
-  assert.match(view.container.textContent ?? "", /Served on OpenAI/u);
+  assert.match(view.container.textContent ?? "", /Core replies use OpenAI\./u);
   assert.match(
     view.container.textContent ?? "",
     /New core replies will use Luna through OpenAI\./u,
@@ -396,7 +401,10 @@ test("a combined provider and model save preserves both choices for retry", asyn
     view.container.querySelector('[role="alert"]')?.textContent,
     "We couldn’t save this change. Try again.",
   );
-  assert.match(view.container.textContent ?? "", /Served on Venice/u);
+  assert.match(
+    view.container.textContent ?? "",
+    /Core replies switch to Venice after Save\./u,
+  );
   assert.ok(isRadioChecked(solInput));
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
@@ -416,6 +424,7 @@ test("a combined provider and model save preserves both choices for retry", asyn
   );
   assert.ok(statusLine);
   assert.match(statusLine.textContent ?? "", /Sol through Venice/u);
+  assert.match(view.container.textContent ?? "", /Core replies use Venice\./u);
   assert.equal(statusLine.className.includes("whitespace-nowrap"), false);
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -818,7 +827,7 @@ test("a stale Venice page falls back to OpenAI and removes the unavailable choic
     view.container.textContent ?? "",
     /Venice is no longer available\. Murph will keep using OpenAI\./,
   );
-  assert.doesNotMatch(view.container.textContent ?? "", /Served on/u);
+  assert.doesNotMatch(view.container.textContent ?? "", /Core replies/u);
   assert.equal(findOptionalButton(view.container, "Change"), undefined);
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -981,7 +990,7 @@ test("members without active personal access see both provider and model control
     markup,
     /Provider and model choices are read-only until personal Murph access is active\./,
   );
-  assert.match(markup, /Served on.*OpenAI/su);
+  assert.match(markup, /Core replies use.*OpenAI/su);
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Change<\/button>/u);
   assert.doesNotMatch(markup, /Choose model provider/u);
 });

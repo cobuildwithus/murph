@@ -30,7 +30,10 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
-import { AssistantProviderDialog } from "@/src/components/settings/hosted-assistant-model-settings";
+import {
+  AssistantProviderDialog,
+  AssistantProviderSummary,
+} from "@/src/components/settings/hosted-assistant-model-settings";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -758,24 +761,11 @@ export function ComponentsContent() {
               value="sol"
             />
           </RadioGroup>
-          <div className="flex items-center gap-2 px-1">
-            <p className="text-sm text-muted-foreground">
-              Served on{" "}
-              <span className="font-medium text-foreground">
-                {providerValue === HOSTED_ASSISTANT_OPENAI_PROVIDER
-                  ? "OpenAI"
-                  : "Venice"}
-              </span>
-            </p>
-            <Button
-              className="text-muted-foreground"
-              onClick={() => setProviderDialogOpen(true)}
-              size="xs"
-              variant="ghost"
-            >
-              Change
-            </Button>
-          </div>
+          <AssistantProviderSummary
+            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftProvider={providerValue}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
           <AssistantProviderDialog
             onOpenChange={setProviderDialogOpen}
             onProviderChange={setProviderValue}
