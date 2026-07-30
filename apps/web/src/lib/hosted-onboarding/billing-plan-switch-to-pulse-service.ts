@@ -7,7 +7,7 @@ import { coerceStripeObjectId } from "./billing";
 import {
   canScheduleHostedBillingPlanChange,
   HOSTED_STANDARD_CHECKOUT_OFFER,
-  parseHostedBillingPhase,
+  isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
@@ -142,13 +142,14 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     memberId: input.memberId,
     prisma: input.tx,
   });
-  const sourceBillingPhase = parseHostedBillingPhase(
-    billingRef?.currentBillingPhase,
-  );
+  const sourceIsPulseTrial = isHostedPulseTrialBillingState({
+    currentBillingPhase: billingRef?.currentBillingPhase,
+    currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+  });
 
   if (
     input.requiredSourceBillingPhase
-    && sourceBillingPhase !== input.requiredSourceBillingPhase
+    && !sourceIsPulseTrial
   ) {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
@@ -199,13 +200,13 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     subscription,
   });
   if (
-    sourceBillingPhase === "trial"
+    sourceIsPulseTrial
     && subscription.status !== "trialing"
   ) {
     throw buildHostedBillingPlanSwitchSourceChangedError();
   }
   assertHostedStripeSubscriptionScheduleableState({
-    allowTrialing: sourceBillingPhase === "trial",
+    allowTrialing: sourceIsPulseTrial,
     now: input.now,
     subscription,
   });
@@ -215,7 +216,7 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
   });
 
   if (
-    sourceBillingPhase === "trial"
+    sourceIsPulseTrial
     && input.targetPlanCode === "launch_group_monthly"
     && !hasHostedStripeSubscriptionPaymentMethod(subscription)
   ) {

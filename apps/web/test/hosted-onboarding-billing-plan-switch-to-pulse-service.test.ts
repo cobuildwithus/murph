@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-onboarding/legacy-usage-price";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
   prismaClient: {
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
   requireValidatedHostedStripeBillingPlanConfig: vi.fn(),
   withHostedMemberStripeMutationLock: vi.fn(),
@@ -35,6 +37,16 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest:
+    mocks.requireHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin:
+    mocks.assertHostedOnboardingMutationOrigin,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -62,11 +74,20 @@ import {
   scheduleHostedBillingPlanSwitch,
   scheduleHostedBillingPlanSwitchToPulse,
 } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
+import { POST as postSettingsBillingPlanSwitch } from "../app/api/settings/billing/switch-plan/route";
 
 describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
     );
@@ -638,6 +659,78 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       httpStatus: 409,
     });
 
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
+  test("requires a payment method for an offer-backed trial with no phase projection", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
+      id: "group_member_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      defaultPaymentMethod: null,
+      items: ["price_pulse_recurring"],
+      status: "trialing",
+    }));
+
+    await expect(scheduleHostedBillingPlanSwitch({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      status: "payment_method_required",
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
+  test("authenticated Settings rejects an offer-backed trial after Stripe activation", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
+      id: "group_member_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: ["price_pulse_recurring"],
+      status: "active",
+    }));
+
+    const response = await postSettingsBillingPlanSwitch(
+      new Request("https://example.test/api/settings/billing/switch-plan", {
+        body: JSON.stringify({
+          targetPlanCode: "launch_group_monthly",
+        }),
+        headers: {
+          origin: "https://example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
+      },
+    });
     expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();

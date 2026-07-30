@@ -88,10 +88,12 @@ a usable subscription payment method before Murph creates or updates a
 schedule. If payment setup is needed, Web opens the payment-method flow and
 requires a fresh plan choice after return; it does not retain a Group mutation
 intent that could be applied against changed billing state. The locked
-local billing phase, rather than an optional caller hint, owns both the payment
+Pulse-trial state, rather than an optional caller hint, owns both the payment
 method preflight and the requirement that Stripe itself still report
-`trialing`; a local-trial/provider-paid race fails stale instead of scheduling
-one paid cycle late.
+`trialing`. Admission and those guards share the same resolver, including the
+brief reconciliation window where the retained Pulse-trial offer is canonical
+but the phase projection is still null. A local-trial/provider-paid race fails
+stale instead of scheduling one paid cycle late.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Group to the private catalog must not make it publicly selectable.
