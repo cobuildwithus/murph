@@ -112,6 +112,7 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
     [openAuthDialog, prepareAuth],
   );
   const dialogProps = {
+    autoSendPastedPhoneNumber: true,
     onCompleted: handleAuthCompleted,
     onOpenChange: setOpen,
     open,

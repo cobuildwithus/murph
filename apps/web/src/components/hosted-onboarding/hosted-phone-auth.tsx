@@ -9,6 +9,7 @@ import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthProps {
+  autoSendPastedPhoneNumber?: boolean;
   disableSignup?: boolean;
   inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
@@ -29,6 +30,7 @@ interface HostedPhoneAuthProps {
 }
 
 export function HostedPhoneAuth({
+  autoSendPastedPhoneNumber = false,
   disableSignup = false,
   inviteCode,
   intent = "auth",
@@ -48,6 +50,7 @@ export function HostedPhoneAuth({
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
+    autoSendPastedPhoneNumber,
     disableSignup,
     inviteCode,
     intent,

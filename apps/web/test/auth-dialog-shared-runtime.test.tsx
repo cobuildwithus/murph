@@ -39,7 +39,10 @@ vi.mock("@/src/components/ui/dialog", () => ({
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 
-const SharedAuthPanel = (props: { privyAttempt: number }) => {
+const SharedAuthPanel = (props: {
+  autoSendPastedPhoneNumber?: boolean;
+  privyAttempt: number;
+}) => {
   mocks.sharedPanelRender(props);
   useEffect(() => () => {
     mocks.sharedPanelUnmount();
@@ -78,6 +81,7 @@ test("keeps the warmed provider's auth panel unmounted while the dialog is close
 test("renders the panel supplied by the warm runtime without rendering a standalone provider island", async () => {
   const rendered = await renderClientComponent(
     createElement(AuthDialog, {
+      autoSendPastedPhoneNumber: true,
       onOpenChange: () => {},
       open: true,
       privyRuntime: {
@@ -94,7 +98,10 @@ test("renders the panel supplied by the warm runtime without rendering a standal
     expect(rendered.container.textContent).toContain("Shared auth panel");
     expect(rendered.container.textContent).not.toContain("Standalone auth panel");
     expect(mocks.sharedPanelRender).toHaveBeenCalledWith(
-      expect.objectContaining({ privyAttempt: 3 }),
+      expect.objectContaining({
+        autoSendPastedPhoneNumber: true,
+        privyAttempt: 3,
+      }),
     );
     expect(mocks.standalonePanelRender).not.toHaveBeenCalled();
   } finally {
@@ -119,6 +126,9 @@ test("drops queued panel-local state immediately on close and remounts it fresh 
 
   try {
     expect(rendered.container.textContent).toContain("Shared auth panel");
+    expect(mocks.sharedPanelRender).toHaveBeenCalledWith(
+      expect.objectContaining({ autoSendPastedPhoneNumber: false }),
+    );
 
     await rendered.rerender(renderDialog(false));
 
