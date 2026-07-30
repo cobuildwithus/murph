@@ -71,7 +71,10 @@ selects `post_join_offer` only for an exact interactive iMessage route and uses
 `create_join_link` for SMS, Telegram, explicit standalone-link requests, and
 scheduled group routes whose durable Linq binding lacks a service subtype. The
 model receives only normalized `native` or `link` presentation semantics; Web
-continues to own group creation, consent copy, dedupe, join URLs, and grants.
+continues to own group creation, consent copy, dedupe, join URLs, and grants. An
+explicit native offer is suppressed only by a covering active offer, never by
+the scopes already granted by current members, because access may be intended
+for a provider-room participant who has not joined the hosted group yet.
 
 Challenge kickoff and later interactive identity repair stay inside that same
 model-triggered `read_shared` request. At request time, the runtime adds only
