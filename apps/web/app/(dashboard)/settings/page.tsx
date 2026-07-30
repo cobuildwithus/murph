@@ -243,13 +243,15 @@ export default async function SettingsPage({
     familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpPurchaseReturn;
   const familySettingsUsageTopUpReturnMemberId =
     familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
-  const billingUsageTopUpActivePurchase = familyOwnerUsageTopUpAvailable
+  const billingUsageTopUpUsesFamilyOwner =
+    familyOwnerUsageTopUpAvailable && personalUsageTopUpPurchaseReturn === null;
+  const billingUsageTopUpActivePurchase = billingUsageTopUpUsesFamilyOwner
     ? familyOwnerUsageTopUpActivePurchase
     : personalUsageTopUpActivePurchase;
-  const billingUsageTopUpOffers = familyOwnerUsageTopUpAvailable
+  const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
     ? familyUsageTopUpOffers
     : usageTopUpOffers;
-  const billingUsageTopUpPurchaseReturn = familyOwnerUsageTopUpAvailable
+  const billingUsageTopUpPurchaseReturn = billingUsageTopUpUsesFamilyOwner
     ? familyOwnerUsageTopUpPurchaseReturn
     : personalUsageTopUpPurchaseReturn;
   const canStartFamily =
@@ -401,24 +403,24 @@ export default async function SettingsPage({
           usageStatus={usageStatus}
           usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
           usageTopUpCheckoutUrl={
-            familyOwnerUsageTopUpMember
+            billingUsageTopUpUsesFamilyOwner && familyOwnerUsageTopUpMember
               ? `/api/settings/billing/family/members/${encodeURIComponent(familyOwnerUsageTopUpMember.memberId)}/usage-credit/checkout`
               : undefined
           }
           usageTopUpContactOptions={usageTopUpContactOptions}
           usageTopUpInitialOpen={
-            familyOwnerUsageTopUpAvailable
-              ? requestedFamilyOwnerUsageTopUp
+            billingUsageTopUpUsesFamilyOwner
+              ? requestedFamilyOwnerUsageTopUp || openPersonalUsageTopUp
               : openPersonalUsageTopUp
           }
           usageTopUpOffers={billingUsageTopUpOffers}
           usageTopUpPurchaseReturn={billingUsageTopUpPurchaseReturn}
           usageTopUpScope={
-            familyOwnerUsageTopUpAvailable ? "family" : "personal"
+            billingUsageTopUpUsesFamilyOwner ? "family" : "personal"
           }
           usageTopUpTargetLabel={
-            familyOwnerUsageTopUpMember
-              ? familyOwnerUsageTopUpMember.label ?? "you"
+            billingUsageTopUpUsesFamilyOwner
+              ? "you"
               : undefined
           }
           usageActivityDetail={visibleUsageActivity ? (
