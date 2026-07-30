@@ -4,7 +4,10 @@ import { useId, type FormEvent } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import { Label } from "@/src/components/ui/label";
-import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import {
+  PhoneNumberInput,
+  type PhoneNumberInputChangeMetadata,
+} from "@/src/components/ui/phone-number-input";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
@@ -103,7 +106,10 @@ export function HostedPhoneEntryStep({
   sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
   onPhoneCountryChange: (code: string) => void;
-  onPhoneNumberChange: (value: string) => void;
+  onPhoneNumberChange: (
+    value: string,
+    metadata?: PhoneNumberInputChangeMetadata,
+  ) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const phoneInputId = useId();

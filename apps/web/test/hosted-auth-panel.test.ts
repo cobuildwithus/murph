@@ -8,6 +8,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   hostedPhoneAuthProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     interactionGated?: boolean;
     onAuthCancel?: () => void;
     onAuthQueue?: () => boolean;
@@ -119,6 +120,7 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
+    autoSendPastedPhoneNumber?: boolean;
     disableSignup?: boolean;
     interactionGated?: boolean;
     onAuthCancel?: () => void;
@@ -535,6 +537,7 @@ test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", asy
   cleanupRender = cleanup;
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(true);
   expect(mocks.hostedPhoneAuthProps?.onCodeSent).toBeTypeOf("function");
 
   await act(async () => {

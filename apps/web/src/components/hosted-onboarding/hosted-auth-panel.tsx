@@ -288,6 +288,7 @@ export function HostedAuthPanel({
         />
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
+          autoSendPastedPhoneNumber
           inviteCode={inviteCode}
           interactionGated={
             selectedAuthMethod !== null
