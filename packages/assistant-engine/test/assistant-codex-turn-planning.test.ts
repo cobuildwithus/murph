@@ -607,8 +607,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).toContain(
-        'Set `durationSeconds` to 5–15',
+        'Set `durationSeconds` to exactly 15',
       )
+      expect(plan.systemPrompt).not.toContain('durationSeconds` to 5–15')
       expect(plan.systemPrompt).toContain('at most four short lyric lines')
       expect(plan.systemPrompt).toContain(
         'Never infer the contributor or payer identity',
