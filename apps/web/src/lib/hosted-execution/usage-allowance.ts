@@ -54,6 +54,7 @@ import {
 } from "../hosted-groups/group-sponsorship-authorization";
 import {
   classifyHostedGroupUsageCapacity,
+  type HostedGroupUsageCapacityState,
 } from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
@@ -1340,6 +1341,24 @@ export async function readHostedAiUsageGate(input: {
       memberId: input.memberId,
       period,
     });
+  });
+}
+
+export async function readHostedGroupUsageCapacityState(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedGroupUsageCapacityState | null> {
+  const decision = await readHostedAiUsageGate(input);
+  if (
+    decision.allowanceSource !== "thread_container" ||
+    (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
+  ) {
+    return null;
+  }
+  return classifyHostedGroupUsageCapacity({
+    limitUsdMicros: decision.limitUsdMicros,
+    remainingUsdMicros: decision.remainingUsdMicros,
   });
 }
 

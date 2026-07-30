@@ -1036,7 +1036,12 @@ owner requests them, never above the current period's maximum. The explicit
 **Contribute $10** action authorizes only that one contribution. Murph uses the
 payer Customer's attached default card, or its sole attached card. If there is
 no canonical choice, Stripe Checkout collects a card. The monthly authorization
-is capped auto-refill authority, not a fixed-price Stripe Subscription.
+is capped auto-refill authority, not a fixed-price Stripe Subscription. Because
+provider work happens after admission, Murph re-reads the same current capacity
+under the beneficiary lock immediately before confirming an automatic
+PaymentIntent. If another contribution has already restored healthy capacity,
+the intent is canceled and the now-unneeded deterministic refill purchase
+expires silently; it is not charged or treated as a payment failure.
 
 ## Family Member Funding
 

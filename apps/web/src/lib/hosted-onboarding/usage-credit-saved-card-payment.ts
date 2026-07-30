@@ -2,10 +2,14 @@ import {
   type HostedBillingStatus,
   HostedUsageCreditPurchaseStatus,
   type HostedUsageCreditPurchase,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import {
+  readHostedGroupUsageCapacityState,
+} from "../hosted-execution/usage-allowance";
 import { coerceStripeObjectId } from "./billing";
 import {
   hasHostedAccountGroupAccess,
@@ -164,7 +168,10 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     });
     if (binding.kind === "not_bound") {
       return cancelUnboundHostedUsageCreditDirectPaymentIntent({
+        billingAuthority: input.billingAuthority,
+        now: input.now,
         paymentIntent,
+        prisma: input.prisma,
         purchase: binding.purchase,
         stripe: input.stripe,
       });
@@ -365,14 +372,36 @@ async function hasCurrentHostedUsageCreditAutomaticPaymentAuthority(input: {
   if (!automaticSponsorship) {
     return true;
   }
-  return input.prisma.$transaction((tx) =>
-    hasHostedGroupSponsorshipPaymentAuthorityTx({
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, automaticSponsorship.beneficiaryMemberId);
+    return hasCurrentHostedGroupSponsorshipPaymentAuthorityTx({
       authority: automaticSponsorship,
       now: input.now,
       payerMemberId: input.payerMemberId,
       purchaseId: input.purchase.id,
       tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function hasCurrentHostedGroupSponsorshipPaymentAuthorityTx(input: {
+  authority: HostedGroupSponsorshipPaymentAuthority;
+  now: Date;
+  payerMemberId: string;
+  purchaseId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (
+    input.authority.mode === "automatic" &&
+    await readHostedGroupUsageCapacityState({
+      memberId: input.authority.beneficiaryMemberId,
+      now: input.now,
+      prisma: input.tx,
+    }) === "healthy"
+  ) {
+    return false;
+  }
+  return hasHostedGroupSponsorshipPaymentAuthorityTx(input);
 }
 
 async function resolveHostedUsageCreditSavedCard(input: {
@@ -710,10 +739,13 @@ async function cancelHostedUsageCreditDirectPaymentIntent(input: {
 }
 
 async function cancelUnboundHostedUsageCreditDirectPaymentIntent(input: {
+  billingAuthority: HostedUsageCreditSavedCardBillingAuthority;
+  now: Date;
   paymentIntent: Stripe.PaymentIntent;
+  prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
-}): Promise<null> {
+}): Promise<HostedUsageCreditPurchase | null> {
   const canceled = await cancelHostedUsageCreditDirectPaymentIntent({
     paymentIntent: input.paymentIntent,
     purchase: input.purchase,
@@ -736,7 +768,20 @@ async function cancelUnboundHostedUsageCreditDirectPaymentIntent(input: {
       "saved_card_unbound_payment_became_bound",
     );
   }
-  return null;
+  const automaticSponsorship = input.billingAuthority.kind === "group"
+    ? input.billingAuthority.automaticSponsorship
+    : undefined;
+  if (!automaticSponsorship || automaticSponsorship.mode !== "automatic") {
+    return null;
+  }
+  return transitionCanceledHostedUsageCreditDirectPaymentIntent({
+    billingAuthority: input.billingAuthority,
+    now: input.now,
+    paymentIntent: canceled,
+    prisma: input.prisma,
+    purchase: input.purchase,
+    transition: "expire_unbound",
+  });
 }
 
 export async function cancelHostedUsageCreditDirectPayment(input: {
@@ -824,7 +869,7 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
   paymentIntent: Stripe.PaymentIntent;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
-  transition: "expire" | "release";
+  transition: "expire" | "expire_unbound" | "release";
 }): Promise<HostedUsageCreditPurchase | null> {
   if (input.paymentIntent.status !== "canceled") {
     throw buildHostedUsageCreditInvariantError(
@@ -853,6 +898,37 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
       throw buildHostedUsageCreditInvariantError(
         "saved_card_purchase_missing",
       );
+    }
+    if (input.transition === "expire_unbound") {
+      if (
+        current.status !== HostedUsageCreditPurchaseStatus.created ||
+        current.stripePaymentIntentLookupKey
+      ) {
+        return current;
+      }
+      const expired = await tx.hostedUsageCreditPurchase.updateMany({
+        data: {
+          lastReconciledAt: input.now,
+          reconciliationVersion: { increment: 1n },
+          status: HostedUsageCreditPurchaseStatus.expired,
+          terminalAt: input.now,
+          updatedAt: input.now,
+        },
+        where: {
+          id: current.id,
+          reconciliationVersion: current.reconciliationVersion,
+          status: HostedUsageCreditPurchaseStatus.created,
+          stripePaymentIntentLookupKey: null,
+        },
+      });
+      if (expired.count !== 1) {
+        throw buildHostedUsageCreditInvariantError(
+          "saved_card_payment_expire_failed",
+        );
+      }
+      return tx.hostedUsageCreditPurchase.findUnique({
+        where: { id: current.id },
+      });
     }
     if (
       !current.stripePaymentIntentLookupKey ||
@@ -1037,7 +1113,7 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
       if (
         billingAuthority.kind === "group" &&
         billingAuthority.automaticSponsorship &&
-        !(await hasHostedGroupSponsorshipPaymentAuthorityTx({
+        !(await hasCurrentHostedGroupSponsorshipPaymentAuthorityTx({
           authority: billingAuthority.automaticSponsorship,
           now: input.now,
           payerMemberId,

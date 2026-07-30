@@ -118,6 +118,16 @@ group's existing capacity owner says more credit is needed.
   notice identity purchase-specific, so a cap increase or later failed refill
   cannot be suppressed by an earlier private notice. Focused Web, assistant
   skill, catalog, and design-proof tests pass for this remediation.
+- Parent final review found and closed the post-admission race where another
+  contribution could restore healthy capacity before the minute sweep confirmed
+  an automatic refill. The saved-card owner now re-reads current capacity under
+  the beneficiary lock immediately before confirmation, cancels any unconfirmed
+  intent, and silently expires the unneeded deterministic purchase. Focused
+  saved-card, refill, allowance, typecheck, and broad-CI contract tests pass.
+- The prior broad CI failure contained four stale expectations rather than a
+  runtime failure: the migration manifest, reviewed Prisma relation surface,
+  explicit one-time route arguments, and two new changelog items. Those exact
+  contract expectations are updated and their focused 29-test suite passes.
 - The required Claude UI double-check was attempted from the task checkout.
   Opus produced no usable result and was stopped after remaining silent; the
   prescribed Fable retry reported explicit usage-credit exhaustion. Per the

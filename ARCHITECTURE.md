@@ -753,8 +753,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   or the only attached card. The initial purchase establishes the reusable card;
   automatic refills reuse the existing saved-card PaymentIntent, bind-before-
   confirm authority check, verified Stripe-event grant, refund/dispute handling,
-  and runtime recheck. Refill admission performs no provider I/O. The existing
-  minute Stripe sweep dispatches admitted purchases post-commit; ambiguous
+  and runtime recheck. That locked authority check re-reads current group
+  capacity immediately before confirmation; if another contribution already
+  restored healthy capacity, Murph cancels the unconfirmed intent and expires
+  the now-unneeded purchase without entering payment recovery. Refill admission
+  performs no provider I/O. The existing minute Stripe sweep dispatches admitted
+  purchases post-commit; ambiguous
   provider outcomes retain the deterministic purchase, while safe card or
   authentication failure marks the authorization recovery-required and privately
   notifies only the payer. Period rollover is lazy and activation-anchored,

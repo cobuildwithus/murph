@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
+  readHostedGroupUsageCapacityState: vi.fn(),
   readHostedAccountGroupStripeBillingRef: vi.fn(),
   resolveHostedFamilyUsageCreditCheckoutTargetTx: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
@@ -144,6 +145,17 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccessForUpdateTx:
     mocks.hasHostedRuntimeActiveAccessForUpdateTx,
 }));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >();
+  return {
+    ...original,
+    readHostedGroupUsageCapacityState:
+      mocks.readHostedGroupUsageCapacityState,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
@@ -284,6 +296,7 @@ beforeEach(() => {
   ]);
   mocks.ensureHostedMemberStripeCustomer.mockResolvedValue("cus_group_payer");
   mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(true);
+  mocks.readHostedGroupUsageCapacityState.mockResolvedValue("low");
   mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
     displayName: "Sunday sleep crew",
     fundingPath: "/groups/fund/group_join_code_1234",
@@ -4338,6 +4351,49 @@ describe("automatic group refill saved-card recovery", () => {
     });
   });
 
+  it("cancels a bound refill when another contribution restored capacity", async () => {
+    const fake = createFakePrisma();
+    const fixture = installAutomaticGroupRefillFixture(fake, {
+      status: "payment_pending",
+    });
+    mocks.readHostedGroupUsageCapacityState.mockResolvedValue("healthy");
+    const requiresConfirmation = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: fixture.refill.id,
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(requiresConfirmation);
+    mocks.stripePaymentIntentCancel.mockResolvedValueOnce({
+      ...requiresConfirmation,
+      status: "canceled",
+    });
+
+    await expect(tryChargeHostedUsageCreditSavedCard({
+      billingAuthority: {
+        automaticSponsorship: fixture.authority,
+        kind: "group",
+      },
+      checkoutRequest: { customer: "cus_group_payer" } as never,
+      now: NOW,
+      policyVersion: "hosted-usage-credit-checkout-v4",
+      prisma: fake.prisma as never,
+      purchase: fixture.refill as never,
+      stripe: mocks.requireHostedStripeApiMode().stripe as never,
+    })).resolves.toMatchObject({
+      id: fixture.refill.id,
+      status: "expired",
+    });
+
+    expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledTimes(1);
+    expect(fixture.refill).toMatchObject({
+      status: "expired",
+      terminalAt: NOW,
+    });
+  });
+
   it("does not bind or confirm after the group loses runtime viability", async () => {
     const fake = createFakePrisma();
     const fixture = installAutomaticGroupRefillFixture(fake);
@@ -4367,7 +4423,10 @@ describe("automatic group refill saved-card recovery", () => {
       prisma: fake.prisma as never,
       purchase: fixture.refill as never,
       stripe: mocks.requireHostedStripeApiMode().stripe as never,
-    })).resolves.toBeNull();
+    })).resolves.toMatchObject({
+      id: fixture.refill.id,
+      status: "expired",
+    });
 
     expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledTimes(1);
     expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
@@ -4377,9 +4436,10 @@ describe("automatic group refill saved-card recovery", () => {
     );
     expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
     expect(fixture.refill).toMatchObject({
-      status: "created",
+      status: "expired",
       stripePaymentIntentIdEncrypted: null,
       stripePaymentIntentLookupKey: null,
+      terminalAt: NOW,
     });
   });
 });
