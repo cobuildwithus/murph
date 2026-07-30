@@ -394,15 +394,25 @@ function createPendingHostedDeliveryIntent(
 function createRequiredHostedDeliveryIntent(
   overrides: Record<string, unknown>,
 ) {
+  const deliveryIdempotencyKey =
+    typeof overrides.deliveryIdempotencyKey === "string"
+      ? overrides.deliveryIdempotencyKey
+      : "required-sequence:required-before-final";
+  const requiredBeforeFinalPredecessorIntentId =
+    Object.hasOwn(overrides, "requiredBeforeFinalPredecessorIntentId")
+      ? overrides.requiredBeforeFinalPredecessorIntentId
+      : deliveryIdempotencyKey.includes(":segment:")
+        ? null
+        : "intent_required_predecessor";
   return createPendingHostedDeliveryIntent({
     attemptCount: 0,
     delivery: null,
     deliveryConfirmationPending: false,
-    deliveryIdempotencyKey:
-      "required-sequence:required-before-final",
+    deliveryIdempotencyKey,
     lastAttemptAt: null,
     media: [],
     preparedDispatchToken: null,
+    requiredBeforeFinalPredecessorIntentId,
     sentAt: null,
     updatedAt: "2026-04-08T00:01:00.000Z",
     ...overrides,
@@ -525,6 +535,37 @@ describe("hosted runtime callbacks", () => {
       preparedDispatches: [],
     });
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not pre-claim a blocked exact successor from an unmarked effect payload", async () => {
+    const predecessor = createRequiredHostedDeliveryIntent({
+      deliveryIdempotencyKey:
+        "required-sequence:required-before-final:segment:0",
+      intentId: "intent_required_predecessor",
+    });
+    const final = createRequiredHostedDeliveryIntent({
+      intentId: "intent_123",
+      requiredBeforeFinalPredecessorIntentId:
+        "intent_required_predecessor",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      final,
+      predecessor,
+    ]);
+
+    await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [
+        createEffect({
+          idempotencyKey: "provider-mutated-effect-key",
+          transportIdempotent: true,
+        }),
+      ],
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(
+      mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+    ).not.toHaveBeenCalled();
   });
 
   it("pre-claims non-idempotent Linq reaction effects before provider dispatch", async () => {
@@ -3693,6 +3734,8 @@ describe("hosted runtime callbacks", () => {
         url: "https://cdn.example.test/progress-card.png",
       }],
       message: "",
+      requiredBeforeFinalPredecessorIntentId:
+        "zzzz_required_predecessor",
       replyToMessageId: "message_new",
       targetFingerprint: "target_new",
     });
@@ -5428,7 +5471,7 @@ describe("hosted runtime callbacks", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it("blocks and resets a cross-boundary marked final after its required predecessor fails", async () => {
+  it("blocks and resets a cross-boundary retry-turn final after its required predecessor fails", async () => {
     const predecessorEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_required_predecessor",
       deliveryPhase: "foreground_current_turn",
@@ -5440,7 +5483,7 @@ describe("hosted runtime callbacks", () => {
           "required-sequence:required-before-final:segment:0",
         replyToMessageId: "message_old",
         sessionId: "session_required",
-        turnId: "turn_required",
+        turnId: "turn_required_first_attempt",
       }),
     });
     const finalEffect = buildHostedAssistantDeliveryEffect({
@@ -5461,7 +5504,7 @@ describe("hosted runtime callbacks", () => {
         message: "",
         replyToMessageId: "message_new",
         sessionId: "session_required",
-        turnId: "turn_required",
+        turnId: "turn_required_retry_attempt",
       }),
     });
     const deliveryError = {

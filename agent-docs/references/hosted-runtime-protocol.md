@@ -1273,22 +1273,27 @@ Private-media recovery ordering is explicit rather than generic segment
 ordering. The normalized final sequence base is
 `<base>:required-before-final`; every required predecessor adds
 `:segment:<ordinal>` before any bubble suffix and retains its original route
-and native reply target. The shared assistant-engine resolver groups the
-sequence by session, turn, and base across delivery
-boundaries. Hosted collection, wake calculation, preparation, and drain use
-that resolver, keep unavailable finals observable but unprepared, and rely on
-core dispatch to revalidate the complete group under the assistant-runtime
-write lock. Local and generic engine drains use the same dependency. Only a
-final whose predecessors are all `sent` with non-null receipts may enter
-provider delivery. This marker applies only to the private-media recovery
-sequence and does not change ordinary or cross-turn outbox ordering.
+and native reply target. Every new member also persists its exact predecessor
+intent id, with an explicit root on the first required member. The shared
+assistant-engine resolver follows that chain by session and stable base across
+delivery boundaries and idempotent retries whose runtime turn ids differ.
+Missing or quarantined links are unavailable without inspecting the corrupt
+payload. Hosted collection, wake calculation, preparation, and drain use that
+resolver, keep unavailable members observable but unprepared, and rely on core
+dispatch to revalidate the complete chain under the assistant-runtime write
+lock. Local and generic engine drains use the same dependency. Only a final
+whose predecessors are all `sent` with non-null receipts may enter provider
+delivery. This marker applies only to the private-media recovery sequence and
+does not change ordinary outbox ordering.
 
 The marker writer and all local, hosted, and core readers ship in one
 fingerprinted runner artifact. Its first production release is a runtime-only
 immediate hard cut: exact source and bundle fingerprint admission must converge
 before the release is accepted. Once production traffic is admitted, treat
 that dependency-aware bundle as the runner rollback floor because marked
-outbox intent or checkpoint state may already depend on it.
+outbox intent or checkpoint state may already depend on it. The exact
+predecessor field is additive to the current strict outbox schema, so an older
+reader would quarantine a new member rather than preserve the dependency.
 
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone

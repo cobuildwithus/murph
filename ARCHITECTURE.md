@@ -1085,21 +1085,40 @@ representations. A failed or schema-invalid media replacement clears the
 current response-media batch and establishes a visible-reply obligation. That
 obligation remains authoritative for the rest of the turn, across later steer
 contexts and successful outputs, so neither `finish_without_reply` nor a
-vault-file completion can turn recovery into silence. If the provider supplies
-no nonblank recovery text, finalization emits `An attachment couldn't be
-included in this reply.` in both delivery and transcript state, using the
-obligation's original delivery context and selected reply target. Valid media
-selected in the same context accompanies that sentence. Valid media selected
-for a later steered context remains the final segment on its own context and
-target, while the recovery becomes an earlier response segment. For that
-explicitly marked sequence, the normalized final sequence base is
+vault-file completion can turn recovery into silence. Only nonblank provider
+text owned by the obligation's delivery context satisfies it. Otherwise,
+finalization emits `An attachment couldn't be included in this reply.` in both
+delivery and transcript state, using the obligation's original delivery
+context and selected reply target. Valid media selected in the same context
+accompanies that sentence. Valid media or text selected for a later steered
+context remains the final segment on its own context and target, while the
+recovery becomes an earlier response segment. A model-authored recovery
+promoted from the obligation's context retains its original target and becomes
+required before that later final; when no such text exists, finalization uses
+the neutral recovery sentence instead. Output already selected for an
+intervening delivery context becomes another marked predecessor with its own
+target rather than being folded into the latest final. For that explicitly
+marked sequence, the normalized final sequence base is
 `<base>:required-before-final`; each required predecessor adds
 `:segment:<ordinal>` before any bubble suffix while retaining its original
-route and native target. The shared assistant-engine resolver groups by
-session, turn, and sequence base across route or target changes. Local queueing
-plus hosted
+route and native target. Every new marked bubble, segment, and final also
+persists its exact preceding intent id; the first member records an explicit
+root. The shared assistant-engine resolver follows that chain within the same
+session and stable sequence base across route or target changes. Exact
+idempotent replay may reuse a persisted predecessor from an earlier runtime
+turn id while creating the missing final under the retry's turn id; its
+immutable intent id keeps the chain intact without rewriting receipt
+ownership. Local queueing plus hosted
 collection, wake, preparation, and drain read the same dependency; core
-dispatch revalidates the full group under the assistant-runtime write lock.
+dispatch revalidates the full group under the assistant-runtime write lock,
+including predecessor-only groups while the final intent is still being
+constructed. If a required logical segment persists one provider bubble but
+cannot persist a later bubble, or a multi-segment required sequence otherwise
+loses intent ownership, the remaining segments and final fail closed instead
+of bypassing the missing predecessor. An absent or quarantined linked member is
+equally unavailable even when no usable bytes remain to inspect. Terminal
+ancestors remain retained while any linked member is active so pruning cannot
+make a delayed successor forget a failed predecessor.
 The final may dispatch only after every marked predecessor is `sent` with a
 non-null receipt. This contract applies only to explicitly marked recovery
 sequences; it does not redefine ordinary reply, cross-turn, or generic outbox
@@ -1112,7 +1131,11 @@ ownership independently of generic no-reply eligibility, so an earlier visible
 response remains an earlier segment instead of erasing the file-delivery fence.
 Stateful media and final-action tools apply in request order; receiving a later
 no-reply request cannot suppress an earlier queued media mutation or its
-recovery obligation.
+recovery obligation. Each response-media result remains owned by the delivery
+context captured when its tool request was accepted. If the result arrives
+after a steer, it updates or creates a closed segment on that original context
+and selected target; it never joins or relabels the live media batch for the
+newer accepted input.
 
 Provider-native thread continuity is not a delivery ledger. Preserve a resumable Codex thread even when `finish_without_reply` or delivery-context filtering means its internal history differs slightly from the durable semantic transcript, and preserve it after authenticated private reads. Runtime-owned capability URLs belong only to the ephemeral delivery response: do not put them in the durable assistant transcript, fresh-thread replay, stale-resume fallback, or provider-native turn. Do not clear or abandon provider continuity as a privacy or delivery-reconciliation mechanism; enforce privacy at authority, output, logging, and snapshot boundaries instead.
 Hosted group-email assistant replies use the assistant outbox as their single durability owner. The parent effect resolves authorized group members and creates privacy-blind, member-scoped child intents before it is considered sent; the no-send parent planner remains replay-safe through bounded response-body and partial child-intent persistence failures until that durable expansion completes, and stable per-member dedupe fills only missing children after a restart. Each child resolves only that member's current authorized address at delivery time. A deleted group or child whose recipient authority has changed before the provider call is durably abandoned with a typed authority-superseded reason, and transient failures proven to occur before provider entry remain retryable across the runner response boundary, while a lost internal response or liveness failure after the recipient-scoped provider request starts is terminal ambiguity. Successful siblings remain durable when another recipient fails, and an ambiguous child send is recorded terminally instead of replaying the whole group. Production Worker config embeds the prepared runner bundle and source fingerprints. Every warm or cold runner must report those exact fingerprints before a user workspace invocation is admitted, so a stale warm shell is replaced and a stale cold shell fails closed even before post-deploy smoke completes.

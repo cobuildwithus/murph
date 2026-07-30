@@ -1,4 +1,5 @@
 import type {
+  AssistantOutboxIntent,
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -154,6 +155,8 @@ export async function deliverAssistantReply(input: {
   dedupeToken?: string | null
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
+  requiredBeforeFinalPredecessorIntentId?:
+    AssistantOutboxIntent['requiredBeforeFinalPredecessorIntentId']
   response: string
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
@@ -197,6 +200,8 @@ export async function deliverAssistantReply(input: {
       input: input.input,
       media: deliveryMedia,
       message: input.response,
+      requiredBeforeFinalPredecessorIntentId:
+        input.requiredBeforeFinalPredecessorIntentId,
       session: input.session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
@@ -213,6 +218,8 @@ export async function deliverAssistantReply(input: {
       input: input.input,
       media: deliveryMedia,
       message: replyBubbles[0]!,
+      requiredBeforeFinalPredecessorIntentId:
+        input.requiredBeforeFinalPredecessorIntentId,
       session: input.session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
@@ -220,6 +227,9 @@ export async function deliverAssistantReply(input: {
   }
 
   let session = input.session
+  let precedingBubbleIntentPersisted = false
+  let requiredBeforeFinalPredecessorIntentId =
+    input.requiredBeforeFinalPredecessorIntentId
   // Bubbles deliver sequentially with per-bubble idempotency keys. Persisted
   // intent ordering is owned by the outbox drain comparator
   // (`compareAssistantOutboxDeliverySequenceOrder`) plus hosted boundary
@@ -232,42 +242,102 @@ export async function deliverAssistantReply(input: {
       index: bubbleIndex,
       turnId: input.turnId,
     })
-    const outcome = await deliverAssistantCurrentAudienceMessage({
-      dedupeToken: bubbleIdempotencyKey,
-      answeredMailboxItemIds: [],
-      deliveryIdempotencyKey: bubbleIdempotencyKey,
-      deliveryTransportIdempotent:
-        resolveHostedAssistantDeliveryTransportIdempotentOverride({
-          channel: deliveryFields.channel,
-          deliveryIdempotencyKey: bubbleIdempotencyKey,
-          executionContext: input.input.executionContext,
-          media: [],
-        }),
-      input: input.input,
-      media: [],
-      message: replyBubbles[bubbleIndex]!,
-      session,
-      sharedPlan: input.sharedPlan,
-      turnId: input.turnId,
-    })
+    let outcome: AssistantDeliveryOutcome
+    try {
+      outcome = await deliverAssistantCurrentAudienceMessage({
+        dedupeToken: bubbleIdempotencyKey,
+        answeredMailboxItemIds: [],
+        deliveryIdempotencyKey: bubbleIdempotencyKey,
+        deliveryTransportIdempotent:
+          resolveHostedAssistantDeliveryTransportIdempotentOverride({
+            channel: deliveryFields.channel,
+            deliveryIdempotencyKey: bubbleIdempotencyKey,
+            executionContext: input.input.executionContext,
+            media: [],
+          }),
+        input: input.input,
+        media: [],
+        message: replyBubbles[bubbleIndex]!,
+        requiredBeforeFinalPredecessorIntentId,
+        session,
+        sharedPlan: input.sharedPlan,
+        turnId: input.turnId,
+      })
+    } catch (error) {
+      if (!precedingBubbleIntentPersisted) {
+        throw error
+      }
+      return {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(error),
+        intentId: null,
+        media: deliveryMedia,
+        session,
+      }
+    }
     session = outcome.session
     if (outcome.kind === 'failed') {
       return outcome
     }
+    if (outcome.kind === 'sent' || outcome.kind === 'queued') {
+      precedingBubbleIntentPersisted = true
+      if (requiredBeforeFinalPredecessorIntentId !== undefined) {
+        if (outcome.intentId === null) {
+          return createAssistantRequiredReplyIntentMissingOutcome({
+            media: deliveryMedia,
+            session,
+          })
+        }
+        requiredBeforeFinalPredecessorIntentId = outcome.intentId
+      }
+    }
   }
 
-  return await deliverAssistantCurrentAudienceMessage({
-    dedupeToken: baseDedupeToken,
-    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    input: input.input,
-    media: deliveryMedia,
-    message: replyBubbles[replyBubbles.length - 1]!,
-    session,
-    sharedPlan: input.sharedPlan,
-    turnId: input.turnId,
-  })
+  try {
+    const outcome = await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: replyBubbles[replyBubbles.length - 1]!,
+      requiredBeforeFinalPredecessorIntentId,
+      session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    return outcome
+  } catch (error) {
+    if (!precedingBubbleIntentPersisted) {
+      throw error
+    }
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(error),
+      intentId: null,
+      media: deliveryMedia,
+      session,
+    }
+  }
+}
+
+function createAssistantRequiredReplyIntentMissingOutcome(input: {
+  media: readonly AssistantResponseMedia[]
+  session: AssistantSession
+}): AssistantDeliveryOutcome {
+  return {
+    kind: 'failed',
+    error: normalizeAssistantDeliveryError(
+      new VaultCliError(
+        'ASSISTANT_REQUIRED_PRECEDING_REPLY_UNOWNED',
+        'Required assistant reply did not create a delivery intent.',
+      ),
+    ),
+    intentId: null,
+    media: [...input.media],
+    session: input.session,
+  }
 }
 
 export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {
@@ -435,7 +505,20 @@ export async function deliverAssistantPrecedingReplies(input: {
 
   const outcomes: AssistantDeliveryOutcome[] = []
   let session = input.session
+  let requiredSequenceFailure:
+    ReturnType<typeof normalizeAssistantDeliveryError> | null = null
+  let requiredSequencePredecessorIntentId: string | null = null
   for (const [ordinal, segment] of segments.entries()) {
+    if (segment.requiredBeforeFinal && requiredSequenceFailure) {
+      outcomes.push({
+        kind: 'failed',
+        error: requiredSequenceFailure,
+        intentId: null,
+        media: normalizeAssistantResponseMediaList(segment.media ?? []),
+        session,
+      })
+      continue
+    }
     try {
       const baseSegmentInput = applyAssistantReplyDeliveryContext({
         context: segment.deliveryContext ?? null,
@@ -479,6 +562,12 @@ export async function deliverAssistantPrecedingReplies(input: {
           deliveryIdempotencyKey: segmentKey,
         },
         media: segment.media ?? [],
+        ...(segment.requiredBeforeFinal
+          ? {
+              requiredBeforeFinalPredecessorIntentId:
+                requiredSequencePredecessorIntentId,
+            }
+          : {}),
         response: segment.response,
         session,
         sharedPlan: input.sharedPlan,
@@ -486,14 +575,42 @@ export async function deliverAssistantPrecedingReplies(input: {
       })
       session = outcome.session
       outcomes.push(outcome)
+      if (
+        segment.requiredBeforeFinal &&
+        outcome.kind !== 'not-requested' &&
+        outcome.intentId !== null
+      ) {
+        requiredSequencePredecessorIntentId = outcome.intentId
+      }
+      if (
+        segment.requiredBeforeFinal &&
+        (
+          (outcome.kind !== 'sent' && outcome.kind !== 'queued') ||
+          outcome.intentId === null
+        )
+      ) {
+        requiredSequenceFailure =
+          outcome.kind === 'failed'
+            ? outcome.error
+            : normalizeAssistantDeliveryError(
+                new VaultCliError(
+                  'ASSISTANT_REQUIRED_PRECEDING_REPLY_UNOWNED',
+                  'Required preceding assistant reply did not create a delivery intent.',
+                ),
+              )
+      }
     } catch (error) {
+      const normalizedError = normalizeAssistantDeliveryError(error)
       outcomes.push({
         kind: 'failed',
-        error: normalizeAssistantDeliveryError(error),
+        error: normalizedError,
         intentId: null,
         media: normalizeAssistantResponseMediaList(segment.media ?? []),
         session,
       })
+      if (segment.requiredBeforeFinal) {
+        requiredSequenceFailure = normalizedError
+      }
     }
   }
 
@@ -865,6 +982,8 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
   message: string
+  requiredBeforeFinalPredecessorIntentId?:
+    AssistantOutboxIntent['requiredBeforeFinalPredecessorIntentId']
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -890,6 +1009,12 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     message: input.message,
     nativeReplyRequested: input.input.deliveryNativeReplyRequested,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    ...(input.requiredBeforeFinalPredecessorIntentId === undefined
+      ? {}
+      : {
+          requiredBeforeFinalPredecessorIntentId:
+            input.requiredBeforeFinalPredecessorIntentId,
+        }),
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,

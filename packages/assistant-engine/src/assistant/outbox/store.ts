@@ -23,7 +23,10 @@ import {
   resolveAssistantOutboxQuarantineDirectory,
 } from './intents.js'
 import { normalizeAssistantDeliveryError } from './retry-policy.js'
-import { compareAssistantOutboxDeliverySequenceOrder } from './ordering.js'
+import {
+  compareAssistantOutboxDeliverySequenceOrder,
+  readAssistantOutboxRequiredBeforeFinalSequenceMember,
+} from './ordering.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js'
 
@@ -106,6 +109,10 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     intentPath: string
     terminalAtMs: number
   }> = []
+  const inventory: Array<{
+    intent: AssistantOutboxIntent
+    intentPath: string
+  }> = []
   const protectedNewsletterOccurrencePrefixes =
     await readProtectedNewsletterOccurrencePrefixes(input.paths)
 
@@ -116,9 +123,58 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
 
     const intentPath = path.join(input.paths.outboxDirectory, entry.name)
     const intent = await readAssistantOutboxIntentInventoryEntry(input.vault, intentPath)
+    if (intent) {
+      inventory.push({ intent, intentPath })
+    }
+  }
+
+  const activeRequiredSequenceKeys = new Set(
+    inventory.flatMap(({ intent }) => {
+      if (
+        isTerminalAssistantOutboxIntent(intent) ||
+        intent.requiredBeforeFinalPredecessorIntentId !== undefined
+      ) {
+        return []
+      }
+      const sequenceKey = readAssistantOutboxRequiredSequenceGroupKey(intent)
+      return sequenceKey ? [sequenceKey] : []
+    }),
+  )
+  const intentById = new Map(
+    inventory.map(({ intent }) => [intent.intentId, intent] as const),
+  )
+  const exactRequiredPredecessorIntentIds = new Set<string>()
+  for (const { intent } of inventory) {
+    if (isTerminalAssistantOutboxIntent(intent)) {
+      continue
+    }
+    const visited = new Set<string>()
+    let current: AssistantOutboxIntent | undefined = intent
+    while (
+      current?.requiredBeforeFinalPredecessorIntentId
+    ) {
+      const predecessorIntentId =
+        current.requiredBeforeFinalPredecessorIntentId
+      if (visited.has(predecessorIntentId)) {
+        break
+      }
+      visited.add(predecessorIntentId)
+      exactRequiredPredecessorIntentIds.add(predecessorIntentId)
+      current = intentById.get(predecessorIntentId)
+    }
+  }
+
+  for (const { intent, intentPath } of inventory) {
+    const requiredSequenceGroupKey =
+      readAssistantOutboxRequiredSequenceGroupKey(intent)
     if (
-      !intent
-      || !isTerminalAssistantOutboxIntent(intent)
+      !isTerminalAssistantOutboxIntent(intent)
+      || exactRequiredPredecessorIntentIds.has(intent.intentId)
+      || (
+        intent.requiredBeforeFinalPredecessorIntentId === undefined &&
+        requiredSequenceGroupKey !== null &&
+        activeRequiredSequenceKeys.has(requiredSequenceGroupKey)
+      )
       || isPruneProtectedAssistantOutboxIntent(
         intent,
         protectedNewsletterOccurrencePrefixes,
@@ -278,6 +334,18 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
     intent.status === 'failed' ||
     intent.status === 'abandoned'
   )
+}
+
+function readAssistantOutboxRequiredSequenceGroupKey(
+  intent: AssistantOutboxIntent,
+): string | null {
+  const member = readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)
+  return member
+    ? JSON.stringify([
+        intent.sessionId,
+        member.sequenceBaseKey,
+      ])
+    : null
 }
 
 function isPruneProtectedAssistantOutboxIntent(

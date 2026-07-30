@@ -157,7 +157,9 @@ Private-media recovery ordering is a runtime-only persisted-outbox contract.
 Its `:required-before-final` writer, shared resolver, local and hosted readers,
 and locked core-dispatch revalidation must ship in the same exact-fingerprint
 runner artifact. There is no Web/Vercel, Temporal, database, or migration
-ordering dependency.
+ordering dependency. New marked members also carry an additive exact
+predecessor-intent field in the strict outbox schema; an older reader would
+quarantine that state, so this is not a reader-compatible suffix-only change.
 
 Deploy Cloudflare and the runner with `container_rollout=immediate`, then require
 managed-container smoke and normal invocation admission to report the exact new
@@ -172,8 +174,9 @@ private outbox contents to prove a drain, or add a second writer.
 After convergence, use controlled synthetic routes to verify that a predecessor
 on its original target blocks a final on a different target until persisted
 `sent` receipt evidence exists. Check missing, terminal, sent-without-receipt,
-and confirmation-ambiguous predecessor outcomes without a new final provider
-call. Also verify that provider handoff exact-stages a retained image
+confirmation-ambiguous, and quarantined predecessor outcomes without a new
+provider call from any affected member. Also verify that provider handoff
+exact-stages a retained image
 completion, checkpoints a due `assistant` wake, and leaves its consumption to a
 fresh invocation. Keep observability aggregate and identifier-free.
 

@@ -138,7 +138,10 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
         preparedDispatchToken: baseIntent.preparedDispatchToken,
         deliveryIdempotencyKey:
-          input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
+          resolveAssistantOutboxCompletedDeliveryIdempotencyKey({
+            delivery: input.delivery,
+            intent: baseIntent,
+          }),
         updatedAt: input.delivery.sentAt,
         nextAttemptAt: null,
         status: 'sending',
@@ -189,7 +192,10 @@ export async function markAssistantOutboxIntentSent(input: {
     const deliveryOwner = {
       ...input.intent,
       deliveryIdempotencyKey:
-        input.delivery.idempotencyKey ?? input.intent.deliveryIdempotencyKey,
+        resolveAssistantOutboxCompletedDeliveryIdempotencyKey({
+          delivery: input.delivery,
+          intent: input.intent,
+        }),
     }
     if (
       current &&
@@ -217,7 +223,10 @@ export async function markAssistantOutboxIntentSent(input: {
         ...baseIntent,
         deliveryConfirmationPending: false,
         deliveryIdempotencyKey:
-          input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
+          resolveAssistantOutboxCompletedDeliveryIdempotencyKey({
+            delivery: input.delivery,
+            intent: baseIntent,
+          }),
         updatedAt: completedAt,
         nextAttemptAt: null,
         preparedDispatchToken: null,
@@ -254,6 +263,18 @@ export async function markAssistantOutboxIntentSent(input: {
     vault: input.vault,
   })
   return sentIntent
+}
+
+function resolveAssistantOutboxCompletedDeliveryIdempotencyKey(input: {
+  delivery: AssistantChannelDelivery
+  intent: AssistantOutboxIntent
+}): string | null {
+  if (
+    input.intent.requiredBeforeFinalPredecessorIntentId !== undefined
+  ) {
+    return input.intent.deliveryIdempotencyKey
+  }
+  return input.delivery.idempotencyKey ?? input.intent.deliveryIdempotencyKey
 }
 
 export async function updateAssistantOutboxAfterDispatchFailure(input: {
@@ -1312,7 +1333,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
           await listAssistantOutboxIntentsLocal(input.vault),
         )
       if (
-        !dependencyState.unavailableFinalIntentIds.has(
+        !dependencyState.unavailableIntentIds.has(
           currentOrInput.intentId,
         ) ||
         !isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(

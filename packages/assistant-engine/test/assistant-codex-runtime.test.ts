@@ -18544,6 +18544,13 @@ describe('steered final segments', () => {
         expectedSuccess?: boolean
         expectedText: string
         id: number
+        kind: 'generate-voice-memo'
+        text: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
         kind: 'react-to-message'
         messageRef: string
         reaction: 'heart' | 'thumbs_up' | 'laugh'
@@ -18577,6 +18584,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'list-memberships' }> {
     return 'kind' in step && step.kind === 'list-memberships'
+  }
+
+  function isGenerateVoiceMemoStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-voice-memo' }> {
+    return 'kind' in step && step.kind === 'generate-voice-memo'
   }
 
   function isSendVaultFileStep(
@@ -18618,6 +18631,10 @@ describe('steered final segments', () => {
     input: {
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
+      beforeVoiceMemoResponse?: (input: {
+        child: MockChildProcess
+        requestId: number
+      }) => Promise<void> | void
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
       onFirstAssistantResponseCompleted?:
         CodexAppServerTurnInput['onFirstAssistantResponseCompleted']
@@ -18625,6 +18642,7 @@ describe('steered final segments', () => {
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       turnStatus?: 'completed' | 'failed'
+      voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -18706,6 +18724,38 @@ describe('steered final segments', () => {
                   turnId: 'turn-steered-finals',
                 },
               }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            if (isGenerateVoiceMemoStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'generate_voice_memo',
+                  arguments: {
+                    text: step.text,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await input.beforeVoiceMemoResponse?.({
+                child,
+                requestId: step.id,
+              })
               await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
                 id: step.id,
                 result: {
@@ -18861,6 +18911,7 @@ describe('steered final segments', () => {
       progressDelivery: input.progressDelivery,
       prompt: 'First question',
       sandbox: 'workspace-write',
+      voiceMemoRuntime: input.voiceMemoRuntime,
       workingDirectory,
     })
   }
@@ -19366,6 +19417,364 @@ describe('steered final segments', () => {
         kind: 'image',
       },
     ])
+  })
+
+  it('keeps append-generated media on each textless steered context owner', async () => {
+    const firstReplyRef = `ain_${'3'.repeat(32)}`
+    const secondReplyRef = `ain_${'4'.repeat(32)}`
+    const finalReplyRef = `ain_${'5'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-owning-first-generated-media',
+        type: 'user_message',
+        message: 'Send the first voice memo.',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1201,
+        kind: 'select-reply-target',
+        messageRef: firstReplyRef,
+      },
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 1202,
+        kind: 'generate-voice-memo',
+        text: 'First memo.',
+      },
+      completedItemEvent({
+        id: 'user-owning-second-generated-media',
+        type: 'user_message',
+        message: 'Send a second voice memo.',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1203,
+        kind: 'select-reply-target',
+        messageRef: secondReplyRef,
+      },
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 1204,
+        kind: 'generate-voice-memo',
+        text: 'Second memo.',
+      },
+      completedItemEvent({
+        id: 'user-owning-final-text-after-generated-media',
+        type: 'user_message',
+        message: 'Now answer in text.',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1205,
+        kind: 'select-reply-target',
+        messageRef: finalReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-final-after-generated-media',
+        type: 'assistant_message',
+        message: 'Here is the final text.',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        kind: 'telegram',
+      },
+    })
+
+    expect(result.precedingAgentMessageSegments).toMatchObject([
+      {
+        deliveryContextOrdinal: 0,
+        media: [
+          {
+            kind: 'voice_memo',
+            transcript: 'First memo.',
+          },
+        ],
+        response: '',
+        targetInputId: firstReplyRef,
+      },
+      {
+        deliveryContextOrdinal: 1,
+        media: [
+          {
+            kind: 'voice_memo',
+            transcript: 'Second memo.',
+          },
+        ],
+        response: '',
+        targetInputId: secondReplyRef,
+      },
+    ])
+    expect(result.finalMessage).toBe('Here is the final text.')
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(finalReplyRef)
+  })
+
+  it('keeps an in-flight append-generated memo on the context that started it after a steer', async () => {
+    const originalReplyRef = `ain_${'6'.repeat(32)}`
+    const laterReplyRef = `ain_${'7'.repeat(32)}`
+    const uploadStarted = createDeferred<void>()
+    const releaseUpload = createDeferred<void>()
+    const steerObserved = createDeferred<void>()
+    let originalTargetResponse: Promise<Record<string, unknown>> | null = null
+    const generateAndUpload = vi.fn(async () => {
+      uploadStarted.resolve()
+      await releaseUpload.promise
+      return {
+        attachmentId: 'attachment_original_context',
+        filename: 'original-context-memo.mp3',
+      }
+    })
+
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-owning-in-flight-generated-media',
+        message: 'Send a voice memo.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 1207,
+        kind: 'generate-voice-memo',
+        text: 'Original context memo.',
+      },
+      {
+        expectedText: 'selection recorded',
+        id: 1208,
+        kind: 'select-reply-target',
+        messageRef: laterReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-after-in-flight-generated-media',
+        message: 'Here is the later answer.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+      beforeVoiceMemoResponse: async ({ child, requestId }) => {
+        if (requestId !== 1207) {
+          return
+        }
+        await uploadStarted.promise
+        child.stdout.write(jsonLine({
+          id: 1206,
+          method: 'item/tool/call',
+          params: {
+            arguments: {
+              message_ref: originalReplyRef,
+            },
+            namespace: 'murph',
+            tool: 'select_reply_target',
+            turnId: 'turn-steered-finals',
+          },
+        }))
+        originalTargetResponse = waitForRpcResponse(child, 1206)
+        child.stdout.write(jsonLine(completedItemEvent({
+          id: 'user-steering-during-generated-media-upload',
+          message: 'Answer this instead.',
+          type: 'user_message',
+        })))
+        await steerObserved.promise
+        releaseUpload.resolve()
+      },
+      onTraceEvent(event) {
+        if (
+          JSON.stringify(event.rawEvent).includes(
+            '"id":"user-steering-during-generated-media-upload"',
+          )
+        ) {
+          steerObserved.resolve()
+        }
+      },
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        generateAndUpload,
+        kind: 'linq',
+      },
+    })
+
+    expect(generateAndUpload).toHaveBeenCalledOnce()
+    if (!originalTargetResponse) {
+      throw new Error('Original-context target selection was not started.')
+    }
+    await expect(originalTargetResponse).resolves.toEqual({
+      id: 1206,
+      result: {
+        contentItems: [{
+          text: 'selection recorded',
+          type: 'inputText',
+        }],
+        success: true,
+      },
+    })
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        media: [
+          {
+            filename: 'original-context-memo.mp3',
+            kind: 'voice_memo',
+            transcript: 'Original context memo.',
+            transport: {
+              attachmentId: 'attachment_original_context',
+              kind: 'linq_attachment',
+            },
+          },
+        ],
+        response: '',
+        targetInputId: originalReplyRef,
+      },
+    ])
+    expect(result.finalMessage).toBe('Here is the later answer.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(laterReplyRef)
+  })
+
+  it('rejects queued no-reply after in-flight media materializes across a steer', async () => {
+    const originalReplyRef = `ain_${'8'.repeat(32)}`
+    const laterReplyRef = `ain_${'9'.repeat(32)}`
+    const uploadStarted = createDeferred<void>()
+    const releaseUpload = createDeferred<void>()
+    const steerObserved = createDeferred<void>()
+    let noReplyResponse: Promise<Record<string, unknown>> | null = null
+    const generateAndUpload = vi.fn(async () => {
+      uploadStarted.resolve()
+      await releaseUpload.promise
+      return {
+        attachmentId: 'attachment_queued_no_reply',
+        filename: 'queued-no-reply.mp3',
+      }
+    })
+
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-owning-queued-no-reply-media',
+        message: 'Send a voice memo.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1209,
+        kind: 'select-reply-target',
+        messageRef: originalReplyRef,
+      },
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 1210,
+        kind: 'generate-voice-memo',
+        text: 'Original queued context memo.',
+      },
+      {
+        expectedText: 'selection recorded',
+        id: 1212,
+        kind: 'select-reply-target',
+        messageRef: laterReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-after-queued-no-reply-media',
+        message: 'Here is the later answer.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+      beforeVoiceMemoResponse: async ({ child, requestId }) => {
+        if (requestId !== 1210) {
+          return
+        }
+        await uploadStarted.promise
+        child.stdout.write(jsonLine({
+          id: 1211,
+          method: 'item/tool/call',
+          params: {
+            arguments: {},
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            turnId: 'turn-steered-finals',
+          },
+        }))
+        noReplyResponse = waitForRpcResponse(child, 1211)
+        child.stdout.write(jsonLine(completedItemEvent({
+          id: 'user-steering-during-queued-no-reply-media',
+          message: 'Answer this instead.',
+          type: 'user_message',
+        })))
+        await steerObserved.promise
+        releaseUpload.resolve()
+      },
+      onTraceEvent(event) {
+        if (
+          JSON.stringify(event.rawEvent).includes(
+            '"id":"user-steering-during-queued-no-reply-media"',
+          )
+        ) {
+          steerObserved.resolve()
+        }
+      },
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        generateAndUpload,
+        kind: 'linq',
+      },
+    })
+
+    expect(generateAndUpload).toHaveBeenCalledOnce()
+    if (!noReplyResponse) {
+      throw new Error('Queued no-reply response was not started.')
+    }
+    await expect(noReplyResponse).resolves.toEqual({
+      id: 1211,
+      result: {
+        contentItems: [{
+          text: 'finish_without_reply unavailable after assistant output',
+          type: 'inputText',
+        }],
+        success: false,
+      },
+    })
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        media: [
+          {
+            filename: 'queued-no-reply.mp3',
+            kind: 'voice_memo',
+            transcript: 'Original queued context memo.',
+            transport: {
+              attachmentId: 'attachment_queued_no_reply',
+              kind: 'linq_attachment',
+            },
+          },
+        ],
+        response: '',
+        targetInputId: originalReplyRef,
+      },
+    ])
+    expect(result.finalMessage).toBe('Here is the later answer.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(laterReplyRef)
   })
 
   it('closes admission and preserves a media-only response before a steer boundary', async () => {
@@ -19980,10 +20389,11 @@ describe('steered final segments', () => {
       "An attachment couldn't be included in this reply.",
     )
     expect(result.precedingAgentMessageSegments).toEqual([
-      expect.objectContaining({
+      {
         deliveryContextOrdinal: 0,
+        media: [],
         response: 'Here is the earlier answer.',
-      }),
+      },
     ])
     expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.responseMedia).toEqual([])
@@ -20022,6 +20432,177 @@ describe('steered final segments', () => {
       "An attachment couldn't be included in this reply.",
     )
     expect(result.responseMedia).toEqual([laterMedia])
+  })
+
+  it('keeps same-context recovery media with recovery before later text', async () => {
+    const recoveryReplyRef = `ain_${'d'.repeat(32)}`
+    const laterReplyRef = `ain_${'e'.repeat(32)}`
+    const recoveryMedia = {
+      alt: 'A valid image selected after recovery became required',
+      kind: 'image' as const,
+      source: 'same-context-recovery-image',
+      url: 'https://cdn.example.test/assistant/same-context-recovery.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-owning-recovery-media',
+        message: 'Send the requested image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1051,
+        kind: 'select-reply-target',
+        messageRef: recoveryReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1052,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-before-recovery-media.png',
+        }],
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 1053,
+        kind: 'attach-response-media',
+        media: [recoveryMedia],
+      },
+      completedItemEvent({
+        id: 'user-after-recovery-media',
+        message: 'Also answer this follow-up.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1054,
+        kind: 'select-reply-target',
+        messageRef: laterReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-after-recovery-media',
+        message: 'Here is the follow-up answer.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('Here is the follow-up answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [recoveryMedia],
+      requiredBeforeFinal: true,
+      response: "An attachment couldn't be included in this reply.",
+      targetInputId: recoveryReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(laterReplyRef)
+    expect(result.transcriptMessage).toBe('Here is the follow-up answer.')
+  })
+
+  it('keeps intervening media on its own target before later text', async () => {
+    const recoveryReplyRef = `ain_${'f'.repeat(32)}`
+    const mediaReplyRef = `ain_${'1'.repeat(32)}`
+    const finalReplyRef = `ain_${'2'.repeat(32)}`
+    const interveningMedia = {
+      alt: 'An image for the intervening delivery context',
+      kind: 'image' as const,
+      source: 'intervening-context-image',
+      url: 'https://cdn.example.test/assistant/intervening-context.png',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-owning-intervening-recovery',
+        message: 'Send the first image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1055,
+        kind: 'select-reply-target',
+        messageRef: recoveryReplyRef,
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'invalid response media arguments; do not call finish_without_reply; explain that an attachment could not be included in this reply',
+        id: 1056,
+        kind: 'attach-response-media',
+        media: [{
+          kind: 'vault_image',
+          ref: 'raw/captures/incomplete-before-intervening-media.png',
+        }],
+      },
+      completedItemEvent({
+        id: 'user-owning-intervening-media',
+        message: 'Send this other image.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1057,
+        kind: 'select-reply-target',
+        messageRef: mediaReplyRef,
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 1058,
+        kind: 'attach-response-media',
+        media: [interveningMedia],
+      },
+      completedItemEvent({
+        id: 'user-owning-final-text',
+        message: 'One final question.',
+        type: 'user_message',
+      }),
+      {
+        expectedText: 'selection recorded',
+        id: 1059,
+        kind: 'select-reply-target',
+        messageRef: finalReplyRef,
+      },
+      completedItemEvent({
+        id: 'assistant-owning-final-text',
+        message: 'Here is the final answer.',
+        type: 'assistant_message',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('Here is the final answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        media: [],
+        requiredBeforeFinal: true,
+        response: "An attachment couldn't be included in this reply.",
+        targetInputId: recoveryReplyRef,
+      },
+      {
+        deliveryContextOrdinal: 1,
+        media: [interveningMedia],
+        requiredBeforeFinal: true,
+        response: '',
+        targetInputId: mediaReplyRef,
+      },
+    ])
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
+    expect(result.responseMedia).toEqual([])
+    expect(result.targetInputId).toBe(finalReplyRef)
+    expect(result.transcriptMessage).toBe('Here is the final answer.')
   })
 
   it('keeps later-context media on its own target after required recovery', async () => {
@@ -20073,6 +20654,11 @@ describe('steered final segments', () => {
         kind: 'attach-response-media',
         media: [laterMedia],
       },
+      completedItemEvent({
+        id: 'assistant-owning-later-context-media',
+        message: 'Here is the other image.',
+        type: 'assistant_message',
+      }),
     ], {
       authorizeAcceptedMessageTarget: async (input) => ({
         targetInputId: input.messageRef,
@@ -20080,7 +20666,7 @@ describe('steered final segments', () => {
     })
 
     expect(result.finalAction).toBeNull()
-    expect(result.finalMessage).toBe('')
+    expect(result.finalMessage).toBe('Here is the other image.')
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,
       media: [],
@@ -20092,7 +20678,7 @@ describe('steered final segments', () => {
     expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.responseMedia).toEqual([laterMedia])
     expect(result.targetInputId).toBe(laterReplyRef)
-    expect(result.transcriptMessage).toBe('')
+    expect(result.transcriptMessage).toBe('Here is the other image.')
   })
 
   it.each([
@@ -20271,7 +20857,15 @@ describe('steered final segments', () => {
     },
   )
 
-  it('keeps an earlier private-media reply obligation across a later steer', async () => {
+  it('keeps model-authored private-media recovery required across a later steer', async () => {
+    const recoveryReplyRef = `ain_${'b'.repeat(32)}`
+    const laterReplyRef = `ain_${'c'.repeat(32)}`
+    const laterMedia = {
+      alt: 'Later image after model-authored recovery',
+      kind: 'image' as const,
+      source: 'later-image-after-model-recovery',
+      url: 'https://cdn.example.test/assistant/later-model-recovery.png',
+    }
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
@@ -20279,10 +20873,16 @@ describe('steered final segments', () => {
         message: 'Send the image',
       }),
       {
+        expectedText: 'selection recorded',
+        id: 105,
+        kind: 'select-reply-target',
+        messageRef: recoveryReplyRef,
+      },
+      {
         expectedSuccess: false,
         expectedText:
           'private response image could not be prepared; do not retry, regenerate it, or call finish_without_reply; explain that the image is unavailable in the final reply now',
-        id: 105,
+        id: 106,
         kind: 'attach-response-media',
         media: [{
           alt: 'Unavailable private image',
@@ -20296,29 +20896,52 @@ describe('steered final segments', () => {
         }],
       },
       completedItemEvent({
+        id: 'assistant-private-media-recovery',
+        type: 'assistant_message',
+        message: 'That image is unavailable.',
+      }),
+      completedItemEvent({
         id: 'user-2',
         type: 'user_message',
-        message: 'Are you still there?',
+        message: 'Send this other image instead.',
       }),
       {
-        expectedSuccess: false,
-        expectedText: 'finish_without_reply unavailable after assistant output',
-        id: 106,
-        kind: 'finish-without-reply',
+        expectedText: 'selection recorded',
+        id: 107,
+        kind: 'select-reply-target',
+        messageRef: laterReplyRef,
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 108,
+        kind: 'attach-response-media',
+        media: [laterMedia],
       },
       completedItemEvent({
-        id: 'assistant-steered-private-media-recovery',
+        id: 'assistant-after-private-media-recovery',
         type: 'assistant_message',
-        message: 'I am here, but that image is unavailable.',
+        message: 'Here is the other image.',
       }),
-    ])
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        targetInputId: input.messageRef,
+      }),
+    })
 
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalAction).toBeNull()
-    expect(result.finalMessage).toBe(
-      'I am here, but that image is unavailable.',
-    )
-    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toBe('Here is the other image.')
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      requiredBeforeFinal: true,
+      response: 'That image is unavailable.',
+      targetInputId: recoveryReplyRef,
+    }])
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+    expect(result.responseMedia).toEqual([laterMedia])
+    expect(result.targetInputId).toBe(laterReplyRef)
+    expect(result.transcriptMessage).toBe('Here is the other image.')
   })
 
   it('keeps a failed private-media reply obligation after an unrelated vault-file approval', async () => {

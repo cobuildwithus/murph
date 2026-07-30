@@ -58,6 +58,9 @@ import {
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import {
+  persistAssistantOutboxIntentDeliveryPendingConfirmation,
+} from '../src/assistant/outbox/dispatch-state.ts'
+import {
   createAssistantCronCanonicalRuntimeRecord,
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
@@ -176,6 +179,120 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+  })
+
+  it('keeps a deduplicated required predecessor link immutable', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-link-dedupe-',
+    )
+    const shared = {
+      dedupeToken: 'required-link-dedupe',
+      deliveryIdempotencyKey:
+        'delivery-required-link:required-before-final:segment:0',
+      message: 'required recovery',
+      sessionId: 'session-required-link-dedupe',
+      turnId: 'turn-required-link-dedupe',
+    }
+    const root = await createIntent(vaultRoot, {
+      ...shared,
+      requiredBeforeFinalPredecessorIntentId: null,
+    })
+    const replayed = await createIntent(vaultRoot, {
+      ...shared,
+      requiredBeforeFinalPredecessorIntentId: null,
+    })
+    expect(replayed.intentId).toBe(root.intentId)
+
+    await expect(createIntent(vaultRoot, {
+      ...shared,
+      requiredBeforeFinalPredecessorIntentId: 'outbox_other',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+
+    const legacyShared = {
+      ...shared,
+      dedupeToken: 'required-link-legacy-dedupe',
+      deliveryIdempotencyKey:
+        'delivery-required-link-legacy:required-before-final:segment:0',
+    }
+    await createIntent(vaultRoot, legacyShared)
+    await expect(createIntent(vaultRoot, {
+      ...legacyShared,
+      requiredBeforeFinalPredecessorIntentId: null,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(createIntent(vaultRoot, {
+      dedupeToken: 'unmarked-required-link',
+      deliveryIdempotencyKey: 'delivery-unmarked',
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId: 'session-unmarked-required-link',
+      turnId: 'turn-unmarked-required-link',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_REQUIRED_SEQUENCE_KEY_INVALID',
+    })
+  })
+
+  it('preserves the marked sequence key across a provider-key crash checkpoint', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-provider-key-',
+    )
+    const sequenceKey =
+      'delivery-provider-key:required-before-final:segment:0'
+    const root = await createIntent(vaultRoot, {
+      deliveryIdempotencyKey: sequenceKey,
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId: 'session-required-provider-key',
+      turnId: 'turn-required-provider-key',
+    })
+    const delivery = createDelivery({
+      idempotencyKey: 'provider-returned-key',
+      providerMessageId: 'provider-required-provider-key',
+      sentAt: '2026-04-08T00:01:00.000Z',
+    })
+    const sending = await beginAssistantOutboxIntentMirrorDispatch({
+      deliveryIdempotencyKey: sequenceKey,
+      deliveryTransportIdempotent: false,
+      intentId: root.intentId,
+      startedAt: '2026-04-08T00:00:30.000Z',
+      vault: vaultRoot,
+    })
+    expect(sending).not.toBeNull()
+    const checkpointed =
+      await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        delivery,
+        deliveryTransportIdempotent: false,
+        intent: sending!,
+        intentPath: resolveAssistantOutboxIntentPath(
+          paths.outboxDirectory,
+          root.intentId,
+        ),
+        vault: vaultRoot,
+      })
+
+    expect(checkpointed).toMatchObject({
+      delivery: expect.objectContaining({
+        idempotencyKey: 'provider-returned-key',
+      }),
+      deliveryIdempotencyKey: sequenceKey,
+      requiredBeforeFinalPredecessorIntentId: null,
+      status: 'sending',
+    })
+
+    const reconciled = await dispatchAssistantOutboxIntent({
+      intentId: root.intentId,
+      now: new Date('2026-04-08T00:20:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(reconciled.intent).toMatchObject({
+      delivery: expect.objectContaining({
+        idempotencyKey: 'provider-returned-key',
+      }),
+      deliveryIdempotencyKey: sequenceKey,
+      status: 'sent',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
@@ -1477,6 +1594,81 @@ describe('assistant outbox runtime', () => {
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
     expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+  })
+
+  it('retains terminal required-sequence evidence until every member is terminal', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-sequence-retention-',
+    )
+    const sessionId = 'session-required-sequence-retention'
+    const turnId = 'turn-required-sequence-retention'
+    const sequenceBaseKey =
+      buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+        deliveryIdempotencyKey:
+          'delivery-required-sequence-retention',
+        turnId,
+      })
+    const failedPredecessor = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:00:00.000Z',
+      dedupeToken: 'required-sequence-retention-predecessor',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
+      message: 'failed required predecessor',
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId,
+      turnId,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...failedPredecessor,
+      lastError: {
+        code: 'CHANNEL_REQUIRED',
+        message: 'required predecessor failed',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+      updatedAt: '2026-03-01T00:01:00.000Z',
+    })
+    const pendingSuccessor = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:02:00.000Z',
+      dedupeToken: 'required-sequence-retention-successor',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:1`,
+      message: 'pending required successor',
+      requiredBeforeFinalPredecessorIntentId:
+        failedPredecessor.intentId,
+      sessionId,
+      turnId,
+    })
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(0)
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, failedPredecessor.intentId),
+    ).resolves.toMatchObject({
+      status: 'failed',
+    })
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...pendingSuccessor,
+      lastError: {
+        code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+        message: 'required predecessor unavailable',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+      updatedAt: '2026-03-01T00:03:00.000Z',
+    })
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(2)
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
   })
 
   it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
@@ -4605,6 +4797,17 @@ describe('assistant outbox runtime', () => {
         deliveryIdempotencyKey: 'delivery-required-sequence-active',
         turnId,
       })
+    const predecessor = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T05:01:00.000Z',
+      dedupeToken: 'required-sequence-predecessor',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
+      explicitTarget: 'telegram-old-thread',
+      message: "An attachment couldn't be included in this reply.",
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId,
+      threadId: 'telegram-old-thread',
+      turnId,
+    })
     const final = await createIntent(vaultRoot, {
       createdAt: '2026-04-08T05:00:00.000Z',
       dedupeToken: 'required-sequence-final',
@@ -4617,18 +4820,9 @@ describe('assistant outbox runtime', () => {
         url: 'https://cdn.example.test/progress-card.png',
       }],
       message: '',
+      requiredBeforeFinalPredecessorIntentId: predecessor.intentId,
       sessionId,
       threadId: 'telegram-new-thread',
-      turnId,
-    })
-    const predecessor = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T05:01:00.000Z',
-      dedupeToken: 'required-sequence-predecessor',
-      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
-      explicitTarget: 'telegram-old-thread',
-      message: "An attachment couldn't be included in this reply.",
-      sessionId,
-      threadId: 'telegram-old-thread',
       turnId,
     })
 
@@ -4739,29 +4933,12 @@ describe('assistant outbox runtime', () => {
         deliveryIdempotencyKey: 'delivery-required-sequence-future',
         turnId,
       })
-    const final = await createIntent(vaultRoot, {
-      createdAt: '2026-04-08T06:00:00.000Z',
-      dedupeToken: 'required-sequence-future-final',
-      deliveryIdempotencyKey: sequenceBaseKey,
-      message: 'final waits for recovery',
-      sessionId,
-      turnId,
-    })
-    await saveAssistantOutboxIntent(vaultRoot, {
-      ...final,
-      lastError: {
-        code: 'REQUEST_FAILED',
-        message: 'final retry was due',
-      },
-      nextAttemptAt: '2026-04-08T06:05:00.000Z',
-      status: 'retryable',
-      updatedAt: '2026-04-08T06:00:30.000Z',
-    })
     const predecessor = await createIntent(vaultRoot, {
       createdAt: '2026-04-08T06:01:00.000Z',
       dedupeToken: 'required-sequence-future-predecessor',
       deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
       message: 'recovery retries later',
+      requiredBeforeFinalPredecessorIntentId: null,
       sessionId,
       turnId,
     })
@@ -4776,6 +4953,25 @@ describe('assistant outbox runtime', () => {
       nextAttemptAt: '2026-04-08T07:00:00.000Z',
       status: 'retryable',
       updatedAt: '2026-04-08T06:01:30.000Z',
+    })
+    const final = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T06:00:00.000Z',
+      dedupeToken: 'required-sequence-future-final',
+      deliveryIdempotencyKey: sequenceBaseKey,
+      message: 'final waits for recovery',
+      requiredBeforeFinalPredecessorIntentId: predecessor.intentId,
+      sessionId,
+      turnId,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...final,
+      lastError: {
+        code: 'REQUEST_FAILED',
+        message: 'final retry was due',
+      },
+      nextAttemptAt: '2026-04-08T06:05:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T06:00:30.000Z',
     })
 
     await expect(drainAssistantOutboxLocal({
@@ -4794,6 +4990,101 @@ describe('assistant outbox runtime', () => {
         nextAttemptAt: '2026-04-08T07:00:00.000Z',
         retryable: 2,
       })
+  })
+
+  it('orders a deduplicated predecessor from an earlier retry turn before the new final', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-sequence-retry-turn-',
+    )
+    const sessionId = 'session-required-sequence-retry-turn'
+    const firstTurnId = 'turn-required-sequence-first-attempt'
+    const retryTurnId = 'turn-required-sequence-retry-attempt'
+    const sequenceBaseKey =
+      buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+        deliveryIdempotencyKey:
+          'delivery-required-sequence-retry-turn',
+        turnId: firstTurnId,
+      })
+    const predecessorInput = {
+      createdAt: '2026-04-08T06:20:00.000Z',
+      dedupeToken: `${sequenceBaseKey}:segment:0`,
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
+      message: 'required recovery from the first attempt',
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId,
+      turnId: firstTurnId,
+    }
+    const predecessor = await createIntent(vaultRoot, predecessorInput)
+    const replayedPredecessor = await createIntent(vaultRoot, {
+      ...predecessorInput,
+      createdAt: '2026-04-08T06:21:00.000Z',
+      turnId: retryTurnId,
+    })
+    expect(replayedPredecessor.intentId).toBe(predecessor.intentId)
+    expect(replayedPredecessor.turnId).toBe(firstTurnId)
+
+    const final = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T06:22:00.000Z',
+      dedupeToken: sequenceBaseKey,
+      deliveryIdempotencyKey: sequenceBaseKey,
+      message: 'final from the retry attempt',
+      requiredBeforeFinalPredecessorIntentId: predecessor.intentId,
+      sessionId,
+      turnId: retryTurnId,
+    })
+    mockedDeliverAssistantMessageOverBinding
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          idempotencyKey: null,
+          providerMessageId:
+            'provider-required-sequence-retry-predecessor',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: false,
+        outboxIntentId: null,
+        session: undefined,
+      })
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          idempotencyKey: null,
+          providerMessageId: 'provider-required-sequence-retry-final',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: false,
+        outboxIntentId: null,
+        session: undefined,
+      })
+
+    await expect(drainAssistantOutboxLocal({
+      limit: 2,
+      now: new Date('2026-04-08T06:23:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      attempted: 1,
+      sent: 1,
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, final.intentId),
+    ).resolves.toMatchObject({
+      status: 'pending',
+    })
+
+    await expect(drainAssistantOutboxLocal({
+      limit: 2,
+      now: new Date('2026-04-08T06:24:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      attempted: 1,
+      sent: 1,
+    })
+    expect(
+      mockedDeliverAssistantMessageOverBinding.mock.calls.map(
+        (call) => call[0]?.message,
+      ),
+    ).toEqual([
+      'required recovery from the first attempt',
+      'final from the retry attempt',
+    ])
   })
 
   it.each([
@@ -4887,8 +5178,8 @@ describe('assistant outbox runtime', () => {
         now: new Date('2026-04-08T07:03:00.000Z'),
         vault: vaultRoot,
       })).resolves.toEqual({
-        attempted: 1,
-        failed: 1,
+        attempted: predecessorState === 'confirmation-pending' ? 2 : 1,
+        failed: predecessorState === 'confirmation-pending' ? 2 : 1,
         queued: 0,
         sent: 0,
       })
@@ -4906,15 +5197,193 @@ describe('assistant outbox runtime', () => {
         status: 'failed',
       })
       if (predecessor) {
-        await expect(
-          readAssistantOutboxIntent(vaultRoot, predecessor.intentId),
-        ).resolves.toMatchObject({
-          lastError: predecessor.lastError,
-          status: predecessor.status,
-        })
+        const persistedPredecessor =
+          readAssistantOutboxIntent(vaultRoot, predecessor.intentId)
+        if (predecessorState === 'confirmation-pending') {
+          await expect(persistedPredecessor).resolves.toMatchObject({
+            lastError: {
+              code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+            },
+            status: 'failed',
+          })
+        } else {
+          await expect(persistedPredecessor).resolves.toMatchObject({
+            lastError: predecessor.lastError,
+            status: predecessor.status,
+          })
+        }
       }
     },
   )
+
+  it('terminalizes every unattempted required successor after an earlier predecessor fails', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-sequence-successors-',
+    )
+    const sessionId = 'session-required-sequence-successors'
+    const turnId = 'turn-required-sequence-successors'
+    const sequenceBaseKey =
+      buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+        deliveryIdempotencyKey:
+          'delivery-required-sequence-successors',
+        turnId,
+      })
+    const predecessor = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T07:10:00.000Z',
+      dedupeToken: 'required-sequence-successors-predecessor',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
+      message: 'required recovery',
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId,
+      turnId,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...predecessor,
+      lastError: {
+        code: 'CHANNEL_REQUIRED',
+        message: 'required predecessor failed',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+      updatedAt: '2026-04-08T07:10:30.000Z',
+    })
+    const successorInputs = [
+      {
+        createdAt: '2026-04-08T07:11:00.000Z',
+        dedupeToken: 'required-sequence-successors-bubble-zero',
+        deliveryIdempotencyKey:
+          `${sequenceBaseKey}:segment:1:bubble:0`,
+        message: 'later required bubble zero',
+      },
+      {
+        createdAt: '2026-04-08T07:12:00.000Z',
+        dedupeToken: 'required-sequence-successors-bubble-final',
+        deliveryIdempotencyKey: `${sequenceBaseKey}:segment:1`,
+        message: 'later required bubble final',
+      },
+      {
+        createdAt: '2026-04-08T07:13:00.000Z',
+        dedupeToken: 'required-sequence-successors-final',
+        deliveryIdempotencyKey: sequenceBaseKey,
+        message: 'final reply',
+      },
+    ]
+    const successors: AssistantOutboxIntent[] = []
+    for (const successorInput of successorInputs) {
+      successors.push(await createIntent(vaultRoot, {
+        ...successorInput,
+        sessionId,
+        turnId,
+      }))
+    }
+
+    for (const successor of successors) {
+      await expect(drainAssistantOutboxLocal({
+        limit: 1,
+        now: new Date('2026-04-08T07:14:00.000Z'),
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        attempted: 1,
+        failed: 1,
+        queued: 0,
+        sent: 0,
+      })
+      await expect(
+        readAssistantOutboxIntent(vaultRoot, successor.intentId),
+      ).resolves.toMatchObject({
+        attemptCount: 0,
+        lastAttemptAt: null,
+        lastError: {
+          code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+        },
+        status: 'failed',
+      })
+    }
+
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('fails the surviving exact chain when a middle predecessor is quarantined', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-required-sequence-quarantine-',
+    )
+    const sessionId = 'session-required-sequence-quarantine'
+    const turnId = 'turn-required-sequence-quarantine'
+    const sequenceBaseKey =
+      buildAssistantOutboxRequiredBeforeFinalSequenceBase({
+        deliveryIdempotencyKey:
+          'delivery-required-sequence-quarantine',
+        turnId,
+      })
+    const root = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T07:10:00.000Z',
+      dedupeToken: 'required-sequence-quarantine-root',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
+      message: 'required root',
+      requiredBeforeFinalPredecessorIntentId: null,
+      sessionId,
+      turnId,
+    })
+    const middle = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T07:11:00.000Z',
+      dedupeToken: 'required-sequence-quarantine-middle',
+      deliveryIdempotencyKey: `${sequenceBaseKey}:segment:1`,
+      message: 'required middle',
+      requiredBeforeFinalPredecessorIntentId: root.intentId,
+      sessionId,
+      turnId,
+    })
+    const final = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T07:12:00.000Z',
+      dedupeToken: 'required-sequence-quarantine-final',
+      deliveryIdempotencyKey: sequenceBaseKey,
+      message: 'required final',
+      requiredBeforeFinalPredecessorIntentId: middle.intentId,
+      sessionId,
+      turnId,
+    })
+    await writeFile(
+      resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        middle.intentId,
+      ),
+      '{"schema":"invalid"}\n',
+      'utf8',
+    )
+
+    await expect(drainAssistantOutboxLocal({
+      now: new Date('2026-04-08T07:20:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      attempted: 2,
+      failed: 2,
+      queued: 0,
+      sent: 0,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, root.intentId),
+    ).resolves.toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+      },
+      status: 'failed',
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, final.intentId),
+    ).resolves.toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_REQUIRED_PREDECESSOR_UNAVAILABLE',
+      },
+      status: 'failed',
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, middle.intentId),
+    ).resolves.toBeNull()
+    await expect(
+      readdir(paths.outboxQuarantineDirectory),
+    ).resolves.toHaveLength(1)
+  })
 
   it('terminalizes a zero-evidence retryable final when its required predecessor is unavailable', async () => {
     const { vaultRoot } = await createAssistantVault(
@@ -5052,6 +5521,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken: 'required-sequence-terminal-race-predecessor',
       deliveryIdempotencyKey: `${sequenceBaseKey}:segment:0`,
       message: 'required recovery',
+      requiredBeforeFinalPredecessorIntentId: null,
       sessionId,
       turnId,
     })
@@ -5070,6 +5540,8 @@ describe('assistant outbox runtime', () => {
       dedupeToken: 'required-sequence-terminal-race-final',
       deliveryIdempotencyKey: sequenceBaseKey,
       message: 'final after recovered predecessor',
+      requiredBeforeFinalPredecessorIntentId:
+        seededPredecessor.intentId,
       sessionId,
       turnId,
     })
@@ -5077,7 +5549,7 @@ describe('assistant outbox runtime', () => {
       resolveAssistantOutboxRequiredBeforeFinalDependencies(
         await listAssistantOutboxIntentsLocal(vaultRoot),
       )
-    expect(staleDependencyState.unavailableFinalIntentIds.has(final.intentId))
+    expect(staleDependencyState.unavailableIntentIds.has(final.intentId))
       .toBe(true)
 
     await saveAssistantOutboxIntent(vaultRoot, {
@@ -5702,6 +6174,7 @@ async function createIntent(
     identityId: string | null
     message: string
     nativeReplyRequested: true
+    requiredBeforeFinalPredecessorIntentId: string | null
     replyToMessageId: string | null
     media: AssistantOutboxIntent['media']
     reviewedAssistantAskCompletionExpiresAt: string | null
@@ -5735,6 +6208,12 @@ async function createIntent(
     ...(overrides.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: overrides.nativeReplyRequested }),
+    ...(overrides.requiredBeforeFinalPredecessorIntentId === undefined
+      ? {}
+      : {
+          requiredBeforeFinalPredecessorIntentId:
+            overrides.requiredBeforeFinalPredecessorIntentId,
+        }),
     replyToMessageId: overrides.replyToMessageId ?? null,
     sessionId,
     threadId: overrides.threadId ?? 'thread-1',

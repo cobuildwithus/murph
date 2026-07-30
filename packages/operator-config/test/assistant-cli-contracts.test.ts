@@ -145,6 +145,22 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
     expect(intent.automationAuthority).toBeUndefined()
+    expect(intent.requiredBeforeFinalPredecessorIntentId).toBeUndefined()
+
+    expect(assistantOutboxIntentSchema.parse({
+      ...intent,
+      requiredBeforeFinalPredecessorIntentId: null,
+    }).requiredBeforeFinalPredecessorIntentId).toBeNull()
+    expect(assistantOutboxIntentSchema.parse({
+      ...intent,
+      requiredBeforeFinalPredecessorIntentId: ' outbox_required_predecessor ',
+    }).requiredBeforeFinalPredecessorIntentId).toBe(
+      'outbox_required_predecessor',
+    )
+    expect(() => assistantOutboxIntentSchema.parse({
+      ...intent,
+      requiredBeforeFinalPredecessorIntentId: ' ',
+    })).toThrow()
 
     const authorizedIntent = assistantOutboxIntentSchema.parse({
       ...intent,

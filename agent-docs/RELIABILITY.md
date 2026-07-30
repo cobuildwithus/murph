@@ -550,26 +550,47 @@ Last verified: 2026-07-29
   becoming an undeliverable outbox item, or permitting accidental silence. The
   reply requirement remains unresolved for the rest of the turn across later
   steer contexts and successful output tools; neither ordinary
-  `finish_without_reply` nor an approved vault-file delivery may replace it. If
-  final provider text is blank, the finalizer supplies `An attachment couldn't
-  be included in this reply.` in delivery and transcript state and routes it
+  `finish_without_reply` nor an approved vault-file delivery may replace it.
+  Only nonblank provider text owned by the requirement's delivery context
+  satisfies it. Otherwise, the finalizer supplies `An attachment couldn't be
+  included in this reply.` in delivery and transcript state and routes it
   through the requirement's originating context and selected target.
-  Same-context valid media accompanies that recovery; media selected for a
-  later steered context remains on its own final context and target while the
-  recovery is an earlier segment. The explicitly marked final sequence base is
+  Same-context valid media accompanies that recovery; media or text selected
+  for a later steered context remains on its own final context and target while
+  the recovery is an earlier segment. A model-authored recovery promoted from
+  the requirement's context retains its original target and is marked required
+  before that later final; absent such text, the neutral recovery sentence is
+  used. Output already selected for an intervening delivery context becomes
+  another marked predecessor with its own target rather than inheriting the
+  latest final target. The explicitly marked final sequence base is
   `<base>:required-before-final`; required predecessors add
   `:segment:<ordinal>` before any bubble suffix and retain their original route
-  and native target. The final is eligible only after every predecessor is
+  and native target. Every new marked bubble, segment, and final persists the
+  exact preceding intent id, with an explicit root on the first member.
+  Predecessor-only groups enforce that chain while the final intent is still
+  being constructed. If one provider bubble of a required
+  logical segment persists but a later bubble cannot, or a multi-segment
+  sequence otherwise loses intent ownership, remaining delivery and the final
+  fail closed. The final is
+  eligible only after every predecessor is
   `sent` with a non-null
   receipt. Missing, failed, abandoned, sent-without-receipt, or non-idempotent
   confirmation-pending predecessor evidence makes the marked predecessor
-  unavailable without mutating it. Only a final proved never attempted is
-  terminal-failed for predecessor unavailability. An attempted final is
-  reconciliation-only: idempotent transport may pace another receipt
-  confirmation but never re-enter provider delivery, while non-idempotent
-  transport ends in terminal ambiguity. An `awaiting_approval` final remains
-  parked. The shared assistant-engine resolver groups by session, turn, and
-  sequence base across route and target changes; local queueing, hosted
+  unavailable and blocks the entire active sequence. A missing, quarantined,
+  wrong-session, or conflicting linked intent is unavailable without relying
+  on the corrupt file's bytes. Any affected member proved never attempted is
+  terminal-failed for predecessor unavailability. An
+  attempted affected member is reconciliation-only: idempotent transport may
+  pace another receipt confirmation but never re-enter provider delivery,
+  while non-idempotent transport ends in terminal ambiguity. An
+  `awaiting_approval` member remains parked. Terminal ancestors of a marked
+  sequence are retained while any linked member remains nonterminal, so
+  age/count pruning cannot later release a successor after its failed
+  predecessor disappears. The shared assistant-engine resolver groups by
+  session and stable sequence base across route and target changes;
+  an exact idempotent replay may therefore reuse a persisted predecessor from
+  an earlier runtime turn id and still order a newly created final from the
+  retry without rewriting immutable receipt ownership. Local queueing, hosted
   collection/wake/preparation/drain, generic engine drain, and locked core
   dispatch all read or revalidate it. This contract applies only to explicitly
   marked recovery sequences and does not redefine ordinary outbox ordering.
@@ -581,7 +602,11 @@ Last verified: 2026-07-29
   no-reply eligibility, so earlier visible output is preserved without dropping
   the later media fence. Stateful media and final-action tools apply in request
   order, so receipt of a later request cannot suppress an earlier queued media
-  mutation. Progress remains an independently delivered visible output: an
+  mutation. A response-media result that completes after a steer updates or
+  creates a closed segment for the delivery context and selected target
+  captured when the tool request was accepted; it cannot merge into or relabel
+  the live media batch for the newer input. Progress remains an independently
+  delivered visible output: an
   in-flight progress send makes no-reply unavailable instead of being silently
   discarded. Final delivery reloads and verifies the artifact again before
   provider-entry bookkeeping so a post-attachment change, missing file,

@@ -1998,7 +1998,7 @@ describe("assistant delivery orchestration seam", () => {
         }),
     };
 
-    await deliverAssistantPrecedingReplies({
+    const [recoveryOutcome] = await deliverAssistantPrecedingReplies({
       input: recoveryContextInput,
       requiredSegmentSequenceInput: sequencedFinalContextInput,
       resolveSegmentDeliveryInput: async ({ input }) => ({
@@ -2018,6 +2018,10 @@ describe("assistant delivery orchestration seam", () => {
       sharedPlan: createSharedPlan(),
       turnId,
     });
+    expect(recoveryOutcome).toMatchObject({
+      intentId: "intent-required-recovery",
+      kind: "queued",
+    });
     await deliverAssistantReply({
       input: sequencedFinalContextInput,
       media: [
@@ -2028,6 +2032,12 @@ describe("assistant delivery orchestration seam", () => {
           url: "https://cdn.example.test/assistant/later-response-image.png",
         },
       ],
+      requiredBeforeFinalPredecessorIntentId:
+        recoveryOutcome?.kind === "queued" ||
+        recoveryOutcome?.kind === "sent" ||
+        recoveryOutcome?.kind === "failed"
+          ? recoveryOutcome.intentId
+          : null,
       response: "",
       session,
       sharedPlan: createSharedPlan(),
@@ -2041,16 +2051,21 @@ describe("assistant delivery orchestration seam", () => {
       deliveryCalls[1]?.[0]?.deliveryIdempotencyKey ?? null;
     expect(deliveryCalls.map((call) => ({
       deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+      requiredBeforeFinalPredecessorIntentId:
+        call[0]?.requiredBeforeFinalPredecessorIntentId,
       replyToMessageId: call[0]?.replyToMessageId,
     }))).toEqual([
       {
         deliveryIdempotencyKey:
           "delivery-new-context:required-before-final:segment:0",
+        requiredBeforeFinalPredecessorIntentId: null,
         replyToMessageId: "message-required-recovery",
       },
       {
         deliveryIdempotencyKey:
           "delivery-new-context:required-before-final",
+        requiredBeforeFinalPredecessorIntentId:
+          "intent-required-recovery",
         replyToMessageId: "message-final-media",
       },
     ]);
@@ -2064,6 +2079,141 @@ describe("assistant delivery orchestration seam", () => {
         turnId,
       },
     )).toBeLessThan(0);
+  });
+
+  it("does not dispatch later required segments after an earlier segment cannot create an intent", async () => {
+    const session = createAssistantSession();
+    const resolveSegmentDeliveryInput = vi.fn(async () => {
+      throw new Error("required segment target unavailable");
+    });
+    const laterMedia = {
+      alt: "Later required image",
+      kind: "image" as const,
+      source: "later-required-image",
+      url: "https://cdn.example.test/assistant/later-required-image.png",
+    };
+
+    const outcomes = await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-required-segments",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      requiredSegmentSequenceInput: {
+        deliverResponse: true,
+        deliveryIdempotencyKey:
+          "delivery-required-segments:required-before-final",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      resolveSegmentDeliveryInput,
+      segments: [
+        {
+          media: [],
+          requiredBeforeFinal: true,
+          response:
+            "An attachment couldn't be included in this reply.",
+        },
+        {
+          media: [laterMedia],
+          requiredBeforeFinal: true,
+          response: "",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-required-segments",
+    });
+
+    expect(resolveSegmentDeliveryInput).toHaveBeenCalledOnce();
+    expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        intentId: null,
+        kind: "failed",
+        media: [],
+      }),
+      expect.objectContaining({
+        intentId: null,
+        kind: "failed",
+        media: [laterMedia],
+      }),
+    ]);
+  });
+
+  it("marks a required reply incomplete when a later bubble cannot create its intent", async () => {
+    const session = createAssistantSession();
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-required-bubble-zero",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockRejectedValueOnce(new Error("required bubble outbox write failed"));
+
+    const outcomes = await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "delivery-required-bubbles",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      requiredSegmentSequenceInput: {
+        deliverResponse: true,
+        deliveryIdempotencyKey:
+          "delivery-required-bubbles:required-before-final",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [
+        {
+          media: [],
+          requiredBeforeFinal: true,
+          response: "Recovery first.\n---\nRecovery second.",
+        },
+      ],
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+          },
+        },
+      }),
+      turnId: "turn-required-bubbles",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(
+        (call) => ({
+          deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+          requiredBeforeFinalPredecessorIntentId:
+            call[0]?.requiredBeforeFinalPredecessorIntentId,
+        })
+      )
+    ).toEqual([
+      {
+        deliveryIdempotencyKey:
+          "delivery-required-bubbles:required-before-final:segment:0:bubble:0",
+        requiredBeforeFinalPredecessorIntentId: null,
+      },
+      {
+        deliveryIdempotencyKey:
+          "delivery-required-bubbles:required-before-final:segment:0",
+        requiredBeforeFinalPredecessorIntentId:
+          "intent-required-bubble-zero",
+      },
+    ]);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        intentId: null,
+        kind: "failed",
+      }),
+    ]);
   });
 
   it("composes preceding segment and bubble idempotency keys", async () => {

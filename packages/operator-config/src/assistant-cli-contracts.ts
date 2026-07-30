@@ -914,6 +914,8 @@ export const assistantOutboxIntentSchema = z
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
+    requiredBeforeFinalPredecessorIntentId:
+      assistantOutboxIntentIdSchema.nullable().optional(),
     deliveryTransportIdempotent: z.boolean().default(false),
     newsletterAuthorizationProof: z
       .string()

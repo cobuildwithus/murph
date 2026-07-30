@@ -362,7 +362,7 @@ function reconcileHostedAssistantRequiredBeforeFinalSequences(input: {
   const preferredIntentIds = new Set(input.preferredIntentIds);
   for (const intent of input.intents) {
     if (
-      !dependencyState.unavailableFinalIntentIds.has(intent.intentId)
+      !dependencyState.unavailableIntentIds.has(intent.intentId)
     ) {
       continue;
     }
@@ -1537,7 +1537,7 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
     resolveAssistantOutboxRequiredBeforeFinalDependencies(intents);
   const wakeEligibleIntents = intents.filter((intent) =>
     !dependencyState.blockedIntentIds.has(intent.intentId) ||
-    dependencyState.unavailableFinalIntentIds.has(intent.intentId)
+    dependencyState.unavailableIntentIds.has(intent.intentId)
   );
   let wakeAt: string | null = null;
 
@@ -1547,7 +1547,7 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
     const candidate = resolveHostedAssistantDeliveryBoundaryWakeAt(
       boundaryIntents,
       now,
-      dependencyState.unavailableFinalIntentIds,
+      dependencyState.unavailableIntentIds,
     );
     if (!candidate) {
       continue;
@@ -1563,14 +1563,14 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
 function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,
-  unavailableFinalIntentIds: ReadonlySet<string>,
+  unavailableIntentIds: ReadonlySet<string>,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(
       intent,
       now,
-      unavailableFinalIntentIds.has(intent.intentId),
+      unavailableIntentIds.has(intent.intentId),
     );
     if (!wakeAt) {
       continue;
@@ -1639,24 +1639,20 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
-  const hasRequiredFinalObservation = input.assistantDeliveryEffects.some(
-    (effect) =>
-      readAssistantOutboxRequiredBeforeFinalSequenceMember({
-        deliveryIdempotencyKey: effect.payload.idempotencyKey,
-        turnId: effect.payload.turnId,
-      })?.kind === "final",
-  );
-  const unavailableFinalIntentIds = hasRequiredFinalObservation
+  const requiredSequenceDependencies =
+    input.assistantDeliveryEffects.length > 0
     ? resolveAssistantOutboxRequiredBeforeFinalDependencies(
         await listAssistantOutboxIntents(input.vaultRoot),
-      ).unavailableFinalIntentIds
-    : new Set<string>();
+      )
+    : null;
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
   });
   for (const effect of input.assistantDeliveryEffects) {
-    if (unavailableFinalIntentIds.has(effect.effectId)) {
+    if (
+      requiredSequenceDependencies?.blockedIntentIds.has(effect.effectId)
+    ) {
       continue;
     }
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
@@ -2310,7 +2306,6 @@ function readHostedAssistantRequiredBeforeFinalSequenceKey(
   return member
     ? JSON.stringify([
         effect.payload.sessionId,
-        member.turnId,
         member.sequenceBaseKey,
       ])
     : null;

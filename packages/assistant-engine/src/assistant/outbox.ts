@@ -120,7 +120,6 @@ export type {
 export {
   buildAssistantOutboxRequiredBeforeFinalSequenceBase,
   compareAssistantOutboxDeliverySequenceOrder,
-  isAssistantOutboxRequiredBeforeFinalPair,
   isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted,
   isAssistantOutboxReplyBubbleSuccessor,
   readAssistantOutboxRequiredBeforeFinalSequenceMember,
@@ -280,6 +279,8 @@ export type AssistantOutboxCreateIntentInput = {
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   newsletterAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
+  requiredBeforeFinalPredecessorIntentId?:
+    AssistantOutboxIntent['requiredBeforeFinalPredecessorIntentId']
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -342,6 +343,22 @@ export async function createAssistantOutboxIntent(
       ...rawTargetIdentity,
     })
     const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
+    const requiredBeforeFinalPredecessorIntentId =
+      normalizeAssistantOutboxRequiredBeforeFinalPredecessorIntentId(
+        input.requiredBeforeFinalPredecessorIntentId,
+      )
+    if (
+      requiredBeforeFinalPredecessorIntentId !== undefined &&
+      readAssistantOutboxRequiredBeforeFinalSequenceMember({
+        deliveryIdempotencyKey,
+        turnId: input.turnId,
+      }) === null
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_REQUIRED_SEQUENCE_KEY_INVALID',
+        'Assistant outbox required predecessor links require a marked delivery sequence key.',
+      )
+    }
     const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds(
       input.answeredMailboxItemIds ?? [],
     )
@@ -371,6 +388,10 @@ export async function createAssistantOutboxIntent(
         intent: existing,
         operation,
         persistedTarget,
+      })
+      assertAssistantOutboxIntentRequiredBeforeFinalPredecessorMatches({
+        intent: existing,
+        requiredBeforeFinalPredecessorIntentId,
       })
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
@@ -453,6 +474,9 @@ export async function createAssistantOutboxIntent(
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
+      ...(requiredBeforeFinalPredecessorIntentId === undefined
+        ? {}
+        : { requiredBeforeFinalPredecessorIntentId }),
       deliveryTransportIdempotent,
       newsletterAuthorizationProof: input.newsletterAuthorizationProof ?? null,
       answeredMailboxItemIds,
@@ -648,14 +672,17 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
     const requiredSequenceMember =
       readAssistantOutboxRequiredBeforeFinalSequenceMember(intent)
-    if (requiredSequenceMember) {
+    if (
+      requiredSequenceMember ||
+      intent.requiredBeforeFinalPredecessorIntentId !== undefined
+    ) {
       const dependencyState =
         resolveAssistantOutboxRequiredBeforeFinalDependencies(
           await listAssistantOutboxIntentsLocalStore(input.vault),
         )
       if (dependencyState.blockedIntentIds.has(intent.intentId)) {
         if (
-          dependencyState.unavailableFinalIntentIds.has(intent.intentId) &&
+          dependencyState.unavailableIntentIds.has(intent.intentId) &&
           isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(intent)
         ) {
           return {
@@ -664,7 +691,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           }
         }
         if (
-          requiredSequenceMember.kind === 'final' &&
+          dependencyState.unavailableIntentIds.has(intent.intentId) &&
           intent.status !== 'awaiting_approval' &&
           !isAssistantOutboxRequiredBeforeFinalIntentProvenUnattempted(intent)
         ) {
@@ -680,7 +707,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         }
       }
       if (
-        requiredSequenceMember.kind === 'final' &&
+        requiredSequenceMember?.kind === 'final' &&
         intent.status === 'retryable' &&
         !inferAssistantOutboxDeliveryTransportIdempotent(intent) &&
         intent.lastError?.code ===
@@ -1110,7 +1137,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       sanitizeAssistantOutboxIntentForPersistence({
         ...deliveredIntent,
         deliveryIdempotencyKey:
-          delivery.idempotencyKey ?? deliveredIntent.deliveryIdempotencyKey,
+          deliveredIntent.requiredBeforeFinalPredecessorIntentId !== undefined
+            ? deliveredIntent.deliveryIdempotencyKey
+            : delivery.idempotencyKey ??
+              deliveredIntent.deliveryIdempotencyKey,
         deliveryTransportIdempotent,
       }),
     )
@@ -1296,6 +1326,8 @@ export async function deliverAssistantOutboxMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  requiredBeforeFinalPredecessorIntentId?:
+    AssistantOutboxIntent['requiredBeforeFinalPredecessorIntentId']
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1331,6 +1363,12 @@ export async function deliverAssistantOutboxMessage(input: {
     ...(input.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: input.nativeReplyRequested }),
+    ...(input.requiredBeforeFinalPredecessorIntentId === undefined
+      ? {}
+      : {
+          requiredBeforeFinalPredecessorIntentId:
+            input.requiredBeforeFinalPredecessorIntentId,
+        }),
     replyToMessageId: input.replyToMessageId ?? null,
     subject: input.subject ?? null,
     sessionId: input.sessionId,
@@ -1819,7 +1857,7 @@ export async function drainAssistantOutboxLocal(input: {
     shouldDispatchAssistantOutboxIntent(intent, now) &&
     (
       !requiredDependencyState.blockedIntentIds.has(intent.intentId) ||
-      requiredDependencyState.unavailableFinalIntentIds.has(intent.intentId)
+      requiredDependencyState.unavailableIntentIds.has(intent.intentId)
     )
   )
   const limit = Math.max(0, Math.trunc(input.limit ?? due.length))
@@ -2432,6 +2470,22 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
   )
 }
 
+function assertAssistantOutboxIntentRequiredBeforeFinalPredecessorMatches(input: {
+  intent: AssistantOutboxIntent
+  requiredBeforeFinalPredecessorIntentId:
+    AssistantOutboxIntent['requiredBeforeFinalPredecessorIntentId']
+}): void {
+  if (input.requiredBeforeFinalPredecessorIntentId === undefined) {
+    return
+  }
+  if (
+    input.intent.requiredBeforeFinalPredecessorIntentId !==
+    input.requiredBeforeFinalPredecessorIntentId
+  ) {
+    throw createAssistantOutboxDedupeEffectMismatchError()
+  }
+}
+
 function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
   answeredMailboxItemIds: readonly string[]
   intent: AssistantOutboxIntent
@@ -2549,6 +2603,22 @@ function normalizeAssistantOutboxAnsweredMailboxItemIds(
   }
 
   return result
+}
+
+function normalizeAssistantOutboxRequiredBeforeFinalPredecessorIntentId(
+  value: string | null | undefined,
+): string | null | undefined {
+  if (value === undefined || value === null) {
+    return value
+  }
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_OUTBOX_REQUIRED_PREDECESSOR_INVALID',
+      'Assistant outbox required predecessor intent id must not be blank.',
+    )
+  }
+  return normalized
 }
 
 function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

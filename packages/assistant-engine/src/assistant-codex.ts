@@ -3461,6 +3461,162 @@ async function runCodexAppServerTurnOnProcess(
       entry.patch.kind === 'none'
     )
 
+  const applyResponseMediaListPatch = (
+    currentMedia: readonly AssistantResponseMedia[],
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+  ): AssistantResponseMedia[] =>
+    patch.op === 'replace'
+      ? [...patch.media]
+      : normalizeAssistantResponseMediaList([
+          ...currentMedia,
+          ...patch.media,
+        ])
+
+  const findResponseSegmentForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): CodexAppServerResponseSegment | null => {
+    if (
+      trailingSteerCandidate?.deliveryContextOrdinal ===
+        deliveryContextOrdinal
+    ) {
+      return trailingSteerCandidate
+    }
+    return precedingAgentMessageSegments.find((segment) =>
+      segment.deliveryContextOrdinal === deliveryContextOrdinal
+    ) ?? null
+  }
+
+  const insertClosedResponseSegment = (
+    segment: CodexAppServerResponseSegment,
+  ): void => {
+    const latestPrecedingDeliveryContextOrdinal =
+      precedingAgentMessageSegments.at(-1)?.deliveryContextOrdinal ?? -1
+    if (
+      (
+        trailingSteerCandidate === null &&
+        latestPrecedingDeliveryContextOrdinal <
+          segment.deliveryContextOrdinal
+      ) ||
+      (
+        trailingSteerCandidate !== null &&
+        trailingSteerCandidate.deliveryContextOrdinal <
+          segment.deliveryContextOrdinal
+      )
+    ) {
+      promoteTrailingSteerCandidate()
+      trailingSteerCandidate = segment
+      return
+    }
+
+    const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
+      (existingSegment) =>
+        existingSegment.deliveryContextOrdinal >
+          segment.deliveryContextOrdinal,
+    )
+    if (laterSegmentIndex < 0) {
+      precedingAgentMessageSegments.push(segment)
+    } else {
+      precedingAgentMessageSegments.splice(laterSegmentIndex, 0, segment)
+    }
+  }
+
+  const removeBlankResponseSegment = (
+    segment: CodexAppServerResponseSegment,
+  ): void => {
+    if (
+      segment.media.length > 0 ||
+      normalizeNullableString(segment.response) !== null ||
+      segment.requiredBeforeFinal
+    ) {
+      return
+    }
+    if (trailingSteerCandidate === segment) {
+      trailingSteerCandidate = null
+      return
+    }
+    const segmentIndex = precedingAgentMessageSegments.indexOf(segment)
+    if (segmentIndex >= 0) {
+      precedingAgentMessageSegments.splice(segmentIndex, 1)
+    }
+  }
+
+  const applyResponseMediaPatchToClosedContext = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    const existingSegment = findResponseSegmentForDeliveryContext(
+      deliveryContextOrdinal,
+    )
+    if (existingSegment) {
+      existingSegment.media = applyResponseMediaListPatch(
+        existingSegment.media,
+        patch,
+      )
+      const targetInputId = resolveReplyTargetPatch(
+        deliveryContextOrdinal,
+      )?.targetInputId ?? null
+      if (targetInputId) {
+        existingSegment.targetInputId = targetInputId
+      }
+      removeBlankResponseSegment(existingSegment)
+      return
+    }
+
+    const media = applyResponseMediaListPatch([], patch)
+    if (media.length === 0) {
+      return
+    }
+    const targetInputId = resolveReplyTargetPatch(
+      deliveryContextOrdinal,
+    )?.targetInputId ?? null
+    insertClosedResponseSegment({
+      deliveryContextOrdinal,
+      media,
+      response: '',
+      ...(targetInputId ? { targetInputId } : {}),
+    })
+  }
+
+  const materializeLiveResponseMedia = (): void => {
+    if (responseMedia.length === 0) {
+      responseMediaDeliveryContextOrdinal = null
+      return
+    }
+    const deliveryContextOrdinal =
+      responseMediaDeliveryContextOrdinal ?? currentDeliveryContextOrdinal()
+    applyResponseMediaPatchToClosedContext(
+      {
+        media: responseMedia,
+        op: 'append',
+      },
+      deliveryContextOrdinal,
+    )
+    responseMedia = []
+    responseMediaDeliveryContextOrdinal = null
+  }
+
+  const responseMediaForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): readonly AssistantResponseMedia[] => {
+    const segment = findResponseSegmentForDeliveryContext(
+      deliveryContextOrdinal,
+    )
+    if (segment) {
+      return segment.media
+    }
+    return responseMedia.length === 0 ||
+        responseMediaDeliveryContextOrdinal === null ||
+        responseMediaDeliveryContextOrdinal === deliveryContextOrdinal
+      ? responseMedia
+      : []
+  }
+
   const applyResponseMediaPatch = (
     patch: {
       media: AssistantResponseMedia[]
@@ -3474,10 +3630,34 @@ async function runCodexAppServerTurnOnProcess(
         'Response media cannot be attached after finish_without_reply.',
       )
     }
-    responseMedia = patch.op === 'replace'
-      ? patch.media
-      : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
-    responseMediaDeliveryContextOrdinal = deliveryContextOrdinal
+    const currentContextOrdinal = currentDeliveryContextOrdinal()
+    const liveMediaDeliveryContextOrdinal =
+      responseMedia.length === 0
+        ? null
+        : responseMediaDeliveryContextOrdinal ?? currentContextOrdinal
+    if (
+      liveMediaDeliveryContextOrdinal !== null &&
+      liveMediaDeliveryContextOrdinal < currentContextOrdinal
+    ) {
+      materializeLiveResponseMedia()
+    }
+    if (deliveryContextOrdinal < currentContextOrdinal) {
+      applyResponseMediaPatchToClosedContext(
+        patch,
+        deliveryContextOrdinal,
+      )
+      return
+    }
+    if (
+      responseMedia.length > 0 &&
+      responseMediaDeliveryContextOrdinal !== null &&
+      responseMediaDeliveryContextOrdinal !== deliveryContextOrdinal
+    ) {
+      materializeLiveResponseMedia()
+    }
+    responseMedia = applyResponseMediaListPatch(responseMedia, patch)
+    responseMediaDeliveryContextOrdinal =
+      responseMedia.length > 0 ? deliveryContextOrdinal : null
   }
 
   const resolveReplyRequiredPatchThrough = (
@@ -3520,6 +3700,9 @@ async function runCodexAppServerTurnOnProcess(
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
     const trailingSteerCandidateOrdinal =
       trailingSteerCandidate?.deliveryContextOrdinal
+    const responseSegment = findResponseSegmentForDeliveryContext(
+      deliveryContextOrdinal,
+    )
     if (hasReplyRequiredPatchThrough(deliveryContextOrdinal)) {
       return false
     }
@@ -3536,6 +3719,16 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseMedia.length > 0) {
+      return false
+    }
+    if (
+      responseSegment &&
+      (
+        responseSegment.media.length > 0 ||
+        normalizeNullableString(responseSegment.response) !== null ||
+        responseSegment.requiredBeforeFinal
+      )
+    ) {
       return false
     }
     if (
@@ -3948,7 +4141,9 @@ async function runCodexAppServerTurnOnProcess(
           fetchImpl: input.fetchImpl,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-          currentResponseMedia: responseMedia,
+          currentResponseMedia: responseMediaForDeliveryContext(
+            dynamicToolRequestDeliveryContextOrdinal,
+          ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
@@ -4060,6 +4255,13 @@ async function runCodexAppServerTurnOnProcess(
             patch: result.replyTargetPatch,
           },
         ]
+        const responseSegment = findResponseSegmentForDeliveryContext(
+          dynamicToolDeliveryContextOrdinal,
+        )
+        if (responseSegment) {
+          responseSegment.targetInputId =
+            result.replyTargetPatch.targetInputId
+        }
       }
       if (
         dynamicToolRequest.kind === 'send-progress-update' &&
@@ -4265,17 +4467,41 @@ async function runCodexAppServerTurnOnProcess(
         input.onFirstAssistantResponseCompleted?.()
       }
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
-      if (completedFinalAgentMessage !== null) {
-        const completedResponseDeliveryContextOrdinal = Math.max(
-          0,
-          completedUserMessageOrdinal,
-        )
+      const completedResponseDeliveryContextOrdinal = Math.max(
+        0,
+        completedUserMessageOrdinal,
+      )
+      const mediaOnlyResponseDeliveryContextOrdinal =
+        completedFinalAgentMessage === null &&
+          completedUserMessageOrdinal >= 0 &&
+          responseMedia.length > 0 &&
+          (
+            responseMediaDeliveryContextOrdinal === null ||
+            responseMediaDeliveryContextOrdinal <=
+              completedResponseDeliveryContextOrdinal
+          )
+          ? responseMediaDeliveryContextOrdinal ??
+            completedResponseDeliveryContextOrdinal
+          : null
+      if (
+        completedFinalAgentMessage !== null ||
+        mediaOnlyResponseDeliveryContextOrdinal !== null
+      ) {
+        if (completedFinalAgentMessage === null) {
+          // Append-style media can complete a context without a final text
+          // item. Close that media at the steer boundary before a later tool
+          // appends media owned by the next accepted input.
+          promoteTrailingSteerCandidate()
+        }
+        const responseDeliveryContextOrdinal =
+          mediaOnlyResponseDeliveryContextOrdinal ??
+          completedResponseDeliveryContextOrdinal
         const completedResponseTargetInputId = resolveReplyTargetPatch(
-          completedResponseDeliveryContextOrdinal,
+          responseDeliveryContextOrdinal,
         )?.targetInputId ?? null
         trailingSteerCandidate = {
-          deliveryContextOrdinal: completedResponseDeliveryContextOrdinal,
-          response: completedFinalAgentMessage,
+          deliveryContextOrdinal: responseDeliveryContextOrdinal,
+          response: completedFinalAgentMessage ?? '',
           media: [...responseMedia],
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
@@ -4857,6 +5083,13 @@ async function runCodexAppServerTurnOnProcess(
       assistantStreamOrder,
     }) ?? ''
   const latestDeliveryContextOrdinal = Math.max(0, completedUserMessageOrdinal)
+  if (
+    responseMedia.length > 0 &&
+    responseMediaDeliveryContextOrdinal !== null &&
+    responseMediaDeliveryContextOrdinal < latestDeliveryContextOrdinal
+  ) {
+    materializeLiveResponseMedia()
+  }
   const latestReplyRequiredPatch = resolveReplyRequiredPatchThrough(
     latestDeliveryContextOrdinal,
   )
@@ -4899,11 +5132,20 @@ async function runCodexAppServerTurnOnProcess(
   }
   const selectedFinalMessage =
     finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  const requiredRecoveryDeliveryContextOrdinal =
-    normalizeNullableString(selectedFinalMessage) === null
-      ? latestReplyRequiredPatch?.deliveryContextOrdinal ?? null
+  const normalizedSelectedFinalMessage =
+    normalizeNullableString(selectedFinalMessage)
+  const selectedFinalMessageDeliveryContextOrdinal =
+    normalizedSelectedFinalMessage !== null
+      ? finalTrailingSteerCandidate?.deliveryContextOrdinal ??
+        latestDeliveryContextOrdinal
       : null
-  const finalResponseMedia =
+  const requiredRecoveryDeliveryContextOrdinal =
+    latestReplyRequiredPatch !== null &&
+      selectedFinalMessageDeliveryContextOrdinal !==
+        latestReplyRequiredPatch.deliveryContextOrdinal
+      ? latestReplyRequiredPatch.deliveryContextOrdinal
+      : null
+  let finalResponseMedia =
     latestFinalActionPatch?.kind === 'none'
       ? responseMedia
       : suppressTrailingSteerCandidateForEarlierNoReply
@@ -4920,33 +5162,146 @@ async function runCodexAppServerTurnOnProcess(
         ? finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
         : responseMediaDeliveryContextOrdinal ?? latestDeliveryContextOrdinal
-  const laterMediaDeliveryContextOrdinal =
-    requiredRecoveryDeliveryContextOrdinal !== null &&
-    finalResponseMediaDeliveryContextOrdinal !== null &&
-    finalResponseMediaDeliveryContextOrdinal >
-      requiredRecoveryDeliveryContextOrdinal
-      ? finalResponseMediaDeliveryContextOrdinal
-      : null
+  let laterFinalDeliveryContextOrdinal: number | null = null
+  if (requiredRecoveryDeliveryContextOrdinal !== null) {
+    if (
+      selectedFinalMessageDeliveryContextOrdinal !== null &&
+      selectedFinalMessageDeliveryContextOrdinal >
+        requiredRecoveryDeliveryContextOrdinal
+    ) {
+      laterFinalDeliveryContextOrdinal =
+        selectedFinalMessageDeliveryContextOrdinal
+    } else if (
+      finalResponseMediaDeliveryContextOrdinal !== null &&
+      finalResponseMediaDeliveryContextOrdinal >
+        requiredRecoveryDeliveryContextOrdinal
+    ) {
+      laterFinalDeliveryContextOrdinal =
+        finalResponseMediaDeliveryContextOrdinal
+    }
+  }
   const synthesizedRecoveryMessage =
     "An attachment couldn't be included in this reply."
   if (
-    laterMediaDeliveryContextOrdinal !== null &&
+    laterFinalDeliveryContextOrdinal !== null &&
     requiredRecoveryDeliveryContextOrdinal !== null
   ) {
     const recoveryTarget = resolveReplyTargetPatch(
       requiredRecoveryDeliveryContextOrdinal,
     )?.targetInputId ?? null
-    precedingAgentMessageSegments.push({
-      deliveryContextOrdinal: requiredRecoveryDeliveryContextOrdinal,
-      media: [],
-      requiredBeforeFinal: true,
-      response: synthesizedRecoveryMessage,
-      ...(recoveryTarget ? { targetInputId: recoveryTarget } : {}),
-    })
+    const recoveryResponseMedia =
+      finalResponseMediaDeliveryContextOrdinal ===
+        requiredRecoveryDeliveryContextOrdinal
+        ? finalResponseMedia
+        : []
+    if (recoveryResponseMedia.length > 0) {
+      finalResponseMedia = []
+    }
+    const promotedRecoverySegment =
+      precedingAgentMessageSegments.find((segment) =>
+        segment.deliveryContextOrdinal ===
+          requiredRecoveryDeliveryContextOrdinal
+      )
+    if (promotedRecoverySegment) {
+      if (normalizeNullableString(promotedRecoverySegment.response) === null) {
+        promotedRecoverySegment.response = synthesizedRecoveryMessage
+      }
+      if (recoveryResponseMedia.length > 0) {
+        promotedRecoverySegment.media = normalizeAssistantResponseMediaList([
+          ...promotedRecoverySegment.media,
+          ...recoveryResponseMedia,
+        ])
+      }
+      promotedRecoverySegment.requiredBeforeFinal = true
+      if (recoveryTarget) {
+        promotedRecoverySegment.targetInputId = recoveryTarget
+      }
+    } else {
+      const recoverySegment: CodexAppServerResponseSegment = {
+        deliveryContextOrdinal: requiredRecoveryDeliveryContextOrdinal,
+        media: [...recoveryResponseMedia],
+        requiredBeforeFinal: true,
+        response: synthesizedRecoveryMessage,
+        ...(recoveryTarget ? { targetInputId: recoveryTarget } : {}),
+      }
+      const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
+        (segment) =>
+          segment.deliveryContextOrdinal >
+            requiredRecoveryDeliveryContextOrdinal,
+      )
+      if (laterSegmentIndex < 0) {
+        precedingAgentMessageSegments.push(recoverySegment)
+      } else {
+        precedingAgentMessageSegments.splice(
+          laterSegmentIndex,
+          0,
+          recoverySegment,
+        )
+      }
+    }
+    if (
+      finalResponseMedia.length > 0 &&
+      finalResponseMediaDeliveryContextOrdinal !== null &&
+      finalResponseMediaDeliveryContextOrdinal >
+        requiredRecoveryDeliveryContextOrdinal &&
+      finalResponseMediaDeliveryContextOrdinal <
+        laterFinalDeliveryContextOrdinal
+    ) {
+      const mediaTarget = resolveReplyTargetPatch(
+        finalResponseMediaDeliveryContextOrdinal,
+      )?.targetInputId ?? null
+      const promotedMediaSegment =
+        precedingAgentMessageSegments.find((segment) =>
+          segment.deliveryContextOrdinal ===
+            finalResponseMediaDeliveryContextOrdinal
+        )
+      if (promotedMediaSegment) {
+        promotedMediaSegment.media = normalizeAssistantResponseMediaList([
+          ...promotedMediaSegment.media,
+          ...finalResponseMedia,
+        ])
+        if (mediaTarget) {
+          promotedMediaSegment.targetInputId = mediaTarget
+        }
+      } else {
+        const mediaSegment: CodexAppServerResponseSegment = {
+          deliveryContextOrdinal: finalResponseMediaDeliveryContextOrdinal,
+          media: [...finalResponseMedia],
+          requiredBeforeFinal: true,
+          response: '',
+          ...(mediaTarget ? { targetInputId: mediaTarget } : {}),
+        }
+        const laterSegmentIndex = precedingAgentMessageSegments.findIndex(
+          (segment) =>
+            segment.deliveryContextOrdinal >
+              finalResponseMediaDeliveryContextOrdinal,
+        )
+        if (laterSegmentIndex < 0) {
+          precedingAgentMessageSegments.push(mediaSegment)
+        } else {
+          precedingAgentMessageSegments.splice(
+            laterSegmentIndex,
+            0,
+            mediaSegment,
+          )
+        }
+      }
+      finalResponseMedia = []
+    }
+    for (const segment of precedingAgentMessageSegments) {
+      if (
+        segment.deliveryContextOrdinal >=
+          requiredRecoveryDeliveryContextOrdinal &&
+        segment.deliveryContextOrdinal <
+          laterFinalDeliveryContextOrdinal
+      ) {
+        segment.requiredBeforeFinal = true
+      }
+    }
   }
   const finalDeliveryContextOrdinal =
-    laterMediaDeliveryContextOrdinal !== null
-      ? laterMediaDeliveryContextOrdinal
+    laterFinalDeliveryContextOrdinal !== null
+      ? laterFinalDeliveryContextOrdinal
       : requiredRecoveryDeliveryContextOrdinal !== null
         ? requiredRecoveryDeliveryContextOrdinal
         : latestFinalActionPatch?.kind === 'none'
@@ -4963,8 +5318,11 @@ async function runCodexAppServerTurnOnProcess(
     ? { kind: 'none' }
     : null
   const modelFinalMessage =
-    laterMediaDeliveryContextOrdinal !== null
-      ? ''
+    laterFinalDeliveryContextOrdinal !== null
+      ? selectedFinalMessageDeliveryContextOrdinal ===
+          laterFinalDeliveryContextOrdinal
+        ? selectedFinalMessage
+        : ''
       : requiredRecoveryDeliveryContextOrdinal !== null
         ? synthesizedRecoveryMessage
         : noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply

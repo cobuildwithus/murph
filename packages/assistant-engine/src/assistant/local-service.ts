@@ -1825,8 +1825,11 @@ export async function sendAssistantMessageLocal(
               requiredPrecedingDeliveryQueued = true
             }
             const requiredRecoveryPrecedesFinal =
-              requiredOutcome?.kind === 'sent' ||
-              requiredOutcome?.kind === 'queued'
+              (
+                requiredOutcome?.kind === 'sent' ||
+                requiredOutcome?.kind === 'queued'
+              ) &&
+              requiredOutcome.intentId !== null
             if (requiredRecoveryPrecedesFinal) {
               continue
             }
@@ -1849,6 +1852,26 @@ export async function sendAssistantMessageLocal(
             break
           }
         }
+        const requiredPrecedingSequenceMissingIntent =
+          [...requiredPrecedingSegmentIndexes].some((requiredIndex) => {
+            const requiredOutcome =
+              precedingDeliveryOutcomes[requiredIndex] ?? null
+            return (
+              requiredOutcome === null ||
+              requiredOutcome.kind === 'not-requested' ||
+              requiredOutcome.intentId === null
+            )
+          })
+        const finalRequiredPredecessorOutcome =
+          requiredPrecedingSegmentIndexes.size === 0
+            ? null
+            : precedingDeliveryOutcomes[
+                [...requiredPrecedingSegmentIndexes].at(-1)!
+              ] ?? null
+        const finalRequiredPredecessorIntentId =
+          finalRequiredPredecessorOutcome?.kind === 'not-requested'
+            ? null
+            : finalRequiredPredecessorOutcome?.intentId ?? null
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
         const replyDispatchStartedAt = Date.now()
@@ -1864,7 +1887,11 @@ export async function sendAssistantMessageLocal(
           typeof normalizeAssistantDeliveryError
         > | null = null
         const finalReplyCanPersist = finalResponseText !== null
-        if (finalReplyCanPersist && providerResult.targetInputId) {
+        if (
+          finalReplyCanPersist &&
+          !requiredPrecedingSequenceMissingIntent &&
+          providerResult.targetInputId
+        ) {
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
@@ -1883,7 +1910,18 @@ export async function sendAssistantMessageLocal(
         }
         const selectedFinalDeliveryOutcome =
           finalResponseText !== null
-            ? finalTargetResolutionError
+            ? (
+                requiredPrecedingSequenceMissingIntent &&
+                requiredPrecedingDeliveryInterruption?.kind === 'failed'
+              )
+              ? {
+                  kind: 'failed' as const,
+                  error: requiredPrecedingDeliveryInterruption.error,
+                  intentId: null,
+                  media: [...(providerResult.responseMedia ?? [])],
+                  session: deliverySession,
+                }
+              : finalTargetResolutionError
               ? {
                   kind: 'failed' as const,
                   error: finalTargetResolutionError,
@@ -1894,6 +1932,12 @@ export async function sendAssistantMessageLocal(
               : await dispatchAssistantReply({
                   input: finalDeliveryInput,
                   media: providerResult.responseMedia ?? [],
+                  ...(requiredPrecedingSegmentIndexes.size === 0
+                    ? {}
+                    : {
+                        requiredBeforeFinalPredecessorIntentId:
+                          finalRequiredPredecessorIntentId,
+                      }),
                   response: rawFinalResponseText ?? '',
                   session: deliverySession,
                   sharedPlan,

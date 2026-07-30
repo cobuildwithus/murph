@@ -13,9 +13,9 @@ verification scheduling are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
-Private assistant-media recovery ordering, retained image-completion
-checkpoint ownership, and its runtime rollout floor are jointly specified by
-`ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`,
+Delivery-context-owned private assistant-media recovery ordering, retained
+image-completion checkpoint ownership, and its runtime rollout floor are
+jointly specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/references/hosted-runtime-protocol.md`, and
 `apps/cloudflare/DEPLOY.md`.
 

@@ -33,7 +33,7 @@ export async function buildAssistantOutboxSummary(
       ) &&
       (
         !requiredDependencyState.blockedIntentIds.has(intent.intentId) ||
-        requiredDependencyState.unavailableFinalIntentIds.has(intent.intentId)
+        requiredDependencyState.unavailableIntentIds.has(intent.intentId)
       ) &&
       intent.nextAttemptAt &&
       (!nextAttemptAt || intent.nextAttemptAt < nextAttemptAt)
