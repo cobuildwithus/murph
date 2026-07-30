@@ -25,7 +25,8 @@ Updated: 2026-07-30
 ## Scope
 
 - In scope: sponsorship notification prompt text, its focused regression proof,
-  and the matching hosted-usage product contract.
+  the creative-notification system duration contract, their focused regression
+  proofs, and the matching owner docs/product contract.
 - Out of scope: sponsorship delivery/retry behavior, payment fulfillment,
   generated-song tooling, UI, schemas, or provider configuration.
 
@@ -64,6 +65,10 @@ Updated: 2026-07-30
 - Product-experience review returned `NO FINDINGS`; retain the explicit evidence
   gap that deterministic prompt proof does not demonstrate real generated audio
   quality, duration, or sensitive-context restraint.
+- Preliminary ReviewGPT found that the higher-priority creative system prompt
+  still allowed `durationSeconds` 5–15. Resolve the single conflicting owner by
+  fixing that tool argument at 15 and leaving the dynamic task to own the
+  room-specific premise and lyric pacing.
 
 ## Verification
 
@@ -71,6 +76,7 @@ Updated: 2026-07-30
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-group-sponsorship-notification.test.ts`
   - `pnpm --dir apps/web typecheck:prepared`
   - `pnpm --dir apps/web exec eslint src/lib/hosted-groups/group-sponsorship-notification.ts test/hosted-group-sponsorship-notification.test.ts`
+  - focused assistant-engine planning test and package typecheck
   - `pnpm docs:drift`
   - `git diff --check`
 - Expected outcomes: focused prompt assertions pass, app types remain valid,
