@@ -83,6 +83,19 @@ export const POST = withJsonError(async (request: Request) => {
           message: "Your Murph access is not active.",
         });
       }
+      if (!isEnvironmentVoiceCaptureFresh(upload.capturedAt)) {
+        const existing =
+          await readHostedMailboxWakeAfterDedupeLockTx({
+            dedupeKey: eventId,
+            tx,
+            userId: auth.member.id,
+          });
+        if (!isExactEnvironmentVoiceRetry(existing, upload)) {
+          throw invalidEnvironmentVoiceUpload(
+            "The recording time is invalid.",
+          );
+        }
+      }
       return await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
         envelope,
         tx,
@@ -166,10 +179,7 @@ async function readEnvironmentVoiceUpload(request: Request): Promise<{
   }
   const capturedAt = request.headers.get(CAPTURED_AT_HEADER)?.trim() ?? "";
   const capturedAtMs = Date.parse(capturedAt);
-  if (
-    !Number.isFinite(capturedAtMs)
-    || Math.abs(Date.now() - capturedAtMs) > CAPTURE_TIME_TOLERANCE_MS
-  ) {
+  if (!Number.isFinite(capturedAtMs)) {
     throw invalidEnvironmentVoiceUpload("The recording time is invalid.");
   }
 
@@ -208,6 +218,37 @@ async function readEnvironmentVoiceUpload(request: Request): Promise<{
     durationMs,
     sha256,
   };
+}
+
+function isEnvironmentVoiceCaptureFresh(capturedAt: string): boolean {
+  return Math.abs(Date.now() - Date.parse(capturedAt))
+    <= CAPTURE_TIME_TOLERANCE_MS;
+}
+
+function isExactEnvironmentVoiceRetry(
+  wake: Awaited<
+    ReturnType<typeof readHostedMailboxWakeAfterDedupeLockTx>
+  >,
+  upload: {
+    bytes: Uint8Array;
+    captureId: string;
+    capturedAt: string;
+    contentType:
+      (typeof HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES)[number];
+    durationMs: number;
+    sha256: string;
+  },
+): boolean {
+  if (!wake || wake.kind !== "environment-voice.captured") {
+    return false;
+  }
+  const existing = wake.environmentVoice;
+  return existing.byteLength === upload.bytes.byteLength
+    && existing.captureId === upload.captureId
+    && existing.capturedAt === upload.capturedAt
+    && existing.contentType === upload.contentType
+    && existing.durationMs === upload.durationMs
+    && existing.sha256 === upload.sha256;
 }
 
 function environmentVoiceSignatureMatches(

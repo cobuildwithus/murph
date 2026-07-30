@@ -147,6 +147,115 @@ describe("environment voice upload route", () => {
     expect(response.status).toBe(415);
     expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
   });
+
+  it("reuses and re-signals an exact retained recording after the freshness window", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    const capturedAt = "2026-07-30T08:00:00.000Z";
+    const capturedAtMs = Date.parse(capturedAt);
+    const firstAudioKey = "a".repeat(40);
+    const duplicateAudioKey = "b".repeat(40);
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(capturedAtMs);
+    mocks.stageEnvironmentVoice
+      .mockResolvedValueOnce({
+        audioKey: firstAudioKey,
+        byteLength: bytes.byteLength,
+        sha256: captureId,
+      })
+      .mockResolvedValueOnce({
+        audioKey: duplicateAudioKey,
+        byteLength: bytes.byteLength,
+        sha256: captureId,
+      });
+    mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        claimedAudioKey: firstAudioKey,
+        dedupeConflict: false,
+        duplicate: false,
+        item: { id: "mailbox_123" },
+      })
+      .mockResolvedValueOnce({
+        claimedAudioKey: firstAudioKey,
+        dedupeConflict: false,
+        duplicate: true,
+        item: { id: "mailbox_123" },
+      });
+    mocks.signalHostedMailboxAppendRuntime
+      .mockRejectedValueOnce(new Error("ambiguous signal failure"))
+      .mockResolvedValueOnce(undefined);
+
+    try {
+      const firstResponse = await POST(createRequest({
+        bytes,
+        captureId,
+        capturedAt,
+      }));
+      expect(firstResponse.status).toBe(500);
+
+      nowSpy.mockReturnValue(capturedAtMs + 11 * 60 * 1_000);
+      mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValueOnce(
+        createExistingEnvironmentVoiceWake({
+          audioKey: firstAudioKey,
+          byteLength: bytes.byteLength,
+          captureId,
+          capturedAt,
+        }),
+      );
+
+      const retryResponse = await POST(createRequest({
+        bytes,
+        captureId,
+        capturedAt,
+      }));
+
+      expect(retryResponse.status).toBe(202);
+      await expect(retryResponse.json()).resolves.toEqual({
+        accepted: true,
+        captureId,
+        duplicate: true,
+      });
+      expect(mocks.deleteEnvironmentVoice).toHaveBeenCalledWith({
+        audioKey: duplicateAudioKey,
+        userId: "member_123",
+      });
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenLastCalledWith({
+        expectedUserId: "member_123",
+        mailboxItemId: "mailbox_123",
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("still rejects a stale first-seen recording", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    const capturedAt = "2026-07-30T08:00:00.000Z";
+    const nowSpy = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.parse(capturedAt) + 11 * 60 * 1_000);
+    mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValue(null);
+
+    try {
+      const response = await POST(createRequest({
+        bytes,
+        captureId,
+        capturedAt,
+      }));
+
+      expect(response.status).toBe(400);
+      expect(
+        mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx,
+      ).not.toHaveBeenCalled();
+      expect(mocks.deleteEnvironmentVoice).toHaveBeenCalledWith({
+        audioKey: "a".repeat(40),
+        userId: "member_123",
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });
 
 function createRequest(input: {
@@ -179,4 +288,24 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...digest]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function createExistingEnvironmentVoiceWake(input: {
+  audioKey: string;
+  byteLength: number;
+  captureId: string;
+  capturedAt: string;
+}) {
+  return {
+    environmentVoice: {
+      ...input,
+      contentType: "audio/webm" as const,
+      durationMs: 12_000,
+      sha256: input.captureId,
+    },
+    eventId: `environment-voice:${input.captureId}`,
+    kind: "environment-voice.captured" as const,
+    occurredAt: input.capturedAt,
+    userId: "member_123",
+  };
 }

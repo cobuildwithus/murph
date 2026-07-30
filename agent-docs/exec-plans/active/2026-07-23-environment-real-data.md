@@ -82,6 +82,13 @@ Updated: 2026-07-30
    extracted facts are durable.
    Mitigation: delete through a retryable post-checkpoint effect, sweep the
    member prefix on account deletion, and apply a 24-hour R2 lifecycle backstop.
+6. Risk: a member says a precise address while describing the home.
+   Mitigation: the Habitat-only maintenance prompt permits only an explicitly
+   stated city or approximate region and leaves location unknown otherwise.
+7. Risk: an ambiguous upload response leaves a valid recording retained while
+   its browser retry arrives after the normal freshness window.
+   Mitigation: a stale upload is accepted only when its complete capture
+   identity exactly matches the already retained canonical mailbox item.
 
 ## Tasks
 
@@ -110,6 +117,10 @@ Updated: 2026-07-30
 - Recommendation dismissal changes future suggestions, not facts or grade.
 - The capture surface has three product modes rather than percentage-specific
   screens: first walkthrough, fill gaps, and update.
+- Exact address details from a recording are discarded; only an explicitly
+  stated city or approximate region may become Habitat truth.
+- Arrow keys retain their normal browser scrolling behavior inside fact
+  drawers; facts change only through the visible navigation controls.
 
 ## Verification
 
@@ -133,3 +144,13 @@ Updated: 2026-07-30
   component remains represented in the design catalog, and the existing
   desktop/mobile walkthrough proof plus focused interaction tests cover the
   changed surface.
+- Preliminary ReviewGPT found four remediation items: precise-address
+  extraction, retained-upload retries after ten minutes, missing provider-backed
+  transcript-to-vault proof, and arrow-key hijacking in the fact drawer. The
+  implementation now has explicit prompt/privacy policy, exact stale-retry
+  matching, a real-provider E2E lane through the production Habitat CLI, and a
+  drawer interaction regression test.
+- Post-remediation focused Web proof passed 85 tests across five files.
+  Assistant Engine prompt and E2E harness proof passed 72 tests with 14
+  credential-gated provider scenarios skipped. Web and Assistant Engine
+  typechecks passed; scoped lint and `git diff --check` passed.

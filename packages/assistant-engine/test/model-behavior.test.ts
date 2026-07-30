@@ -1964,6 +1964,12 @@ describe('assistant system prompt cache stability', () => {
     expect(habitatVoicePrompt).toContain(
       'Never clear an existing value merely because the transcript does not mention it.',
     )
+    expect(habitatVoicePrompt).toContain(
+      'save only an explicitly stated city or approximate region',
+    )
+    expect(habitatVoicePrompt).toContain(
+      'Never persist precise address details.',
+    )
     expect(habitatVoicePrompt).not.toContain('vault-cli memory upsert')
   })
 

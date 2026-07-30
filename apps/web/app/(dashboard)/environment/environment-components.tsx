@@ -823,17 +823,6 @@ function FactDrawer({
       <SheetContent
         side="right"
         className="w-full overflow-y-auto sm:max-w-md"
-        onKeyDown={(event) => {
-          if (!onStep) return;
-          if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-            event.preventDefault();
-            onStep(1);
-          }
-          if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-            event.preventDefault();
-            onStep(-1);
-          }
-        }}
       >
         {fact ? (
           <>
