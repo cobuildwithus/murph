@@ -10,7 +10,6 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 export function HostedAiUsageActivity(props: {
   activity: HostedAiUsageActivitySnapshot;
-  historyInitiallyOpen?: boolean;
   missionContactOption: MurphContactOption | null;
 }) {
   const canStartMissions =
@@ -78,10 +77,7 @@ export function HostedAiUsageActivity(props: {
           aria-label={hasMissionSurface ? "History" : "Purchased credits"}
           className={hasMissionSurface ? "border-t border-border/70" : undefined}
         >
-          <details
-            className="group"
-            open={props.historyInitiallyOpen || undefined}
-          >
+          <details className="group">
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-sm py-3 text-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
               {hasMissionSurface ? "History" : "Purchased credits"}
               <ChevronDown
@@ -97,22 +93,13 @@ export function HostedAiUsageActivity(props: {
                 <MissionRow historical key={mission.id} mission={mission} />
               ))}
               {props.activity.credits.map((credit) => (
-                <li
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-3.5"
+                <HistoryRow
+                  amountLabel={credit.addedLabel}
                   key={credit.id}
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-foreground">
-                      {credit.sourceLabel}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {credit.dateLabel}
-                    </div>
-                  </div>
-                  <div className="font-serif font-semibold tabular-nums text-foreground">
-                    {credit.addedLabel}
-                  </div>
-                </li>
+                  primaryMeta={credit.sourceLabel}
+                  secondaryMeta={credit.dateLabel}
+                  title="Usage purchase"
+                />
               ))}
             </ul>
           </details>
@@ -128,17 +115,23 @@ function MissionRow(props: {
 }) {
   const { mission } = props;
 
+  if (props.historical) {
+    return (
+      <HistoryRow
+        amountLabel={mission.rewardLabel}
+        destinationLabel={mission.destinationLabel}
+        primaryMeta={mission.statusLabel}
+        secondaryMeta={mission.timingLabel}
+        title={mission.title}
+      />
+    );
+  }
+
   return (
-    <li className={props.historical ? "py-3.5" : "py-5"}>
+    <li className="py-5">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
         <div className="min-w-0">
-          <h4
-            className={
-              props.historical
-                ? "text-balance text-sm font-medium leading-snug text-foreground"
-                : "text-balance font-serif text-xl font-semibold leading-snug tracking-tight text-foreground"
-            }
-          >
+          <h4 className="text-balance font-serif text-xl font-semibold leading-snug tracking-tight text-foreground">
             {mission.title}
           </h4>
           <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -152,18 +145,51 @@ function MissionRow(props: {
           </p>
         </div>
         <div className="text-right">
-          <div
-            className={
-              props.historical
-                ? "font-serif text-lg font-semibold tabular-nums text-foreground"
-                : "font-serif text-2xl font-semibold leading-none tabular-nums text-foreground"
-            }
-          >
+          <div className="font-serif text-2xl font-semibold leading-none tabular-nums text-foreground">
             {mission.rewardLabel}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
             to {mission.destinationLabel}
           </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function HistoryRow(props: {
+  amountLabel: string;
+  destinationLabel?: string;
+  primaryMeta: string;
+  secondaryMeta: string;
+  title: string;
+}) {
+  return (
+    <li className="py-3.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
+        <div className="min-w-0">
+          <h4 className="text-balance text-sm font-medium leading-snug text-foreground">
+            {props.title}
+          </h4>
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/80">
+              {props.primaryMeta}
+            </span>
+            <span aria-hidden="true" className="text-border">
+              /
+            </span>
+            <span>{props.secondaryMeta}</span>
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="font-serif text-lg font-semibold tabular-nums text-foreground">
+            {props.amountLabel}
+          </div>
+          {props.destinationLabel ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              to {props.destinationLabel}
+            </div>
+          ) : null}
         </div>
       </div>
     </li>

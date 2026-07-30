@@ -182,6 +182,10 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /AI usage/);
     assert.match(markup, /aria-label="Pulse Trial AI usage"/);
+    assert.doesNotMatch(
+      markup,
+      /aria-label="Pulse Trial AI usage" class="[^"]*rounded-xl/u,
+    );
     assert.match(markup, /35% used/);
     assert.match(markup, /65% remaining/);
     assert.match(markup, /Trial ends Jul 17, 2026/);
@@ -416,7 +420,7 @@ describe("HostedBillingSettings", () => {
     assert.ok(addUsageButton);
     assert.match(addUsageButton, /\bh-7\b/u);
     assert.match(addUsageButton, /\bborder-foreground\/20\b/u);
-    assert.match(addUsageButton, /\bself-start\b/u);
+    assert.match(addUsageButton, /\bshrink-0\b/u);
     assert.doesNotMatch(addUsageButton, /\bw-full\b/u);
   });
 

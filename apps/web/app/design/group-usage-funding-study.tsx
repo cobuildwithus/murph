@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type SyntheticEvent } from "react";
 import type {
   HostedPlanUsageAvailableStatus,
   HostedPlanUsageStatus,
@@ -412,6 +412,7 @@ function PersonalUsageCreditOwnerStudy() {
           Overall usage with active referrals and history
         </p>
         <PersonalUsageCreditState
+          allowHistoryInteraction
           label="Overall usage active"
           state="active-with-credit"
           usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
@@ -422,7 +423,6 @@ function PersonalUsageCreditOwnerStudy() {
               </div>
               <HostedAiUsageActivity
                 activity={DESIGN_AI_USAGE_ACTIVITY}
-                historyInitiallyOpen
                 missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
               />
             </section>
@@ -479,6 +479,7 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
+  allowHistoryInteraction?: boolean;
   label: string;
   state: string;
   usageActivityDetail?: ReactNode;
@@ -492,7 +493,18 @@ function PersonalUsageCreditState(props: {
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
-      <div inert>
+      <div
+        data-design-interaction={
+          props.allowHistoryInteraction ? "history-only" : undefined
+        }
+        inert={props.allowHistoryInteraction ? undefined : true}
+        onClickCapture={
+          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
+        }
+        onSubmitCapture={
+          props.allowHistoryInteraction ? blockNonHistoryPreviewAction : undefined
+        }
+      >
         <HostedBillingSettings
           authenticated
           billingStatus="active"
@@ -506,6 +518,19 @@ function PersonalUsageCreditState(props: {
       </div>
     </div>
   );
+}
+
+function blockNonHistoryPreviewAction(event: SyntheticEvent<HTMLDivElement>) {
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest("[data-hosted-ai-usage-activity] details")
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 export {
