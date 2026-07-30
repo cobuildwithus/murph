@@ -931,9 +931,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group, Choice Cards & Provider Dialog">
+        <Section title="Radio Group, Choice Cards & Provider Picker">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Choose the intelligence behind your personal health assistant.
+            Compare model choice cards and the compact, save-gated provider
+            picker used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"

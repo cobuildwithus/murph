@@ -32,6 +32,7 @@ const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
 
 const COPY_CONCURRENCY = 16;
 const COPY_OBJECT_MAX_BYTES_EXCLUSIVE = 5_000_000_000;
+const R2_SAME_KEY_WRITE_INTERVAL_MS = 1_000;
 const MIGRATION_ACCESS_KEY_ENV = "R2_MIGRATION_ACCESS_KEY_ID";
 const MIGRATION_SECRET_KEY_ENV = "R2_MIGRATION_SECRET_ACCESS_KEY";
 const MIGRATION_MARKER_PREFIX = "_murph/r2-bundles-migration/";
@@ -121,6 +122,13 @@ interface MigrationEnvironment {
 interface R2HeadResult {
   etag: string;
   size: number;
+}
+
+interface R2CopyRequestInput {
+  bucket: string;
+  headers: Readonly<Record<string, string>>;
+  key: string;
+  method: "PUT";
 }
 
 interface OnlineCopyClient {
@@ -1020,7 +1028,7 @@ function pickEnvironment(
 function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyClient {
   return {
     async copyObject(input) {
-      const response = await fetchR2CopyObjectWithPreconnectRetry(environment, {
+      const request: R2CopyRequestInput = {
         bucket: input.destination,
         headers: {
           "cf-copy-destination-if-none-match": "*",
@@ -1031,8 +1039,20 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
         },
         key: input.entry.key,
         method: "PUT",
-      });
+      };
+      const response = await fetchR2CopyObjectWithPreconnectRetry(environment, request);
       await response.arrayBuffer();
+      if (response.status === 500) {
+        const recoveryNotBefore = performance.now() + R2_SAME_KEY_WRITE_INTERVAL_MS;
+        return await reconcileR2CopyObjectHttp500({
+          destination: input.destination,
+          entry: input.entry,
+          environment,
+          recoveryNotBefore,
+          request,
+          source: input.source,
+        });
+      }
       if (response.status === 412) return "destination_exists";
       if (response.status === 404) {
         return "source_missing";
@@ -1043,22 +1063,7 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
       return "copied";
     },
     async headObject(bucket, key) {
-      const response = await fetchR2WithOneRetry(environment, {
-        bucket,
-        key,
-        method: "HEAD",
-      });
-      if (response.status === 404) return null;
-      if (!response.ok) {
-        throw new Error(`R2 online-copy HEAD failed with HTTP ${response.status}.`);
-      }
-      const etag = response.headers.get("etag");
-      const sizeText = response.headers.get("content-length");
-      const size = sizeText === null ? Number.NaN : Number(sizeText);
-      if (!etag || !Number.isSafeInteger(size) || size < 0) {
-        throw new Error("R2 online-copy HEAD omitted object identity metadata.");
-      }
-      return { etag, size };
+      return await headR2Object(environment, bucket, key);
     },
     async putMarker(bucket, key) {
       const response = await fetchR2WithOneRetry(environment, {
@@ -1079,14 +1084,84 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
   };
 }
 
+async function reconcileR2CopyObjectHttp500(input: {
+  destination: string;
+  entry: R2ObjectInventoryEntry;
+  environment: MigrationEnvironment;
+  recoveryNotBefore: number;
+  request: R2CopyRequestInput;
+  source: string;
+}): Promise<"copied" | "destination_exists"> {
+  const destinationHead = await headR2Object(
+    input.environment,
+    input.destination,
+    input.entry.key,
+  );
+  if (destinationHead && !sameHeadIdentity(input.entry, destinationHead)) {
+    throw new Error(
+      "R2 CopyObject HTTP 500 reconciliation found a conflicting destination identity.",
+    );
+  }
+
+  const sourceHead = await headR2Object(input.environment, input.source, input.entry.key);
+  if (!sourceHead) {
+    throw new Error(
+      "R2 CopyObject HTTP 500 reconciliation found the planned source object missing.",
+    );
+  }
+  if (!sameHeadIdentity(input.entry, sourceHead)) {
+    throw new Error(
+      "R2 CopyObject HTTP 500 reconciliation found the planned source identity changed.",
+    );
+  }
+  if (destinationHead) return "destination_exists";
+
+  await waitForR2SameKeyWriteInterval(input.recoveryNotBefore);
+  const recoveryResponse = await fetchR2Once(input.environment, input.request);
+  await recoveryResponse.arrayBuffer();
+  if (recoveryResponse.status === 412) return "destination_exists";
+  if (!recoveryResponse.ok) {
+    throw new Error(
+      `R2 create-only CopyObject recovery failed with HTTP ${recoveryResponse.status}.`,
+    );
+  }
+  return "copied";
+}
+
+async function waitForR2SameKeyWriteInterval(notBefore: number): Promise<void> {
+  while (true) {
+    const remaining = notBefore - performance.now();
+    if (remaining <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+  }
+}
+
+async function headR2Object(
+  environment: MigrationEnvironment,
+  bucket: string,
+  key: string,
+): Promise<R2HeadResult | null> {
+  const response = await fetchR2WithOneRetry(environment, {
+    bucket,
+    key,
+    method: "HEAD",
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`R2 online-copy HEAD failed with HTTP ${response.status}.`);
+  }
+  const etag = response.headers.get("etag");
+  const sizeText = response.headers.get("content-length");
+  const size = sizeText === null ? Number.NaN : Number(sizeText);
+  if (!etag || !Number.isSafeInteger(size) || size < 0) {
+    throw new Error("R2 online-copy HEAD omitted object identity metadata.");
+  }
+  return { etag, size };
+}
+
 async function fetchR2CopyObjectWithPreconnectRetry(
   environment: MigrationEnvironment,
-  input: {
-    bucket: string;
-    headers: Readonly<Record<string, string>>;
-    key: string;
-    method: "PUT";
-  },
+  input: R2CopyRequestInput,
 ): Promise<Response> {
   try {
     return await fetchR2Once(environment, input);

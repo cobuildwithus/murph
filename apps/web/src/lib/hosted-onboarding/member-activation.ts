@@ -381,16 +381,12 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     input.member.routing?.linqChatId
     || input.member.routing?.pendingLinqChatId,
   );
-  const hasTelegramRoute = Boolean(
-    input.member.routing?.telegramThreadId
-    || input.member.routing?.telegramUserId,
-  );
 
   if (
     !input.member.identity?.phoneNumber
     && (
       !linqContactLookupKey
-      || (hasTelegramRoute && !hasReusableLinqThread)
+      || !hasReusableLinqThread
     )
   ) {
     return {

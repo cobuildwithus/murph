@@ -9,6 +9,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     onOpenChange: (open: boolean) => void;
     open: boolean;
@@ -26,6 +27,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    autoSendPastedPhoneNumber?: boolean;
     description: string;
     onCompleted: () => void;
     onOpenChange: (open: boolean) => void;
@@ -108,6 +110,7 @@ test("renders the Messages alternative as a compact ghost button and opens sign-
     requireLaunchConsentOnCompletion: true,
     title: "Sign in to join Murph Family",
   });
+  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBeUndefined();
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
