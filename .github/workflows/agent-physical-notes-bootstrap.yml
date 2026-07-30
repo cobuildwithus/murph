@@ -28,11 +28,47 @@ jobs:
             echo 'already_applied=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           cat .github/agent-physical-notes-base.patch.gz.part* > /tmp/physical-notes-base.patch.gz
           cat .github/agent-physical-notes-corrections.patch.gz.part* > /tmp/physical-notes-corrections.patch.gz
-          gzip -dc /tmp/physical-notes-base.patch.gz | git apply --3way
+          gzip -dc /tmp/physical-notes-base.patch.gz > /tmp/physical-notes-base.patch
+          gzip -dc .github/agent-physical-notes-current.py.gz > /tmp/apply_physical_notes_current.py
+          gzip -dc .github/agent-physical-notes-send-block.txt.gz > /tmp/new_send_physical_note_block.txt
+
+          python - <<'PY'
+          from pathlib import Path
+
+          excluded = {
+              'apps/web/prisma/schema.prisma',
+              'apps/web/src/lib/hosted-execution/usage-allowance.ts',
+              'packages/assistant-engine/src/assistant-codex/dynamic-tools.ts',
+              'packages/assistant-engine/src/assistant/execution-context.ts',
+              'packages/assistant-runtime/src/hosted-runtime/platform.ts',
+          }
+          text = Path('/tmp/physical-notes-base.patch').read_text()
+          starts = []
+          position = 0
+          while True:
+              start = text.find('diff --git ', position)
+              if start < 0:
+                  break
+              starts.append(start)
+              position = start + 1
+          sections = []
+          for index, start in enumerate(starts):
+              end = starts[index + 1] if index + 1 < len(starts) else len(text)
+              section = text[start:end]
+              path = section.splitlines()[0].split(' b/', 1)[1]
+              if path not in excluded:
+                  sections.append(section)
+          Path('/tmp/physical-notes-base-revised.patch').write_text(''.join(sections))
+          PY
+
+          git apply --3way /tmp/physical-notes-base-revised.patch
           gzip -dc /tmp/physical-notes-corrections.patch.gz | git apply
+          python /tmp/apply_physical_notes_current.py
           git diff --check
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
