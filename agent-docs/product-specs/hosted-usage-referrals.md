@@ -222,6 +222,11 @@ owner. Its detail surface is a read-only projection:
   projection of the durable referral state, not a second lifecycle;
 - the surface never creates another balance, mission lifecycle, qualification
   counter, participant list, or group-name store;
+- the surface leads with compact mission rows showing title, status, deadline,
+  reward, and reward owner; qualification requirements and selection date stay
+  available in one native details disclosure rather than remaining expanded;
+- purchase-grant history follows the missions as a flat ledger, with no
+  explanatory hero or wide table;
 - the action opens the member's existing Murph channel with a prefilled question
   about available missions; opening or sending that question does not arm a
   mission by itself;

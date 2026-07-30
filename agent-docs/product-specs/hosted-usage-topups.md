@@ -239,7 +239,9 @@ plan allowance or the usage-credit balance.
 Settings may separately show a bounded history of immutable purchase grants
 with the original added amount, source, and date. That history does not read or
 display aggregate or per-grant remaining capacity; the combined AI usage bar
-remains the only current-capacity view.
+remains the only current-capacity view. Present that history as compact flat
+rows after mission activity, with one short clarification that the amounts are
+added credit rather than the current balance.
 
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
