@@ -39,10 +39,11 @@ MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrato
 The setting changes only the package directory passed to `pnpm --dir` for
 `temporal:worker` and `temporal:ensure-device-sync-reconciler-schedule`. The
 Temporal address, namespace, task queue, and signed Web/Cloudflare HTTP
-contracts remain unchanged. When it is unset or blank, hosted-local uses the
-existing in-repo `packages/hosted-orchestrator-temporal` package. This keeps one
-canonical local entrypoint without a submodule, source mirror, or second
-orchestration path.
+contracts remain unchanged. The private package is not mirrored into public
+Murph: when the setting is unset or blank, hosted-local fails before starting
+Temporal and points to this variable or `MURPH_DEV_TEMPORAL=disabled`. This
+keeps one canonical local entrypoint without a submodule, source mirror, or
+second orchestration path.
 
 ## Local web origin
 

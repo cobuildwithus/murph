@@ -277,8 +277,9 @@ reconciles.
 
 ## Workflow Replay And Versioning
 
-`packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts`
-is a long-lived per-user Temporal Workflow. Any change that adds, removes, or
+Private `cobuildwithus/murph-cloud` owns the long-lived per-user Temporal
+Workflow under its `packages/hosted-orchestrator-temporal` package. Any change
+that adds, removes, or
 reorders awaited command-producing Temporal APIs requires an explicit replay
 compatibility plan before deployment. This includes Activity proxy calls,
 durable timers or `condition()` timeouts, `continueAsNew`, child Workflow
@@ -300,13 +301,13 @@ fixtures must be redacted or synthetic: do not commit raw mailbox payloads,
 prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers just to prove replay.
 
-The reconciliation-before-mailbox patch is in the `deprecatePatch()` phase.
+The reconciliation-before-mailbox patch is in the `deprecatePatch()` phase in
+Murph Cloud.
 After production pre-patch histories drained, the old direct-mailbox branch and
 synthetic pre-patch replay fixture were removed. The workflow must keep the
 `deprecatePatch()` marker and patch id until a later removal phase confirms the
-deprecatePatch-window histories have drained. The root
-`hosted-temporal:guard` check requires that marker and the CI package-coverage
-entry to remain present.
+deprecatePatch-window histories have drained. Private replay and package
+coverage gates require that marker to remain present.
 
 ## Final Minimal Contract
 
@@ -550,10 +551,10 @@ The hard-cut architecture is accepted when:
   or hard-disabled for production.
 - The root `hosted-temporal:guard` script remains wired into `pnpm typecheck`
   and `pnpm test:diff` so legacy Vercel nudge workflows, Cloudflare scheduler
-  methods, and business payload fields in Temporal workflow history surfaces
-  cannot re-enter production source silently; it also requires the hosted user
-  runtime `deprecatePatch()` marker and CI package-coverage entry to remain
-  present during the reconciliation-before-mailbox patch retirement window.
+  methods, business payload fields in shared orchestration contracts, and a
+  public Temporal worker implementation cannot re-enter production source
+  silently. Murph Cloud independently owns Workflow bundle and replay-policy
+  gates.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

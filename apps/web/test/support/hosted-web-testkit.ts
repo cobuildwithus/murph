@@ -1479,6 +1479,22 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   });
 }
 
+export async function queryHostedRuntimeWorkflowForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  queryName: string;
+  workflowId: string;
+}): Promise<unknown> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const handle = deps.temporalSignalClient?.workflow.getHandle?.(
+      input.workflowId,
+    );
+    if (!handle) {
+      throw new Error("Hosted runtime Temporal query client is not configured.");
+    }
+    return await handle.query(input.queryName);
+  });
+}
+
 export async function createHostedWebTestkitDeps(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<HostedWebTestkitDeps> {
