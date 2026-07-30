@@ -9,6 +9,10 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedRuntimeLinqDeliveryBlockCode,
+  HostedRuntimeLinqDeliveryPosture,
+} from '@murphai/hosted-execution/routes'
+import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationSchedule,
@@ -429,12 +433,15 @@ export interface AssistantHostedExecutionContext {
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
+    fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
     conversationThreadId?: string | null
+    deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null
+    deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null
     target: string
     threadIsDirect: boolean
   }>
@@ -449,6 +456,24 @@ export interface AssistantHostedExecutionContext {
 
 export interface AssistantExecutionContext {
   hosted: AssistantHostedExecutionContext | null
+}
+
+export function appendAssistantHostedDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext
+  prompt: string | null
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext
+  }
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
+  }
 }
 
 export function normalizeAssistantExecutionContext(

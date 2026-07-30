@@ -8,7 +8,6 @@ import {
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import { createHostedStripeCheckoutSessionLookupKey } from "./contact-privacy";
-import { lockHostedMemberRow } from "./shared";
 
 const HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD =
   "hosted-member-subscription-checkout.stripe-session-id";
@@ -17,11 +16,16 @@ type HostedSubscriptionCheckoutPrisma =
   | Prisma.TransactionClient
   | PrismaClient;
 
-export async function bindHostedMemberSubscriptionCheckoutTx(input: {
+export interface PreparedHostedMemberSubscriptionCheckout {
+  encryptedSessionId: string;
+  lookupKey: string;
+}
+
+export async function prepareHostedMemberSubscriptionCheckout(input: {
   memberId: string;
+  prisma: PrismaClient;
   stripeCheckoutSessionId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
+}): Promise<PreparedHostedMemberSubscriptionCheckout> {
   const lookupKey = createHostedStripeCheckoutSessionLookupKey(
     input.stripeCheckoutSessionId,
   );
@@ -31,31 +35,33 @@ export async function bindHostedMemberSubscriptionCheckoutTx(input: {
   const encryptedSessionId = await encryptHostedWebNullableString({
     field: HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD,
     memberId: input.memberId,
-    prisma: input.tx,
+    prisma: input.prisma,
     value: input.stripeCheckoutSessionId,
   });
   if (!encryptedSessionId) {
     throw new TypeError("Stripe Checkout session id encryption failed.");
   }
+  return {
+    encryptedSessionId,
+    lookupKey,
+  };
+}
 
-  await lockHostedMemberRow(input.tx, input.memberId);
-  const member = await input.tx.hostedMember.findUnique({
-    select: { suspendedAt: true },
-    where: { id: input.memberId },
-  });
-  if (!member || member.suspendedAt) {
-    return false;
-  }
-
+export async function bindHostedMemberSubscriptionCheckoutUnderLockTx(input: {
+  memberId: string;
+  preparedCheckout: PreparedHostedMemberSubscriptionCheckout;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
   try {
     await input.tx.hostedMemberSubscriptionCheckout.create({
       data: {
         memberId: input.memberId,
-        stripeCheckoutSessionIdEncrypted: encryptedSessionId,
-        stripeCheckoutSessionLookupKey: lookupKey,
+        stripeCheckoutSessionIdEncrypted:
+          input.preparedCheckout.encryptedSessionId,
+        stripeCheckoutSessionLookupKey: input.preparedCheckout.lookupKey,
       },
     });
-    return true;
+    return;
   } catch (error) {
     if (!isPrismaUniqueConstraintError(error)) {
       throw error;
@@ -64,12 +70,13 @@ export async function bindHostedMemberSubscriptionCheckoutTx(input: {
 
   const existing = await input.tx.hostedMemberSubscriptionCheckout.findUnique({
     select: { memberId: true },
-    where: { stripeCheckoutSessionLookupKey: lookupKey },
+    where: {
+      stripeCheckoutSessionLookupKey: input.preparedCheckout.lookupKey,
+    },
   });
   if (existing?.memberId !== input.memberId) {
     throw new TypeError("Stripe Checkout session already has a different owner.");
   }
-  return true;
 }
 
 export async function listHostedMemberSubscriptionCheckoutSessionIds(input: {

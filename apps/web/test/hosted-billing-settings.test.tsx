@@ -1147,6 +1147,39 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /From \$7\/person/);
   });
 
+  test("posts the Join recovery Family action and keeps syncing feedback visible", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedFamilyStartButton } = await import(
+      "@/src/components/settings/hosted-family-start-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedFamilyStartButton, {
+        block: true,
+        label: "Restart Family",
+      }),
+    );
+
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+      method: "POST",
+      url: "/api/settings/billing/family/checkout",
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Family plan is syncing with Stripe\. Refresh in a moment\./,
+    );
+
+    await rendered.cleanup();
+  });
+
   test("shows the switch-to-Pulse action on the Pulse card for Edge members", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
