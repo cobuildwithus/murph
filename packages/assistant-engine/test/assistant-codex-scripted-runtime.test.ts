@@ -9,6 +9,9 @@ import { promisify } from 'node:util'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import type {
+  HostedRuntimeAssistantConfigurationSnapshot,
+} from '@murphai/hosted-execution/runtime-control'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -21,6 +24,7 @@ import {
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -33,6 +37,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import {
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -449,6 +456,160 @@ text(JSON.stringify(result));
     expect(groupOutput).toContain('none')
     expect(result.finalMessage).toBe('EAGER_GROUP_READ_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('applies an explicit group-room model request on the next provider turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const assistantInputId = `ain_${'g'.repeat(32)}`
+    const configurationRequests: unknown[] = []
+    const groupSnapshot = (
+      model: 'gpt-5.6-sol' | 'gpt-5.6-terra',
+    ): HostedRuntimeAssistantConfigurationSnapshot => ({
+      availableModels: [
+        'gpt-5.6-luna',
+        'gpt-5.6-terra',
+        'gpt-5.6-sol',
+      ],
+      availableProviders: ['openai'],
+      availableReasoningEfforts: ['low'],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model,
+      provider: 'openai' as const,
+      reasoningEffort: 'low' as const,
+      solAvailable: true,
+    })
+    const currentSnapshot = groupSnapshot('gpt-5.6-sol')
+    const updatedSnapshot = groupSnapshot('gpt-5.6-terra')
+    const groupDeveloperInstructions = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      assistantContextSnapshotPrompt: null,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: true,
+      assistantStyleSettingsAvailable: true,
+      channel: 'linq',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      conversationScope: 'group',
+      currentLocalDate: '2026-07-30',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      turnTrigger: null,
+    })
+    expect(groupDeveloperInstructions).toContain(
+      'select Luna, Terra, or Sol for the room',
+    )
+    expect(groupDeveloperInstructions).not.toContain(
+      'Do not use or offer `murph.assistant_configuration` here',
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__assistant_configuration({
+  action: "update",
+  model: "gpt-5.6-terra",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'GROUP_MODEL_SWITCH_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
+      dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
+      hostedToolContext: {
+        assistantConfigurationTool: {
+          request: async (request) => {
+            configurationRequests.push(request)
+            return request.action === 'read'
+              ? { action: 'read', result: currentSnapshot }
+              : {
+                  action: 'update',
+                  result: {
+                    ...updatedSnapshot,
+                    appliesAt: 'next_turn',
+                    requiredPlan: null,
+                    status: 'updated',
+                  },
+                }
+          },
+        },
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => assistantInputId,
+        currentAssistantTarget: () => ({
+          model: 'gpt-5.6-sol',
+          provider: 'openai',
+          reasoningEffort: 'low',
+        }),
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentUserActionScope: () => ({
+          acceptedInputIds: [assistantInputId],
+          conversationId: 'conversation-group',
+          conversationScope: 'group',
+          inboundMailboxItemIds: ['mailbox-group'],
+          originSessionId: 'session-group',
+          recipientKey: 'group:current',
+        }),
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      model: 'gpt-5.6-sol',
+      prompt:
+        'Use the current group room request to switch this room to Terra, then reply exactly GROUP_MODEL_SWITCH_OK.',
+    })
+
+    expect(configurationRequests).toEqual([
+      {
+        action: 'update',
+        assistantInputId,
+        model: 'gpt-5.6-terra',
+      },
+    ])
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.model).toBe('gpt-5.6-sol')
+    expect(summaries[1]?.model).toBe('gpt-5.6-sol')
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+    })
+    const groupConfigurationOutput =
+      summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(groupConfigurationOutput).toContain('gpt-5.6-sol')
+    expect(groupConfigurationOutput).toContain('gpt-5.6-terra')
+    expect(groupConfigurationOutput).toContain('next_turn')
+    expect(groupConfigurationOutput).toContain('updated')
+    expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
+
+    scenario.stub.queue({ text: 'GROUP_MODEL_NEXT_TURN_OK' })
+    const nextTurn = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      developerInstructions: groupDeveloperInstructions,
+      dynamicTools: [MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL],
+      model: updatedSnapshot.model,
+      prompt: 'Reply exactly GROUP_MODEL_NEXT_TURN_OK.',
+      resumeSessionId: result.sessionId,
+    })
+
+    expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
+      'gpt-5.6-terra',
+    )
+    expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
+    expect(nextTurn.sessionId).toBe(result.sessionId)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('sends flex service tier through real Codex with the patched model catalog', {

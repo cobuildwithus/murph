@@ -30,8 +30,9 @@ transitions still stay out of scope.
 
 ## Hosted Assistant Configuration
 
-Active personal members can inspect and explicitly choose the assistant target
-that Murph should use on the next hosted turn:
+Active personal members and authenticated group-room runtimes can inspect and
+explicitly choose the assistant target that Murph should use on the next hosted
+turn:
 
 - OpenAI is the default core assistant provider. When the operator-controlled
   Venice rollout flag is enabled, an active personal member may choose Venice
@@ -47,34 +48,40 @@ that Murph should use on the next hosted turn:
 - Luna and Terra are available to every active personal member. Terra remains
   the default when no personal model override is stored.
 - Synthetic thread-container runtimes use Sol by default from the existing
-  thread-container relation. They have no writable or persisted model or
-  reasoning preference.
+  thread-container relation. An explicit current-room request may choose Luna,
+  Terra, or Sol for that room through `murph.assistant_configuration`. Group
+  provider and reasoning remain fixed to OpenAI and `low`; the tool never reads
+  or changes a participant's private configuration.
 - Settings keeps Luna and Terra editable for non-Edge personal members and
   explains that Sol requires paid Edge access. A paid Pulse member who is
   eligible for the direct upgrade sees the existing Edge upgrade action; other
   ineligible members see the Edge requirement without a billing action.
 - Only an active, unsuspended personal member with direct paid Edge access or an
-  active paid Family Edge assignment can choose Sol. Family Pulse assignments,
-  direct Pulse, and trials do not qualify. Synthetic thread-container members
-  receive their derived Sol target but cannot mutate or persist a preference.
-- The common reasoning choices are `low`, `medium`, `high`, and `xhigh`. `low`
-  is the default when no reasoning override is stored.
-- Postgres stores nullable non-default provider, model, and reasoning intent
-  only for the personal member. It is the only durable owner; the vault, hosted
+  active paid Family Edge assignment can choose Sol for their personal runtime.
+  Family Pulse assignments, direct Pulse, and trials do not qualify. Synthetic
+  thread-container runtimes keep their existing relation-derived Sol default and
+  may choose any supported room model without reading personal plan state.
+- The common personal reasoning choices are `low`, `medium`, `high`, and
+  `xhigh`. `low` is both the personal default and the fixed group-room value.
+- Postgres stores nullable provider, model, and reasoning intent on the existing
+  `HostedMember` row. It remains the only durable owner; the vault, hosted
   workspace snapshot, and assistant runtime do not keep a second preference.
-  The thread-container Sol target remains derived rather than stored.
+  For a personal member, a null model means Terra. For a synthetic
+  thread-container member, null means the relation-derived Sol default, while an
+  explicit Luna or Terra room choice uses the same existing model field. No
+  group-settings table, migration, or second state machine is added.
 - A scheduled switch to Pulse keeps Sol available until Stripe applies the
   Pulse phase and reconciliation changes the current billing state. After that
   boundary, Terra is effective while the stored Sol intent remains available
   for a later Edge reactivation.
-- The signed workspace read projects either an eligible personal member's
-  available provider, non-default model, and reasoning effort or the
-  relation-derived thread-container Sol model to the runner at the next hosted
-  invocation boundary. If Venice is disabled, a stored Venice preference
-  resolves to OpenAI without deleting member intent. This is also the activation
-  boundary for changes made through Settings. An already-active invocation can
-  retain that snapshot through its bounded 180-second idle window, so Settings
-  states that an idle run can take up to three minutes to close.
+- The signed workspace read projects an eligible personal member's provider,
+  model, and reasoning effort or a synthetic thread-container's resolved room
+  model to the runner at the next hosted invocation boundary. If Venice is
+  disabled, a stored personal Venice preference resolves to OpenAI without
+  deleting member intent. This is also the activation boundary for changes made
+  through Settings. An already-active invocation can retain that snapshot
+  through its bounded 180-second idle window, so Settings states that an idle
+  run can take up to three minutes to close.
 - A confirmed `murph.assistant_configuration` update is different: its
   authoritative full web response becomes an ephemeral target for the next
   separately accepted provider turn, including a follow-up serviced by the
@@ -84,18 +91,20 @@ that Murph should use on the next hosted turn:
   invocation always rereads the web-owned preference. At idle shutdown, a
   model or reasoning change does not replace the engine-owned warm thread.
   The next separately accepted turn resumes that same native Codex thread and
-  applies both settings on `turn/start`. Compaction usage is attributed from
+  applies the saved target on `turn/start`. Compaction usage is attributed from
   the model actually bound to the thread, never the future preference, and
   provider work is skipped when that bound model cannot be priced.
-- Configuration updates require an explicit personal-member choice. The
-  authenticated Settings form uses its normal session and CSRF boundary. An
-  assistant-driven update additionally requires eligible accepted user input
-  for that turn. The runtime forwards the terminal input id from its locally
-  revalidated bounded exact-successor provider batch, and web binds it to the
-  callback member plus one live conversation mailbox row inside the matching
-  field-level preference-write transaction. This low-risk preference update
-  does not require a passkey or browser handoff; missing or ambiguous input
-  authority fails closed.
+- Configuration updates require an explicit personal-member or current-room
+  choice. The authenticated Settings form uses its normal session and CSRF
+  boundary. An assistant-driven update additionally requires eligible accepted
+  user input for that turn. The runtime forwards the terminal input id from its
+  locally revalidated bounded exact-successor provider batch, and web binds it
+  to the callback member plus one live conversation mailbox row inside the
+  matching field-level preference-write transaction. For a group room, that
+  callback member is the existing synthetic thread-container member, so the
+  write is room-scoped without participant identity inference. This low-risk
+  preference update does not require a passkey or browser handoff; missing or
+  ambiguous input authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
 - Changing the preference does not create a mailbox item, wake, queue, or a
@@ -218,15 +227,16 @@ no model-specific fallback or rollback path.
 Focused contract coverage proves old/no-field compatibility, gated
 OpenAI/Venice resolution, personal-member Luna/Terra/Sol eligibility, the
 common reasoning values, same-invocation next-turn projection and default
-reset, the relation-derived thread-container Sol default, fixed Venice model
-translation at the Worker boundary, and private-member tone/voice reads and
-writes. The normal deploy keeps its managed-container fingerprint and live
-OpenAI Terra smoke. Before the Web flag is enabled, a post-deploy canary must
-exercise one controlled Venice turn through the exact Worker/runner path. A
-later configuration canary may save one non-default target for an eligible
-personal member, confirm a same-invocation follow-up reports it, update style
-through personalization, and verify usage retains both requested-model and
-served-model attribution.
+reset, the relation-derived thread-container Sol default plus explicit
+room-scoped Luna/Terra/Sol switching, fixed Venice model translation at the
+Worker boundary, and private-member tone/voice reads and writes. The normal
+deploy keeps its managed-container fingerprint and live OpenAI Terra smoke.
+Before the Web flag is enabled, a post-deploy canary must exercise one
+controlled Venice turn through the exact Worker/runner path. A later
+configuration canary may save one non-default target for an eligible personal
+member, confirm a same-invocation follow-up reports it, update style through
+personalization, and verify usage retains both requested-model and served-model
+attribution.
 
 ## First-Version Scope
 

@@ -809,6 +809,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
+        groupAssistantConfigurationAvailable:
+          authenticatedGroupChatRuntime &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.assistantConfigurationTool != null,
         automationAvailable: input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&

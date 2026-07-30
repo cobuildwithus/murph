@@ -216,7 +216,7 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
-  it("defaults synthetic thread-container runtimes to Sol", async () => {
+  it("defaults synthetic thread-container runtimes to Sol with room model controls", async () => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
       billingStatus: HostedBillingStatus.not_started,
@@ -229,20 +229,87 @@ describe("hosted member assistant model preference", () => {
       memberId: "member_group_chat",
       prisma: createReadClient(),
     })).resolves.toEqual({
-      availableModels: [],
-      availableProviders: [],
-      availableReasoningEfforts: [],
-      configurationAvailable: false,
+      availableModels: [
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+      ],
+      availableProviders: ["openai"],
+      availableReasoningEfforts: ["low"],
+      configurationAvailable: true,
       dormantSolPreference: false,
       hostedAssistantModelOverride: "gpt-5.6-sol",
       model: "gpt-5.6-sol",
       provider: "openai",
       reasoningEffort: "low",
-      solAvailable: false,
+      solAvailable: true,
     });
   });
 
-  it("rejects provider, model, and reasoning updates for a synthetic thread-container", async () => {
+  it("stores an explicit Terra override for a synthetic thread-container", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      threadContainerMemberId: "member_group_chat",
+    }));
+
+    const result = await updateHostedMemberAssistantConfigurationTx({
+      memberId: "member_group_chat",
+      model: "gpt-5.6-terra",
+      prisma: tx,
+    });
+
+    expect(result).toMatchObject({
+      effectiveModelUpdated: true,
+      model: "gpt-5.6-terra",
+      solAvailable: true,
+      updated: true,
+    });
+    expect(result).not.toHaveProperty("hostedAssistantModelOverride");
+    expect(mocks.updateHostedMember).toHaveBeenCalledWith({
+      data: {
+        assistantModelPreference: "gpt-5.6-terra",
+      },
+      where: {
+        id: "member_group_chat",
+      },
+    });
+  });
+
+  it("restores the derived Sol default by clearing the group room override", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: "gpt-5.6-terra",
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      threadContainerMemberId: "member_group_chat",
+    }));
+
+    await expect(updateHostedMemberAssistantConfigurationTx({
+      memberId: "member_group_chat",
+      model: "gpt-5.6-sol",
+      prisma: tx,
+    })).resolves.toMatchObject({
+      effectiveModelUpdated: true,
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      updated: true,
+    });
+    expect(mocks.updateHostedMember).toHaveBeenCalledWith({
+      data: {
+        assistantModelPreference: null,
+      },
+      where: {
+        id: "member_group_chat",
+      },
+    });
+  });
+
+  it("keeps provider and reasoning controls personal for a synthetic thread-container", async () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
@@ -253,7 +320,6 @@ describe("hosted member assistant model preference", () => {
     }));
 
     for (const update of [
-      { model: "gpt-5.6-luna" as const },
       { provider: "venice" as const },
       { reasoningEffort: "high" as const },
     ]) {
