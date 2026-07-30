@@ -2074,7 +2074,10 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -2083,7 +2086,10 @@ describe("parseHostedRuntimeGroupTool", () => {
       telegramSenderHandles: [" 1234567890 "],
     })).toEqual({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
       sourceConversation: {
         channel: "telegram",
         threadId: `hid_${"a".repeat(32)}`,
@@ -2093,11 +2099,26 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "cancel_usage_referral",
-    })).toEqual({ action: "cancel_usage_referral" });
+      policyCode: "new_person_activation_v1",
+    })).toEqual({
+      action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "cancel_usage_referral",
+    })).toThrow(/policyCode must be a non-empty string/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "future_policy",
+      policyCodes: ["future_policy"],
     })).toThrow(/not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: [],
+    })).toThrow(/between 1 and 2 entries/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    })).toThrow(/must have unique entries/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
@@ -2105,7 +2126,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/more than one channel/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         threadId: "raw-provider-thread",
@@ -2114,7 +2135,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/threadId is invalid/u);
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: ["active_group_v1"],
       sourceConversation: {
         channel: "telegram",
         identityId: `hid_${"b".repeat(32)}`,
@@ -2914,13 +2935,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         outcome: "read" as const,
         referral: {
-          active: {
+          activeMissions: [{
             destinationKind: "group" as const,
             expiresAt: "2026-08-02T12:00:00.000Z",
             policyCode: "active_group_v1" as const,
             rewardLabel: "$3.50 of Murph usage",
             state: "armed" as const,
-          },
+          }],
           availablePolicies: [{
             code: "new_person_activation_v1" as const,
             requirementsLabel: "Introduce one new person.",
@@ -2932,6 +2953,55 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const pluralResponse = {
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            {
+              destinationKind: "group" as const,
+              expiresAt: "2026-08-03T12:00:00.000Z",
+              policyCode: "new_person_activation_v1" as const,
+              rewardLabel: "$2 of Murph usage",
+              state: "target_bound" as const,
+            },
+          ],
+          availablePolicies: [],
+        },
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(pluralResponse)).toEqual(
+      pluralResponse,
+    );
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          activeMissions: [
+            response.result.referral.activeMissions[0],
+            response.result.referral.activeMissions[0],
+          ],
+        },
+      },
+    })).toThrow(/activeMissions must have unique policies/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        referral: {
+          ...response.result.referral,
+          availablePolicies: [{
+            ...response.result.referral.availablePolicies[0],
+            code: "active_group_v1",
+          }],
+        },
+      },
+    })).toThrow(/policy cannot be both active and available/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "arm_usage_referral",
       result: {

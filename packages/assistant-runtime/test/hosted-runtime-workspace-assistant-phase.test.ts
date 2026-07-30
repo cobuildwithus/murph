@@ -4109,7 +4109,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             await groupTool.request({ action: "read_usage_referral" });
             await groupTool.request({
               action: "arm_usage_referral",
-              policyCode: "new_person_activation_v1",
+              policyCodes: ["new_person_activation_v1"],
             });
           },
           turnEnvironment: null,
@@ -4129,7 +4129,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           },
           {
             action: "arm_usage_referral",
-            policyCode: "new_person_activation_v1",
+            policyCodes: ["new_person_activation_v1"],
             sourceConversation: expectedSourceConversation,
           },
         ]);
