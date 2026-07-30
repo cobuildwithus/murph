@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import {
   HostedCodeEntryStep,
@@ -177,13 +178,19 @@ export function HostedAuthenticatedPhoneAuthState({
         <AlertTitle>You already started logging in or signing up.</AlertTitle>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
+            aria-busy={pendingAction === "continue"}
             type="button"
             onClick={onContinue}
             disabled={disabled}
             size="lg"
             className="w-full"
           >
-            Continue
+            {pendingAction === "continue" ? (
+              <>
+                <Spinner aria-hidden="true" />
+                Finishing...
+              </>
+            ) : "Continue"}
           </Button>
           <HostedUseDifferentNumberButton
             disabled={disabled}

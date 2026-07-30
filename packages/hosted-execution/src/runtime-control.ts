@@ -1954,6 +1954,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_request_started",
   "linq_typing_accepted",
+  "progress_update_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
@@ -2070,6 +2071,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   assistant?: {
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
+    progressUpdateAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
@@ -2200,6 +2202,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   assistant: [
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
+    "progressUpdateAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
@@ -2301,7 +2304,9 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write.
+// stored leaves are dropped before the next write. Accepted progress is the one
+// repeated milestone: retain its earliest timestamp when callbacks arrive out
+// of order.
 export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   existing: unknown;
   incoming: HostedRuntimeLatencyPhaseBreakdown;
@@ -2340,6 +2345,18 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
     let phaseChanged = false;
 
     for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
+      if (
+        phase === "assistant"
+        && leafKey === "progressUpdateAcceptedAtEpochMs"
+        && typeof leaf === "number"
+        && typeof mergedPhase[leafKey] === "number"
+      ) {
+        if (leaf < mergedPhase[leafKey]) {
+          mergedPhase[leafKey] = leaf;
+          phaseChanged = true;
+        }
+        continue;
+      }
       if (mergedPhase[leafKey] !== undefined) {
         continue;
       }

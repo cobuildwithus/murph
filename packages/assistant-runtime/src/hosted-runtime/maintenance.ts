@@ -507,7 +507,7 @@ export async function runHostedAssistantAutomation(
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId
           ? {
-              assistantInputIds: event.assistantInputIds,
+              assistantInputIds: [...event.assistantInputIds],
               latencyTracePort: options?.latencyTracePort ?? null,
               runtimeAttemptId,
               source,
