@@ -1,12 +1,18 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
   transaction: vi.fn(),
   updateHostedMemberAssistantConfigurationTx: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -147,6 +153,9 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
+    const task = mocks.after.mock.calls[0]?.[0];
+    await task?.();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       userId: "member_edge",
@@ -183,6 +192,8 @@ describe("assistant model settings route", () => {
       prisma: { tx: true },
       provider: "venice",
     });
+    const task = mocks.after.mock.calls[0]?.[0];
+    await task?.();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
   });
 
@@ -211,6 +222,8 @@ describe("assistant model settings route", () => {
       provider: "venice",
       updated: true,
     });
+    const task = mocks.after.mock.calls[0]?.[0];
+    await expect(task?.()).resolves.toBeUndefined();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
   });
 
@@ -260,6 +273,7 @@ describe("assistant model settings route", () => {
       solAvailable: true,
       updated: false,
     });
+    expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 

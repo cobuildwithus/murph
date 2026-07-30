@@ -4,6 +4,7 @@ import {
   type HostedAssistantProductModel,
   type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
+import { after } from "next/server";
 
 import { getPrisma } from "@/src/lib/prisma";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -52,7 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
   if (result.effectiveProviderUpdated) {
-    await signalHostedProviderChangeBestEffort(auth.member.id);
+    scheduleHostedProviderChange(auth.member.id);
   }
 
   return jsonOk({
@@ -107,21 +108,27 @@ function parseAssistantModelRequestBody(
   };
 }
 
-async function signalHostedProviderChangeBestEffort(
-  userId: string,
-): Promise<void> {
-  const deadlineMs = createHostedPostCommitDeadline(undefined);
+function scheduleHostedProviderChange(userId: string): void {
+  const task = async () => {
+    const deadlineMs = createHostedPostCommitDeadline(undefined);
+    try {
+      await waitForHostedPostCommitOperation({
+        deadlineMs,
+        operation: (abortSignal) =>
+          signalHostedRuntimeRecheckRuntime({
+            abortSignal,
+            userId,
+          }),
+      });
+    } catch {
+      // The durable preference remains authoritative. A later invocation and
+      // the provider-entry gate still revalidate it if this wake is unavailable.
+    }
+  };
+
   try {
-    await waitForHostedPostCommitOperation({
-      deadlineMs,
-      operation: (abortSignal) =>
-        signalHostedRuntimeRecheckRuntime({
-          abortSignal,
-          userId,
-        }),
-    });
+    after(task);
   } catch {
-    // The durable preference remains authoritative. A later invocation and
-    // the provider-entry gate still revalidate it if this wake is unavailable.
+    void task();
   }
 }
