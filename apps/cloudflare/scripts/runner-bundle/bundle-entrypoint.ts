@@ -65,10 +65,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
 //
-// Linq group-line recovery adds authored code to the existing runner chunks
-// without adding a forbidden boot input. The 2026-07-30 assemblies measured
-// 9,889,299B on Linux and 9,936,771B on macOS. Ratchet the total baseline to the
-// higher cross-platform measurement and retain the established 32KB allowance.
+// Direct Group subscription handling and Linq group-line recovery extend the
+// existing runner chunks without adding a forbidden boot input. The combined
+// 2026-07-30 macOS assembly measured 9,935,873B, below the existing 9,936,771B
+// cross-platform baseline. Retain that higher baseline and the established
+// 32KB allowance.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_936_771 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
