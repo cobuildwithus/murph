@@ -1481,6 +1481,11 @@ export function ComponentsContent() {
               <div
                 className="flex flex-col gap-3"
                 data-design-state={preview.state}
+                id={
+                  preview.state === "empty"
+                    ? "hosted-ai-usage-empty"
+                    : undefined
+                }
                 key={preview.label}
               >
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
