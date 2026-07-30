@@ -400,15 +400,16 @@ function PersonalUsageCreditOwnerStudy() {
     >
       <p className="text-sm text-muted-foreground">
         Static owner-layout preview keeps plan allowance and purchased credit
-        combined in one usage bar at the top, then adds the read-only credit
-        and mission history below.
+        combined in one usage bar at the top. Current referrals stay visible
+        below it, while completed referrals and purchase history remain on
+        demand.
       </p>
       <div
         className="flex flex-col gap-3"
         data-design-state="usage-credits-and-missions"
       >
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Overall usage with credits and missions
+          Overall usage with active referrals and history
         </p>
         <PersonalUsageCreditState
           label="Overall usage active"

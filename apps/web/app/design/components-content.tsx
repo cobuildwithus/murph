@@ -1441,10 +1441,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Hosted AI usage credits and missions">
+        <Section title="Hosted AI usage credits and referrals">
           <p className="text-sm text-muted-foreground">
-            Read-only Settings detail with missions first, optional mission
-            details on demand, and a compact purchased-credit ledger.
+            Read-only Settings detail keeps current referrals visible and
+            moves completed referrals and purchased credits into quiet history.
           </p>
           <div
             aria-label="Read-only hosted AI usage activity previews"
@@ -1456,25 +1456,25 @@ export function ComponentsContent() {
               {
                 activity: DESIGN_AI_USAGE_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Active and completed missions",
+                label: "Active referrals with completed history",
                 state: "active-and-completed",
               },
               {
                 activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Mission selected, waiting for a new group",
+                label: "Referral selected, waiting for a new group",
                 state: "waiting-for-group",
               },
               {
                 activity: DESIGN_AI_USAGE_EMPTY_ACTIVITY,
                 contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
-                label: "Missions available, none selected",
+                label: "Referrals available, none selected",
                 state: "empty",
               },
               {
                 activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
                 contactOption: null,
-                label: "New missions disabled, existing history retained",
+                label: "New referrals disabled, existing history retained",
                 state: "disabled-history",
               },
             ].map((preview) => (
