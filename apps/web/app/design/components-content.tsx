@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  type HostedAssistantProvider,
+} from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
 import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
@@ -26,6 +30,10 @@ import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
+import {
+  AssistantProviderDialog,
+  AssistantProviderSummary,
+} from "@/src/components/settings/hosted-assistant-model-settings";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
@@ -496,6 +504,10 @@ export function ComponentsContent() {
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
   const [choiceCardValue, setChoiceCardValue] = useState("terra");
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [providerValue, setProviderValue] = useState<HostedAssistantProvider>(
+    HOSTED_ASSISTANT_OPENAI_PROVIDER,
+  );
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -916,7 +928,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Radio Group & Choice Cards">
+        <Section title="Radio Group, Choice Cards & Provider Dialog">
           <p className="max-w-2xl text-sm text-muted-foreground">
             Choose the intelligence behind your personal health assistant.
           </p>
@@ -955,6 +967,17 @@ export function ComponentsContent() {
               value="sol"
             />
           </RadioGroup>
+          <AssistantProviderSummary
+            currentProvider={HOSTED_ASSISTANT_OPENAI_PROVIDER}
+            draftProvider={providerValue}
+            onChangeClick={() => setProviderDialogOpen(true)}
+          />
+          <AssistantProviderDialog
+            onOpenChange={setProviderDialogOpen}
+            onProviderChange={setProviderValue}
+            open={providerDialogOpen}
+            provider={providerValue}
+          />
         </Section>
 
         <Separator />

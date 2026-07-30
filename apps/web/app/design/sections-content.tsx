@@ -121,8 +121,8 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings model provider and model choice">
-        <div data-design-section="settings-model-provider-choice" inert>
+      <StudySection title="Settings model choice and compact provider control">
+        <div data-design-section="settings-compact-provider-control" inert>
           <HostedAssistantModelSettings
             canUpgradeToEdge={false}
             configurationAvailable
