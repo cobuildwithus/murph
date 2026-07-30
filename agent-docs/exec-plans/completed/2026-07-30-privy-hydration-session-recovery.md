@@ -1,6 +1,6 @@
 # Reconcile Privy session on homepage hydration
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -111,3 +111,19 @@ Updated: 2026-07-30
 - Rendered proof: desktop and mobile catalog captures show production-faithful
   session-snapshot waiting, hydrated email recovery, and idle phone recovery
   compositions; no production data or provider side effect is used.
+- Preliminary specialist retry: the exact-turn, exact-head response completed
+  well above the trust floor on the selected Pro lane and returned two
+  substantive findings with no patch artifact. The response model verified as
+  the Pro slug despite the wrapper's internal requested-model alias differing;
+  both findings were independently proved against the installed SDK and real
+  panel path before acceptance.
+- Corrected-head product-purpose revalidation: `NO FINDINGS`. The smallest
+  complete experience keeps the ordinary unauthenticated form available,
+  truthfully pauses only an indeterminate existing session, preserves active
+  journeys, and resolves to the exact recovery method with bounded restart.
+  The deterministic provider-call boundary is sufficient here because no
+  method SDK call or backend completion contract changed.
+- Parent final review: no unresolved correctness, auth-boundary, privacy,
+  reliability, accessibility, or simplicity finding remains on the pushed
+  corrected head.
+Completed: 2026-07-30
