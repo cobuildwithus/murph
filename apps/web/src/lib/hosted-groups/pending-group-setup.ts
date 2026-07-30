@@ -76,7 +76,6 @@ export type HostedPendingGroupSetupClaimReason =
 
 export type HostedPendingGroupSetupClaimResult =
   | {
-      claimToken: HostedPendingGroupSetupRestoreToken;
       kind: "claimed";
       reason: Extract<
         HostedPendingGroupSetupClaimReason,
@@ -95,8 +94,6 @@ export type HostedPendingGroupSetupClaimResult =
         | "recipient_line_unmanaged"
       >;
     };
-
-export type HostedPendingGroupSetupRestoreToken = HostedPendingGroupSetupRow;
 
 export async function armHostedPendingGroupSetupTx(input: {
   now?: Date;
@@ -289,11 +286,13 @@ export function selectHostedPendingGroupSetupCandidate(input: {
 }
 
 /**
- * `DELETE ... RETURNING` is the one-time claim. A surrounding transaction
- * rollback restores it, while a simultaneous second group cannot consume it.
+ * The selected setup row stays locked for the surrounding route transaction.
+ * Its caller consumes it only after that transaction creates the intended
+ * route; rollback and route convergence therefore need no compensation path.
  */
 export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   now?: Date;
+  occurredAt: Date;
   participantMemberIds: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
   senderMemberId?: string | null;
@@ -312,6 +311,10 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
     return { kind: "none", reason: "no_candidates" };
   }
   const now = requireValidDate(input.now ?? new Date(), "pending group setup claim time");
+  const occurredAt = requireValidDate(
+    input.occurredAt,
+    "pending group setup event time",
+  );
   if (!(await hasActiveHostedLinqManagedLine({
     phoneNumberLookupKeys: recipientPhoneLookupKeys,
     prisma: input.tx,
@@ -322,6 +325,7 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const candidateRows = await readCandidateRowsTx({
       now,
+      occurredAt,
       ownerMemberIds: participantMemberIds,
       recipientPhoneLookupKeys,
       tx: input.tx,
@@ -348,19 +352,22 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
       continue;
     }
     const claimedRows = await input.tx.$queryRaw<HostedPendingGroupSetupRow[]>(Prisma.sql`
-      DELETE FROM "hosted_pending_group_setup"
-      WHERE "id" = ${selected.id}
-        AND "owner_member_id" = ${selected.ownerMemberId}
-        AND "channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
-        AND "recipient_phone_lookup_key" = ${selected.recipientPhoneLookupKey}
-        AND "expires_at" > ${now}
-      RETURNING
+      SELECT
         "id",
         "owner_member_id" AS "ownerMemberId",
         "recipient_phone_lookup_key" AS "recipientPhoneLookupKey",
         "payload_encrypted" AS "payloadEncrypted",
         "armed_at" AS "armedAt",
         "expires_at" AS "expiresAt"
+      FROM "hosted_pending_group_setup"
+      WHERE "id" = ${selected.id}
+        AND "owner_member_id" = ${selected.ownerMemberId}
+        AND "channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
+        AND "recipient_phone_lookup_key" = ${selected.recipientPhoneLookupKey}
+        AND "armed_at" <= ${occurredAt}
+        AND "expires_at" > ${occurredAt}
+        AND "expires_at" > ${now}
+      FOR UPDATE
     `);
     const claimed = claimedRows[0];
     if (claimed) {
@@ -373,10 +380,14 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
       } catch {
         // Arm validates payloads. Corrupt or future bytes are consumed rather
         // than repeatedly blocking unrelated new-group admission.
+        await deleteHostedPendingGroupSetupTx({
+          id: claimed.id,
+          ownerMemberId: claimed.ownerMemberId,
+          tx: input.tx,
+        });
         return { kind: "none", reason: "invalid_payload" };
       }
       return {
-        claimToken: claimed,
         kind: "claimed",
         reason: selection.reason,
         setup: projectHostedPendingGroupSetupSnapshot(claimed, setup),
@@ -386,28 +397,18 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   return { kind: "none", reason: "claim_raced" };
 }
 
-/** Preserve the intent when route creation only converged on an existing route. */
-export async function restoreHostedPendingGroupSetupClaimTx(input: {
-  claimToken: HostedPendingGroupSetupRestoreToken;
+/** Consume the exact setup row already locked by the surrounding transaction. */
+export async function consumeHostedPendingGroupSetupClaimTx(input: {
+  id: string;
+  ownerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
-  const token = input.claimToken;
-  return (await input.tx.$executeRaw(Prisma.sql`
-    INSERT INTO "hosted_pending_group_setup" (
-      "id", "owner_member_id", "channel", "recipient_phone_lookup_key",
-      "payload_encrypted", "armed_at", "expires_at", "created_at", "updated_at"
-    )
-    VALUES (
-      ${token.id}, ${token.ownerMemberId}, ${HOSTED_PENDING_GROUP_SETUP_CHANNEL},
-      ${token.recipientPhoneLookupKey}, ${token.payloadEncrypted},
-      ${token.armedAt}, ${token.expiresAt}, ${token.armedAt}, ${token.armedAt}
-    )
-    ON CONFLICT ("owner_member_id") DO NOTHING
-  `)) > 0;
+  return await deleteHostedPendingGroupSetupTx(input);
 }
 
 async function readCandidateRowsTx(input: {
   now: Date;
+  occurredAt: Date;
   ownerMemberIds: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
   tx: Prisma.TransactionClient;
@@ -431,10 +432,25 @@ async function readCandidateRowsTx(input: {
       AND setup."channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
       AND setup."recipient_phone_lookup_key"
         IN (${Prisma.join(input.recipientPhoneLookupKeys)})
+      AND setup."armed_at" <= ${input.occurredAt}
+      AND setup."expires_at" > ${input.occurredAt}
       AND setup."expires_at" > ${input.now}
       AND owner."suspended_at" IS NULL
     ORDER BY setup."owner_member_id" ASC
   `);
+}
+
+async function deleteHostedPendingGroupSetupTx(input: {
+  id: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  return (await input.tx.$executeRaw(Prisma.sql`
+    DELETE FROM "hosted_pending_group_setup"
+    WHERE "id" = ${input.id}
+      AND "owner_member_id" = ${input.ownerMemberId}
+      AND "channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
+  `)) > 0;
 }
 
 async function filterCurrentlyEligibleCandidateRows(input: {

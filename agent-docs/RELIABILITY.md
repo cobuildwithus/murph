@@ -199,13 +199,17 @@ Last verified: 2026-07-29
   an empty, oversized, or non-group result, no eligible intent, or unresolved
   ambiguity must preserve the existing first-active-sender provisioning path
   and must not delay or drop the accepted group message. The one-use setup
-  claim and route creation share one transaction. A concurrent loser
-  re-evaluates without the consumed intent, while convergence on an
-  already-created route restores the still-valid intent instead of silently
-  spending it. The optional setup payload is encrypted and versioned; unreadable
-  or future bytes are consumed as unavailable optional setup and fall back to
-  ordinary sender admission instead of wedging the room. For a newly created
-  route, sparse style is committed in the same transaction through the existing
+  claim and route creation share one transaction. Claim eligibility requires
+  the setup to cover the provider event time and to remain unexpired at
+  processing time, so a delayed pre-arm event cannot spend a newer intent. The
+  selected setup row stays locked until route admission finishes and is deleted
+  only when that transaction creates the route; rollback and convergence leave
+  it unchanged without a compensation lifecycle. A concurrent loser re-reads
+  the canonical route and appends its distinct message there. The optional
+  setup payload is encrypted and versioned; unreadable or future bytes are
+  consumed as unavailable optional setup and fall back to ordinary sender
+  admission instead of wedging the room. For a newly created route, sparse
+  style is committed in the same transaction through the existing
   synthetic-member preference owner. Optional room context rides the existing
   activation wake; its fixed-page initialization is exact-replay idempotent and
   fail-open so it cannot block the accepted first group message.

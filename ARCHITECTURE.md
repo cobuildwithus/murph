@@ -1120,18 +1120,22 @@ an unbound Linq group, Web performs one bounded current-chat read and resolves
 at most 32 active non-Murph roster handles to member ids. Inside the existing
 route transaction, a lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
-first-active-sender fallback continues. `DELETE ... RETURNING` is the one-use
-claim, and the existing `ensureHostedThreadContainerRouteTx` remains the only
-route and `ownerMemberId` owner. Only a newly created route applies sparse
-style through the synthetic member's existing preference owner and carries
-explicit room context on the existing activation wake to initialize the fixed
-group-room-model page exactly once before conversation work. Existing-route
-convergence restores the envelope and changes neither owner nor configuration.
-Unreadable or future encrypted payloads are consumed as unavailable optional
-setup so they cannot block an accepted group message. Transaction failure
-preserves the intent, expiry is query-time authority, and member deletion
-removes it by foreign-key cascade. Provider add-actor fields are not ownership
-authority.
+first-active-sender fallback continues. Sender inactivity or unresolved sender
+identity disqualifies only that fallback; it does not veto a distinct active
+roster-matched owner. The setup must cover the provider event time and remain
+unexpired at processing time. The selected row stays locked through
+`ensureHostedThreadContainerRouteTx`, which remains the only route and
+`ownerMemberId` owner, and is deleted only when that transaction creates the
+route. Only a newly created route applies sparse style through the synthetic
+member's existing preference owner and carries explicit room context on the
+existing activation wake to initialize the fixed group-room-model page exactly
+once before conversation work. Existing-route convergence and transaction
+rollback leave the envelope unchanged without compensation; a concurrent loser
+re-reads the canonical route and appends its distinct message there. Unreadable
+or future encrypted payloads are consumed as unavailable optional setup so they
+cannot block an accepted group message. Expiry is query-time authority, and
+member deletion removes the intent by foreign-key cascade. Provider add-actor
+fields are not ownership authority.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

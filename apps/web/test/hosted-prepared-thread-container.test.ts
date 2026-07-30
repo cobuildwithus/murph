@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   bindUsageReferral: vi.fn(),
   claimPendingSetup: vi.fn(),
+  consumePendingSetup: vi.fn(),
   ensureThreadContainer: vi.fn(),
-  restorePendingSetup: vi.fn(),
   upsertPreferences: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
 
 vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
   claimHostedPendingGroupSetupForParticipantsTx: mocks.claimPendingSetup,
-  restoreHostedPendingGroupSetupClaimTx: mocks.restorePendingSetup,
+  consumeHostedPendingGroupSetupClaimTx: mocks.consumePendingSetup,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
@@ -45,22 +45,12 @@ const pendingSetup = {
     },
   },
 };
-const claimToken = {
-  armedAt: pendingSetup.armedAt,
-  expiresAt: pendingSetup.expiresAt,
-  id: pendingSetup.id,
-  ownerMemberId: pendingSetup.ownerMemberId,
-  payloadEncrypted: "encrypted-pending-setup",
-  recipientPhoneLookupKey: pendingSetup.recipientPhoneLookupKey,
-};
-
 describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.bindUsageReferral.mockResolvedValue({ referralId: null });
-    mocks.restorePendingSetup.mockResolvedValue(true);
+    mocks.consumePendingSetup.mockResolvedValue(true);
     mocks.claimPendingSetup.mockResolvedValue({
-      claimToken,
       kind: "claimed",
       reason: "only_candidate",
       setup: pendingSetup,
@@ -109,10 +99,14 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       targetContainerMemberId: "member_group_container",
       tx,
     });
-    expect(mocks.restorePendingSetup).not.toHaveBeenCalled();
+    expect(mocks.consumePendingSetup).toHaveBeenCalledExactlyOnceWith({
+      id: pendingSetup.id,
+      ownerMemberId: pendingSetup.ownerMemberId,
+      tx,
+    });
   });
 
-  it("restores the intent when a concurrent transaction already created the route", async () => {
+  it("leaves the intent untouched when another transaction already created the route", async () => {
     mocks.ensureThreadContainer.mockResolvedValue({
       containerMemberId: "member_existing_group",
       created: false,
@@ -134,15 +128,12 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       pendingSetupApplied: false,
     });
 
-    expect(mocks.restorePendingSetup).toHaveBeenCalledExactlyOnceWith({
-      claimToken,
-      tx,
-    });
+    expect(mocks.consumePendingSetup).not.toHaveBeenCalled();
     expect(mocks.upsertPreferences).not.toHaveBeenCalled();
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
   });
 
-  it("restores the intent before rethrowing a route-admission failure", async () => {
+  it("leaves the intent for transaction rollback on route-admission failure", async () => {
     const routeFailure = new Error("route admission failed");
     mocks.ensureThreadContainer.mockRejectedValue(routeFailure);
 
@@ -158,17 +149,13 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       tx,
     })).rejects.toBe(routeFailure);
 
-    expect(mocks.restorePendingSetup).toHaveBeenCalledExactlyOnceWith({
-      claimToken,
-      tx,
-    });
+    expect(mocks.consumePendingSetup).not.toHaveBeenCalled();
     expect(mocks.upsertPreferences).not.toHaveBeenCalled();
     expect(mocks.bindUsageReferral).not.toHaveBeenCalled();
   });
 
   it("keeps ownership-only preparation free of style or room-model side effects", async () => {
     mocks.claimPendingSetup.mockResolvedValue({
-      claimToken,
       kind: "claimed",
       reason: "only_candidate",
       setup: {

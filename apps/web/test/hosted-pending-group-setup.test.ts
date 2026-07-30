@@ -20,6 +20,7 @@ function candidate(
 describe("selectHostedPendingGroupSetupCandidate", () => {
   it("refuses to select from an oversized partial roster at the claim boundary", async () => {
     await expect(claimHostedPendingGroupSetupForParticipantsTx({
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: Array.from(
         { length: 33 },
         (_, index) => `member_${index}`,
@@ -38,6 +39,7 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
     const queryRaw = vi.fn();
 
     await expect(claimHostedPendingGroupSetupForParticipantsTx({
+      occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_owner"],
       recipientPhoneLookupKeys: ["line_lookup_key"],
       senderMemberId: "member_owner",

@@ -2387,7 +2387,6 @@ describe("Linq explicit external-thread routing", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
-
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
       prisma: prisma as never,
@@ -3640,11 +3639,50 @@ describe("Linq explicit external-thread routing", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("allows a uniquely prepared roster member to own the group when a non-member speaks first", async () => {
+  async function expectPreparedOwnerAdmission(input: {
+    senderKind: "unknown-phone" | "unverified-email" | "inactive-member";
+  }): Promise<void> {
+    const { senderKind } = input;
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
-    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
-      .mockResolvedValue(null);
+    if (senderKind === "inactive-member") {
+      const readActiveMember =
+        prisma.hostedMember.findUnique.getMockImplementation()!;
+      vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+        .mockResolvedValue({
+          core: {
+            billingStatus: HostedBillingStatus.paused,
+            createdAt: new Date("2026-07-29T16:00:00.000Z"),
+            id: "member_inactive_sender",
+            suspendedAt: null,
+            updatedAt: new Date("2026-07-29T16:00:00.000Z"),
+          },
+          identity: {},
+          matchedBy: "phoneNumber",
+        } as Awaited<
+          ReturnType<
+            typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber
+          >
+        >);
+      prisma.hostedMember.findUnique.mockImplementation(async (input: {
+        where: { id: string };
+      }) =>
+        input.where.id === "member_inactive_sender"
+          ? {
+              accountGroupMemberships: [],
+              billingStatus: HostedBillingStatus.paused,
+              suspendedAt: null,
+              threadContainer: null,
+            }
+          : readActiveMember(input)
+      );
+    } else {
+      vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+        .mockResolvedValue(null);
+    }
+    if (senderKind === "unverified-email") {
+      prisma.hostedMemberEmailAuthorization.findMany.mockResolvedValue([]);
+    }
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       createdAt: new Date("2026-07-29T17:00:00.000Z"),
@@ -3704,7 +3742,11 @@ describe("Linq explicit external-thread routing", () => {
       });
 
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event: buildLinqMessageReceivedEvent({
+        ...(senderKind === "unverified-email"
+          ? { sender: "participant@example.com" }
+          : {}),
+      }),
       pendingGroupParticipantMemberIds: ["member_prepared_owner"],
       prisma: prisma as never,
     });
@@ -3729,14 +3771,34 @@ describe("Linq explicit external-thread routing", () => {
         kind: "conversation.message",
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
-            from: "+15551112222",
+            from: senderKind === "unverified-email"
+              ? "participant@example.com"
+              : "+15551112222",
           }),
         }),
         userId: "member_prepared_container",
       }),
       tx: prisma,
     });
-  });
+  }
+
+  it.each([
+    {
+      senderKind: "unknown-phone",
+      title: "an unknown phone participant speaks first",
+    },
+    {
+      senderKind: "unverified-email",
+      title: "an unverified email participant speaks first",
+    },
+    {
+      senderKind: "inactive-member",
+      title: "an inactive member speaks first",
+    },
+  ] as const)(
+    "allows a uniquely prepared roster member to own the group when $title",
+    expectPreparedOwnerAdmission,
+  );
 
   it("ignores routed thread traffic when the container is inactive", async () => {
     const prisma = createPrisma({
@@ -5825,6 +5887,11 @@ describe("Linq group chat concurrent provisioning race", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
+    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+      .mockResolvedValueOnce({
+        kind: "owner_unavailable",
+        pendingSetupResolution: "claim_raced",
+      });
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
@@ -5843,5 +5910,6 @@ describe("Linq group chat concurrent provisioning race", () => {
     });
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 });

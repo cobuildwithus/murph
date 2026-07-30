@@ -2509,6 +2509,7 @@ async function planHostedLinqGroupChatWebhook(input: {
       : "verified-email"
     : "none";
   let activeSenderMemberId: string | null = null;
+  let inactiveSender = false;
   if (sender) {
     if (
       isHostedMemberSuspended(sender.suspendedAt)
@@ -2517,16 +2518,12 @@ async function planHostedLinqGroupChatWebhook(input: {
         prisma: input.prisma,
       })).allowed
     ) {
-      return ignored("sender-inactive", senderIdentityMatch);
+      inactiveSender = true;
+    } else {
+      activeSenderMemberId = sender.id;
     }
-    activeSenderMemberId = sender.id;
-  } else if (participantContact.kind !== "phone") {
-    // Preserve the existing verified-email authority boundary. The prepared
-    // owner exception is for an unknown phone participant speaking first; an
-    // unverified email sender remains ineligible to start a group route.
-    return ignored("sender-identity-unresolved");
   }
-  if (!sender && input.rosterUnavailable) {
+  if (!activeSenderMemberId && input.rosterUnavailable) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
       httpStatus: 502,
@@ -2561,15 +2558,16 @@ async function planHostedLinqGroupChatWebhook(input: {
       ) {
         return ignored("recipient-line-unmanaged", senderIdentityMatch);
       }
-      return !sender
-        ? ignored("sender-identity-unresolved")
-        : ignored("provision-unavailable", senderIdentityMatch);
+      // A concurrent setup claimant may have committed this route while the
+      // row lock was held. The canonical re-read below decides whether this
+      // distinct message can append to that winner.
+    } else {
+      const ensureResult = preparedResult.ensure;
+      createdContainerMemberId = ensureResult.created
+        ? ensureResult.containerMemberId
+        : null;
+      demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
     }
-    const ensureResult = preparedResult.ensure;
-    createdContainerMemberId = ensureResult.created
-      ? ensureResult.containerMemberId
-      : null;
-    demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (
       !isHostedOnboardingError(error)
@@ -2589,7 +2587,12 @@ async function planHostedLinqGroupChatWebhook(input: {
     threadId: summary.chatId,
   });
   if (!route) {
-    return ignored("provision-unavailable", senderIdentityMatch);
+    return activeSenderMemberId
+      ? ignored("provision-unavailable", senderIdentityMatch)
+      : ignored(
+          inactiveSender ? "sender-inactive" : "sender-identity-unresolved",
+          senderIdentityMatch,
+        );
   }
 
   const plan = await planHostedLinqExplicitThreadRouteWebhook({
