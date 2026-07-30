@@ -151,9 +151,10 @@ bound to an exact runnable revision.
   longer available, and the assistant offers a currently runnable alternative
   as a distinct experiment with a new id and lineage. The withdrawn run's
   protocol references, effective snapshot, run plan, and analysis plan are
-  never rewritten to represent that alternative. The old run becomes
-  `abandoned` only after separate explicit member agreement. A missing public
-  page is not presented as a refreshable revision mismatch.
+  never rewritten to represent that alternative, including after the old run
+  reaches a terminal status. The old run becomes `abandoned` only after
+  separate explicit member agreement. A missing public page is not presented
+  as a refreshable revision mismatch.
 
 ## Protocol Summary Copy
 

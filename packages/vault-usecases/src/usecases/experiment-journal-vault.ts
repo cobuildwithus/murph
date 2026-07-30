@@ -1290,8 +1290,9 @@ export async function updateExperimentRecord(input: {
         nextAnalysisPlan,
         frontmatter.analysisPlan,
       )
+      const nextStatus = input.status ?? frontmatter.status
       if (
-        (frontmatter.status === 'planned' || frontmatter.status === 'paused') &&
+        nextStatus !== 'active' &&
         (
           changesCommonsProtocolRef ||
           changesProtocolRef ||
@@ -1304,7 +1305,7 @@ export async function updateExperimentRecord(input: {
       ) {
         throw new VaultCliError(
           'invalid_payload',
-          'This experiment is linked to a withdrawn Health Commons protocol, so its protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place. Start the alternative as a new experiment; this run remains unchanged until the member separately agrees to abandon it.',
+          'This experiment is linked to a withdrawn Health Commons protocol, so its protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place. Start the alternative as a new experiment; this saved run remains unchanged. Abandonment changes status only and must be a separate member decision.',
         )
       }
       if (
@@ -1320,7 +1321,6 @@ export async function updateExperimentRecord(input: {
           'Only a planned experiment may change its protocol lineage or effective snapshot. Start a new experiment to use a different revision.',
         )
       }
-      const nextStatus = input.status ?? frontmatter.status
       const nextActivationOnboarding = changesCommonsProtocolRef
         ? input.onboarding ?? undefined
         : input.onboarding === undefined

@@ -346,8 +346,21 @@ describe('experiment start and support mechanics', () => {
     )
     expect(resolution).toContain('Never replace it with a')
     expect(resolution).toContain('`starterCandidate`')
-    expect(resolution).toMatch(
-      /If\s+there is no unique exact match, ask one clarification and do not plan or\s+start\./u,
+    const nameFirstRule = resolution.slice(
+      resolution.indexOf('- A public Murph start draft names the experiment'),
+      resolution.indexOf('- For that name-first draft'),
+    )
+    expect(nameFirstRule).toMatch(
+      /direct public Start sentence names one experiment and there are zero current\s+exact title or alias matches/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /named experiment is not currently\s+available, say that no run was created, and offer currently runnable\s+alternatives in the same reply/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /Do not ask a clarification merely to\s+rediscover that unavailable title, expose a raw key or revision, or direct\s+the user to refresh or reopen it/u,
+    )
+    expect(nameFirstRule).toMatch(
+      /multiple exact matches or the\s+text is genuinely ambiguous, ask one clarification and do not plan or start/u,
     )
     expect(resolution).toContain('use the exact shown page')
     expect(resolution).toContain('Do not surface')
@@ -397,10 +410,10 @@ describe('experiment start and support mechanics', () => {
       /start it as a distinct\s+experiment with its own id and protocol lineage/u,
     )
     expect(persistedRunRule).toMatch(
-      /never edit the old\s+run's\s+`commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or\s+`analysisPlan`/u,
+      /never edit the old\s+run's\s+`commonsProtocolRef`,\s+`protocolRef`, effective snapshot, `runPlan`, or\s+`analysisPlan` to turn it into the alternative, including after its status\s+changes/u,
     )
     expect(persistedRunRule).toMatch(
-      /Mark the old run `abandoned`\s+only after the user separately and explicitly agrees/u,
+      /Mark the old run `abandoned`\s+only after the user separately\s+and\s+explicitly agrees/u,
     )
     expect(persistedRunRule).not.toMatch(/no run was created/u)
   })

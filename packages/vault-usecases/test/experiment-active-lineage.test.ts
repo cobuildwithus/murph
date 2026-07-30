@@ -11,9 +11,10 @@ import {
 import { test } from "vitest";
 
 import { updateExperimentRecord } from "../src/usecases/experiment-journal-vault.ts";
+import { createIntegratedVaultServices } from "../src/vault-services.ts";
 
 const ORIGINAL_PROTOCOL_REF = {
-  key: "protocol_variant:sleep-baseline-observation/consistent-wake-time",
+  key: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure",
   pageRevisionId: `sha256:${"1".repeat(64)}`,
   runSpecRevisionId: `sha256:${"2".repeat(64)}`,
 } as const;
@@ -63,7 +64,7 @@ const WITHDRAWN_RUN_PLAN: NonNullable<ExperimentRecordUpdate["runPlan"]> = {
   targetSessions: 7,
   minimumUsefulSessions: 4,
   logging: {
-    sessionFields: ["sleep_quality_1_10"],
+    sessionFields: ["sleep_quality_0_10"],
   },
 };
 
@@ -110,6 +111,40 @@ const WITHDRAWN_PROTECTED_FIELD_CHANGES = [
   update: ProtectedExperimentUpdate;
 }>;
 
+const WITHDRAWN_POST_STATUS_CHANGES = [
+  {
+    field: "runPlan",
+    initialStatus: "planned",
+    update: {
+      runPlan: {
+        ...WITHDRAWN_RUN_PLAN,
+        targetSessions: 12,
+      },
+    },
+  },
+  {
+    field: "analysisPlan",
+    initialStatus: "paused",
+    update: {
+      analysisPlan: {
+        ...WITHDRAWN_ANALYSIS_PLAN,
+        desiredDirection: "decrease",
+      },
+    },
+  },
+] satisfies ReadonlyArray<{
+  field: string;
+  initialStatus: "planned" | "paused";
+  update: ProtectedExperimentUpdate;
+}>;
+
+type WithdrawnExperimentStatus =
+  | "planned"
+  | "paused"
+  | "active"
+  | "completed"
+  | "abandoned";
+
 async function withProtocolBackedExperiment(
   input: {
     status: "active" | "completed";
@@ -139,7 +174,7 @@ async function withProtocolBackedExperiment(
 }
 
 async function withWithdrawnExperiment(
-  status: "planned" | "paused",
+  status: WithdrawnExperimentStatus,
   run: (input: {
     vaultRoot: string;
     experimentId: string;
@@ -240,7 +275,7 @@ test.each(
           lookup: experimentId,
           ...update,
         }),
-        /withdrawn Health Commons protocol.*protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place.*alternative as a new experiment.*remains unchanged.*separately agrees to abandon it/u,
+        /withdrawn Health Commons protocol.*protocol lineage, effective snapshot, run plan, and analysis plan cannot be changed in place.*alternative as a new experiment.*saved run remains unchanged.*Abandonment changes status only.*separate member decision/u,
       );
 
       assert.equal(await fs.readFile(experimentPath, "utf8"), before);
@@ -326,6 +361,150 @@ test.each(["planned", "paused"] as const)(
     });
   },
 );
+
+test.each(WITHDRAWN_POST_STATUS_CHANGES)(
+  "$initialStatus withdrawn experiment rejects a later $field edit after abandonment",
+  async ({ initialStatus, update }) => {
+    await withWithdrawnExperiment(initialStatus, async ({
+      vaultRoot,
+      experimentId,
+      experimentPath,
+    }) => {
+      const services = createIntegratedVaultServices();
+      const abandonment = await services.core.updateExperiment({
+        vault: vaultRoot,
+        requestId: null,
+        lookup: experimentId,
+        status: "abandoned",
+      });
+      assert.equal(abandonment.status, "abandoned");
+      const afterAbandonment = await fs.readFile(experimentPath, "utf8");
+
+      await assert.rejects(
+        services.core.updateExperiment({
+          vault: vaultRoot,
+          requestId: null,
+          lookup: experimentId,
+          ...update,
+        }),
+        /withdrawn Health Commons protocol.*cannot be changed in place.*saved run remains unchanged/u,
+      );
+
+      assert.equal(
+        await fs.readFile(experimentPath, "utf8"),
+        afterAbandonment,
+      );
+    });
+  },
+);
+
+test.each([
+  {
+    status: "completed",
+    update: {
+      runPlan: {
+        ...WITHDRAWN_RUN_PLAN,
+        targetSessions: 12,
+      },
+    },
+  },
+  {
+    status: "abandoned",
+    update: {
+      analysisPlan: {
+        ...WITHDRAWN_ANALYSIS_PLAN,
+        desiredDirection: "decrease",
+      },
+    },
+  },
+] satisfies ReadonlyArray<{
+  status: "completed" | "abandoned";
+  update: ProtectedExperimentUpdate;
+}>)(
+  "$status withdrawn experiment rejects a protected plan edit",
+  async ({ status, update }) => {
+    await withWithdrawnExperiment(status, async ({
+      vaultRoot,
+      experimentId,
+      experimentPath,
+    }) => {
+      const services = createIntegratedVaultServices();
+      const before = await fs.readFile(experimentPath, "utf8");
+
+      await assert.rejects(
+        services.core.updateExperiment({
+          vault: vaultRoot,
+          requestId: null,
+          lookup: experimentId,
+          ...update,
+        }),
+        /withdrawn Health Commons protocol.*cannot be changed in place.*saved run remains unchanged/u,
+      );
+
+      assert.equal(await fs.readFile(experimentPath, "utf8"), before);
+    });
+  },
+);
+
+test("active withdrawn experiment may adjust its current run plan", async () => {
+  await withWithdrawnExperiment("active", async ({
+    vaultRoot,
+    experimentId,
+    experimentPath,
+  }) => {
+    const services = createIntegratedVaultServices();
+    const result = await services.core.updateExperiment({
+      vault: vaultRoot,
+      requestId: null,
+      lookup: experimentId,
+      runPlan: {
+        ...WITHDRAWN_RUN_PLAN,
+        targetSessions: 8,
+      },
+    });
+    const afterDocument = parseFrontmatterDocument(
+      await fs.readFile(experimentPath, "utf8"),
+    );
+    const runPlan = afterDocument.attributes.runPlan;
+    if (
+      runPlan === null
+      || typeof runPlan !== "object"
+      || Array.isArray(runPlan)
+    ) {
+      throw new Error("Expected a structured run plan.");
+    }
+
+    assert.equal(result.status, "active");
+    assert.equal(runPlan.targetSessions, 8);
+  });
+});
+
+test("active withdrawn experiment cannot become non-active while rewriting its saved plan", async () => {
+  await withWithdrawnExperiment("active", async ({
+    vaultRoot,
+    experimentId,
+    experimentPath,
+  }) => {
+    const services = createIntegratedVaultServices();
+    const before = await fs.readFile(experimentPath, "utf8");
+
+    await assert.rejects(
+      services.core.updateExperiment({
+        vault: vaultRoot,
+        requestId: null,
+        lookup: experimentId,
+        status: "paused",
+        runPlan: {
+          ...WITHDRAWN_RUN_PLAN,
+          targetSessions: 8,
+        },
+      }),
+      /withdrawn Health Commons protocol.*cannot be changed in place.*saved run remains unchanged/u,
+    );
+
+    assert.equal(await fs.readFile(experimentPath, "utf8"), before);
+  });
+});
 
 test("completed Health Commons experiment rejects a stale lineage replacement", async () => {
   await withProtocolBackedExperiment({ status: "completed" }, async ({ vaultRoot, experimentId }) => {

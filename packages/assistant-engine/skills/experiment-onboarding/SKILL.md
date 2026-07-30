@@ -143,9 +143,15 @@ If sending, ask whether the planned session happened and collect only the missin
   `vault-cli commons protocol list --query <query> --format json`. One unique
   exact title or alias match is authoritative. Never replace it with a
   top-level or group `starterCandidate`, a canonical starter, or a same-family
-  variant unless the user explicitly agrees to that different protocol. If
-  there is no unique exact match, ask one clarification and do not plan or
-  start. Read the exact selected protocol with
+  variant unless the user explicitly agrees to that different protocol. If a
+  direct public Start sentence names one experiment and there are zero current
+  exact title or alias matches, say that the named experiment is not currently
+  available, say that no run was created, and offer currently runnable
+  alternatives in the same reply. Do not ask a clarification merely to
+  rediscover that unavailable title, expose a raw key or revision, or direct
+  the user to refresh or reopen it. If there are multiple exact matches or the
+  text is genuinely ambiguous, ask one clarification and do not plan or start.
+  Read the exact selected protocol with
   `vault-cli commons protocol show <key-or-slug> --format json`.
 - For that name-first draft, use the exact shown page's `pageRevisionId` and
   `runSpecRevisionId` as compare-and-swap input on the dry run and the real
@@ -169,8 +175,9 @@ If sending, ask whether the planned session happened and collect only the missin
   alternative. If the user accepts the alternative, start it as a distinct
   experiment with its own id and protocol lineage; never edit the old run's
   `commonsProtocolRef`, `protocolRef`, effective snapshot, `runPlan`, or
-  `analysisPlan` to turn it into the alternative. Mark the old run `abandoned`
-  only after the user separately and explicitly agrees.
+  `analysisPlan` to turn it into the alternative, including after its status
+  changes. Mark the old run `abandoned` only after the user separately and
+  explicitly agrees.
 - For protocol discovery that did not begin with a public Start sentence or a legacy reference, use `vault-cli commons protocol explore <query> --format json` for fuzzy, broad, or ambiguous discovery, `vault-cli commons protocol list --query <query> --format json` for protocol-only listing, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Prefer a same-family public protocol when the user's dosage, schedule, metric, or variant differs, but name the substitution and get explicit agreement before choosing it. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.
 - Use the protocol page's `experimentOnboarding` block only for protocol-specific onboarding deltas: start intent, compact setup slots, safety-screen questions, selected test plan, first-session guidance, adaptation policy, tracking hints, and support copy. Derive plan timing and adherence targets from `testPlans` and `protocol`; derive readable logging labels from `protocol.logFields` and stable session log ids from `protocol.sessionFieldIds`; use `trackingHints.confounderFields` only as stable logging field ids; use prose `trackingHints.confounders` as interpretation guidance; and derive generic vault-read behavior from this skill.
 
