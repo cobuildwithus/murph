@@ -154,7 +154,8 @@ it does not weaken the explicit-confirmation rule.
 Home and `murph.plan_usage` render only `recommendedAction`. Settings may expose
 **Add usage** at any utilization for an eligible direct paid member, using the
 same server-projected offers. Settings does not render `change_plan` from the
-usage projection; its plan cards own those choices and confirmations.
+usage projection or ask that projection to resolve subscription actions; its
+plan cards own those choices and confirmations.
 Subscription actions still use the existing server-authorized billing route;
 **Add usage** uses the authenticated one-time Checkout route described in the
 top-up spec. Assistant policy uses a matching `subscriptionActionQuote` only to

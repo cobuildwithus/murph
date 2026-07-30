@@ -19,6 +19,11 @@ const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingStripe?: Stripe | null;
 };
 
+const HOSTED_BILLING_PLAN_DISPLAY_PRICE_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: 5_000,
+} as const satisfies Stripe.RequestOptions;
+
 export function getHostedOnboardingEnvironment(): HostedOnboardingEnvironment {
   if (globalForHostedOnboarding.__murphHostedOnboardingEnv) {
     return globalForHostedOnboarding.__murphHostedOnboardingEnv;
@@ -151,13 +156,33 @@ export async function requireValidatedHostedStripeBillingPlanConfig(input?: {
   priceId: string;
   stripe: Stripe;
 }> {
+  return requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(input);
+}
+
+async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
+  input?: {
+    billingPlanCode?: HostedBillingPlanCode;
+    requestOptions?: Stripe.RequestOptions;
+  },
+): Promise<{
+  billingPlanCode: HostedBillingPlanCode;
+  priceId: string;
+  stripe: Stripe;
+}> {
   const config = requireHostedStripeBillingPlanConfig(input);
   let price: Stripe.Price;
 
   try {
-    price = await config.stripe.prices.retrieve(config.priceId, {
+    const retrieveParams = {
       expand: ["currency_options"],
-    });
+    };
+    price = input?.requestOptions
+      ? await config.stripe.prices.retrieve(
+          config.priceId,
+          retrieveParams,
+          input.requestOptions,
+        )
+      : await config.stripe.prices.retrieve(config.priceId, retrieveParams);
   } catch (error) {
     throw hostedOnboardingError({
       cause: error,
@@ -185,7 +210,10 @@ export async function isHostedBillingPlanSelectionAvailable(input: {
   billingPlanCode: HostedBillingPlanCode;
 }): Promise<boolean> {
   try {
-    await requireValidatedHostedStripeBillingPlanConfig(input);
+    await requireValidatedHostedStripeBillingPlanConfigWithRequestOptions({
+      ...input,
+      requestOptions: HOSTED_BILLING_PLAN_DISPLAY_PRICE_REQUEST_OPTIONS,
+    });
     return true;
   } catch {
     return false;

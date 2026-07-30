@@ -64,10 +64,10 @@ The supported transitions are:
 A private-conversation change requires a short-lived signed quote that binds
 the member, action, target plan, exact current catalog price, timing, expiry,
 and current billing-state fingerprint. The mutation verifies the quote before
-claiming the accepted private input or contacting Stripe. Settings sends the
-current displayed plan as an expected source token. The service compares that
-token under the member billing-mutation lock before any Stripe mutation. A
-recommendation is never confirmation.
+claiming the accepted private input or contacting Stripe. Immediate Settings
+changes send the current displayed plan as an expected source token. The
+service compares that token under the member billing-mutation lock before any
+Stripe mutation. A recommendation is never confirmation.
 
 One member billing-mutation lock owns the complete direct-plan change:
 authoritative source-plan read, eligibility and provider-Price validation,
@@ -87,7 +87,10 @@ even when its included AI allowance is exhausted. Group-at-trial-end requires
 a usable subscription payment method before Murph creates or updates a
 schedule. If payment setup is needed, Web opens the payment-method flow and
 requires a fresh plan choice after return; it does not retain a Group mutation
-intent that could be applied against changed billing state.
+intent that could be applied against changed billing state. The locked
+trial-end mutation also requires Stripe itself to still report `trialing`; a
+local-trial/provider-paid race fails stale instead of scheduling one paid cycle
+late.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Group to the private catalog must not make it publicly selectable.
@@ -97,6 +100,9 @@ Group to the private catalog must not make it publicly selectable.
 - Missing, duplicate, unreachable, inactive, or catalog-mismatched Group Price
   configuration hides new Group selection without affecting Pulse or Edge and
   fails closed again at quote and mutation boundaries.
+- Settings bounds its display-only provider Price read to five seconds with no
+  network retry. Failure hides Group while the rest of Settings remains
+  available; quote and mutation boundaries keep their stronger validation.
 - Stale membership, quote, local billing state, Stripe customer, subscription,
   subscription items, or schedule shape fails closed.
 - A cardless Group-at-trial-end choice does not create a schedule. Payment

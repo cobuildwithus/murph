@@ -581,6 +581,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     "usage_10_usd",
     "usage_25_usd",
   ]);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({
+    id: "group_member_123",
+  });
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(false);
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -712,6 +716,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
       payerMemberId: "member_123",
+      showGroupPlan: false,
       usageStatus,
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
@@ -753,6 +758,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
+      publicBaseUrl: null,
+    });
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledTimes(1);
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledWith({
+      billingPlanCode: "launch_group_monthly",
     });
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledWith({
       memberId: "member_123",

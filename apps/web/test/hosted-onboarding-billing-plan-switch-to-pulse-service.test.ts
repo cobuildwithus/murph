@@ -613,6 +613,38 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
   });
 
+  test("rejects a trial-end choice after Stripe has already activated billing", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
+      id: "group_member_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: ["price_pulse_recurring"],
+      status: "active",
+    }));
+
+    await expect(scheduleHostedBillingPlanSwitch({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      requiredSourceBillingPhase: "trial",
+      targetPlanCode: "launch_group_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
   test("does not reinterpret a stale trial-end choice as a paid downgrade", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: "paid",

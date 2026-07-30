@@ -439,6 +439,36 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
+  it("does not resolve an unused plan action for Settings usage status", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 10_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_exhausted_trial_settings",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      status: "exhausted",
+    });
+    expect(mocks.isHostedBillingPlanSelectionAvailable).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+  });
+
   it("omits the quote field for callers that keep the original empty request shape", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_paid_member_plan",

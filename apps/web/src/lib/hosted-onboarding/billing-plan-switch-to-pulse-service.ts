@@ -196,6 +196,12 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
     stripeCustomerId,
     subscription,
   });
+  if (
+    input.requiredSourceBillingPhase === "trial"
+    && subscription.status !== "trialing"
+  ) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
   assertHostedStripeSubscriptionScheduleableState({
     allowTrialing:
       parseHostedBillingPhase(billingRef?.currentBillingPhase) === "trial",

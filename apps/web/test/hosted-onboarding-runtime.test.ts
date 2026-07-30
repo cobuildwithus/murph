@@ -7,6 +7,7 @@ import {
   requireHostedStripeFamilyPlanConfig,
   requireHostedStripeUsageCreditCheckoutConfig,
   requireValidatedHostedStripeBillingPlanConfig,
+  isHostedBillingPlanSelectionAvailable,
 } from "@/src/lib/hosted-onboarding/runtime";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
@@ -68,6 +69,7 @@ function createHostedOnboardingEnvironment(
 
 describe("requireHostedStripeCheckoutConfig", () => {
   afterEach(() => {
+    vi.useRealTimers();
     delete globalForHostedOnboarding.__murphHostedOnboardingEnv;
     delete globalForHostedOnboarding.__murphHostedOnboardingStripe;
     if (originalVercelEnvironment === undefined) {
@@ -109,6 +111,45 @@ describe("requireHostedStripeCheckoutConfig", () => {
     expect(retrieve).toHaveBeenCalledWith("price_group_monthly_123", {
       expand: ["currency_options"],
     });
+  });
+
+  it("bounds display-only Group Price validation and fails closed", async () => {
+    vi.useFakeTimers();
+    const retrieve = vi.fn(
+      (
+        _priceId: string,
+        _params: unknown,
+        requestOptions: { timeout?: number },
+      ) =>
+        new Promise((_, reject) => {
+          setTimeout(
+            () => reject(new Error("Stripe display read timed out.")),
+            requestOptions.timeout,
+          );
+        }),
+    );
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = {
+      prices: { retrieve },
+    };
+
+    const availability = isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_group_monthly",
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(availability).resolves.toBe(false);
+    expect(retrieve).toHaveBeenCalledWith(
+      "price_group_monthly_123",
+      {
+        expand: ["currency_options"],
+      },
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
   });
 
   it("rejects a Group Price id reused by another direct plan", () => {

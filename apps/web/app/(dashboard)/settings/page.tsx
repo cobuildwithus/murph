@@ -583,6 +583,7 @@ async function readSettingsPageData(input: {
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,
+    publicBaseUrl: null,
   });
   const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
     memberId,
