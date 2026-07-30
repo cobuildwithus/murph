@@ -84,7 +84,7 @@ const MODEL_OPTIONS = [
 
 const PROVIDER_OPTIONS = [
   {
-    description: "Direct inference through OpenAI",
+    description: "We disable response storage.",
     logo: {
       height: 180,
       src: "/brand-logos/assistant-providers/openai-light.svg",
@@ -94,7 +94,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "Privacy-first. Venice stores no prompts or replies.",
+    description: "No prompts or replies stored.",
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
