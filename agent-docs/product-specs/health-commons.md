@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-07-21
+Last verified: 2026-07-29
 
 ## Current State
 
@@ -145,6 +145,16 @@ bound to an exact runnable revision.
 - A successful protocol-backed run stores the actual key and revisions that
   satisfied creation. Draft, deprecated, hidden, or otherwise non-runnable
   protocols expose neither a runnable artifact nor a Start action.
+- Withdrawing a formerly runnable protocol also revokes future activation and
+  reactivation authority for private planned or paused runs linked to it. Those
+  records remain unchanged; the write owner reports that the protocol is no
+  longer available, and the assistant offers a currently runnable alternative
+  as a distinct experiment with a new id and lineage. The withdrawn run's
+  protocol references, effective snapshot, run plan, and analysis plan are
+  never rewritten to represent that alternative, including after the old run
+  reaches a terminal status. The old run becomes `abandoned` only after
+  separate explicit member agreement. A missing public page is not presented
+  as a refreshable revision mismatch.
 
 ## Protocol Summary Copy
 
