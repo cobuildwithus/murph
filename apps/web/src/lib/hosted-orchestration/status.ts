@@ -327,6 +327,9 @@ function parseHostedRuntimeWorkflowStatusForWeb(
     latestMailboxPointer:
       readNullableObservabilityMailboxPointer(record.latestMailboxPointer),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
+    runtimeWakeRequested: record.runtimeWakeRequested === undefined
+      ? false
+      : requireBoolean(record.runtimeWakeRequested),
     signalVersion: requireSafeInteger(record.signalVersion),
     userId: requireString(record.userId),
   };
@@ -472,6 +475,14 @@ function readNullableString(value: unknown): string | null {
 function requireSafeInteger(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value)) {
     throw new TypeError("Hosted runtime workflow status integer is invalid.");
+  }
+
+  return value;
+}
+
+function requireBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError("Hosted runtime workflow status boolean is invalid.");
   }
 
   return value;

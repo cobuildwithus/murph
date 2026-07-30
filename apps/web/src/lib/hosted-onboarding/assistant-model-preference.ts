@@ -130,6 +130,7 @@ export interface HostedMemberAssistantModelResolution {
 export interface HostedMemberAssistantModelUpdateResult
   extends HostedMemberAssistantModelResolution {
   effectiveModelUpdated: boolean;
+  effectiveProviderUpdated: boolean;
   updated: boolean;
 }
 
@@ -277,6 +278,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     return {
       ...current,
       effectiveModelUpdated: false,
+      effectiveProviderUpdated: false,
       updated: false,
     };
   }
@@ -313,6 +315,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
       current.model !== updated.model
       || current.hostedAssistantProviderOverride
         !== updated.hostedAssistantProviderOverride,
+    effectiveProviderUpdated: current.provider !== updated.provider,
     updated: true,
   };
 }

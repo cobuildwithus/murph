@@ -11,6 +11,7 @@ import {
 import {
   claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqHealthyProactiveLines,
+  readHostedLinqRecentMessageEffectCountsTx,
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
 import { createHostedLinqChat } from "../hosted-onboarding/linq-client";
@@ -677,9 +678,9 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqAssignableHomeLine | null> {
   // Reuse the shared proactive line policy instead of re-deriving one here. It
-  // balances on weighted durable line load and today's new-conversation count,
-  // and applies the per-line warmup limit itself, so pre-member outreach spreads
-  // across the pool the same way signup welcomes do.
+  // balances on weighted planning load, recent message effects, and today's
+  // new-conversation count, and applies the per-line warmup limit itself, so
+  // pre-member outreach spreads across the pool the same way signup welcomes do.
   const dayUtc = startOfUtcDay(input.now);
   const planningLoad = await readHostedLinqLinePlanningLoadSnapshot({
     lines: input.lines,
@@ -696,6 +697,13 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
         : 0,
     ]),
   );
+  const recentMessageEffectsByLineLookupKey = input.lines.length > 1
+    ? await readHostedLinqRecentMessageEffectCountsTx({
+        lineLookupKeys: input.lines.map((line) => line.phoneNumberLookupKey),
+        now: input.now,
+        prisma: input.tx,
+      })
+    : new Map<string, number>();
 
   // Drop a losing line from the candidate set rather than marking it full in the
   // count map. The shared chooser filters against the full signup-welcome limit, so
@@ -708,6 +716,7 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
       newAssignmentsByRecipientPhone,
       plannedMessagesByRecipientPhone,
       preferredRecipientPhone: null,
+      recentMessageEffectsByLineLookupKey,
     });
     if (!line) {
       return null;

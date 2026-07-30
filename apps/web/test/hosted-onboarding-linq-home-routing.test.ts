@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   claimHostedLinqProactiveConversationCapacityTx: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
+  readHostedLinqRecentMessageEffectCountsTx: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
@@ -77,6 +78,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   claimHostedLinqProactiveConversationCapacityTx:
     mocks.claimHostedLinqProactiveConversationCapacityTx,
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  readHostedLinqRecentMessageEffectCountsTx:
+    mocks.readHostedLinqRecentMessageEffectCountsTx,
 }));
 
 import {
@@ -406,6 +409,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
   });
 
   it("reserves the preferred line when it is healthy and under quota", async () => {
@@ -429,6 +433,40 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     });
 
     expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses recent message load when selecting a genuinely new home line", async () => {
+    const busyLine = buildLine("+15550100001");
+    const quietLine = buildLine("+15550100002");
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      busyLine,
+      quietLine,
+    ]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map([
+      [busyLine.phoneNumberLookupKey, 9_000],
+      [quietLine.phoneNumberLookupKey, 100],
+    ]));
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: null,
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: quietLine,
+      },
+    });
+
+    expect(mocks.readHostedLinqRecentMessageEffectCountsTx).toHaveBeenCalledWith({
+      lineLookupKeys: [
+        busyLine.phoneNumberLookupKey,
+        quietLine.phoneNumberLookupKey,
+      ],
+      now: expect.any(Date),
+      prisma: {},
+    });
   });
 
   it("keeps the preferred line for member-initiated routing at the proactive quota", async () => {
@@ -520,6 +558,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
     });
 
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqRecentMessageEffectCountsTx).not.toHaveBeenCalled();
   });
 
   it("keeps inbound routing available when every fallback is at its proactive limit", async () => {
@@ -578,6 +617,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
@@ -1386,6 +1426,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
+    mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   });
 

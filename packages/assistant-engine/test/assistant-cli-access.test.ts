@@ -83,6 +83,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       HOME: "/tmp/murph-home",
       HTTP_PROXY: "http://platform-proxy.example.test:8080",
       HTTPS_PROXY: "http://platform-proxy.example.test:8080",
+      HOSTED_ASSISTANT_PROVIDER: "venice",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
@@ -112,6 +113,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       TELEGRAM_BOT_TOKEN: "telegram-secret",
       VAULT: "/tmp/murph-vault",
       OPENAI_API_KEY: "openai-secret",
+      VENICE_API_KEY: "venice-secret",
     });
 
     const pathEntries = (env.PATH ?? "").split(path.delimiter);
@@ -119,6 +121,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]).toBe("1");
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
+    expect(env.HOSTED_ASSISTANT_PROVIDER).toBe("venice");
     expect(env.VAULT).toBe("/tmp/murph-vault");
     expect(env.MURPH_ASSISTANT_ACTIVE_SESSION_ID).toBeUndefined();
     expect(env.MURPH_ASSISTANT_ACTIVE_TURN_ID).toBeUndefined();
@@ -133,7 +136,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT).toBe(
       "/app/node_modules/@murphai/health-commons",
     );
-    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.VENICE_API_KEY).toBe("venice-secret");
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
     expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
     expect(env.CURL_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
@@ -169,6 +173,20 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.MURPH_ELEVENLABS_VOICE_ID).toBeUndefined();
     expect(env.NODE_OPTIONS).toBeUndefined();
     expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
+  });
+
+  it("forwards only the selected hosted model provider credential", () => {
+    const env = prepareAssistantDirectCliEnv({
+      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
+      HOME: "/tmp/murph-home",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "openai-credential",
+      PATH: "/usr/bin",
+      VENICE_API_KEY: "venice-credential",
+    });
+
+    expect(env.OPENAI_API_KEY).toBe("openai-credential");
+    expect(env.VENICE_API_KEY).toBeUndefined();
   });
 
   it("builds operator guidance that points callers back to the CLI surface", () => {

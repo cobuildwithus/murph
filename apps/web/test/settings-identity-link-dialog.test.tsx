@@ -8,12 +8,28 @@ const ORIGINAL_PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID;
 
 const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
+  openAuthDialog: vi.fn(),
   refresh: vi.fn(),
+  useUser: vi.fn(),
   telegramCardProps: [] as Array<{
     autoLink?: boolean;
     initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
     showHeading?: boolean;
   }>,
+}));
+
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({
+    authenticated: true,
+    ready: true,
+  }),
+  useUser: mocks.useUser,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    openAuthDialog: mocks.openAuthDialog,
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -117,6 +133,11 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.telegramCardProps = [];
+  mocks.useUser.mockReturnValue({
+    user: {
+      id: "privy-user-a",
+    },
+  });
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "app_test";
   process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID = "client_test";
 });
@@ -139,8 +160,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedSettingsIdentityLinkDialog, {
         account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
         initialMode,
         onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
       }),
     );
 
@@ -163,6 +186,59 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     }
   });
 
+  it.each([
+    ["phone server session mismatch", "phone", false, "privy-user-a"],
+    ["email client user mismatch", "email", true, "privy-user-b"],
+    ["Telegram server session mismatch", "telegram", false, "privy-user-a"],
+  ] as const)("does not mount provider mutation children on %s", async (
+    _case,
+    initialMode,
+    privySessionMatchesAppSession,
+    clientUserId,
+  ) => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: clientUserId,
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          email: {
+            address: "member@example.com",
+            privyEmailLinked: false,
+            verifiedAt: null,
+          },
+          telegram: {
+            telegramUserId: null,
+          },
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode,
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession,
+      }),
+    );
+
+    try {
+      expect(container.textContent).toContain(
+        "Your sign-in changed. Sign in again using a login method already linked to this Murph account before changing a linked account.",
+      );
+      expect(container.textContent).not.toContain("Link phone child");
+      expect(container.textContent).not.toContain("Link email child");
+      expect(container.textContent).not.toContain("Privy hand-off child");
+      expect(container.textContent).not.toContain("Link telegram child");
+      expect(mocks.telegramCardProps).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("skips the Murph dialog and hands off to Privy when the Privy user has no email", async () => {
     const { HostedSettingsIdentityLinkDialog } = await import(
       "@/src/components/settings/hosted-settings-identity-link-dialog"
@@ -178,8 +254,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             verifiedAt: null,
           },
         },
+        expectedPrivyUserId: "privy-user-a",
         initialMode: "email",
         onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
       }),
     );
 
@@ -218,8 +296,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
         },
+        expectedPrivyUserId: "privy-user-a",
         initialMode: "email",
         onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
       }),
     );
 
@@ -245,8 +325,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             telegramUserId: null,
           },
         },
+        expectedPrivyUserId: "privy-user-a",
         initialMode: "telegram",
         onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
       }),
     );
 
@@ -277,8 +359,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
             username: "sample_user",
           },
         },
+        expectedPrivyUserId: "privy-user-a",
         initialMode: "telegram",
         onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
       }),
     );
 
