@@ -79,6 +79,7 @@ describe("Hosted Assistant Ask control-plane port", () => {
       description: "Hosted Assistant Ask control",
       fetchImpl: expect.any(Function),
       path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
+      replayOnceOnRetryableFailure: true,
       sensitiveResponseBody: { maxBytes: 16_384 },
       signal,
       timeoutMs: 5_000,
