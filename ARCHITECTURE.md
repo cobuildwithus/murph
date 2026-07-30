@@ -1152,10 +1152,14 @@ an unbound Linq group, Web performs one bounded current-chat read and resolves
 at most 32 active non-Murph roster handles to member ids. Inside the existing
 route transaction, a lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
-first-active-sender fallback continues. Sender inactivity or unresolved sender
-identity disqualifies only that fallback; it does not veto a distinct active
-roster-matched owner. The setup must cover the provider event time and remain
-unexpired at processing time. The selected row stays locked through
+first-active-sender fallback continues when the provider roster read completed.
+An unavailable roster leaves recovery-backed ownership indeterminate and
+returns a typed retry before route creation; a completed empty or oversized
+roster cannot match another member's setup but may retain the active-sender
+fallback. Sender inactivity or unresolved sender identity disqualifies only
+that fallback; it does not veto a distinct active roster-matched owner. The
+setup must cover the provider event time and remain unexpired at processing
+time. The selected row stays locked through
 `ensureHostedThreadContainerRouteTx`, which remains the only route and
 `ownerMemberId` owner, and is deleted only when that transaction creates the
 route. Only a newly created route applies sparse style through the synthetic
@@ -1167,7 +1171,11 @@ re-reads the canonical route and appends its distinct message there. Unreadable
 or future encrypted payloads are consumed as unavailable optional setup so they
 cannot block an accepted group message. Expiry is query-time authority, and
 member deletion removes the intent by foreign-key cascade. Provider add-actor
-fields are not ownership authority.
+fields are not ownership authority. For a hard-blocked-line recovery, the
+existing delivery attempt is the retry owner: transport must durably record its
+provider-accepted milestone before reporting recovery success, and an exact
+uncorrelated attempt makes replacement-line admission retry rather than fall
+through to first-speaker ownership.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

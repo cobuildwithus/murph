@@ -16,6 +16,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
+  readHostedLinqGroupLineRecoveryAuthorityTx,
   readHostedLinqDeliveryProviderDispatchIntentsTx,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
@@ -2866,6 +2867,49 @@ describe("hosted Linq observability stores", () => {
       occurredAt: new Date("2026-03-26T12:01:00.000Z"),
       originalRecipientPhone,
       pendingGroupSetupId: "hpgs-replacement",
+      prisma: fixture.prisma as never,
+      recoveredRecipientPhoneLookupKey,
+      setupArmedAt,
+      threadId: "chat-group-1",
+    })).resolves.toBe(false);
+
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValue([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_in_flight_group_line_recovery_authority",
+        idempotencyKey,
+        lastProviderEventId: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+        sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+          effectId,
+          sourceEventId: "event-in-flight-group-line-recovery-authority",
+        }),
+        status: "attempted",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      },
+    ]);
+    await expect(readHostedLinqGroupLineRecoveryAuthorityTx({
+      memberId: "member-1",
+      occurredAt: new Date("2026-03-26T12:01:00.000Z"),
+      originalRecipientPhone,
+      pendingGroupSetupId,
+      prisma: fixture.prisma as never,
+      recoveredRecipientPhoneLookupKey,
+      setupArmedAt,
+      threadId: "chat-group-1",
+    })).resolves.toBe("in_flight");
+    await expect(hasHostedLinqGroupLineRecoveryAuthorityTx({
+      memberId: "member-1",
+      occurredAt: new Date("2026-03-26T12:01:00.000Z"),
+      originalRecipientPhone,
+      pendingGroupSetupId,
       prisma: fixture.prisma as never,
       recoveredRecipientPhoneLookupKey,
       setupArmedAt,

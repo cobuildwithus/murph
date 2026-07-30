@@ -263,11 +263,13 @@ Last verified: 2026-07-29
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
 - New Linq-group ownership preparation adds one bounded, non-retried provider
-  roster read before the unbound-group transaction. Provider timeout, failure,
-  an empty, oversized, or non-group result, no eligible intent, or unresolved
-  ambiguity must preserve the existing first-active-sender provisioning path
-  and must not delay or drop the accepted group message. The one-use setup
-  claim and route creation share one transaction. Claim eligibility requires
+  roster read before the unbound-group transaction. Provider timeout or failure
+  leaves recovery-backed ownership indeterminate and must return the existing
+  typed retry before route creation. A completed empty, oversized, or non-group
+  result cannot select another member's setup; no eligible intent or unresolved
+  ambiguity otherwise preserves the existing active-sender decision. The
+  one-use setup claim and route creation share one transaction. Claim
+  eligibility requires
   the setup to cover the provider event time and to remain unexpired at
   processing time, so a delayed pre-arm event cannot spend a newer intent. The
   selected setup row stays locked until route admission finishes and is deleted
@@ -276,8 +278,12 @@ Last verified: 2026-07-29
   the canonical route and appends its distinct message there. The optional
   setup payload is encrypted and versioned; unreadable or future bytes are
   consumed as unavailable optional setup and fall back to ordinary sender
-  admission instead of wedging the room. For a newly created route, sparse
-  style is committed in the same transaction through the existing
+  admission instead of wedging the room. Hard-blocked-line recovery keeps the
+  existing delivery attempt as its retry owner, awaits provider-accepted
+  correlation before reporting send success, and treats an exact
+  still-uncorrelated attempt as retryable rather than definitive absence. For a
+  newly created route, sparse style is committed in the same transaction
+  through the existing
   synthetic-member preference owner. Optional room context rides the existing
   activation wake; its fixed-page initialization is exact-replay idempotent and
   fail-open so it cannot block the accepted first group message.

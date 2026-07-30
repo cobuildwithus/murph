@@ -22,6 +22,7 @@ import {
 } from "@/src/lib/hosted-groups/pending-group-setup";
 import {
   hasHostedLinqGroupLineRecoveryAuthorityTx,
+  readHostedLinqGroupLineRecoveryAuthorityTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqGroupLineRecoveryEffectId,
@@ -438,22 +439,57 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
         await client.hostedLinqDelivery.create({
           data: {
-            acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
             attemptedAt: recoveryAttemptedAt,
             id: deliveryId,
             idempotencyKey: recoveryIdempotencyLookupKey,
-            messageLookupKey:
-              `hbid:linq-message:pending-group-recovery-${fixtureId}`,
             phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
             source: "hosted_webhook_side_effect",
             sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
               effectId: recoveryEffectId,
               sourceEventId: `event-pending-group-recovery-${fixtureId}`,
             }),
-            status: "accepted",
+            status: "attempted",
             targetKind: "participant",
             template: "group_line_recovery",
           },
+        });
+
+        await expect(readHostedLinqGroupLineRecoveryAuthorityTx({
+          memberId: ownerMemberId,
+          occurredAt: retryOccurredAt,
+          originalRecipientPhone,
+          pendingGroupSetupId: setup.id,
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          setupArmedAt: setup.armedAt,
+          threadId,
+        })).resolves.toBe("in_flight");
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).rejects.toMatchObject({
+          code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+          httpStatus: 503,
+          retryable: true,
+        });
+
+        await client.hostedLinqDelivery.update({
+          data: {
+            acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
+            messageLookupKey:
+              `hbid:linq-message:pending-group-recovery-${fixtureId}`,
+            status: "accepted",
+          },
+          where: { id: deliveryId },
         });
 
         await expect(hasHostedLinqGroupLineRecoveryAuthorityTx({

@@ -444,13 +444,20 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   };
 }
 
+export type HostedLinqGroupLineRecoveryAuthority =
+  | "accepted"
+  | "in_flight"
+  | "none";
+
 /**
  * A completed private recovery delivery is the existing durable proof that a
  * member was told to move this exact group from one Murph line to another.
- * Bound the proof to setup time so an old recovery cannot authorize a later
+ * An exact uncorrelated attempt remains distinguishable so admission retries
+ * instead of treating an unfinished provider outcome as definitive absence.
+ * Bound both states to setup time so an old recovery cannot affect a later
  * "next group" setup for an unrelated retry.
  */
-export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
+export async function readHostedLinqGroupLineRecoveryAuthorityTx(input: {
   memberId: string;
   occurredAt: Date;
   originalRecipientPhone: string;
@@ -459,7 +466,7 @@ export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
   recoveredRecipientPhoneLookupKey: string;
   setupArmedAt: Date;
   threadId: string;
-}): Promise<boolean> {
+}): Promise<HostedLinqGroupLineRecoveryAuthority> {
   const effectId = buildHostedLinqGroupLineRecoveryEffectId({
     incomingRecipientPhone: input.originalRecipientPhone,
     memberId: input.memberId,
@@ -478,13 +485,11 @@ export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
       idempotencyKeys: attemptEffectIds,
       prisma: input.prisma,
     });
-
-  return persistedIntents.some((intent) =>
+  const matchingIntents = persistedIntents.filter((intent) =>
     intent.attemptedAt >= input.setupArmedAt
     && intent.attemptedAt <= input.occurredAt
     && intent.phoneNumberLookupKey
       === input.recoveredRecipientPhoneLookupKey
-    && intent.providerCorrelated
     && intent.status !== "failed"
     && intent.status !== "skipped"
     && intent.targetKind === "participant"
@@ -494,6 +499,23 @@ export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
       effectId,
     })
   );
+  if (matchingIntents.some((intent) => intent.providerCorrelated)) {
+    return "accepted";
+  }
+  return matchingIntents.length > 0 ? "in_flight" : "none";
+}
+
+export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
+  memberId: string;
+  occurredAt: Date;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  setupArmedAt: Date;
+  threadId: string;
+}): Promise<boolean> {
+  return await readHostedLinqGroupLineRecoveryAuthorityTx(input) === "accepted";
 }
 
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(

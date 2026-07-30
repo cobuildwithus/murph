@@ -188,9 +188,12 @@ Last verified: 2026-07-30
   it rejects raw phone, email, Sender, Telegram, and participant handles. The
   assistant must not infer or copy private memory, health facts, contacts, or
   personal settings. Current roster handles are request-local evidence and only
-  bounded resolved member ids enter the route transaction. An
-  undocumented or provider-supplied add actor is never authority. Logs contain
-  only categorical roster, claim, and activation outcomes, never setup content.
+  bounded resolved member ids enter the route transaction. An unavailable
+  roster or an exact recovery delivery still awaiting provider correlation
+  must fail before route creation; neither may collapse to first-speaker
+  authority. An undocumented or provider-supplied add actor is never authority.
+  Logs contain only categorical roster, claim, and activation outcomes, never
+  setup content.
   Setup can configure only a newly created synthetic room through the existing
   preference and fixed room-model owners; it cannot change an existing route,
   establish identity, consent, routing, or membership authority. Owner deletion

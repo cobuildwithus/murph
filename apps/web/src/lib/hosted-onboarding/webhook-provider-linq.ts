@@ -109,7 +109,7 @@ import {
   readHostedLinqIncomingLineState,
 } from "./linq-line-store";
 import {
-  hasHostedLinqGroupLineRecoveryAuthorityTx,
+  readHostedLinqGroupLineRecoveryAuthorityTx,
 } from "./linq-delivery-store";
 import {
   resolveHostedLinqSignupWelcomeDailyLimit,
@@ -2720,7 +2720,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     }
     pendingSetupParticipantMemberIds = [activeSenderMemberId];
   } else {
-    if (!activeSenderMemberId && input.rosterUnavailable) {
+    if (input.rosterUnavailable) {
       throw hostedOnboardingError({
         code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
         httpStatus: 502,
@@ -2729,13 +2729,9 @@ async function planHostedLinqGroupChatWebhook(input: {
         retryable: true,
       });
     }
-    const recoveryParticipantMemberIds = input.rosterUnavailable
-      ? activeSenderMemberId
-        ? [activeSenderMemberId]
-        : []
-      : activeSenderMemberId
-        ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
-        : input.participantMemberIds;
+    const recoveryParticipantMemberIds = activeSenderMemberId
+      ? [...new Set([...input.participantMemberIds, activeSenderMemberId])]
+      : input.participantMemberIds;
     const recoveredPendingSetup = recoveryParticipantMemberIds.length > 0
       ? await resolveHostedLinqRecoveredPendingGroupSetup({
           occurredAt: new Date(occurredAt),
@@ -3617,7 +3613,11 @@ export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
       || originalRecipientPhoneLookupKeys.includes(
         input.recoveredRecipientPhoneLookupKey,
       )
-      || !(await hasHostedLinqGroupLineRecoveryAuthorityTx({
+    ) {
+      continue;
+    }
+    const recoveryAuthority =
+      await readHostedLinqGroupLineRecoveryAuthorityTx({
         memberId: candidate.ownerMemberId,
         occurredAt: input.occurredAt,
         originalRecipientPhone,
@@ -3627,8 +3627,17 @@ export async function resolveHostedLinqRecoveredPendingGroupSetup(input: {
           input.recoveredRecipientPhoneLookupKey,
         setupArmedAt: candidate.armedAt,
         threadId: input.threadId,
-      }))
-    ) {
+      });
+    if (recoveryAuthority === "in_flight") {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+        httpStatus: 503,
+        message:
+          "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt completes.",
+        retryable: true,
+      });
+    }
+    if (recoveryAuthority !== "accepted") {
       continue;
     }
     recoveredCandidates.push(candidate);

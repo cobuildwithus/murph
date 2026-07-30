@@ -5665,17 +5665,15 @@ describe("Linq group chat auto-provision", () => {
       throw new Error("Expected recovery delivery authority keys.");
     }
     prisma.seedLinqDelivery({
-      acceptedAt: new Date("2026-06-24T12:00:01.000Z"),
       attemptedAt: new Date("2026-06-24T12:00:00.500Z"),
       id: "hld_group_recovery_setup_bridge",
       idempotencyKey: recoveryDeliveryLookupKey,
-      messageLookupKey: "hbid:linq-message:recovery-setup-bridge",
       phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
       sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
         effectId: recoveryEffect.effectId,
         sourceEventId: "evt_group_recovery_original",
       }),
-      status: "accepted",
+      status: "attempted",
       targetKind: "participant",
       template: "group_line_recovery",
     });
@@ -5718,15 +5716,48 @@ describe("Linq group chat auto-provision", () => {
         } as never;
       });
 
-    const retryPlan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({
-        createdAt: "2026-06-24T12:01:00.000Z",
-        eventId: "evt_group_recovery_retry",
-        messageId: "msg_group_recovery_retry",
-        recipient: recoveredRecipientPhone,
-        sender: "+15551113333",
-        text: "Did the new number work?",
+    const retryEvent = buildLinqMessageReceivedEvent({
+      createdAt: "2026-06-24T12:01:00.000Z",
+      eventId: "evt_group_recovery_retry",
+      messageId: "msg_group_recovery_retry",
+      recipient: recoveredRecipientPhone,
+      sender: "+15551113333",
+      text: "Did the new number work?",
+    });
+    await expect(planHostedOnboardingLinqWebhook({
+      event: retryEvent,
+      pendingGroupParticipantMemberIds: [
+        senderCore.id,
+        firstSpeakerCore.id,
+      ],
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+    prisma.seedLinqDelivery({
+      acceptedAt: new Date("2026-06-24T12:00:01.000Z"),
+      attemptedAt: new Date("2026-06-24T12:00:00.500Z"),
+      id: "hld_group_recovery_setup_bridge",
+      idempotencyKey: recoveryDeliveryLookupKey,
+      messageLookupKey: "hbid:linq-message:recovery-setup-bridge",
+      phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+      sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+        effectId: recoveryEffect.effectId,
+        sourceEventId: "evt_group_recovery_original",
       }),
+      status: "accepted",
+      targetKind: "participant",
+      template: "group_line_recovery",
+    });
+    const retryPlan = await planHostedOnboardingLinqWebhook({
+      event: retryEvent,
       pendingGroupParticipantMemberIds: [
         senderCore.id,
         firstSpeakerCore.id,
@@ -6332,8 +6363,7 @@ describe("Linq group chat auto-provision", () => {
     }));
   });
 
-  it("still provisions and hands off the first group message when roster fetch fails", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("retries the first group message when roster authority is unavailable", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -6356,48 +6386,22 @@ describe("Linq group chat auto-provision", () => {
       throw new Error("linq unavailable");
     });
 
-    try {
-      const response = await handleHostedOnboardingLinqWebhook({
-        rawBody: "{}",
-        signature: null,
-        timestamp: null,
-      });
-      const containerCreate = prisma.hostedThreadContainer.create.mock.calls[0]![0] as {
-        data: { memberId: string };
-      };
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+      httpStatus: 502,
+      retryable: true,
+    });
 
-      expect(response).toMatchObject({
-        ignored: false,
-        ok: true,
-        reason: "wake-appended-thread-route",
-      });
-      expect(
-        preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
-      ).toHaveBeenCalledWith(expect.objectContaining({
-        fallbackOwnerMemberId: "member_owner_123",
-        participantMemberIds: ["member_owner_123"],
-        senderMemberId: "member_owner_123",
-      }));
-      expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
-      expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-        abortSignal: expect.any(AbortSignal),
-        expectedUserId: containerCreate.data.memberId,
-        knownCheckpoint: {
-          lane: "conversation",
-          laneSeq: "1",
-          userId: containerCreate.data.memberId,
-        },
-        mailboxItemId: "mailbox_group_123",
-      });
-      expect(warn).toHaveBeenCalledWith(
-        "Hosted thread-container participant reconcile skipped.",
-        expect.objectContaining({
-          reason: "reconcile_failed",
-        }),
-      );
-    } finally {
-      warn.mockRestore();
-    }
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(signalRuntime.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("retries an unregistered first group message when roster authority is unavailable", async () => {

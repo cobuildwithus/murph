@@ -515,7 +515,8 @@ async function drainHostedLinqSideEffectWithProviderFence(
   if (!requiresProviderFence) {
     return drainHostedLinqSideEffectDirect(effect, {
       ...input,
-      completeProviderOutcomeBeforeReturn: false,
+      completeProviderOutcomeBeforeReturn:
+        isHostedLinqGroupLineRecoverySideEffect(effect),
     });
   }
 
@@ -745,6 +746,7 @@ async function sendHostedLinqSideEffect(
       });
   let deliveryEffect = effect;
   let providerIdempotencyKey = effect.effectId;
+  let providerRequestCompleted = false;
   let usageLimitDispatchClaimed = false;
 
   try {
@@ -790,6 +792,7 @@ async function sendHostedLinqSideEffect(
         signal: options.signal,
         to: [participantContact],
       });
+      providerRequestCompleted = true;
       if (options.providerFenceState) {
         options.providerFenceState.providerRequestCompleted = true;
       }
@@ -877,6 +880,7 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: deliveryEffect.payload.replyToMessageId,
       signal: options.signal,
     });
+    providerRequestCompleted = true;
     if (options.providerFenceState) {
       options.providerFenceState.providerRequestCompleted = true;
     }
@@ -914,6 +918,7 @@ async function sendHostedLinqSideEffect(
           !options.providerFenceState
           || options.providerFenceState.providerRequestStarted
         )
+        && !providerRequestCompleted
         && !options.providerFenceState?.providerRequestCompleted
       ) {
         await markHostedLinqDeliveryFailedBestEffort({

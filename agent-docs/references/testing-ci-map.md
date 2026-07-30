@@ -218,17 +218,22 @@ new-route-only style and room-context application, referral binding, and
 existing-route restoration. Assistant-runtime tests prove activation applies
 only a categorical, secret-safe result and fails open. Linq webhook tests prove
 the bounded provider roster read happens before the transaction and only
-resolved member ids cross that boundary, while provider failure or an oversized
-roster preserves sender-owner admission. The opt-in PostgreSQL concurrency
+resolved member ids cross that boundary, while provider failure retries before
+route creation and a completed oversized roster preserves sender-owner
+admission. Transport tests prove group-line recovery persists its accepted
+milestone before returning provider success, retries that write with the stable
+provider idempotency key, and does not misclassify a provider-successful send as
+failed. The opt-in PostgreSQL concurrency
 proof verifies one encrypted setup can be claimed at most once, exact restore
 preserves its payload, stale restore cannot overwrite a replacement, corrupt
 payload does not block admission, and member deletion cascades pending state.
 The same real-database proof composes a provider-correlated line-recovery
 delivery with a different roster member's first message: the exact prepared
-owner is selected, foreign rosters and threads fail closed, and the encrypted
-style/context payload remains one-use. Prepared-route coverage also keeps a
-recovery-pinned message route-free when its exact claim races or disappears,
-instead of committing the first speaker as a fallback owner.
+owner is selected, an exact uncorrelated attempt retries route-free, foreign
+rosters and threads fail closed, and the encrypted style/context payload
+remains one-use. Prepared-route coverage also keeps a recovery-pinned message
+route-free when its exact claim races or disappears, instead of committing the
+first speaker as a fallback owner.
 
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container

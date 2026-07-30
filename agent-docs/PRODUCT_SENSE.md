@@ -153,8 +153,11 @@ default destination for every goal or the definition of activation.
   still-live setup follows only the exact persisted recovery instruction for
   that same member and thread, even when another current roster member speaks
   first on the replacement line. A recovery-pinned message does not create a
-  fallback-owned route if that exact still-live setup cannot be claimed. The
-  setup remains one-use and cannot authorize another group or a later setup.
+  fallback-owned route if that exact still-live setup cannot be claimed. If
+  recovery delivery correlation or the current roster is temporarily
+  unavailable, Murph retries before accepting the replacement-line group
+  message instead of turning uncertainty into permanent ownership. The setup
+  remains one-use and cannot authorize another group or a later setup.
 - Speaker labels should make authenticated group conversation easier to follow
   without pretending uncertainty is identity. Prefer the member's current
   authorized profile name. Use a human owner's explicitly shared contact label
