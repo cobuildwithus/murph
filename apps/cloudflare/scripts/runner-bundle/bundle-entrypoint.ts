@@ -64,7 +64,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure while remaining within the reviewed total budget. Ratchet the static
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
+//
+// Line-health preflight, billing ownership hardening, and address-book
+// participant names later added authored code to the existing graph without
+// introducing a forbidden boot input. The combined 2026-07-29 macOS assembly
+// measured 9,922,779B total. Ratchet the total baseline to that measurement and
+// keep the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_922_779 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

@@ -522,7 +522,7 @@ function renderAssistantAutoReplyInputSection(input: {
     const label = input.speakerLabel.source === 'profile-name'
       ? 'Profile name (display only)'
       : input.speakerLabel.source === 'unverified-owner-contact'
-        ? 'Unverified owner contact label (display only)'
+        ? 'Address-book name (display only)'
         : 'Speaker name'
     sections.push(`${label}: ${JSON.stringify(input.speakerLabel.displayName)}`)
   }

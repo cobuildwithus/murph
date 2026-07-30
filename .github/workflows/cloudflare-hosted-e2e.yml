@@ -274,6 +274,7 @@ jobs:
           apps/web/test/hosted-pending-group-setup-postgres-concurrency.test.ts
           apps/web/test/prisma-database-retry-postgres.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
+          apps/web/test/hosted-linq-provider-health-contract-migration-postgres.test.ts
           apps/web/test/hosted-production-500-regressions-postgres.test.ts
           apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts
 

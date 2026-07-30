@@ -782,7 +782,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).not.toContain('Must Not Render')
     expect(result.prompt).not.toContain('Profile name (display only)')
     expect(result.prompt).not.toContain(
-      'Unverified owner contact label (display only)',
+      'Address-book name (display only)',
     )
   })
 
@@ -1569,7 +1569,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
       `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nProfile name (display only): \"Alice \\\"A\\\"\"`,
     )
     expect(result.prompt).toContain(
-      `Message ref: ${contactFallbackInputId}\n\nSender: +15552220000\n\nUnverified owner contact label (display only): \"Mara P.\"`,
+      `Message ref: ${contactFallbackInputId}\n\nSender: +15552220000\n\nAddress-book name (display only): \"Mara P.\"`,
     )
     expect(result.prompt).toContain(
       `Message ref: ${telegramInputId}\n\nSender: 1234567890\n\nSpeaker name: \"Bob Example\"`,

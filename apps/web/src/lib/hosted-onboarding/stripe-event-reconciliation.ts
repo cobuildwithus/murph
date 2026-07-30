@@ -11,6 +11,9 @@ import {
   type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import {
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 } from "./billing-plan-switch-to-pulse-service";
@@ -26,6 +29,11 @@ import {
   cancelHostedPulseTrialCheckoutLoserSubscription,
   type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
+  prepareHostedStripeCheckoutCompletion,
+  prepareHostedStripeDirectMemberActivationCrypto,
+  prepareHostedStripeReversalProviderState,
+  type PreparedHostedStripeCheckoutCompletion,
+  type PreparedHostedStripeReversalProviderState,
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
@@ -36,6 +44,7 @@ import {
 import {
   findMemberForStripeInvoice,
   findMemberForStripeCheckoutSession,
+  findMemberForStripeReversal,
   findMemberForStripeSubscription,
   listHostedStripeCheckoutSessionMemberIds,
   resolveStripeCustomerContext,
@@ -70,6 +79,10 @@ import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
+import {
+  cleanupHostedStandardCheckoutLoser,
+  HostedStripeCheckoutLoserCleanupPendingError,
+} from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -325,6 +338,7 @@ async function processHostedStripeEventRecord(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -334,21 +348,32 @@ async function processHostedStripeEventRecord(
 
   switch (event.type) {
     case "checkout.session.completed":
+      if (processingContext.preparedCheckoutCompletion) {
+        return mapHostedStripeActivationOutcome(
+          await applyStripeCheckoutCompleted(
+            payload as Stripe.Checkout.Session,
+            prisma,
+            dispatchContext,
+            processingContext.preparedCryptoDomainRoots.size > 0
+              ? processingContext.preparedCryptoDomainRoots
+              : undefined,
+            processingContext.preparedCheckoutCompletion,
+          ),
+        );
+      }
       return mapHostedStripeActivationOutcome(
-        await (
-          processingContext.preparedCryptoDomainRoots.size > 0
-            ? applyStripeCheckoutCompleted(
+        processingContext.preparedCryptoDomainRoots.size > 0
+          ? await applyStripeCheckoutCompleted(
               payload as Stripe.Checkout.Session,
               prisma,
               dispatchContext,
               processingContext.preparedCryptoDomainRoots,
             )
-            : applyStripeCheckoutCompleted(
+          : await applyStripeCheckoutCompleted(
               payload as Stripe.Checkout.Session,
               prisma,
               dispatchContext,
-            )
-        ),
+            ),
       );
     case "checkout.session.expired":
       await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
@@ -426,6 +451,7 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
         processingContext.customerId,
+        processingContext.preparedReversalProviderState,
       );
       return buildEmptyHostedStripeEventProcessingResult();
     case "charge.dispute.created":
@@ -437,6 +463,7 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
         processingContext.customerId,
+        processingContext.preparedReversalProviderState,
       ) === "subscription_identity_pending") {
         throw new HostedStripeSubscriptionIdentityPendingError(
           "Stripe subscription identity is pending.",
@@ -454,6 +481,10 @@ type HostedStripeEventProcessingContext = {
   customerId: string | null;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyCryptoDomainRoots: PreparedHostedFamilyCryptoDomainRoots;
+  preparedCheckoutCompletion:
+    PreparedHostedStripeCheckoutCompletion | null;
+  preparedReversalProviderState:
+    PreparedHostedStripeReversalProviderState | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
@@ -471,6 +502,8 @@ async function prepareHostedStripeEventProcessingContext(
       customerId: null,
       preparedCryptoDomainRoots: new Map(),
       preparedFamilyCryptoDomainRoots: new Map(),
+      preparedCheckoutCompletion: null,
+      preparedReversalProviderState: null,
     };
   }
 
@@ -486,6 +519,8 @@ async function prepareHostedStripeEventProcessingContext(
     customerId: customerContext.customerId,
     preparedCryptoDomainRoots: new Map(),
     preparedFamilyCryptoDomainRoots: new Map(),
+    preparedCheckoutCompletion: null,
+    preparedReversalProviderState: null,
   };
 }
 
@@ -524,6 +559,21 @@ async function resolveHostedStripeEventDirectBillingMemberId(
     });
   }
 
+  if (
+    event.type === "refund.created"
+    || event.type.startsWith("charge.dispute.")
+  ) {
+    const object = readHostedStripeEventObject(event.data.object);
+    const member = await findMemberForStripeReversal({
+      chargeId: readHostedStripeEventChargeId(event.type, object),
+      customerId: preflightProcessingContext?.customerId ?? null,
+      paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
+      prisma,
+      subscriptionId: null,
+    });
+    return member?.core.id ?? null;
+  }
+
   if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
     return null;
   }
@@ -554,18 +604,11 @@ async function resolveHostedStripeEventProcessingMemberId(
 ): Promise<string | null> {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    if (session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER) {
-      const memberIds = await listHostedStripeCheckoutSessionMemberIds({
-        prisma,
-        session,
-      });
-      return memberIds.length === 1 ? memberIds[0] ?? null : null;
-    }
-    const member = await findMemberForStripeCheckoutSession({
+    const memberIds = await listHostedStripeCheckoutSessionMemberIds({
       prisma,
       session,
     });
-    return member?.core.id ?? null;
+    return memberIds.length === 1 ? memberIds[0] ?? null : null;
   }
 
   if (isHostedStripeSubscriptionBillingEvent(event.type)) {
@@ -580,6 +623,21 @@ async function resolveHostedStripeEventProcessingMemberId(
       prisma,
       subscription: processingContext.canonicalSubscription,
     });
+  }
+
+  if (
+    event.type === "refund.created"
+    || event.type.startsWith("charge.dispute.")
+  ) {
+    const object = readHostedStripeEventObject(event.data.object);
+    const member = await findMemberForStripeReversal({
+      chargeId: readHostedStripeEventChargeId(event.type, object),
+      customerId: processingContext.customerId,
+      paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
+      prisma,
+      subscriptionId: null,
+    });
+    return member?.core.id ?? null;
   }
 
   if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") {
@@ -769,7 +827,7 @@ async function processClaimedHostedStripeEvent(
     usageCreditEventHandled = usageCreditReconciliation.handled;
     const preflightProcessingContext =
       !usageCreditReconciliation.handled
-      && hostedStripeEventNeedsFamilyPreparationContext(stripeEvent)
+      && hostedStripeEventNeedsPreflightProcessingContext(stripeEvent)
         ? await prepareHostedStripeEventProcessingContext(stripeEvent)
         : undefined;
     const directBillingMemberId = usageCreditReconciliation.handled
@@ -856,6 +914,12 @@ async function processClaimedHostedStripeEvent(
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
       });
     }
+    if (result.cleanupStandardCheckoutStripeSubscriptionId) {
+      await cleanupHostedStandardCheckoutLoser({
+        stripeSubscriptionId:
+          result.cleanupStandardCheckoutStripeSubscriptionId,
+      });
+    }
     if (result.welcomeEmailMemberId) {
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
@@ -933,6 +997,7 @@ async function processClaimedHostedStripeEvent(
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
+      !(error instanceof HostedStripeCheckoutLoserCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !usageCreditEventHandled &&
@@ -1046,26 +1111,70 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
   };
 }
 
-async function processHostedStripeEventWithVerifiedMemberLock(input: {
+type HostedStripeEventWithVerifiedMemberLockInput = {
   memberId: string;
   preflightProcessingContext?: HostedStripeEventProcessingContext;
   prisma: PrismaClient;
   stripeEvent: Stripe.Event;
-}): Promise<{
+};
+
+type HostedStripeEventWithVerifiedMemberLockResult = {
   memberId: string;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
-}> {
-  const preflightProcessingContext = input.preflightProcessingContext;
+};
+
+async function processHostedStripeEventWithVerifiedMemberLock(
+  input: HostedStripeEventWithVerifiedMemberLockInput,
+): Promise<HostedStripeEventWithVerifiedMemberLockResult> {
+  if (input.stripeEvent.type !== "checkout.session.completed") {
+    return processHostedStripeEventWithVerifiedMemberLockCore(input);
+  }
+  return runWithHostedDomainRootUnwrapCache(
+    () => processHostedStripeEventWithVerifiedMemberLockCore(input),
+  );
+}
+
+async function processHostedStripeEventWithVerifiedMemberLockCore(
+  input: HostedStripeEventWithVerifiedMemberLockInput,
+): Promise<HostedStripeEventWithVerifiedMemberLockResult> {
+  const preflightProcessingContext =
+    input.preflightProcessingContext
+    ?? await prepareHostedStripeEventProcessingContext(input.stripeEvent);
+  const preparedCheckoutCompletion =
+    input.stripeEvent.type === "checkout.session.completed"
+      ? await prepareHostedStripeCheckoutCompletion({
+          canonicalSubscription:
+            preflightProcessingContext.canonicalSubscription,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          session: input.stripeEvent.data.object as Stripe.Checkout.Session,
+        })
+      : null;
+  const preparedReversalProviderState =
+    await prepareHostedStripeReversalProviderState({
+      event: input.stripeEvent,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  const preparedProcessingContext = {
+    ...preflightProcessingContext,
+    canonicalSubscription:
+      preparedCheckoutCompletion?.canonicalSubscription
+      ?? preflightProcessingContext.canonicalSubscription,
+    preparedCheckoutCompletion,
+    preparedReversalProviderState,
+  };
   const preparedFamilyCryptoDomainRoots =
-    preflightProcessingContext?.canonicalSubscription
+    preparedProcessingContext.canonicalSubscription
       ? await prepareHostedFamilyStripeActivationCryptoDomainRoots({
           prisma: input.prisma,
-          subscription: preflightProcessingContext.canonicalSubscription,
+          subscription: preparedProcessingContext.canonicalSubscription,
         })
       : new Map();
   const preparedCryptoDomainRoots =
     await prepareHostedStripeEventCryptoDomainRoots({
-      canonicalSubscription: preflightProcessingContext?.canonicalSubscription ?? null,
+      canonicalSubscription:
+        preparedProcessingContext.canonicalSubscription,
       memberId: input.memberId,
       prisma: input.prisma,
       stripeEvent: input.stripeEvent,
@@ -1075,15 +1184,16 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
     prisma: input.prisma,
     run: async (transaction) => {
       const processingContext = {
-        ...await prepareHostedStripeEventProcessingContext(input.stripeEvent),
+        ...preparedProcessingContext,
         preparedCryptoDomainRoots,
         preparedFamilyCryptoDomainRoots,
       };
-      const processingMemberId = await resolveHostedStripeEventProcessingMemberId(
-        input.stripeEvent,
-        processingContext,
-        transaction,
-      );
+      const processingMemberId =
+        await resolveHostedStripeEventProcessingMemberId(
+          input.stripeEvent,
+          processingContext,
+          transaction,
+        );
       if (processingMemberId !== input.memberId) {
         throw new Error("Canonical Stripe billing ownership changed before processing.");
       }
@@ -1114,13 +1224,15 @@ function hostedStripeEventMayActivateDirectMember(
     === HOSTED_PULSE_TRIAL_OFFER;
 }
 
-function hostedStripeEventNeedsFamilyPreparationContext(
+function hostedStripeEventNeedsPreflightProcessingContext(
   stripeEvent: Stripe.Event,
 ): boolean {
   return (
     isHostedStripeSubscriptionBillingEvent(stripeEvent.type)
     || stripeEvent.type === "invoice.paid"
     || stripeEvent.type === "invoice.payment_failed"
+    || stripeEvent.type === "refund.created"
+    || stripeEvent.type.startsWith("charge.dispute.")
   );
 }
 
@@ -1135,6 +1247,12 @@ async function prepareHostedStripeEventCryptoDomainRoots(input: {
     || !hostedStripeEventMayActivateDirectMember(input.stripeEvent)
   ) {
     return new Map();
+  }
+  if (input.stripeEvent.type === "checkout.session.completed") {
+    return prepareHostedStripeDirectMemberActivationCrypto({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
   }
   return prepareHostedCryptoDomainRootCandidates({
     prisma: input.prisma,
@@ -1448,6 +1566,7 @@ function mapHostedStripeActivationOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
@@ -1456,6 +1575,7 @@ function mapHostedStripeActivationOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1467,6 +1587,8 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
+    cleanupStandardCheckoutStripeSubscriptionId:
+      outcome.cleanupStandardCheckoutStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -1479,6 +1601,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
     hostedExecutionEventId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -1488,6 +1611,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1499,6 +1623,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
+    cleanupStandardCheckoutStripeSubscriptionId:
+      outcome?.cleanupStandardCheckoutStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -1511,6 +1637,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1520,6 +1647,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     activatedMembers: [],
     cleanupFamilySponsoredStripeSubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
+    cleanupStandardCheckoutStripeSubscriptionId: null,
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

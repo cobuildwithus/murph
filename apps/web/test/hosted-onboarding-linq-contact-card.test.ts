@@ -221,13 +221,15 @@ describe("hosted Linq contact card client", () => {
         phoneNumber: "+15550000001",
         phoneNumberHint: "*** 0001",
         phoneNumberLookupKey: "lookup:1",
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550000002",
         phoneNumberHint: "*** 0002",
         phoneNumberLookupKey: "lookup:2",
-        providerStatus: "AT_RISK",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
     const prisma = {};
@@ -313,7 +315,8 @@ describe("hosted Linq contact card client", () => {
         phoneNumber: "+15550000001",
         phoneNumberHint: "*** 0001",
         phoneNumberLookupKey: "lookup:1",
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
     const prisma = {};
@@ -381,7 +384,8 @@ describe("hosted Linq contact card client", () => {
         phoneNumber: "+15550000001",
         phoneNumberHint: "*** 0001",
         phoneNumberLookupKey: "lookup:1",
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
     const prisma = {};
@@ -553,19 +557,29 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
         phoneNumber: "+15550000001",
         phoneNumberHint: "*** 0001",
         phoneNumberLookupKey: "lookup:1",
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
       {
         phoneNumber: "+15550000002",
         phoneNumberHint: "*** 0002",
         phoneNumberLookupKey: "lookup:2",
-        providerStatus: "AT_RISK",
+        providerReputationStatus: "AT_RISK",
+        providerServiceStatus: "ACTIVE",
+      },
+      {
+        phoneNumber: "+15550000004",
+        phoneNumberHint: "*** 0004",
+        phoneNumberLookupKey: "lookup:4",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "FLAGGED",
       },
       {
         phoneNumber: "+15550000003",
         phoneNumberHint: "*** 0003",
         phoneNumberLookupKey: "lookup:3",
-        providerStatus: "HEALTHY",
+        providerReputationStatus: "HEALTHY",
+        providerServiceStatus: "ACTIVE",
       },
     ]);
     const providerFetch = vi.fn(() => {

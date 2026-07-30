@@ -27,6 +27,7 @@ export {
   createHostedStripeBillingEventLookupKey,
   createHostedStripeBillingEventLookupKeyReadCandidates,
   createHostedStripeCheckoutSessionLookupKey,
+  createHostedStripeCheckoutSessionLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripePriceLookupKey,

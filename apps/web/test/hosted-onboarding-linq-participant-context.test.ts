@@ -98,7 +98,7 @@ describe("stageHostedLinqGroupParticipantContextTx", () => {
         expect.stringMatching(/^hbidx:phone:/u),
       ]),
       prisma: expect.any(Object),
-      text: "Participant +15551234567 (unverified owner contact label: Taylor R.) was added to the group.",
+      text: "Participant +15551234567 (address-book name: Taylor R.) was added to the group.",
       threadId: "chat_group",
     });
   });
