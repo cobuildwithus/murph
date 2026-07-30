@@ -182,7 +182,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Persona onboarding">
+      <StudySection title="Persona onboarding with stacked tone samples">
         <PersonaOnboardingStudy />
       </StudySection>
 
