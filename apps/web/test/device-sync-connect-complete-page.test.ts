@@ -41,6 +41,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/components/observability/vercel-telemetry", () => ({
+  VercelTelemetry: () => null,
+}));
+
 vi.mock("@/src/components/home/feature-highlights", () => ({
   FeatureHighlights: () => createElement("section", null, "Feature highlights"),
 }));

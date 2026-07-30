@@ -67,6 +67,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/components/observability/vercel-telemetry", () => ({
+  VercelTelemetry: () => null,
+}));
+
 vi.mock("@/src/components/home/upload-labs-action", () => ({
   UploadLabsActionFallback: () =>
     createElement("button", { type: "button" }, "Sync fallback"),
