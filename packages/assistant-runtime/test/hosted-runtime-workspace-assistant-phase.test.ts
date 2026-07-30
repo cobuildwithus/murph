@@ -661,7 +661,10 @@ beforeEach(() => {
     }
     if (
       input?.allowedRouteActions?.length === 1
-      && input.allowedRouteActions[0] === "apply-member-preferences"
+      && (
+        input.allowedRouteActions[0] === "apply-member-preferences"
+        || input.allowedRouteActions[0] === "initialize-group-room-model"
+      )
     ) {
       return {
         at: null,
@@ -14104,6 +14107,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           reason: null,
         };
       }
+      if (
+        input?.allowedRouteActions?.includes("initialize-group-room-model")
+      ) {
+        return {
+          at: null,
+          reason: null,
+        };
+      }
       return {
         at: now,
         reason: "assistant",
@@ -14136,7 +14147,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(10);
-    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(11);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledTimes(12);
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: now,

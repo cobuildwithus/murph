@@ -2524,6 +2524,22 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_next_group",
+      setup: {
+        roomContextMarkdown: "界".repeat(682),
+      },
+    })).toMatchObject({
+      setup: {
+        roomContextMarkdown: "界".repeat(682),
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "prepare_next_group",
+      setup: {
+        roomContextMarkdown: "界".repeat(683),
+      },
+    })).toThrow(/UTF-8 byte limit/u);
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "read_chat_name",
     })).toEqual({
       action: "read_chat_name",

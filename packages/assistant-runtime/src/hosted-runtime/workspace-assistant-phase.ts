@@ -4196,6 +4196,31 @@ async function runRequiredGroupRoomModelInitializationPhase(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+  const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
+    now: () => now,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!pendingWake.at) {
+    return {
+      continueAssistantLane: true,
+      result: null,
+    };
+  }
+  if (!hostedAssistantPhaseWakeIsDueAt(pendingWake.at, now)) {
+    return {
+      continueAssistantLane: false,
+      result: {
+        nextWakeAt: pendingWake.at,
+        nextWakeReason: "assistant",
+        progressed: false,
+        redactedStatus: {
+          hostedGroupRoomModelInitializationPending: 1,
+        },
+      },
+    };
+  }
+
   const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
     allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
     executionContext: input.executionContext,
@@ -4206,16 +4231,16 @@ async function runRequiredGroupRoomModelInitializationPhase(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   if (!preparation) {
-    const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    const currentPendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
       allowedRouteActions: HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS,
       now: () => now,
       vaultRoot: input.input.restored.vaultRoot,
     });
-    if (pendingWake.at) {
+    if (currentPendingWake.at) {
       return {
         continueAssistantLane: false,
         result: {
-          nextWakeAt: pendingWake.at,
+          nextWakeAt: currentPendingWake.at,
           nextWakeReason: "assistant",
           progressed: false,
           redactedStatus: {

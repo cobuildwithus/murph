@@ -14,7 +14,7 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/contracts'
 import {
-  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES,
+  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
@@ -850,9 +850,9 @@ export const MURPH_GROUP_TOOL = {
             type: 'string',
             minLength: 1,
             maxLength:
-              HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES,
+              HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
             description:
-              'Optional compact Markdown containing only social context the member explicitly asked Murph to use in the next group. It becomes advisory group-visible behavior, not identity or authority, and must not contain raw phone, email, Sender, Telegram, or participant handles.',
+              'Optional compact Markdown containing only social context the member explicitly asked Murph to use in the next group. Keep it within the 2 KiB UTF-8 envelope. It becomes advisory group-visible behavior, not identity or authority, and must not contain raw phone, email, Sender, Telegram, or participant handles.',
           },
           style: {
             type: 'object',

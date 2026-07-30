@@ -244,6 +244,79 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
       }
     });
+
+    it("expires read and claim authority at the exact 30-minute boundary", async () => {
+      const fixtureId = randomUUID();
+      const ownerMemberId = `member_pending_group_expiry_${fixtureId}`;
+      const recipientPhoneLookupKey = `pending-group-expiry-line:${fixtureId}`;
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const armedAt = new Date("2026-07-29T18:00:00.000Z");
+      const expiresAt = new Date("2026-07-29T18:30:00.000Z");
+
+      try {
+        await client.hostedLinqLine.create({
+          data: {
+            configuredAt: armedAt,
+            healthStatus: "healthy",
+            phoneNumberEncrypted: "test-only-encrypted-line",
+            phoneNumberHint: "0000",
+            phoneNumberLookupKey: recipientPhoneLookupKey,
+          },
+        });
+        await client.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: ownerMemberId,
+            routing: {
+              create: { linqRecipientPhoneLookupKey: recipientPhoneLookupKey },
+            },
+          },
+        });
+        await client.$transaction((tx) => armHostedPendingGroupSetupTx({
+          now: armedAt,
+          ownerMemberId,
+          setup: { roomContextMarkdown: "Exact expiry boundary." },
+          tx,
+        }));
+
+        await expect(readHostedPendingGroupSetup({
+          now: new Date(expiresAt.getTime() - 1),
+          ownerMemberId,
+          prisma: client,
+        })).resolves.toMatchObject({
+          expiresAt,
+          ownerMemberId,
+        });
+        await expect(readHostedPendingGroupSetup({
+          now: expiresAt,
+          ownerMemberId,
+          prisma: client,
+        })).resolves.toBeNull();
+        await expect(client.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: expiresAt,
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: ownerMemberId,
+            tx,
+          })
+        )).resolves.toEqual({
+          kind: "none",
+          reason: "no_candidates",
+        });
+        expect(await client.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(1);
+      } finally {
+        await client.hostedMember.deleteMany({
+          where: { id: ownerMemberId },
+        });
+        await client.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        });
+        await client.$disconnect();
+      }
+    });
   },
 );
 
