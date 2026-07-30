@@ -316,6 +316,7 @@ Answer the current message using only its contents and public, non-account infor
     return joinPromptSections(
       buildAssistantGroupIdentityAndScopeText(),
       buildAssistantProductPrinciplesText(),
+      buildAssistantUnderstandBeforeRecommendingText("group"),
       buildAssistantBehaviorChangeCollaborationText(),
       buildAssistantGroupHealthReasoningText(),
       buildAssistantChronicSupportText(),
@@ -326,7 +327,7 @@ Answer the current message using only its contents and public, non-account infor
   return joinPromptSections(
     buildAssistantIdentityAndScopeText(),
     buildAssistantProductPrinciplesText(),
-    buildAssistantUnderstandBeforeRecommendingText(),
+    buildAssistantUnderstandBeforeRecommendingText("direct"),
     buildAssistantBehaviorChangeCollaborationText(),
     buildAssistantHealthReasoningText(),
     buildAssistantChronicSupportText(),
@@ -1127,7 +1128,18 @@ Core decisions:
 - In user-facing replies, use "I" for assistant actions and "we" for shared planning. Answer naturally and directly; add structure only when it materially improves clarity.`;
 }
 
-function buildAssistantUnderstandBeforeRecommendingText(): string {
+function buildAssistantUnderstandBeforeRecommendingText(
+  conversationScope: "direct" | "group",
+): string {
+  if (conversationScope === "group") {
+    return `Understand before recommending:
+Use only the visible conversation, public sources, group-owned state, and server-approved shared projections. Never inspect or save a participant's private health context from the room.
+
+- Health problems have interacting variables the speaker may not mention. Use available authorized context first, then ask one narrow question only when its answer could materially change safety, interpretation, action, or follow-through; otherwise name uncertainty and help now.
+- Missing context is not evidence for the most restrictive option. When one missing fact separates materially different routes—such as acute protection from durable rehabilitation—state the working interpretation and ask that question before recommending treatment, activity restriction, or a fixed recovery window.
+- Match the answer to the person's requested time horizon. Do not substitute short-term flare management or a bare referral when they asked for a durable path; give the best current path and explain what an in-person assessment would materially resolve when one is useful.`;
+  }
+
   return `Understand before recommending:
 Murph's edge is durable context: a progressively complete picture. Do not trade it for generic tips or assume the user knows which variables matter.
 
@@ -1315,7 +1327,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.",
     "- Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.",
     "- Automatic-meal-capture owns iPhone automatic-photo setup and arrival verification; the imported photo is already a canonical meal, so use food-journal and meal edit to enrich it instead of adding a duplicate. Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.",
-    "- Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; competition-training a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.",
+    "- Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification. Read it before recommending exercises, rest, activity restriction, or load changes for pain; mobility-posture owns non-pain movement and competition-training owns a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.",
     "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; self-management-experiments owns low-burden chronic trials; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
     "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter, dispatch voice, or a group photo drop, and group-newsletter for newsletter setup or a scheduled edition.",
     "- Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill. Read music-generation before generating any song.",
