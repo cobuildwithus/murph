@@ -153,6 +153,70 @@ function createCommandBoundaryRunner(input: {
   };
 }
 
+type ProductionCopyFixtureState = {
+  destinationInventory: R2ObjectInventoryEntry[];
+};
+
+function createProductionCopyFixture(
+  eligible: R2ObjectInventoryEntry,
+  fetchImplementation: (
+    request: RequestInfo | URL,
+    init: RequestInit | undefined,
+    state: ProductionCopyFixtureState,
+  ) => Promise<Response>,
+): {
+  fetchMock: ReturnType<typeof vi.fn>;
+  run: () => Promise<void>;
+  state: ProductionCopyFixtureState;
+} {
+  const state: ProductionCopyFixtureState = {
+    destinationInventory: [marker()],
+  };
+  const harness = createCommandBoundaryRunner({
+    destinationInventory: () => state.destinationInventory,
+    sourceInventory: () => [eligible],
+  });
+  const fetchMock = vi.fn(async (
+    request: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => await fetchImplementation(request, init, state));
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    fetchMock,
+    run: async () => await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    ),
+    state,
+  };
+}
+
+function exactHeadResponse(planned: R2ObjectInventoryEntry): Response {
+  return new Response(null, {
+    headers: {
+      "content-length": String(planned.size),
+      etag: planned.etag,
+    },
+    status: 200,
+  });
+}
+
+function criticalCopyHeaders(init: RequestInit | undefined): Record<string, string | null> {
+  const headers = new Headers(init?.headers);
+  return {
+    "cf-copy-destination-if-none-match": headers.get("cf-copy-destination-if-none-match"),
+    "x-amz-copy-source": headers.get("x-amz-copy-source"),
+    "x-amz-copy-source-if-match": headers.get("x-amz-copy-source-if-match"),
+    "x-amz-metadata-directive": headers.get("x-amz-metadata-directive"),
+    "x-amz-storage-class": headers.get("x-amz-storage-class"),
+  };
+}
+
 describe("R2 online immutable copy", () => {
   it("classifies only the approved immutable user-scoped key families", () => {
     expect(classifyR2OnlineCopyKey(
@@ -398,6 +462,10 @@ describe("R2 online immutable copy", () => {
       label: "server failure",
       response: () => new Response(null, { status: 503 }),
     },
+    {
+      label: "rate limit",
+      response: () => new Response(null, { status: 429 }),
+    },
   ])("never retries CopyObject after an ambiguous $label", async ({ response }) => {
     const boundaryNamespace = createHostedStorageNamespaceId("member_1");
     const eligible = entry(
@@ -562,6 +630,564 @@ describe("R2 online immutable copy", () => {
     expect(putAttempts).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(copySuccessResponse.bodyUsed).toBe(true);
+  });
+
+  it("accepts one HTTP 500 when strong HEADs prove the copy already committed", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-committed.snapshot.enc`,
+      { etag: '"01010101010101010101010101010101"', size: 12 },
+    );
+    let firstResponseBodyCancelled = false;
+    let closeFirstResponseBody!: () => void;
+    const firstResponse = new Response(new ReadableStream({
+      start(controller) {
+        closeFirstResponseBody = () => {
+          if (!firstResponseBodyCancelled) controller.close();
+        };
+      },
+      cancel() {
+        firstResponseBodyCancelled = true;
+      },
+    }), { status: 500 });
+    let markFirstPutObserved!: () => void;
+    const firstPutObserved = new Promise<void>((resolve) => {
+      markFirstPutObserved = resolve;
+    });
+    let putAttempts = 0;
+    const headPaths: string[] = [];
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          state.destinationInventory = [marker(), eligible];
+          markFirstPutObserved();
+          return firstResponse;
+        }
+        if (init?.method === "HEAD") {
+          headPaths.push(url.pathname);
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    const runPromise = fixture.run();
+    await Promise.race([firstPutObserved, runPromise]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const firstResponseBodyUsedBeforeDrain = firstResponse.bodyUsed;
+    const headPathsBeforeBodyDrain = [...headPaths];
+    closeFirstResponseBody();
+    await runPromise;
+
+    expect(putAttempts).toBe(1);
+    expect(firstResponseBodyUsedBeforeDrain).toBe(true);
+    expect(firstResponseBodyCancelled).toBe(false);
+    expect(headPathsBeforeBodyDrain).toEqual([]);
+    expect(headPaths).toEqual([
+      `/${destinationBucket}/${eligible.key}`,
+      `/${sourceBucket}/${eligible.key}`,
+      `/${destinationBucket}/${eligible.key}`,
+      `/${sourceBucket}/${eligible.key}`,
+    ]);
+  });
+
+  it("retries one reconciled HTTP 500 once with the identical create-only request", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-recovery.snapshot.enc`,
+      { etag: '"02020202020202020202020202020202"', size: 12 },
+    );
+    const firstResponse = new Response("<Error />", { status: 500 });
+    const recoveryResponse = new Response("<CopyObjectResult />", { status: 200 });
+    const copyHeaders: Record<string, string | null>[] = [];
+    const copyPaths: string[] = [];
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          copyHeaders.push(criticalCopyHeaders(init));
+          copyPaths.push(url.pathname);
+          if (putAttempts === 1) return firstResponse;
+          state.destinationInventory = [marker(), eligible];
+          return recoveryResponse;
+        }
+        if (init?.method === "HEAD") {
+          if (
+            url.pathname === `/${destinationBucket}/${eligible.key}`
+            && !state.destinationInventory.includes(eligible)
+          ) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await fixture.run();
+
+    expect(putAttempts).toBe(2);
+    expect(copyPaths).toEqual([
+      `/${destinationBucket}/${eligible.key}`,
+      `/${destinationBucket}/${eligible.key}`,
+    ]);
+    expect(copyHeaders).toHaveLength(2);
+    expect(copyHeaders[1]).toEqual(copyHeaders[0]);
+    expect(firstResponse.bodyUsed).toBe(true);
+    expect(recoveryResponse.bodyUsed).toBe(true);
+  });
+
+  it("paces the single HTTP 500 recovery to R2's same-key write floor", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T00:00:00.000Z"));
+    try {
+      const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+      const eligible = entry(
+        `users/${boundaryNamespace}/workspace-snapshots/http500-paced-recovery.snapshot.enc`,
+        { etag: '"13131313131313131313131313131313"', size: 12 },
+      );
+      const copyHeaders: Record<string, string | null>[] = [];
+      const copyPaths: string[] = [];
+      const putTimes: number[] = [];
+      let putAttempts = 0;
+      let markSourceHeadObserved!: () => void;
+      const sourceHeadObserved = new Promise<void>((resolve) => {
+        markSourceHeadObserved = resolve;
+      });
+      const fixture = createProductionCopyFixture(
+        eligible,
+        async (request, init) => {
+          const url = new URL(String(request));
+          if (init?.method === "PUT") {
+            putAttempts += 1;
+            putTimes.push(Date.now());
+            copyHeaders.push(criticalCopyHeaders(init));
+            copyPaths.push(url.pathname);
+            return putAttempts === 1
+              ? new Response("<Error />", { status: 500 })
+              : new Response("<Error />", { status: 429 });
+          }
+          if (init?.method === "HEAD") {
+            if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+              return new Response(null, { status: 404 });
+            }
+            markSourceHeadObserved();
+            return exactHeadResponse(eligible);
+          }
+          throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+        },
+      );
+
+      const runPromise = fixture.run();
+      const outcome = runPromise.then(
+        () => new Error("expected the paced recovery 429 to fail"),
+        (error: unknown) => error,
+      );
+      await sourceHeadObserved;
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(putAttempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(putAttempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      const error = await outcome;
+      if (!(error instanceof Error)) {
+        throw new TypeError("expected the paced recovery to reject with an Error");
+      }
+      expect(error.message).toContain("recovery failed with HTTP 429");
+      expect(putAttempts).toBe(2);
+      expect(putTimes).toEqual([
+        new Date("2026-07-30T00:00:00.000Z").getTime(),
+        new Date("2026-07-30T00:00:01.000Z").getTime(),
+      ]);
+      expect(copyPaths).toEqual([
+        `/${destinationBucket}/${eligible.key}`,
+        `/${destinationBucket}/${eligible.key}`,
+      ]);
+      expect(copyHeaders[1]).toEqual(copyHeaders[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("validates a 412 from the single HTTP 500 recovery attempt", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-recovery-412.snapshot.enc`,
+      { etag: '"03030303030303030303030303030303"', size: 12 },
+    );
+    const firstResponse = new Response("<Error />", { status: 500 });
+    const recoveryResponse = new Response("<Error />", { status: 412 });
+    const copyHeaders: Record<string, string | null>[] = [];
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          copyHeaders.push(criticalCopyHeaders(init));
+          if (putAttempts === 1) return firstResponse;
+          state.destinationInventory = [marker(), eligible];
+          return recoveryResponse;
+        }
+        if (init?.method === "HEAD") {
+          if (
+            url.pathname === `/${destinationBucket}/${eligible.key}`
+            && !state.destinationInventory.includes(eligible)
+          ) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await fixture.run();
+
+    expect(putAttempts).toBe(2);
+    expect(copyHeaders[1]).toEqual(copyHeaders[0]);
+    expect(firstResponse.bodyUsed).toBe(true);
+    expect(recoveryResponse.bodyUsed).toBe(true);
+  });
+
+  it("fails a reconciled HTTP 500 when the destination identity conflicts", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-conflict.snapshot.enc`,
+      { etag: '"04040404040404040404040404040404"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(eligible, async (_request, init) => {
+      if (init?.method === "PUT") {
+        putAttempts += 1;
+        return new Response("<Error />", { status: 500 });
+      }
+      if (init?.method === "HEAD") {
+        return new Response(null, {
+          headers: {
+            "content-length": String(eligible.size + 1),
+            etag: eligible.etag,
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+    });
+
+    await expect(fixture.run()).rejects.toThrow("conflicting destination identity");
+
+    expect(putAttempts).toBe(1);
+    expect(fixture.fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { destinationPresent: false, label: "absent destination" },
+    { destinationPresent: true, label: "committed destination" },
+  ])("fails a reconciled HTTP 500 with a missing source and $label", async ({
+    destinationPresent,
+  }) => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-missing-source.snapshot.enc`,
+      { etag: '"05050505050505050505050505050505"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          if (destinationPresent) state.destinationInventory = [marker(), eligible];
+          return new Response("<Error />", { status: 500 });
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${sourceBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return destinationPresent
+            ? exactHeadResponse(eligible)
+            : new Response(null, { status: 404 });
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow("planned source object missing");
+
+    expect(putAttempts).toBe(1);
+  });
+
+  it("fails a reconciled HTTP 500 when the source identity changed", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-source-changed.snapshot.enc`,
+      { etag: '"06060606060606060606060606060606"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          return new Response("<Error />", { status: 500 });
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return new Response(null, {
+            headers: {
+              "content-length": String(eligible.size),
+              etag: '"changed"',
+            },
+            status: 200,
+          });
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow("planned source identity changed");
+
+    expect(putAttempts).toBe(1);
+  });
+
+  it.each([
+    { failedBucket: destinationBucket, label: "destination" },
+    { failedBucket: sourceBucket, label: "source" },
+  ])("fails a reconciled HTTP 500 when the $label HEAD fails", async ({
+    failedBucket,
+  }) => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-head-failure.snapshot.enc`,
+      { etag: '"07070707070707070707070707070707"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          return new Response("<Error />", { status: 500 });
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${failedBucket}/${eligible.key}`) {
+            return new Response(null, { status: 403 });
+          }
+          if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow("HEAD failed with HTTP 403");
+
+    expect(putAttempts).toBe(1);
+  });
+
+  it("does not reconcile an HTTP 500 whose response body cannot be drained", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-body-failure.snapshot.enc`,
+      { etag: '"08080808080808080808080808080808"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(eligible, async (_request, init) => {
+      if (init?.method !== "PUT") {
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      }
+      putAttempts += 1;
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.error(new TypeError("failed to read HTTP 500 body"));
+        },
+      }), { status: 500 });
+    });
+
+    await expect(fixture.run()).rejects.toThrow();
+
+    expect(putAttempts).toBe(1);
+    expect(fixture.fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: "404", outcome: () => new Response(null, { status: 404 }) },
+    { label: "500", outcome: () => new Response(null, { status: 500 }) },
+    { label: "429", outcome: () => new Response(null, { status: 429 }) },
+    { label: "503", outcome: () => new Response(null, { status: 503 }) },
+    { label: "other 4xx", outcome: () => new Response(null, { status: 418 }) },
+    { label: "other 5xx", outcome: () => new Response(null, { status: 502 }) },
+    {
+      label: "redirect rejection",
+      outcome: () => {
+        throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
+      },
+    },
+    {
+      label: "socket failure",
+      outcome: () => {
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+        });
+      },
+    },
+    {
+      label: "generic transport failure",
+      outcome: () => {
+        throw new TypeError("ambiguous recovery transport failure");
+      },
+    },
+    {
+      label: "response body failure",
+      outcome: () => new Response(new ReadableStream({
+        start(controller) {
+          controller.error(new TypeError("failed to read recovery body"));
+        },
+      }), { status: 200 }),
+    },
+  ])("never makes a third CopyObject attempt after recovery $label", async ({ outcome }) => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-terminal-recovery.snapshot.enc`,
+      { etag: '"09090909090909090909090909090909"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          if (putAttempts === 1) return new Response("<Error />", { status: 500 });
+          return outcome();
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow();
+
+    expect(putAttempts).toBe(2);
+  });
+
+  it("does not reset the CopyObject retry budget after pre-connect timeout then HTTP 500", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-budget-success.snapshot.enc`,
+      { etag: '"10101010101010101010101010101010"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          if (putAttempts === 1) throw undiciConnectTimeout();
+          if (putAttempts === 2) return new Response("<Error />", { status: 500 });
+          state.destinationInventory = [marker(), eligible];
+          return new Response("<CopyObjectResult />", { status: 200 });
+        }
+        if (init?.method === "HEAD") {
+          if (
+            url.pathname === `/${destinationBucket}/${eligible.key}`
+            && !state.destinationInventory.includes(eligible)
+          ) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await fixture.run();
+
+    expect(putAttempts).toBe(3);
+  });
+
+  it("does not retry a recovery attempt that fails with a pre-connect timeout", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-budget-preconnect.snapshot.enc`,
+      { etag: '"11111111111111111111111111111111"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          if (putAttempts === 1) return new Response("<Error />", { status: 500 });
+          throw undiciConnectTimeout();
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow("fetch failed");
+
+    expect(putAttempts).toBe(2);
+  });
+
+  it("stops after pre-connect retry, HTTP 500 reconciliation, and one recovery HTTP 500", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/http500-budget-exhausted.snapshot.enc`,
+      { etag: '"12121212121212121212121212121212"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          if (putAttempts === 1) throw undiciConnectTimeout();
+          return new Response("<Error />", { status: 500 });
+        }
+        if (init?.method === "HEAD") {
+          if (url.pathname === `/${destinationBucket}/${eligible.key}`) {
+            return new Response(null, { status: 404 });
+          }
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await expect(fixture.run()).rejects.toThrow("recovery failed with HTTP 500");
+
+    expect(putAttempts).toBe(3);
   });
 
   it("rejects malformed production owner rows before inventory or R2 requests", async () => {
