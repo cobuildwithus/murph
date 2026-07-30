@@ -1020,7 +1020,7 @@ function pickEnvironment(
 function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyClient {
   return {
     async copyObject(input) {
-      const response = await fetchR2Once(environment, {
+      const response = await fetchR2CopyObjectWithPreconnectRetry(environment, {
         bucket: input.destination,
         headers: {
           "cf-copy-destination-if-none-match": "*",
@@ -1077,6 +1077,32 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
       return "created";
     },
   };
+}
+
+async function fetchR2CopyObjectWithPreconnectRetry(
+  environment: MigrationEnvironment,
+  input: {
+    bucket: string;
+    headers: Readonly<Record<string, string>>;
+    key: string;
+    method: "PUT";
+  },
+): Promise<Response> {
+  try {
+    return await fetchR2Once(environment, input);
+  } catch (error) {
+    if (!isExactUndiciConnectTimeout(error)) throw error;
+    return await fetchR2Once(environment, input);
+  }
+}
+
+function isExactUndiciConnectTimeout(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const cause = error.cause;
+  return typeof cause === "object"
+    && cause !== null
+    && "code" in cause
+    && cause.code === "UND_ERR_CONNECT_TIMEOUT";
 }
 
 async function fetchR2WithOneRetry(

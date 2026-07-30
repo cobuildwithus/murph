@@ -66,6 +66,14 @@ function marker(): R2ObjectInventoryEntry {
   return entry(createR2MigrationMarkerKey(sourceBucket, destinationBucket));
 }
 
+function undiciConnectTimeout(): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error("Connect Timeout Error"), {
+      code: "UND_ERR_CONNECT_TIMEOUT",
+    }),
+  });
+}
+
 function options(overrides: Partial<R2BundlesOnlineCopyOptions> = {}): R2BundlesOnlineCopyOptions {
   return {
     apply: false,
@@ -357,6 +365,24 @@ describe("R2 online immutable copy", () => {
       },
     },
     {
+      label: "mid-request socket failure",
+      response: () => {
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("other side closed"), {
+            code: "UND_ERR_SOCKET",
+          }),
+        });
+      },
+    },
+    {
+      label: "lookalike direct connect-timeout code",
+      response: () => {
+        throw Object.assign(new Error("Connect Timeout Error"), {
+          code: "UND_ERR_CONNECT_TIMEOUT",
+        });
+      },
+    },
+    {
       label: "server failure",
       response: () => new Response(null, { status: 503 }),
     },
@@ -392,6 +418,96 @@ describe("R2 online immutable copy", () => {
     )).rejects.toThrow();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after one retry when the exact pre-connect timeout repeats", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/preconnect-exhausted.snapshot.enc`,
+      { etag: '"abababababababababababababababab"', size: 12 },
+    );
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => [marker()],
+      sourceInventory: () => [eligible],
+    });
+    const fetchMock = vi.fn(async (
+      _request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (init?.method !== "PUT") {
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      }
+      throw undiciConnectTimeout();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    )).rejects.toThrow("fetch failed");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once only for Undici's exact pre-connect timeout", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/preconnect-retry.snapshot.enc`,
+      { etag: '"efefefefefefefefefefefefefefefef"', size: 12 },
+    );
+    let destinationInventory = [marker()];
+    const harness = createCommandBoundaryRunner({
+      destinationInventory: () => destinationInventory,
+      sourceInventory: () => [eligible],
+    });
+    let putAttempts = 0;
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(String(request));
+      if (init?.method === "PUT") {
+        putAttempts += 1;
+        if (putAttempts === 1) {
+          throw undiciConnectTimeout();
+        }
+        destinationInventory = [marker(), eligible];
+        return new Response(null, { status: 200 });
+      }
+      if (init?.method === "HEAD") {
+        expect([
+          `/${destinationBucket}/${eligible.key}`,
+          `/${sourceBucket}/${eligible.key}`,
+        ]).toContain(url.pathname);
+        return new Response(null, {
+          headers: {
+            "content-length": String(eligible.size),
+            etag: eligible.etag,
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected online-copy fetch: ${init?.method ?? "GET"} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runR2BundlesOnlineCopy(
+      options({
+        apply: true,
+        confirmDestination: destinationBucket,
+        immutableKeysAudited: true,
+      }),
+      environment,
+      { log: vi.fn(), runner: harness.runner },
+    );
+
+    expect(putAttempts).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("rejects malformed production owner rows before inventory or R2 requests", async () => {
