@@ -117,38 +117,10 @@ export function AuthProvider({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [runtimeRequested, setRuntimeRequested] = useState(false);
-  const [AuthRuntime, setAuthRuntime] =
-    useState<HostedAuthRuntimeComponent | null>(null);
-  const [runtimeLoadError, setRuntimeLoadError] = useState<string | null>(null);
-
-  const prepareAuth = useCallback(() => {
-    if (!isHomepage()) {
-      return;
-    }
-
-    setRuntimeRequested(true);
-    const loaded = hostedAuthRuntimeComponent;
-    if (loaded) {
-      setRuntimeLoadError(null);
-      setAuthRuntime(() => loaded);
-      return;
-    }
-
-    setRuntimeLoadError(null);
-    void loadHostedAuthRuntime()
-      .then((Component) => {
-        setAuthRuntime(() => Component);
-      })
-      .catch(() => {
-        setRuntimeLoadError("Sign in did not load. Try again.");
-      });
-  }, []);
 
   const openAuthDialog = useCallback(() => {
-    prepareAuth();
     setOpen(true);
-  }, [prepareAuth]);
+  }, []);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
     if (source === "cross-document" || source === "same-document-expired") {
@@ -183,6 +155,85 @@ export function AuthProvider({
     () => ({
       authenticated,
       openAuthDialog,
+      prepareAuth: () => {},
+      shared: false,
+    }),
+    [authenticated, openAuthDialog],
+  );
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      <AuthDialog
+        open={open}
+        title={authenticated ? "Sign in again" : undefined}
+        description={authenticated ? "Verify this device to manage secure approvals." : undefined}
+        onCompleted={handleAuthCompleted}
+        onOpenChange={setOpen}
+        requireLaunchConsentOnCompletion={!authenticated}
+      />
+    </AuthContext.Provider>
+  );
+}
+
+export function HomepageAuthRuntimeProvider({
+  authenticated,
+  children,
+}: {
+  authenticated: boolean;
+  children?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [runtimeRequested, setRuntimeRequested] = useState(false);
+  const [AuthRuntime, setAuthRuntime] =
+    useState<HostedAuthRuntimeComponent | null>(null);
+  const [runtimeLoadError, setRuntimeLoadError] = useState<string | null>(null);
+
+  const prepareAuth = useCallback(() => {
+    if (authenticated) {
+      return;
+    }
+
+    setRuntimeRequested(true);
+    const loaded = hostedAuthRuntimeComponent;
+    if (loaded) {
+      setRuntimeLoadError(null);
+      setAuthRuntime(() => loaded);
+      return;
+    }
+
+    setRuntimeLoadError(null);
+    void loadHostedAuthRuntime()
+      .then((Component) => {
+        setAuthRuntime(() => Component);
+      })
+      .catch(() => {
+        setRuntimeLoadError("Sign in did not load. Try again.");
+      });
+  }, [authenticated]);
+
+  const openAuthDialog = useCallback(() => {
+    prepareAuth();
+    setOpen(true);
+  }, [prepareAuth]);
+
+  const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+    if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+      navigateHostedAuthRedirect(payload.joinUrl);
+      return;
+    }
+
+    navigateHostedAuthRedirect(
+      payload.initialVisitEligible === true
+        ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
+        : HOSTED_APP_HOME_PATH,
+    );
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      authenticated,
+      openAuthDialog,
       prepareAuth,
       shared: true,
     }),
@@ -192,13 +243,7 @@ export function AuthProvider({
     onCompleted: handleAuthCompleted,
     onOpenChange: setOpen,
     open,
-    requireLaunchConsentOnCompletion: !authenticated,
-    ...(authenticated
-      ? {
-          description: "Verify this device to manage secure approvals.",
-          title: "Sign in again",
-        }
-      : {}),
+    requireLaunchConsentOnCompletion: true,
   } as const;
   const pendingRuntime: AuthDialogPrivyRuntimeState = runtimeLoadError
     ? { kind: "error", message: runtimeLoadError }
@@ -211,27 +256,17 @@ export function AuthProvider({
         AuthRuntime ? (
           <AuthRuntime>
             {(runtime) => (
-              <AuthDialog
-                {...dialogProps}
-                privyRuntime={runtime}
-              />
+              <AuthDialog {...dialogProps} privyRuntime={runtime} />
             )}
           </AuthRuntime>
         ) : (
-          <AuthDialog
-            {...dialogProps}
-            privyRuntime={pendingRuntime}
-          />
+          <AuthDialog {...dialogProps} privyRuntime={pendingRuntime} />
         )
       ) : (
         <AuthDialog {...dialogProps} />
       )}
     </AuthContext.Provider>
   );
-}
-
-function isHomepage(): boolean {
-  return typeof window !== "undefined" && window.location.pathname === "/";
 }
 
 function loadHostedAuthRuntime(): Promise<HostedAuthRuntimeComponent> {
