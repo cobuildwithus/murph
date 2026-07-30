@@ -6,8 +6,9 @@ This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
 
 1. One preliminary `completion-specialists` pass combines the applicable
-   prompt, frontend, and coverage lenses. It replaces those three former local
-   audit subagents and may return one bounded coverage patch artifact.
+   product-experience, prompt, frontend, and coverage lenses. It replaces those
+   four former local audit subagents and may return one bounded coverage patch
+   artifact.
 2. The later `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
 
@@ -18,7 +19,6 @@ final gate's immutable first-reviewed-head baseline. Final round 1 starts only
 after preliminary findings are resolved, parent final review and verification
 are complete, and the resulting head is pushed.
 
-The local `product-experience-review` remains separate when its trigger applies.
 Never combine local `deep-review` with the final ReviewGPT gate for the same
 completed change, including when the change is complex, sensitive, or the user
 asks for a final bug hunt.
@@ -69,6 +69,9 @@ restart.
 
 Run one preliminary specialist pass when any of these lenses apply:
 
+- product experience: a product-owned journey, semantic-copy, required-action,
+  state-selection, visible-feedback, timing, delivery, permission, recovery,
+  or interaction-economy dimension changed;
 - prompt: prompt text, instruction stacks, tool descriptions, prompt assembly,
   or prompt regression behavior changed;
 - frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
@@ -79,10 +82,11 @@ Run one preliminary specialist pass when any of these lenses apply:
 The task must use a clean worktree/PR lane. Commit and push the review candidate,
 open or update the PR, and run
 `scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>`. The PR body must
-declare each lens `applicable` or `not applicable`, name the focused local proof
-and current exact-head CI status, and list the redacted rendered-evidence files
-for every applicable frontend state and viewport. CI may still be `pending`;
-the preliminary pass runs concurrently with it.
+declare each lens `applicable` or `not applicable`, name the product outcome and
+direct journey evidence or exact gap when applicable, name the focused local
+proof and current exact-head CI status, and list the redacted rendered-evidence
+files for every applicable frontend state and viewport. CI may still be
+`pending`; the preliminary pass runs concurrently with it.
 
 Do not add `ReviewGPT first-reviewed head` to the PR body yet. The preliminary
 pass does not consume the final gate's baseline.
@@ -98,7 +102,7 @@ REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-package
     --wait-timeout 120m \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
-    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the prompt, frontend, and coverage lenses declared in the PR body."
+    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the product-experience, prompt, frontend, and coverage lenses declared in the PR body."
 ```
 
 Omit `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` only when the frontend lens is not
@@ -115,7 +119,7 @@ The guarded ZIP contains:
 - `review-gpt-pr-context/changed-files.txt`
 - `review-gpt-pr-context/review-phase.json`
 - `review-gpt-pr-context/rendered-evidence.txt`
-- the three lens references under `agent-docs/prompts/`
+- the four lens references under `agent-docs/prompts/`
 - every explicitly listed rendered-evidence image
 - current source, tests, and repository guidance
 
@@ -158,11 +162,17 @@ rerun the focused local proof for the affected behavior. Push the result so the
 required exact-head CI surface evaluates it. Never pipe a downloaded artifact
 directly into `git apply`, and never treat the attachment as landed code.
 
-Resolve accepted prompt/frontend findings in the parent, rerun focused proof,
-and push the resulting candidate. Do not rerun the preliminary pass for those
-substantive corrections. Complete parent final review and final verification,
-then close any active plan and push the final task head. Only after that may an
-eligible final ReviewGPT round-one baseline be recorded.
+Resolve accepted product-experience, prompt, and frontend findings in the
+parent, rerun focused proof, and push the resulting candidate. If accepted
+product-experience remediation materially changed a product-owned dimension,
+the parent must reapply `agent-docs/prompts/product-experience-review.md` to that
+corrected pushed head and updated direct journey evidence, then record a
+refreshed product purpose verdict. This is parent-owned corrected-head
+revalidation, not another subagent or ReviewGPT invocation. Do not rerun the
+preliminary pass for those substantive corrections. Complete parent final
+review and final verification, then close any active plan and push the final
+task head. Only after that may an eligible final ReviewGPT round-one baseline be
+recorded.
 
 ## Final Gate: When It Runs
 
@@ -498,8 +508,7 @@ the touched surface, push it, and use the ordinary review-loop rules.
   this cross-cutting ReviewGPT review and does not create a second pass.
 - Do not substitute Codex subagents, pasted text, connector context,
   dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
-  profile for either ReviewGPT stage. The separately routed local
-  `product-experience-review` remains allowed.
+  profile for either ReviewGPT stage.
 - Do not commit ReviewGPT responses, rendered evidence, or downloaded patch
   artifacts. Files under `audit-packages/` and `.artifacts/review-gpt/` are
   local working artifacts.
