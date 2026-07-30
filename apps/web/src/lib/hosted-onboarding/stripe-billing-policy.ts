@@ -216,6 +216,10 @@ export async function writeHostedMemberStripeBillingTx(input: {
     billingRef: currentMember.billingRef,
     dispatchContext: input.dispatchContext,
   });
+  const appliedScheduledPlan =
+    input.currentBillingPlanCode !== undefined
+    && input.currentBillingPlanCode !== null
+    && input.currentBillingPlanCode === currentMember.billingRef?.scheduledBillingPlanCode;
 
   const writeBillingRef = () => writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
@@ -228,6 +232,13 @@ export async function writeHostedMemberStripeBillingTx(input: {
     currentTrialStartedAt: input.currentTrialStartedAt,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
+    ...(appliedScheduledPlan
+      ? {
+          scheduledBillingEffectiveAt: null,
+          scheduledBillingPlanCode: null,
+          stripeSubscriptionScheduleId: null,
+        }
+      : {}),
     stripeEventCreatedAt: nextStripeEventCreatedAt,
     stripeCustomerId: billingRefWriteValues.stripeCustomerId,
     stripeSubscriptionId: billingRefWriteValues.stripeSubscriptionId,

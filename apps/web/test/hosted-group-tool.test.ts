@@ -559,6 +559,30 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  it("does not acknowledge a personal ask when its durable mailbox handoff rejects", async () => {
+    const signalError = new Error("Temporal unavailable");
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(signalError);
+    mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_group_runtime",
+        mailboxItemId: "aask_req_one",
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "ask",
+        groupLabel: "100 Club",
+        originAssistantInputId: `ain_${"a".repeat(32)}`,
+        originSessionId: "session_private",
+        question: "What is today's workout?",
+      },
+      scheduleMailboxWake,
+    })).rejects.toBe(signalError);
+  });
+
   it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
     const scheduleMailboxWake = vi.fn();
     const origin = {
@@ -589,6 +613,34 @@ describe("handleHostedRuntimeGroupTool", () => {
       groupRuntimeMemberId: "member_group_runtime",
       origin,
     });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "aask_req_current_sender",
+    });
+  });
+
+  it("does not acknowledge a current-sender ask when its durable mailbox handoff rejects", async () => {
+    const signalError = new Error("Temporal unavailable");
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(signalError);
+    const origin = {
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "aask_req_current_sender",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "ask_current_sender", origin },
+      scheduleMailboxWake,
+    })).rejects.toBe(signalError);
+
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
@@ -633,6 +685,38 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
       question: "How has the grantor been sleeping lately?",
     });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_grantor",
+      mailboxItemId: "aask_req_disclosure_one",
+    });
+  });
+
+  it("does not acknowledge a grant-bound ask when its durable mailbox handoff rejects", async () => {
+    const signalError = new Error("Temporal unavailable");
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(signalError);
+    mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_grantor",
+        mailboxItemId: "aask_req_disclosure_one",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "ask_member",
+        grantId: "grant_sleep",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        question: "How has the grantor been sleeping lately?",
+      },
+      scheduleMailboxWake,
+    })).rejects.toBe(signalError);
+
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_grantor",
       mailboxItemId: "aask_req_disclosure_one",

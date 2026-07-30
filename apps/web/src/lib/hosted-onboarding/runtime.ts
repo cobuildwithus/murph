@@ -19,6 +19,11 @@ const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingStripe?: Stripe | null;
 };
 
+const HOSTED_BILLING_PLAN_DISPLAY_PRICE_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: 5_000,
+} as const satisfies Stripe.RequestOptions;
+
 export function getHostedOnboardingEnvironment(): HostedOnboardingEnvironment {
   if (globalForHostedOnboarding.__murphHostedOnboardingEnv) {
     return globalForHostedOnboarding.__murphHostedOnboardingEnv;
@@ -129,11 +134,171 @@ export function requireHostedStripeBillingPlanConfig(input?: {
     });
   }
 
+  if (billingPlanCode === "launch_group_monthly") {
+    assertHostedBillingPlanPriceIdIsDistinct({
+      billingPlanCode,
+      environment,
+      priceId,
+    });
+  }
+
   return {
     billingPlanCode,
     priceId,
     stripe: requireHostedStripeApi(),
   };
+}
+
+export async function requireValidatedHostedStripeBillingPlanConfig(input?: {
+  billingPlanCode?: HostedBillingPlanCode;
+}): Promise<{
+  billingPlanCode: HostedBillingPlanCode;
+  priceId: string;
+  stripe: Stripe;
+}> {
+  return requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(input);
+}
+
+async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
+  input?: {
+    billingPlanCode?: HostedBillingPlanCode;
+    requestOptions?: Stripe.RequestOptions;
+  },
+): Promise<{
+  billingPlanCode: HostedBillingPlanCode;
+  priceId: string;
+  stripe: Stripe;
+}> {
+  const config = requireHostedStripeBillingPlanConfig(input);
+  let price: Stripe.Price;
+
+  try {
+    const retrieveParams = {
+      expand: ["currency_options"],
+    };
+    price = input?.requestOptions
+      ? await config.stripe.prices.retrieve(
+          config.priceId,
+          retrieveParams,
+          input.requestOptions,
+        )
+      : await config.stripe.prices.retrieve(config.priceId, retrieveParams);
+  } catch (error) {
+    throw hostedOnboardingError({
+      cause: error,
+      code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
+      httpStatus: 502,
+      message:
+        "Stripe billing is unavailable for this plan right now. Try again shortly.",
+      retryable: true,
+    });
+  }
+
+  assertHostedStripeBillingPlanPriceMatchesCatalog({
+    billingPlanCode: config.billingPlanCode,
+    price,
+    priceId: config.priceId,
+    stripeLiveMode: readHostedStripeSecretKeyLiveMode(
+      getHostedOnboardingEnvironment().stripeSecretKey,
+    ),
+  });
+
+  return config;
+}
+
+export async function isHostedBillingPlanSelectionAvailable(input: {
+  billingPlanCode: HostedBillingPlanCode;
+}): Promise<boolean> {
+  try {
+    await requireValidatedHostedStripeBillingPlanConfigWithRequestOptions({
+      ...input,
+      requestOptions: HOSTED_BILLING_PLAN_DISPLAY_PRICE_REQUEST_OPTIONS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertHostedBillingPlanPriceIdIsDistinct(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  environment: HostedOnboardingEnvironment;
+  priceId: string;
+}): void {
+  const duplicatePlanCode = Object.entries(
+    input.environment.stripePriceIdsByPlan,
+  ).find(([planCode, priceId]) =>
+    planCode !== input.billingPlanCode && priceId === input.priceId
+  )?.[0];
+
+  if (!duplicatePlanCode) {
+    return;
+  }
+
+  throw buildHostedBillingPriceConfigurationError(
+    "price_identity_not_distinct",
+  );
+}
+
+function assertHostedStripeBillingPlanPriceMatchesCatalog(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  price: Stripe.Price;
+  priceId: string;
+  stripeLiveMode: boolean;
+}): void {
+  const definition = getHostedBillingPlanDefinition(input.billingPlanCode);
+  const recurring = input.price.recurring;
+  const hasUnsupportedCurrencyOption = input.price.currency_options
+    ? Object.keys(input.price.currency_options).some(
+        (currency) => currency.toLowerCase() !== "usd",
+      )
+    : false;
+
+  if (input.price.id !== input.priceId || input.price.object !== "price") {
+    throw buildHostedBillingPriceConfigurationError("price_identity_mismatch");
+  }
+  if (input.price.livemode !== input.stripeLiveMode) {
+    throw buildHostedBillingPriceConfigurationError("price_mode_mismatch");
+  }
+  if (!input.price.active) {
+    throw buildHostedBillingPriceConfigurationError("price_inactive");
+  }
+  if (
+    input.price.type !== "recurring"
+    || recurring?.interval !== definition.interval
+    || recurring.interval_count !== 1
+    || recurring.usage_type !== "licensed"
+  ) {
+    throw buildHostedBillingPriceConfigurationError("price_recurrence_mismatch");
+  }
+  if (
+    input.price.billing_scheme !== "per_unit"
+    || input.price.custom_unit_amount !== null
+    || input.price.transform_quantity !== null
+    || input.price.tiers_mode !== null
+  ) {
+    throw buildHostedBillingPriceConfigurationError("price_quantity_unsupported");
+  }
+  if (input.price.currency.toLowerCase() !== "usd") {
+    throw buildHostedBillingPriceConfigurationError("price_currency_mismatch");
+  }
+  if (
+    input.price.unit_amount !== definition.recurringAmountUsdCents
+    || hasUnsupportedCurrencyOption
+  ) {
+    throw buildHostedBillingPriceConfigurationError("price_amount_mismatch");
+  }
+}
+
+function buildHostedBillingPriceConfigurationError(
+  reason: string,
+): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PRICE_CONFIGURATION_INVALID",
+    details: { reason },
+    httpStatus: 500,
+    message: "The configured Stripe Price does not match this billing plan.",
+  });
 }
 
 export function requireHostedStripeFamilyPlanConfig(input: {

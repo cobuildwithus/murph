@@ -206,6 +206,7 @@ function createHostedOnboardingEnvironment(
     },
     stripePriceIdsByPlan: {
       launch_edge_monthly: null,
+      launch_group_monthly: null,
       launch_monthly: null,
     },
     stripeUsageCreditPriceIdsByOffer: {

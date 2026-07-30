@@ -79,6 +79,7 @@ type HostedAiUsageAccessDeniedReason = Exclude<
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
+  | "group_upgrade_pulse"
   | "pulse_upgrade_edge"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
@@ -3164,6 +3165,18 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (input.billingPlanCode === "launch_group_monthly") {
+    return {
+      code: "group_upgrade_pulse",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.group_upgrade_pulse",
+        memberId: input.memberId,
+        noticeCode: "group_upgrade_pulse",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   if (input.billingPlanCode === "launch_edge_monthly") {
     return {
       code: "edge_usage_limit_reached",
@@ -3191,6 +3204,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
+    | "linq.ai_usage.group_upgrade_pulse"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

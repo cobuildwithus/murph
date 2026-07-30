@@ -17,7 +17,7 @@ export function PersonaOnboardingStudy() {
         The production onboarding step for choosing how Murph shows up. It
         starts with one main personality, adds an optional supporting
         personality, then offers every voice with tailored recommendations
-        first.
+        first and finishes with vertically stacked tone samples.
       </p>
 
       <div className="mt-5 flex flex-col gap-5 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">

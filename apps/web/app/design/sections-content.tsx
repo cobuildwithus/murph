@@ -24,6 +24,7 @@ import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
@@ -182,7 +183,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Persona onboarding">
+      <StudySection title="Persona onboarding with stacked tone samples">
         <PersonaOnboardingStudy />
       </StudySection>
 
@@ -226,6 +227,12 @@ export function SectionsContent() {
 
       <StudySection title="Pulse billing return confirmation">
         <PulseTrialBillingContinuationStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group member plan">
+        <GroupMemberPlanStudy />
       </StudySection>
 
       <Separator />
