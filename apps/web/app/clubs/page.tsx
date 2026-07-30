@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import { ClubsPageContent } from "@/src/components/clubs/clubs-page-content";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
-import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -42,7 +41,6 @@ export default async function ClubsPage() {
 
   return (
     <>
-      <VercelTelemetry />
       <StickyNav
         authenticated={authenticated}
         darkTop

@@ -13,7 +13,6 @@ import {
   MessageMurphContactAction,
 } from "@/src/components/home/message-murph-action";
 import { PageHeader } from "@/src/components/ui/page-header";
-import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import {
   resolveHomeTrialBillingBannerVariant,
   TrialBillingBanner,
@@ -183,7 +182,6 @@ export default async function HomePage({
 
   return (
     <div className="flex flex-col gap-8">
-      <VercelTelemetry />
       <PageHeader
         eyebrow="Live Well"
         title="Welcome to Murph"

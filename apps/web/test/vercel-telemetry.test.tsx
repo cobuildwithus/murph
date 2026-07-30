@@ -324,19 +324,7 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   );
 });
 
-test("Vercel telemetry ownership is explicit and matches the allowlist", () => {
-  const pageOwners: Record<
-    (typeof VERCEL_TELEMETRY_PATHNAMES)[number],
-    string
-  > = {
-    "/": "app/page.tsx",
-    "/changelog": "app/changelog/page.tsx",
-    "/clubs": "app/clubs/page.tsx",
-    "/home": "app/(dashboard)/home/page.tsx",
-    "/pitch": "app/pitch/pitch-deck.tsx",
-  };
-  const readAppFile = (path: string) =>
-    readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+test("Vercel telemetry has one fail-closed root owner", () => {
   const telemetryOwners = [
     ...readTypeScriptSources(new URL("../app/", import.meta.url), "app"),
     ...readTypeScriptSources(new URL("../src/", import.meta.url), "src"),
@@ -349,24 +337,21 @@ test("Vercel telemetry ownership is explicit and matches the allowlist", () => {
     }))
     .filter(({ importCount, mountCount }) => importCount > 0 || mountCount > 0)
     .sort((left, right) => left.path.localeCompare(right.path));
-  const expectedOwnerPaths = Object.values(pageOwners).sort();
 
-  assert.deepEqual(Object.keys(pageOwners), [...VERCEL_TELEMETRY_PATHNAMES]);
-  assert.deepEqual(
-    telemetryOwners.map(({ path }) => path),
-    expectedOwnerPaths,
-  );
-
-  for (const path of expectedOwnerPaths) {
-    const source = readAppFile(path);
-    const owner = telemetryOwners.find((candidate) => candidate.path === path);
-
-    assert.equal(owner?.importCount, 1, `${path} should have one direct import`);
-    assert.equal(owner?.mountCount, 1, `${path} should have one direct mount`);
-    assert.match(source, /<VercelTelemetry \/>/u);
-  }
-
-  assert.doesNotMatch(readAppFile("app/layout.tsx"), /VercelTelemetry/u);
+  assert.deepEqual([...VERCEL_TELEMETRY_PATHNAMES], [
+    "/",
+    "/changelog",
+    "/clubs",
+    "/home",
+    "/pitch",
+  ]);
+  assert.deepEqual(telemetryOwners, [
+    {
+      importCount: 1,
+      mountCount: 1,
+      path: "app/layout.tsx",
+    },
+  ]);
 });
 
 function readTypeScriptSources(

@@ -14,10 +14,6 @@ vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
 }));
 
-vi.mock("@/src/components/observability/vercel-telemetry", () => ({
-  VercelTelemetry: () => null,
-}));
-
 vi.mock("@/src/lib/github-stars", () => ({
   formatStarCount: (count: number) => String(count),
   getMurphGithubStarCount: mocks.getMurphGithubStarCount,

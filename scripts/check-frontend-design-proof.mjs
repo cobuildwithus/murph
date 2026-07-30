@@ -8,9 +8,6 @@ const DESIGN_CATALOG_PATHS = new Set([
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
-const VERCEL_TELEMETRY_IMPORT_LINE =
-  'import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";';
-const VERCEL_TELEMETRY_MOUNT_LINE = "<VercelTelemetry />";
 
 function isFrontendUiPath(filePath) {
   if (filePath.startsWith("apps/web/app/design/")) {
@@ -40,17 +37,8 @@ function isFrontendUiPath(filePath) {
   );
 }
 
-function validateFrontendDesignProof({
-  changedPaths,
-  nonVisualPaths = [],
-  prBodyHtml,
-}) {
-  const nonVisualPathSet = new Set(nonVisualPaths);
-  const uiPaths = changedPaths.filter(
-    (filePath) =>
-      isFrontendUiPath(filePath)
-      && !nonVisualPathSet.has(filePath),
-  );
+function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
+  const uiPaths = changedPaths.filter(isFrontendUiPath);
   if (uiPaths.length === 0) {
     return { required: false };
   }
@@ -215,46 +203,6 @@ function readChangedPaths(baseSha, headSha) {
     .filter(Boolean);
 }
 
-function readFileDiff(baseSha, headSha, filePath) {
-  return execFileSync(
-    "git",
-    [
-      "diff",
-      "--unified=0",
-      "--no-ext-diff",
-      `${baseSha}...${headSha}`,
-      "--",
-      filePath,
-    ],
-    { encoding: "utf8" },
-  );
-}
-
-function isNonVisualVercelTelemetryOnlyDiff(diff) {
-  const changes = diff
-    .split("\n")
-    .filter(
-      (line) =>
-        (line.startsWith("+") && !line.startsWith("+++"))
-        || (line.startsWith("-") && !line.startsWith("---")),
-    )
-    .map((line) => ({
-      line: line.slice(1).trim(),
-      operation: line[0],
-    }))
-    .filter(({ line }) => line.length > 0);
-
-  const [first, second] = changes;
-  return changes.length === 2
-    && first?.operation === second?.operation
-    && (
-      first?.operation === "+"
-      || first?.operation === "-"
-    )
-    && first.line === VERCEL_TELEMETRY_IMPORT_LINE
-    && second.line === VERCEL_TELEMETRY_MOUNT_LINE;
-}
-
 async function main() {
   const baseSha = process.env.MURPH_PR_BASE_SHA?.trim();
   const headSha = process.env.MURPH_PR_HEAD_SHA?.trim();
@@ -266,27 +214,12 @@ async function main() {
   }
 
   const changedPaths = readChangedPaths(baseSha, headSha);
-  const nonVisualPaths = changedPaths.filter(
-    (filePath) =>
-      isFrontendUiPath(filePath)
-      && isNonVisualVercelTelemetryOnlyDiff(
-        readFileDiff(baseSha, headSha, filePath),
-      ),
-  );
-  const nonVisualPathSet = new Set(nonVisualPaths);
-  if (
-    !changedPaths.some(
-      (filePath) =>
-        isFrontendUiPath(filePath)
-        && !nonVisualPathSet.has(filePath),
-    )
-  ) {
+  if (!changedPaths.some(isFrontendUiPath)) {
     console.log("No user-facing hosted Web UI changes detected.");
     return;
   }
   const result = validateFrontendDesignProof({
     changedPaths,
-    nonVisualPaths,
     prBodyHtml: await renderPrBody(prBody),
   });
   if (result.errors.length > 0) {
@@ -317,7 +250,6 @@ if (isDirectRun) {
 export {
   findRenderedListItem,
   isFrontendUiPath,
-  isNonVisualVercelTelemetryOnlyDiff,
   readRenderedSection,
   renderPrBody,
   renderedText,

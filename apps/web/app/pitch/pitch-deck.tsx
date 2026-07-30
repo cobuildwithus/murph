@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
-
 import { DeckChrome, TONES, TOTAL } from "./_components/primitives";
 import {
   AskSlide,
@@ -98,7 +96,6 @@ export function PitchDeck() {
       data-pitch-deck
       className="h-svh overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#f5f0e8] md:snap-y md:snap-mandatory"
     >
-      <VercelTelemetry />
       <DeckChrome active={active} dark={dark} onJump={goTo} />
 
       <TitleSlide goTo={goTo} />

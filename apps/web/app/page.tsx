@@ -22,7 +22,6 @@ import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
-import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
@@ -129,7 +128,6 @@ export default async function HomePage() {
 
   return (
     <>
-      <VercelTelemetry />
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
