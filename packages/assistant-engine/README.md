@@ -46,20 +46,23 @@ Detached `assistant.notification.requested` system events are a different kind
 of input, not a scheduled-turn profile. Without a valid occurrence they use one
 isolated output-only formatter with no history, private context, resume
 mutation, tools, or network callbacks; the platform still owns delivery. The
-formatter uses the existing one-shot App Server path so its restrictive launch
-configuration cannot replace the resident ordinary-turn process or interrupt
-detached enrichment.
+formatter uses a fresh ephemeral thread on the resident App Server. Its
+thread-local deny configuration does not change the ordinary process launch
+identity or persist a resumable notification thread.
 
 The `creative-response` notification prompt profile is an isolated system
 continuation for verified social moments. Its prompt is built only from the
 engine-supplied task and bounded committed conversation history. Planning
 projects only `generate_song`, applies the output-only turn's native-capability
-deny set, retains the bound provider transport required by that
-application-owned tool, and keeps the ordinary response-media and outbox
-delivery owners. The prompt tells the model to call that tool exactly once for
-one short original sponsor song. A creative provider failure settles the
-optional notification instead of starting another song attempt; a committed
-delivery intent retains the ordinary outbox retry and deduplication behavior.
+deny set, and runs as a fresh ephemeral thread on the resident process. The
+application-owned song tool retains the bound provider transport plus the
+existing authority-free public transport required for a validated signed Linq
+upload; those transports are not native Codex browsing capabilities. The
+ordinary response-media and outbox owners remain unchanged. The prompt tells
+the model to call that tool exactly once for one short original sponsor song. A
+creative provider failure settles the optional notification instead of starting
+another song attempt; a committed delivery intent retains the ordinary outbox
+retry and deduplication behavior.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
