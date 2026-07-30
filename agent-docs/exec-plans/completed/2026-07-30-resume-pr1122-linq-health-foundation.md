@@ -1,6 +1,6 @@
 # Resume PR 1122 on the Linq health foundation
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -104,8 +104,18 @@ Updated: 2026-07-30
   - `pnpm --dir apps/web typecheck`
   - scoped ESLint over all changed Web source and tests
   - `git diff --check`
+  - post-review transport recheck: 62 tests, including verified-email
+    participant recovery
+- Audit disposition:
+  - the existing preliminary `completion-specialists` pass remains the one
+    required preliminary pass; no rerun was triggered by base integration
+  - parent final review found no unresolved actionable finding
+  - product-purpose revalidation: the smallest complete experience remains one
+    private, link-free instruction to add the pinned backup number to the
+    existing group and retry; typed provider-health integration adds no user
+    step, surface, or lifecycle owner
 - Pending:
-  - parent final review
   - exact-head required GitHub Actions
   - final ReviewGPT round 6
   - final mergeability proof against current `main`
+Completed: 2026-07-30

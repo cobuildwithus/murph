@@ -2291,6 +2291,54 @@ describe("hosted Linq webhook transport", () => {
     }
   });
 
+  it("revalidates a verified email participant before private recovery", async () => {
+    const participantEmail = "member@example.test";
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "email",
+        value: participantEmail,
+      },
+      sourceEventId: "event-group-line-recovery-email",
+      template: "group_line_recovery",
+      threadId: "chat-group-email",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      sideEffects: [effect],
+    })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+    expect(
+      transportBoundaryMocks.lookupHostedMemberByVerifiedEmailAddress,
+    ).toHaveBeenCalledWith({
+      address: participantEmail,
+      prisma,
+    });
+    expect(
+      transportBoundaryMocks.lookupHostedMemberIdentityByPhoneNumber,
+    ).not.toHaveBeenCalled();
+    expect(createHostedLinqChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: [participantEmail],
+      }),
+    );
+  });
+
   it("keeps one recovery instruction when failure is followed by retry and late delivery", async () => {
     const incomingPhone = "+15550100000";
     const backupPhone = "+15550100042";
