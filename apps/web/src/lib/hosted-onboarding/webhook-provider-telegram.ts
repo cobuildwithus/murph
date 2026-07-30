@@ -276,6 +276,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           await bindArmedHostedUsageReferralToNewContainerTx({
             occurredAt: new Date(summary.occurredAt),
             ownerMemberId: existingMember.id,
+            targetChannel: "telegram",
+            targetLinqService: null,
             targetContainerMemberId: ensured.containerMemberId,
             tx: input.prisma,
           });

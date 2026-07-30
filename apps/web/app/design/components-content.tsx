@@ -94,13 +94,18 @@ import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/conn
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
+import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import {
+  DESIGN_AI_USAGE_ACTIVITY,
+  DESIGN_AI_USAGE_DISABLED_HISTORY,
+  DESIGN_AI_USAGE_WAITING_ACTIVITY,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
+  DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
@@ -1139,6 +1144,50 @@ export function ComponentsContent() {
                 <HostedEmailMurphContactDialog
                   murphEmailAddress="murph@mail.withmurph.ai"
                   userEmailAddress={variant.userEmail}
+                />
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Hosted AI usage credits and missions">
+          <p className="text-sm text-muted-foreground">
+            Read-only Settings detail for one-time usage credits and explicit
+            referral missions. The production component keeps a single semantic
+            table tree for desktop and mobile layouts.
+          </p>
+          <div
+            aria-label="Read-only hosted AI usage activity previews"
+            className="flex max-w-3xl flex-col gap-8"
+            data-design-component="hosted-ai-usage-activity-states"
+            inert
+          >
+            {[
+              {
+                activity: DESIGN_AI_USAGE_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Active and completed missions",
+              },
+              {
+                activity: DESIGN_AI_USAGE_WAITING_ACTIVITY,
+                contactOption: DESIGN_USAGE_MISSION_CONTACT_OPTION,
+                label: "Mission selected, waiting for a new group",
+              },
+              {
+                activity: DESIGN_AI_USAGE_DISABLED_HISTORY,
+                contactOption: null,
+                label: "New missions disabled, existing history retained",
+              },
+            ].map((preview) => (
+              <div className="flex flex-col gap-3" key={preview.label}>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  {preview.label}
+                </p>
+                <HostedAiUsageActivity
+                  activity={preview.activity}
+                  missionContactOption={preview.contactOption}
                 />
               </div>
             ))}
