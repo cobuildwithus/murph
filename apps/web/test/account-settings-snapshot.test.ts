@@ -457,6 +457,7 @@ describe("hosted account settings snapshot", () => {
         configurationAvailable: true,
         dormantSolPreference: false,
         model: "gpt-5.6-terra",
+        provider: "openai",
         personality: {
           detail: 8,
           humor: 7,
@@ -640,6 +641,7 @@ function makeSettingsMemberRecord(
     assistantDetail: null,
     assistantHumor: null,
     assistantModelPreference: null,
+    assistantProviderPreference: null,
     assistantPush: null,
     assistantUnhinged: null,
     assistantReasoningEffortPreference: null,

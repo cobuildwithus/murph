@@ -14,8 +14,18 @@ import {
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
+import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "../hosted-onboarding/linq-observability-identifiers";
+import {
+  isHostedRuntimeLogDatabaseConfigured,
+} from "../hosted-runtime-log/database";
+import {
+  listHostedRuntimeTurnTimingLogs,
+  mergeHostedRuntimeTurnTimingLogs,
+} from "../hosted-runtime-log/store";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -651,65 +661,32 @@ export async function readHostedIngressLatencyDashboard(
   });
   const truncated = rows.length > HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT;
   const visibleRows = truncated ? rows.slice(0, HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT) : rows;
-  const runtimeAttemptIds = source === "linq"
-    ? [...new Set(visibleRows
-        .filter((row) =>
-          row.linqDeliveryId
+  const runtimeAttemptIds: string[] = source === "linq"
+    ? [...new Set<string>(visibleRows.flatMap((row): string[] =>
+        row.linqDeliveryId
           && row.linqDelivery
           && row.replyRuntimeAttemptId
           && row.providerStartAt
           && typeof row.providerRequestOrdinal === "number"
-        )
-        .map((row) => row.runtimeAttemptId)
-        .filter((id): id is string => Boolean(id)))]
+          && typeof row.runtimeAttemptId === "string"
+          ? [row.runtimeAttemptId]
+          : []
+      ))]
     : [];
-  const timingLogRows = runtimeAttemptIds.length === 0
-    ? []
-    : await prisma.hostedRuntimeLog.findMany({
-        orderBy: { at: "desc" },
-        select: {
-          attemptId: true,
-          redactedJson: true,
-        },
-        take: HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT + 1,
-        where: {
-          at: {
-            gte: new Date(
-              windowStart.getTime() - HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
-            ),
-            lte: new Date(
-              now.getTime() + HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
-            ),
-          },
-          attemptId: { in: runtimeAttemptIds },
-          eventCode: "assistant.automation_detail",
-          AND: [
-            {
-              redactedJson: {
-                equals: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
-                path: ["schema"],
-              },
-            },
-            {
-              redactedJson: {
-                equals: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
-                path: ["type"],
-              },
-            },
-            {
-              redactedJson: {
-                equals: "reply-dispatched",
-                path: ["turnTimingStage"],
-              },
-            },
-          ],
-        },
-      });
-  const timingLogTruncated =
-    timingLogRows.length > HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT;
+  const timingLogs = await readHostedIngressLatencyTimingLogs({
+    from: new Date(
+      windowStart.getTime() - HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+    ),
+    prisma,
+    runtimeAttemptIds,
+    to: new Date(
+      now.getTime() + HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+    ),
+  });
+  const timingLogTruncated = timingLogs.truncated;
   const turnTimingIndex = timingLogTruncated
     ? new Map<string, HostedTurnTimingIndexEntry[]>()
-    : buildHostedTurnTimingIndex(timingLogRows);
+    : buildHostedTurnTimingIndex(timingLogs.rows);
   const completedDurations: number[] = [];
   const acceptedToSignalDurations: number[] = [];
   const acceptedToStagedDurations: number[] = [];
@@ -1130,6 +1107,103 @@ export async function readHostedIngressLatencyDashboard(
       start: windowStart.toISOString(),
     },
   };
+}
+
+async function readHostedIngressLatencyTimingLogs(input: {
+  from: Date;
+  prisma: HostedIngressLatencyPrismaReadClient;
+  runtimeAttemptIds: readonly string[];
+  to: Date;
+}) {
+  if (input.runtimeAttemptIds.length === 0) {
+    return { rows: [], truncated: false };
+  }
+
+  const readLimit = HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT + 1;
+  const [legacyRows, dedicatedRead] = await Promise.all([
+    input.prisma.hostedRuntimeLog.findMany({
+      orderBy: [{ at: "desc" }, { id: "desc" }],
+      select: {
+        at: true,
+        attemptId: true,
+        id: true,
+        redactedJson: true,
+      },
+      take: readLimit,
+      where: {
+        at: {
+          gte: input.from,
+          lte: input.to,
+        },
+        attemptId: { in: [...input.runtimeAttemptIds] },
+        eventCode: "assistant.automation_detail",
+        AND: [
+          {
+            redactedJson: {
+              equals: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+              path: ["schema"],
+            },
+          },
+          {
+            redactedJson: {
+              equals: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+              path: ["type"],
+            },
+          },
+          {
+            redactedJson: {
+              equals: "reply-dispatched",
+              path: ["turnTimingStage"],
+            },
+          },
+        ],
+      },
+    }),
+    readDedicatedHostedRuntimeTimingLogsBestEffort({
+      attemptIds: input.runtimeAttemptIds,
+      from: input.from,
+      limit: readLimit,
+      to: input.to,
+    }),
+  ]);
+
+  const merged = mergeHostedRuntimeTurnTimingLogs([
+    dedicatedRead.rows,
+    legacyRows.map((row) => ({
+      at: row.at.toISOString(),
+      attemptId: row.attemptId,
+      id: row.id,
+      redactedJson: row.redactedJson,
+    })),
+  ], HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT);
+  return {
+    rows: merged.rows,
+    truncated: dedicatedRead.unavailable || merged.truncated,
+  };
+}
+
+async function readDedicatedHostedRuntimeTimingLogsBestEffort(input: {
+  attemptIds: readonly string[];
+  from: Date;
+  limit: number;
+  to: Date;
+}) {
+  try {
+    if (!isHostedRuntimeLogDatabaseConfigured()) {
+      return { rows: [], unavailable: false };
+    }
+    return {
+      rows: await listHostedRuntimeTurnTimingLogs(input),
+      unavailable: false,
+    };
+  } catch (error) {
+    console.warn("Hosted latency isolated timing-log read failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_RUNTIME_LATENCY_TIMING_LOG_READ_FAILED",
+      }),
+    });
+    return { rows: [], unavailable: true };
+  }
 }
 
 type HostedTurnTimingIndexEntry = {

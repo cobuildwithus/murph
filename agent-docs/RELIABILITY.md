@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-28
+Last verified: 2026-07-29
 
 ## Current Guardrails
 
@@ -8,6 +8,14 @@ Last verified: 2026-07-28
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Venice core inference is an all-or-none operator configuration: one Worker
+  secret plus fixed Luna/Terra/Sol mappings. Deploy preflight rejects partial
+  configuration, and Web keeps Venice hidden and projects OpenAI until the
+  Worker/runner deployment has been verified. Missing or invalid mappings,
+  unsupported paths/models, malformed JSON, and request bodies above 20 MiB
+  fail closed before provider egress. Rollback removes Web exposure first; it
+  does not add a queue, repair pass, provider fallback, or second preference
+  owner.
 - Explicit remote verification is fail-closed. The dispatcher never retries on
   another executor or runs local and remote copies together; an operator may
   retry the same head only after recording a concrete infrastructure failure.
@@ -39,6 +47,70 @@ Last verified: 2026-07-28
 
 ## Runtime Expectations
 
+- The production database-health operator alert is an independent Cloudflare
+  singleton so the monitored Postgres database cannot take down its own page
+  owner. A five-minute Cron Trigger records one normalized PlanetScale sample
+  or classified failure in Durable Object SQLite and prunes history after 30
+  days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
+  required-metric absence must recur on two consecutive runs before paging.
+  A newly opened incident or one-shot direct migration admission failure admits
+  its exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances any direct-error counter baseline.
+  If another immutable page already owns the single pending-message slot, the
+  same transaction advances the sample baseline and accumulates the later
+  direct-error count plus latest check time in the existing alert row instead
+  of dropping it. An acknowledged older page cannot close the incident while
+  that evidence remains. The next run with a free slot atomically promotes the
+  accumulated count into one direct-error page, which then follows the ordinary
+  attempt fence, health preflight, exact-body retry, and restart contract.
+  When a direct error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  direct-error evidence; co-occurring replayable gauges remain in the persisted
+  sample but cannot become stale pending claims. That exact direct-error page
+  owns the next eligible attempt. A replayable condition still unsafe at that
+  boundary remains eligible for the following paced recurrence. The same
+  one-slot ordering applies in reverse: a later direct-error obligation waits
+  behind an older page but cannot be consumed by the counter baseline. This
+  explicit prioritization keeps admitted bodies immutable without another
+  message queue or delivery lifecycle.
+  An acknowledged incident's replayable gauge or monitoring recurrence does
+  not admit stale evidence while the attempt fence is closed; once the fence
+  opens, a still-unsafe current sample admits the recurrence, while recovery
+  closes the incident without another page. An already pending page is
+  processed or deferred before a later clean sample can close the incident,
+  and only an acknowledged provider response clears it. Provider entry is
+  globally fenced by the persisted last-attempt
+  timestamp, so neither a new incident, recurrence, retry, nor worker restart
+  can attempt Linq more often than once every 30 minutes. The attempt time is
+  actual wall time, not the Cron slot, and is written before network egress.
+  The message's UTC check time likewise comes from the actual completed
+  collection run while the Cron slot remains only the persisted sample
+  identity. Every eligible cycle independently retrieves both configured
+  direct chats and current line reputation; unhealthy or indeterminate health
+  suppresses that destination's message POST without blocking the other
+  destination, and retains the pending alert for the next paced cycle. Healthy
+  destinations are compared before provider entry. Primary recipient identity
+  is required before any secondary POST: an unresolved primary identity
+  suppresses both positions, while an unresolved secondary identity does not
+  block a healthy primary. A known primary identity with unhealthy or
+  indeterminate delivery health still permits a healthy distinct secondary
+  POST; the suppressed primary keeps the page pending.
+  Distinct chat ids that resolve to the same external recipient admit only the
+  primary POST and keep the page pending; after configuration is corrected,
+  stable provider
+  idempotency deduplicates that primary replay while the actual secondary
+  receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
+  route separately for each chat. The primary retains the persisted Linq
+  idempotency key and the secondary uses a stable derived key. A
+  transport-ambiguous or rejected send keeps the exact persisted body and both
+  destination keys for the next eligible cycle; only acknowledged entry to both
+  distinct recipients clears the pending alert. An idempotent replay of a
+  destination that already succeeded cannot produce another recipient-visible
+  message. Acknowledged recurrences advance the alert
+  sequence and choose another fixed opening from current metric evidence.
+  Message variation must remain contextual and deterministic, never random
+  padding. Database pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
@@ -92,6 +164,22 @@ Last verified: 2026-07-28
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq participant add/remove context is a bounded optional sidecar on the
+  existing routed group, not another work owner. Provider-event deduplication
+  and optional staging run in one transaction under chat, owner, then route
+  lock order, so the next ordinary group message cannot overtake a unique
+  change after ledger insertion and projection cleanup cannot deadlock against
+  a labeled append. A unique addition atomically retains the existing anonymous
+  route bit; a removal has no send or wake fallback. Identity and
+  owner-address-book reads happen only on the
+  participant webhook path, never on ordinary message ingress. Optional lookup
+  failure falls back to handle-only context, optional staging failure preserves
+  the addition bit, and duplicate events never restage. Address-book
+  replacement/deletion takes the same owner lock and clears that owner's
+  pending optional group-event buffers, so revoked labels cannot surface later
+  and ordinary message ingress adds no query. Route-account lookup keys also
+  reject Murph's own line when `is_me` is absent. Append and consume retain the
+  existing 500 ms context-crypto bound.
 - Linq and Telegram group ingress must use the same canonical current runtime
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at
@@ -106,6 +194,12 @@ Last verified: 2026-07-28
   ownership; delayed observations remain subject to the shared seven-day lease
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
+- Current-chat naming is one on-demand provider read through
+  `murph.group action="read_chat_name"`. It uses the current durable route and
+  existing bounded Linq or Telegram request timeout and does not retry, cache,
+  reconcile, or add a state owner. Provider failure returns `unavailable`; an
+  absent title or Linq-synthesized handle label returns `none`. New-group setup
+  may continue unnamed after either outcome.
 - Group-origin Telegram recovery retains three outcomes in the existing
   delivery owner. Explicit Telegram rate limits persist a retry time;
   provider-confirmed permanent 4xx rejection persists a recognizable definitely
@@ -139,9 +233,11 @@ Last verified: 2026-07-28
   coalesce against the bounded four-minute send lease until the attempt settles
   or expires; only then may the persisted incident become healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
-- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- The post-onboarding choice point is installed as one ordinary managed one-shot after answered onboarding. Its original window begins 21 local-calendar days after completion and expires seven days later. Maintenance gives an eligible older member one future same-weekday occurrence instead of dropping all pre-existing completions or sending a late catch-up immediately; once installed, that occurrence remains anchored. Claim and queued delivery revalidate canonical answered-onboarding authority so a successfully read reopened, declined, manual, or replaced completion state cannot send. An unreadable or malformed authority document is availability failure, not revocation: the existing cron or outbox owner retains and retries the same occurrence or intent within its finite window. The restricted provider attempt uses a fresh ephemeral one-shot process with committed session history and preserves the ordinary provider resume state. A current-home Linq correction derives the conversation locator from the canonical route participant lookup key, including email-keyed routes, with member phone identity only as a legacy fallback. The occurrence otherwise uses the ordinary scheduled notification path and its existing retry, outbox, session, and tool owners. A model skip consumes the one-shot normally and never creates a nag loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
-- The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
+- The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions report the accepted newsletter parent to cron immediately and put it into the same canonical pending-delivery field used by ordinary queued notifications, even when the notification turn later fails; that failure remains on the run record instead of reopening composition. A restart before that cron write derives the parent from the durable occurrence-scoped outbox key before admitting the provider and reconnects the existing intent to the same pending-delivery field. Web marks the parent sent only after durable recipient fanout planning; the existing cron reconciler then settles the occurrence without another model turn, while recipient intents keep the generic outbox retry policy. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
+- Direct and authenticated group input share one active-turn lifecycle. Initial and live exact-successor input is capped at 50 messages cumulatively; the first completed assistant response closes new admission while preserving the existing provider-turn key only long enough for an already-started steer to settle, and a rejected steer plus overflow or later input remains durable and pending for the next ordinary turn. Every completed text or media segment is retained for delivery rather than replaced by a group-only latest response. Telegram speaker labels ride the already-durable wake, while Linq labels are an optional fail-soft read after ingress; only that display-name action receives a one-second soft deadline bounded by the configured control timeout, and lookup failure, timeout, or rollout skew must fall back unnamed without blocking or acknowledging conversation work.
 - Reviewed Assistant Ask delivery uses the ordinary outbox retry owner. Linq and Telegram revalidate the exact completion and disclosure authority inside their existing Web-owned provider-entry checks. If the authority expires or changes after queueing, the outbox first persists the fixed text-only fallback and retries that same intent; the reviewed answer never enters the provider. Route validity alone cannot admit a reviewed completion.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
@@ -152,12 +248,28 @@ Last verified: 2026-07-28
   member may begin another purchase only after the existing one is terminal.
 - Current-policy personal, Family, and group funding may create one unconfirmed
   saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
-  purchases retain this behavior for groups only; v1 remains Checkout-only.
+  purchases retain the legacy selection behavior for groups only, frozen v3
+  purchases retain it for all targets, and v1 remains Checkout-only. Current
+  policy binds personal and Family selection to the exact Murph billing
+  Subscription whose Customer matches the frozen purchase, using its attached
+  explicit default or its inherited attached Customer default. Missing, stale,
+  terminal, customer-mismatched, unattached, or legacy Source-only
+  exact-subscription state remains in Checkout, and unrelated Subscriptions
+  never participate. Group funding has no required billing Subscription and
+  may use the attached Customer default or the only attached method only when
+  no legacy Customer default Source exists; multiple non-default methods remain
+  in Checkout.
+  `allow_redisplay` affects Checkout presentation rather than direct
+  chargeability. Current-policy Checkout exposes Stripe's explicit save choice;
+  older policy requests remain byte-for-byte reconstructible.
   The producer must bind its encrypted exact reference under the payer lock
-  before confirmation. The
-  locked bind must re-read both payer suspension and purchase status; a
-  suspension, deletion, or terminal transition that wins first leaves the
-  intent unbound, canceled, and never confirmed. A succeeded or processing
+  before confirmation. For personal and Family v4 attempts, that locked bind
+  also re-reads the current persisted billing Customer, Subscription, canonical
+  billing status, suspension state, and last accepted Stripe-event time. A
+  billing change, suspension, deletion, or terminal transition that wins first
+  leaves the intent unbound, canceled, and never confirmed. Once bound, retries
+  remain tied to that exact intent rather than retargeting after a later billing
+  change. A succeeded or processing
   event for an unbound intent remains in the existing Stripe receipt retry lane
   instead of being acknowledged without a grant.
   Confirmation and cancellation use separate stable keys. An ambiguous
@@ -318,7 +430,7 @@ Last verified: 2026-07-28
   fence.
 - Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
 - Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
-- Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient replay must preserve that logical terminal state instead of resetting the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
+- Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient intents use that same terminal lifecycle and never reset the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
 - A canonical pending or retryable signup welcome is obsolete once durable auto-reply provenance proves a newer accepted reply for the same recipient route. Hosted collection must abandon that welcome before provider dispatch; a `sending` welcome remains under the normal delivery-confirmation contract rather than being hidden mid-flight.
 - Accepted canonical Linq signup welcomes require a completed delivery-outcome callback even when they answer no conversation mailbox item. Web records acceptance and materializes the provider's direct chat in one transaction under existing route ownership locks; callback failure is a may-have-succeeded delivery, and replay relies on the canonical provider idempotency key instead of issuing an ordinary duplicate send.
 - Assistant Ask uses `assistant.ask.requested` and
@@ -382,6 +494,8 @@ Last verified: 2026-07-28
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Assistant product-feedback capture accepts at most one in-memory candidate during a successful provider turn. The assistant execution context can only hand that candidate to its hosted invocation synchronously; the existing web-control write remains at the foreground delivery owner and starts only after a current-turn member-channel send succeeds. Failed provider attempts discard their candidate, invocations without a successful foreground send may abandon it, feedback never counts as a provider side effect for transport retry safety, and persistence remains best-effort with a two-second maximum deadline, no retry queue, and no user-visible delivery state. The accepted-input-derived idempotency key remains the ambiguity fence when a timed-out post-reply write may already have reached Web.
 - Exact-message targeting must preserve existing effect owners. Reply selection is side-effect free until normal delivery, while reactions keep the existing `message-reaction` operation and retry policy. The local service re-resolves the accepted input before either effect. For a reaction followed by `finish_without_reply`, the provider's already-recorded reaction patch—not a later mutable eligibility check—defers suppression evidence until the delivery outcome is known. A marked normal message persists `nativeReplyRequested: true` with its provider target, and both fields participate in outbox fingerprinting, equality, dedupe, and retry. Every `---` bubble from one response segment copies that same pair; unmarked automatic replies remain flat. Invalid or stale refs fail as recoverable tool results before any effect. A marked Linq send may not create a replacement direct chat, and a selected Linq voice-only response must fail before sending because the voice-memo endpoint cannot carry the reply target.
+- An authenticated non-direct group burst may cross sender and native reply-anchor changes only while exact positive causal succession, room/account/delivery/audience, projection readiness, reaction rules, and the 50-input bound still hold. It remains one provider turn and at most one normal reply, but every admitted input keeps separate sender/ref/text/attachment/reply-context prompt evidence plus separate journaling, checkpoint, answered-mailbox, and terminal evidence. Direct actor/anchor grouping is unchanged. When any Linq input carries an explicit anchor, resolve each explicit anchor independently and do not use the unanchored latest-reply fallback for that compound turn. Missing participant attribution blocks only an exact participant effect, never admission or the normal reply.
+- Linq speaker-label resolution is prompt-time, presentation-only work owned by the assistant-runtime reader. Its operation-local memo retains successful labels, explicit valid unnamed results, and fail-soft misses through later live admissions, so an already-seen handle never recontacts Web during the compound operation. One versioned private file at `.runtime/cache/assistant-runtime/group-participant-display-names.json` opportunistically reuses validated profile and owner-shared contact labels for 14 days across ordinary turns and fresh reader or process instances that share the same local workspace. A six-hour negative entry requires the additive `nameMissSenderHandles` evidence that Web successfully checked every applicable authorized profile/contact source for that exact requested handle and found no safe label; legacy responses and ordinary omissions remain operation-local. A granted but not-yet-materialized profile snapshot is unavailable rather than profileless, and only the exact first 16 phones admitted to the bounded owner-contact reader may receive contact evidence; overflow handles remain operation-local. Opaque SHA-256 keys bind the callback-bound runtime member, exact accepted-input route conversation key, channel, and normalized handle; hits do not slide expiry or insertion-order eviction. The file is atomically replaced, bounded to 2,048 entries and two MiB on read, and protected by `0700`/`0600` permissions. New or expired handles still form one bounded Web batch. Missing, corrupt, oversized, or unreadable files are ordinary misses. Failures, timeout, late completion, pending snapshots, parser skew, authorization loss, suspension, consent loss, disabled projections, ambiguity, KMS/storage failure, and malformed responses remain operation-local and are never written, so the label always falls back unnamed without blocking, retrying, or acknowledging accepted conversation work. The cache has no timer, resident mirror, single-flight, mutation invalidation, lock owner, or distributed coordination. Because `.runtime/cache/**` is excluded from hosted workspace checkpoints, a cold restore, replacement, or workspace loss re-reads Web; the existing `read_participant_display_names` one-second soft deadline remains unchanged.
 - Clinical Records retrieval is generation-fenced and page-idempotent. A
   server-derived run/page fingerprint deduplicates caller request ids without
   persisting them or page URLs; claim-version compare and swap prevents a

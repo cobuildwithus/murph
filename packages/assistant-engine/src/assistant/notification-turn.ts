@@ -92,6 +92,9 @@ import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
 } from './shared.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+} from './onboarding-goal-checkin-automation.js'
 
 const assistantNotificationSkipDecisionSchema = z
   .object({
@@ -138,6 +141,14 @@ const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
+const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'provider-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -176,6 +187,7 @@ export interface AssistantNotificationCommitContext {
 }
 
 export interface AssistantNotificationPostTurnDeliveryExpectations {
+  newsletterPendingDeliveryIntentId?: string | null
   newsletterSendResult?: Extract<
     HostedRuntimeNewsletterToolResponse,
     { action: 'send' }
@@ -226,6 +238,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  onNewsletterPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
@@ -277,6 +290,7 @@ export async function sendAssistantNotificationLocal(
               unavailableReason: 'newsletter_send_not_observed',
             }
           : null
+      let newsletterPendingDeliveryIntentId: string | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -302,6 +316,9 @@ export async function sendAssistantNotificationLocal(
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
+                ...(newsletterPendingDeliveryIntentId
+                  ? { newsletterPendingDeliveryIntentId }
+                  : {}),
                 newsletterSendResult,
               },
             }
@@ -383,6 +400,10 @@ export async function sendAssistantNotificationLocal(
                 current: newsletterSendResult ?? null,
                 next: result.result,
               })
+            },
+            recordNewsletterPendingDeliveryIntentId: (intentId) => {
+              newsletterPendingDeliveryIntentId = intentId
+              input.onNewsletterPendingDeliveryIntentId?.(intentId)
             },
             route,
             session: resolved.session,
@@ -1422,6 +1443,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
 }): AssistantProviderResumeStateAction {
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
+    isAssistantOnboardingGoalCheckinNotification(input.input) ||
     !isAssistantNotificationScheduledOccurrence(input.input)
   ) {
     return 'preserve-existing'
@@ -1507,9 +1529,19 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
+  if (isAssistantOnboardingGoalCheckinNotification(input)) {
+    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+  }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
+}
+
+function isAssistantOnboardingGoalCheckinNotification(
+  input: Pick<AssistantNotificationInput, 'scheduledInvocationAuthority'>,
+): boolean {
+  return input.scheduledInvocationAuthority?.automationId ===
+    MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run

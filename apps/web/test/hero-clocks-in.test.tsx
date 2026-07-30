@@ -59,34 +59,39 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("HeroClocksIn renders the reduced-motion group seed", async () => {
+test("HeroClocksIn renders the solo exchange without animation for reduced motion", async () => {
   const view = await renderHero({ messengerChannel: "imessage" });
 
   const text = view.container.textContent ?? "";
   assert.equal(view.container.querySelectorAll("h1").length, 1);
-  assert.match(text, /walk challenge starts tomorrow\. loser buys steak dinner/);
-  assert.match(text, /Baselines are set from everyone's wearables/);
-  assert.match(text, /Saturday 9:02 AM/);
-  assert.match(text, /no shot you guys are keeping up with me this week/);
-  assert.match(text, /Walk challenge · Day 5 of 7/);
-  assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
-  assert.ok(view.container.querySelector('audio[src="/audio/challenge-roast.mp3"]'));
-  assert.match(text, /Sunday 8:02 AM/);
-  assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(text, /Your crew: week 3 in health/);
-  assert.match(text, /4 People/);
-  assert.match(text, /referees the week/);
-  assert.equal(
-    view.container.querySelector(
-      'button[aria-label="Start a group chat with Theo"]',
-    ),
-    null,
+  assert.match(text, /Did the magnesium actually do anything\?/);
+  assert.match(text, /Day 14 · Magnesium/);
+  assert.match(
+    text,
+    /Two weeks in, deep sleep up 18% and HRV up 12% vs your baseline/,
   );
+  assert.doesNotMatch(text, /HRV up 12 ms/);
+  assert.match(text, /referees the week/);
+  assert.doesNotMatch(text, /walk challenge starts tomorrow/);
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  const topic = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(composer);
+  assert.ok(topic);
+  const controls = [...view.container.querySelectorAll("input, button")];
+  assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
 
   await view.cleanup();
 });
 
-test("the animated demo opens straight into the group challenge", async () => {
+test("automatic demo switches to the group after one private Murph exchange", async () => {
   vi.useFakeTimers();
 
   const view = await renderHero({
@@ -95,10 +100,522 @@ test("the animated demo opens straight into the group challenge", async () => {
     flushInitialTimers: false,
   });
 
-  // The group gets composed first: the new-message sheet goes up with only
-  // Murph on the To: line, before any friend has flown in.
+  const copyLayerFor = (needle: string) =>
+    [...view.container.querySelectorAll(".hero-copy-layer")].find((element) =>
+      element.textContent?.includes(needle),
+    );
+  const soloCopyLayer = copyLayerFor("Wearables, bloodwork");
+  const groupCopyLayer = copyLayerFor("Start a health challenge");
+  assert.ok(soloCopyLayer);
+  assert.ok(groupCopyLayer);
+  assert.equal(soloCopyLayer.getAttribute("aria-hidden"), "false");
+  assert.equal(groupCopyLayer.getAttribute("aria-hidden"), "true");
+
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_400);
+    await vi.advanceTimersByTimeAsync(5_500);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Did the magnesium actually do anything\?/);
+  assert.match(privateThread, /Two weeks in, deep sleep up 18%/);
+  assert.doesNotMatch(privateThread, /DEXA|BodySpec/);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_700);
+  });
+
+  const groupThread = view.container.textContent ?? "";
+  assert.match(groupThread, /4 People/);
+  assert.match(groupThread, /referees the week/);
+  assert.doesNotMatch(groupThread, /DEXA|BodySpec/);
+  assert.doesNotMatch(groupThread, /Did the magnesium actually do anything\?/);
+  assert.equal(soloCopyLayer.getAttribute("aria-hidden"), "true");
+  assert.equal(groupCopyLayer.getAttribute("aria-hidden"), "false");
+
+  await view.cleanup();
+});
+
+test("topic controls wait for Murph to finish the current reply", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_500);
+  });
+
+  assert.equal(stepsButton.disabled, true);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(1_900);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /Did the magnesium actually do anything\?/);
+  assert.match(thread, /Two weeks in, deep sleep up 18%/);
+  assert.doesNotMatch(thread, /How are my steps this week\?/);
+  assert.equal(stepsButton.disabled, false);
+
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /How are my steps this week\?/);
+  assert.match(thread, /Average 8\.4k a day, up 600 from last week/);
+
+  await view.cleanup();
+});
+
+test("a private composer draft cancels the automatic group handoff", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_500);
+  });
+
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(composer);
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(
+      view.window,
+      composer,
+      "Can you check my private sleep trend?",
+    );
+    dispatchInputValueChange(view.window, composer);
+  });
+  assert.equal(composer.value, "Can you check my private sleep trend?");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(8_000);
+  });
+
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /walk challenge starts tomorrow/,
+  );
+  assert.equal(composer.value, "Can you check my private sleep trend?");
+
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Can you check my private sleep trend\?/);
+  assert.doesNotMatch(privateThread, /walk challenge starts tomorrow/);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+
+  await view.cleanup();
+});
+
+test("the private composer preempts an automatic reply with visible progress", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_500);
+  });
+
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(composer);
+  assert.equal(composer.disabled, false);
+
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(view.window, composer, "Show my latest recovery.");
+    dispatchInputValueChange(view.window, composer);
+  });
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+  });
+
+  assert.match(view.container.textContent ?? "", /Murph is replying/);
+  assert.equal(composer.disabled, true);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  const privateThread = view.container.textContent ?? "";
+  assert.match(privateThread, /Show my latest recovery\./);
+  assert.match(privateThread, /shoot me a message and we can get started/);
+  assert.doesNotMatch(privateThread, /walk challenge starts tomorrow/);
+  assert.equal(composer.disabled, false);
+
+  await view.cleanup();
+});
+
+test("topic activation exposes progress and results in the conversation log", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  const conversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Private conversation with Murph"]',
+  );
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  assert.ok(stepsButton);
+  assert.ok(conversation);
+  assert.ok(composer);
+
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  assert.equal(conversation.getAttribute("tabindex"), "-1");
+  assert.equal(conversation.getAttribute("role"), "log");
+  assert.equal(conversation.getAttribute("aria-live"), "polite");
+  assert.equal(conversation.getAttribute("aria-busy"), "true");
+  assert.equal(composer.disabled, true);
+  assert.match(view.container.textContent ?? "", /Murph is replying/);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  assert.equal(conversation.getAttribute("aria-busy"), "false");
+  assert.match(
+    conversation.textContent ?? "",
+    /How are my steps this week\?.*Average 8\.4k a day/s,
+  );
+  assert.equal(composer.disabled, false);
+
+  await view.cleanup();
+});
+
+test("the Sleep quality journey uses deep sleep from question through answer", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const sleepButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sleep quality"]',
+  );
+  assert.ok(sleepButton);
+  await act(async () => {
+    sleepButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  const thread = view.container.textContent ?? "";
+  assert.match(thread, /Why am I sleeping so badly this week\?/);
+  assert.match(thread, /18 night deep sleep window/);
+  assert.match(thread, /1h 34m.*1h 11m.*-24%/s);
+  assert.match(
+    thread,
+    /less deep sleep after afternoon espresso: 1h 11m vs 1h 34m, down 24%/,
+  );
+  assert.doesNotMatch(thread, /\bHRV\b|58.*ms.*44.*ms/s);
+
+  await view.cleanup();
+});
+
+test("topic controls render order and bloodwork artifacts in the private thread", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const boneDensityButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Bone density"]',
+  );
+  assert.ok(boneDensityButton);
+  await act(async () => {
+    boneDensityButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /Book me a DEXA scan nearby\./);
+  assert.match(thread, /Appointment booked · today/);
+  assert.match(thread, /BodySpec DEXA scan/);
+  assert.match(thread, /Added to your calendar/);
+  assert.match(thread, /Booked BodySpec on Mission for Thursday at 2pm/);
+
+  const ldlButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about LDL cholesterol"]',
+  );
+  assert.ok(ldlButton);
+  await act(async () => {
+    ldlButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /Did my LDL get worse\?/);
+  assert.match(thread, /Latest panel · vs March/);
+  assert.match(thread, /2 flagged/);
+  assert.match(thread, /108.*122.*mg\/dL/s);
+  assert.match(thread, /LDL up 14 since March/);
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(groupHeader);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+
+  await view.cleanup();
+});
+
+test("topic controls wait for Murph to finish the group kickoff reply", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
+  const saunaButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sauna"]',
+  );
+  assert.ok(theoButton);
+  assert.ok(saunaButton);
+
+  await act(async () => {
+    theoButton.click();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(7_000);
+  });
+
+  assert.equal(saunaButton.disabled, true);
+  await act(async () => {
+    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(1_200);
+  });
+
+  let thread = view.container.textContent ?? "";
+  assert.match(thread, /walk challenge starts tomorrow/);
+  assert.match(thread, /Baselines are set from everyone's wearables/);
+  assert.doesNotMatch(thread, /Did the sauna actually help my HRV\?/);
+  assert.equal(saunaButton.disabled, false);
+
+  await act(async () => {
+    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  thread = view.container.textContent ?? "";
+  assert.match(thread, /Did the sauna actually help my HRV\?/);
+  assert.doesNotMatch(thread, /walk challenge starts tomorrow/);
+
+  await view.cleanup();
+});
+
+test("an explicit member selection immediately owns the group audience", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
+  assert.ok(theoButton);
+  await act(async () => {
+    theoButton.click();
+  });
+
+  const groupConversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Group conversation with Murph"]',
+  );
+  const groupComposer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
+  assert.ok(groupConversation);
+  assert.ok(groupComposer);
+  assert.ok(groupHeader);
+  assert.ok(audienceStatus);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+  assert.equal(groupConversation.getAttribute("role"), "log");
+  assert.equal(view.window.document.activeElement, groupConversation);
+  assert.equal(audienceStatus.textContent, "Group conversation selected.");
+  assert.doesNotMatch(
+    groupConversation.textContent ?? "",
+    /How are my steps this week\?|Average 8\.4k a day/,
+  );
+
+  await act(async () => {
+    groupComposer.focus();
+    groupComposer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+    setNativeInputValue(view.window, groupComposer, "Keep this with the group.");
+    dispatchInputValueChange(view.window, groupComposer);
+  });
+  const send = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Send"]',
+  );
+  assert.ok(send);
+  await act(async () => {
+    submitComposer(view.window, send);
+    await vi.advanceTimersByTimeAsync(1_600);
+  });
+
+  assert.match(
+    groupConversation.textContent ?? "",
+    /Keep this with the group\./,
+  );
+  assert.doesNotMatch(
+    groupConversation.textContent ?? "",
+    /How are my steps this week\?/,
+  );
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+
+  await view.cleanup();
+});
+
+test("composer focus restores and announces the private audience from the automatic group", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(9_000);
+  });
+  const groupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  const composer = view.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Message Murph"]',
+  );
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
+  assert.ok(groupHeader);
+  assert.ok(composer);
+  assert.ok(audienceStatus);
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "false");
+
+  await act(async () => {
+    composer.focus();
+    composer.dispatchEvent(
+      new view.window.Event("focusin", { bubbles: true }),
+    );
+  });
+
+  assert.equal(groupHeader.getAttribute("aria-hidden"), "true");
+  assert.equal(audienceStatus.textContent, "Private conversation selected.");
+  assert.match(
+    view.container.textContent ?? "",
+    /Did the magnesium actually do anything\?.*Two weeks in, deep sleep up 18%/s,
+  );
+
+  await view.cleanup();
+});
+
+test("group start clears the private 1:1 thread and topic clicks return to a fresh private thread", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  // Play a private exchange first so the thread holds personal health talk.
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+  assert.match(view.container.textContent ?? "", /How are my steps this week\?/);
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
+  assert.ok(theoButton);
+
+  await act(async () => {
+    theoButton.click();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(950);
   });
 
   assert.match(view.container.textContent ?? "", /New Message/);
@@ -107,7 +624,9 @@ test("the animated demo opens straight into the group challenge", async () => {
     view.container.querySelectorAll("[data-hero-recipient-chip]").length,
     1,
   );
-  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Murph"]'));
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Murph"]'),
+  );
 
   // The sheet is a decorative stage prop: hidden from assistive tech, with
   // no operable controls inside.
@@ -116,10 +635,35 @@ test("the animated demo opens straight into the group challenge", async () => {
   assert.equal(sheet.getAttribute("aria-hidden"), "true");
   assert.equal(sheet.querySelectorAll("button").length, 0);
 
-  // Mid-burst all three member flights animate concurrently.
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(2_700);
+    await vi.advanceTimersByTimeAsync(750);
   });
+
+  // The group is a fresh conversation: the private exchange must be gone.
+  const groupConversation = view.container.querySelector<HTMLDivElement>(
+    '[aria-label="Group conversation with Murph"]',
+  );
+  assert.ok(groupConversation);
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /How are my steps this week\?/,
+  );
+  assert.match(view.container.textContent ?? "", /4 People/);
+  assert.match(view.container.textContent ?? "", /referees the week/);
+
+  // While the sheet covers the thread, every floater is inert so no topic
+  // exchange can pollute the fresh conversation before the reveal.
+  const saunaButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sauna"]',
+  );
+  assert.ok(saunaButton);
+  assert.equal(saunaButton.disabled, true);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_900);
+  });
+
+  // Mid-burst all three member flights animate concurrently.
   assert.equal(
     view.container.querySelectorAll(".hero-floater--active").length,
     3,
@@ -129,63 +673,56 @@ test("the animated demo opens straight into the group challenge", async () => {
     await vi.advanceTimersByTimeAsync(1_500);
   });
 
-  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Theo"]'));
-  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Maya"]'));
-  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Sam"]'));
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Theo"]'),
+  );
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Maya"]'),
+  );
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Sam"]'),
+  );
 
-  // Sheet drops away and the challenge kicks off in the group thread.
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(4_500);
+    await vi.advanceTimersByTimeAsync(1_300);
   });
 
+  // Sheet revealed: wait for Murph to finish the visible kickoff answer before
+  // allowing another topic to replace the group.
   assert.equal(view.container.querySelector(".hero-compose-sheet"), null);
-  const groupThread = view.container.textContent ?? "";
-  assert.match(groupThread, /4 People/);
-  assert.match(groupThread, /referees the week/);
-  assert.match(
-    groupThread,
-    /walk challenge starts tomorrow\. loser buys steak dinner/,
-  );
-  assert.match(groupThread, /Baselines are set from everyone's wearables/);
-
+  assert.equal(saunaButton.disabled, true);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(11_000);
+    await vi.advanceTimersByTimeAsync(1_700);
+  });
+  assert.match(
+    view.container.textContent ?? "",
+    /Baselines are set from everyone's wearables/,
+  );
+  assert.equal(saunaButton.disabled, false);
+
+  // Topic floaters remain useful, but a health topic leaves the group rather
+  // than sharing private readings into that conversation.
+  await act(async () => {
+    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
   });
 
-  assert.match(view.container.textContent ?? "", /Walk challenge · Day 5 of 7/);
-
-  await view.cleanup();
-});
-
-test("floating topic labels are decorative, not solo-Murph prompts", async () => {
-  vi.useFakeTimers();
-
-  const view = await renderHero({
-    messengerChannel: "imessage",
-    reducedMotion: false,
-    flushInitialTimers: false,
-  });
-
-  // The words still float as atmosphere...
-  const floaters = view.container.querySelectorAll(".hero-floater");
-  assert.ok(floaters.length > 0);
-  const text = view.container.textContent ?? "";
-  assert.match(text, /Magnesium/);
-  assert.match(text, /LDL cholesterol/);
-
-  // ...but nothing in the layer is operable, so no click can start a private
-  // 1:1 exchange or a second group.
-  assert.equal(view.container.querySelectorAll(".hero-floater button").length, 0);
-  assert.equal(
-    view.container.querySelector('button[aria-label="Ask Murph about Steps"]'),
-    null,
+  const privateThread = view.container.textContent ?? "";
+  const audienceStatus =
+    view.container.querySelector<HTMLElement>('[role="status"]');
+  assert.ok(audienceStatus);
+  assert.match(privateThread, /Did the sauna actually help my HRV\?/);
+  assert.match(
+    privateThread,
+    /Sauna nights show \+9 ms HRV vs non-sauna nights/,
   );
-  assert.equal(
-    view.container.querySelector(
-      'button[aria-label="Start a group chat with Theo"]',
-    ),
-    null,
-  );
+  assert.equal(audienceStatus.textContent, "Private conversation selected.");
+  assert.doesNotMatch(privateThread, /Walk challenge · Day 5 of 7/);
+  assert.doesNotMatch(privateThread, /Standings, day 5 of 7/);
+  const activeGroupHeader = [...view.container.querySelectorAll(".hero-header-layer")]
+    .find((element) => element.textContent?.includes("4 People"));
+  assert.ok(activeGroupHeader);
+  assert.equal(activeGroupHeader.getAttribute("aria-hidden"), "true");
 
   await view.cleanup();
 });
@@ -272,8 +809,74 @@ function installGlobals(
     configurable: true,
     value() {},
   });
+  const originalFocusDescriptor = Object.getOwnPropertyDescriptor(
+    window.HTMLElement.prototype,
+    "focus",
+  );
+  const originalActiveElementDescriptor = Object.getOwnPropertyDescriptor(
+    document,
+    "activeElement",
+  );
+  // LinkeDOM can deadlock React's act queue when a focused control is disabled
+  // during the same commit that moves focus. Keep the observable focus contract
+  // while avoiding that DOM-emulator behavior.
+  Object.defineProperty(document, "activeElement", {
+    configurable: true,
+    value: document.body,
+  });
+  Object.defineProperty(window.HTMLElement.prototype, "focus", {
+    configurable: true,
+    value(this: HTMLElement) {
+      Object.defineProperty(document, "activeElement", {
+        configurable: true,
+        value: this,
+      });
+    },
+  });
+  // React's legacy input-event fallback probes these IE hooks when LinkeDOM
+  // does not advertise native input-event support.
+  Object.defineProperty(window.HTMLElement.prototype, "attachEvent", {
+    configurable: true,
+    value(
+      this: HTMLElement,
+      eventName: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      this.addEventListener(eventName.replace(/^on/u, ""), listener);
+    },
+  });
+  Object.defineProperty(window.HTMLElement.prototype, "detachEvent", {
+    configurable: true,
+    value(
+      this: HTMLElement,
+      eventName: string,
+      listener: EventListenerOrEventListenerObject,
+    ) {
+      this.removeEventListener(eventName.replace(/^on/u, ""), listener);
+    },
+  });
 
   const restoreEntries = [
+    () => {
+      if (originalFocusDescriptor) {
+        Object.defineProperty(
+          window.HTMLElement.prototype,
+          "focus",
+          originalFocusDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(window.HTMLElement.prototype, "focus");
+      }
+      if (originalActiveElementDescriptor) {
+        Object.defineProperty(
+          document,
+          "activeElement",
+          originalActiveElementDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(document, "activeElement");
+      }
+    },
     setGlobal("window", window),
     setGlobal("self", window),
     setGlobal("document", document),
@@ -297,6 +900,42 @@ function installGlobals(
       restore();
     }
   };
+}
+
+function setNativeInputValue(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+  value: string,
+) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  assert.ok(setter);
+  setter.call(input, value);
+}
+
+function dispatchInputValueChange(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+) {
+  const event = new window.Event("propertychange", { bubbles: true });
+  Object.defineProperty(event, "propertyName", {
+    configurable: true,
+    value: "value",
+  });
+  input.dispatchEvent(event);
+}
+
+function submitComposer(
+  window: Window & typeof globalThis,
+  send: HTMLButtonElement,
+) {
+  const form = send.closest("form");
+  assert.ok(form);
+  form.dispatchEvent(
+    new window.Event("submit", { bubbles: true, cancelable: true }),
+  );
 }
 
 function setGlobal(key: string, value: unknown) {

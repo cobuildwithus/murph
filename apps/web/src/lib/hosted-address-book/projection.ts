@@ -10,7 +10,10 @@ import {
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
 } from "../hosted-crypto/secure-box";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
@@ -326,6 +329,10 @@ export async function replaceHostedAddressBookProjection(input: {
           })),
         });
       }
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -384,6 +391,10 @@ export async function deleteHostedAddressBookProjection(input: {
         },
         where: { memberId: input.memberId },
       });
+      await clearHostedOwnerPendingGroupEventContextTx({
+        memberId: input.memberId,
+        tx,
+      });
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
@@ -391,6 +402,22 @@ export async function deleteHostedAddressBookProjection(input: {
       source,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function clearHostedOwnerPendingGroupEventContextTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedThreadRoute.updateMany({
+    data: {
+      pendingGroupReactionContextEncrypted: null,
+    },
+    where: {
+      container: {
+        ownerMemberId: input.memberId,
+      },
+    },
+  });
 }
 
 export async function readHostedOwnerAddressBookAdvisoryNames(input: {
@@ -453,8 +480,14 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
       memberId: container.ownerMemberId,
       prisma: input.prisma,
     });
-  } catch {
-    return finish("consent_unavailable");
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_CONSENT_REQUIRED"
+    ) {
+      return finish("consent_unavailable");
+    }
+    throw error;
   }
 
   const projection = await input.prisma.hostedAddressBookProjection.findUnique({

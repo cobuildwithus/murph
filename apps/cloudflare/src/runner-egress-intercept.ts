@@ -92,6 +92,12 @@ import {
   readHostedXaiResponseMetadata,
 } from "./runner-egress-xai.ts";
 import {
+  DEFAULT_VENICE_API_BASE_URL,
+  HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
+  buildHostedVeniceResponsesRequestBody,
+  isAllowedHostedVeniceRequest,
+} from "./runner-egress-venice.ts";
+import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
 
@@ -150,6 +156,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
   transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
+  venice: "api.venice.ai",
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
   xai: "api.x.ai",
@@ -402,6 +409,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe]: handleHostedRunnerOpenInternetOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.venice]: handleHostedRunnerVeniceOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai]: handleHostedRunnerXaiOutbound,
@@ -428,6 +436,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleVeniceRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
@@ -579,6 +588,23 @@ export async function handleHostedRunnerOpenAiOutbound(
       env,
       request,
       upstreamFetchImpl,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerVeniceOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleVeniceRequest({
+      ctx,
+      env,
+      request,
       url,
       userId: readHostedRunnerBoundUserId(request),
     }),
@@ -1284,6 +1310,89 @@ async function maybeHandleOpenAiRequest(input: {
     startedAt,
     upstreamRequest,
     upstreamFetchImpl: input.upstreamFetchImpl,
+    url: input.url,
+  });
+}
+
+async function maybeHandleVeniceRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const providerBase = readProviderBaseConfig(
+    undefined,
+    DEFAULT_VENICE_API_BASE_URL,
+    input.env,
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    return isKnownProviderHost(input.url, providerBase)
+      ? disallowedProviderEgress()
+      : null;
+  }
+  if (!isAllowedHostedVeniceRequest(input.request.method, pathMatch.pathnameSuffix)) {
+    return disallowedProviderEgress();
+  }
+
+  const credential = readBearerCredential(input.request.headers);
+  if (!credential) {
+    return disallowedProviderEgress();
+  }
+  const startedAt = Date.now();
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential,
+    env: input.env,
+    providerKind: "venice",
+    request: input.request,
+  });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "venice",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const body = await readBoundedRequestBody(
+    input.request,
+    HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
+  );
+  if (body === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  const upstreamBody = buildHostedVeniceResponsesRequestBody({
+    body,
+    env: input.env,
+  });
+  if (upstreamBody === null) {
+    return disallowedProviderEgress();
+  }
+
+  const token = readRequiredInterceptSecret(input.env.VENICE_API_KEY, "VENICE_API_KEY");
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  headers.set("authorization", `Bearer ${token}`);
+  headers.set("content-type", "application/json");
+
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "venice",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+      { body: upstreamBody },
+    ),
     url: input.url,
   });
 }

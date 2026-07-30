@@ -735,7 +735,7 @@ test.sequential(
 )
 
 test.sequential(
-  'bedtime transition protocol starts with a capturable bedtime-delay outcome',
+  'draft bedtime transition protocol cannot start through the CLI',
   async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), 'murph-cli-bedtime-transition-start-'),
@@ -743,7 +743,7 @@ test.sequential(
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])
-      const created = await runSliceCli<{ experimentId: string; slug: string }>([
+      const rejected = await runSliceCli([
         'experiment',
         'start',
         'bedtime-transition-run',
@@ -757,116 +757,24 @@ test.sequential(
         vaultRoot,
       ])
 
-      assert.equal(created.ok, true, created.ok ? undefined : created.error.message)
-      assert.equal(requireData(created).slug, 'bedtime-transition-run')
-
-      const shown = await runSliceCli<{
-        entity: {
-          data: {
-            analysisPlan?: {
-              primaryBiomarkerKey?: string
-              secondaryBiomarkerKeys?: string[]
-            }
-            runPlan?: {
-              logging?: {
-                confounderFields?: string[]
-                sessionFields?: string[]
-              }
-            }
-          }
-        }
-      }>(['experiment', 'show', 'bedtime-transition-run', '--vault', vaultRoot])
-
-      assert.equal(
-        requireData(shown).entity.data.analysisPlan?.primaryBiomarkerKey,
-        'biomarker:bedtime-delay',
-      )
-      assert.deepEqual(
-        requireData(shown).entity.data.analysisPlan?.secondaryBiomarkerKeys,
-        [
-          'biomarker:sleep-onset-latency',
-          'biomarker:daytime-sleepiness',
-        ],
-      )
-      assert.deepEqual(
-        requireData(shown).entity.data.runPlan?.logging?.sessionFields,
-        [
-          'bedtime_delay_minutes',
-          'sleep_opportunity_minutes',
-          'estimated_sleep_onset_latency_minutes',
-          'daytime_sleepiness',
-          'adverse_effects',
-        ],
-      )
-      assert.equal(
-        requireData(shown).entity.data.runPlan?.logging?.confounderFields,
-        undefined,
-      )
-
-      const diaryValues = [60, 45, 30, 20, 10, 0] as const
-      const diaryDates = [
-        '2026-05-29',
-        '2026-05-30',
-        '2026-05-31',
-        '2026-06-01',
-        '2026-06-02',
-        '2026-06-03',
-      ] as const
-      for (const [index, value] of diaryValues.entries()) {
-        const date = diaryDates[index]
-        assert.ok(date)
-        const logged = await runSliceCli<unknown>([
-          'experiment',
-          'session',
-          'log',
-          'bedtime-transition-run',
-          '--date',
-          date,
-          '--occurred-at',
-          `${date}T08:00:00.000Z`,
-          '--field',
-          `bedtime_delay_minutes=${value}`,
-          '--field',
-          'sleep_opportunity_minutes=480',
-          '--field',
-          'estimated_sleep_onset_latency_minutes=20',
-          '--field',
-          'daytime_sleepiness=3',
-          '--field',
-          'adverse_effects=0',
-          '--vault',
-          vaultRoot,
-        ])
-        assert.equal(logged.ok, true, logged.ok ? undefined : logged.error.message)
+      assert.equal(rejected.ok, false)
+      if (rejected.ok) {
+        throw new Error('Draft bedtime transition protocol must not start.')
       }
+      assert.equal(rejected.error.code, 'not_found')
+      assert.match(
+        rejected.error.message ?? '',
+        /No Health Commons protocol variant matched/u,
+      )
 
-      const outcome = await runSliceCli<{
-        outcome: {
-          experiment: { status: string }
-          metricResults: Array<{
-            baselineMean: number | null
-            biomarkerKey: string
-            interventionMean: number | null
-          }>
-        }
-      }>([
+      const shown = await runSliceCli([
         'experiment',
-        'outcome',
-        'write',
-        requireData(created).experimentId,
-        '--as-of',
-        '2026-06-14',
+        'show',
+        'bedtime-transition-run',
         '--vault',
         vaultRoot,
       ])
-      assert.equal(outcome.ok, true, outcome.ok ? undefined : outcome.error.message)
-      assert.equal(
-        requireData(outcome).outcome.metricResults[0]?.biomarkerKey,
-        'biomarker:bedtime-delay',
-      )
-      assert.equal(requireData(outcome).outcome.metricResults[0]?.baselineMean, 45)
-      assert.equal(requireData(outcome).outcome.metricResults[0]?.interventionMean, 10)
-      assert.equal(requireData(outcome).outcome.experiment.status, 'completed')
+      assert.equal(shown.ok, false)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

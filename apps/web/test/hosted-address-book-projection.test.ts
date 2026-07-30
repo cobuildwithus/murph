@@ -21,6 +21,7 @@ vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
 
 import {
   deleteHostedAddressBookProjection,
+  HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
   HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
   HOSTED_ADDRESS_BOOK_REPLACEMENT_BODY_MAX_BYTES,
   parseHostedAddressBookDeleteRequest,
@@ -31,6 +32,7 @@ import {
   replaceHostedAddressBookProjection,
 } from "@/src/lib/hosted-address-book/projection";
 import type { HostedGcpKmsClient } from "@/src/lib/hosted-crypto/gcp-kms";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const KEY_VERSION_NAME =
   "projects/example/locations/global/keyRings/address-book/cryptoKeys/phone-token/cryptoKeyVersions/1";
@@ -277,6 +279,7 @@ describe("hosted address-book projection lifecycle", () => {
     expect(new Set(store.contacts.map((row) => row.phoneToken)).size).toBe(
       HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
     );
+    expect(store.pendingGroupEventContextClearCount).toBe(1);
     expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
   });
 
@@ -371,6 +374,54 @@ describe("hosted address-book projection lifecycle", () => {
     });
   });
 
+  it("uses one bounded DB and KMS batch at advisory lookup cardinality", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    store.projection = {
+      disabledAt: null,
+      enabled: true,
+      lastMutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      lastMutationOperation: "replace",
+      lastReplacedAt: new Date("2026-07-26T12:00:00.000Z"),
+      memberId: "owner-member",
+      revision: 1,
+    };
+    const crypto = makeAddressBookCrypto();
+    const findContainer = vi.spyOn(store.hostedThreadContainer, "findUnique");
+    const findProjection = vi.spyOn(
+      store.hostedAddressBookProjection,
+      "findUnique",
+    );
+    const findContacts = vi.spyOn(store.hostedAddressBookContact, "findMany");
+    const phoneHandles = Array.from(
+      { length: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES },
+      (_, index) => `+1202555${String(index).padStart(4, "0")}`,
+    );
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles,
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      canonicalHandleCount: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      contactMatchCount: 0,
+      names: new Map(),
+      outcome: "no_contact_match",
+      requestedHandleCount: HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    });
+
+    expect(findContainer).toHaveBeenCalledTimes(1);
+    expect(findProjection).toHaveBeenCalledTimes(1);
+    expect(findContacts).toHaveBeenCalledTimes(1);
+    expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
+    expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "owner-member",
+        prisma: store,
+      });
+  });
+
   it("keeps an enabled projection active until an explicit lifecycle deletion", async () => {
     const store = new AddressBookPrismaStub("owner-member");
     store.projection = {
@@ -448,7 +499,11 @@ describe("hosted address-book projection lifecycle", () => {
     }
     if (condition === "consent") {
       accessMocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(
-        new Error("missing consent"),
+        hostedOnboardingError({
+          code: "HOSTED_CONSENT_REQUIRED",
+          httpStatus: 403,
+          message: "Accept the current Murph legal consent before continuing.",
+        }),
       );
     }
     await expect(readHostedOwnerAddressBookAdvisoryNames({
@@ -467,6 +522,24 @@ describe("hosted address-book projection lifecycle", () => {
       requestedHandleCount: 1,
     });
     expect(accessMocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(crypto.kms.macSign).not.toHaveBeenCalled();
+  });
+
+  it("rethrows failures from the owner consent check", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    const failure = new Error("consent database unavailable");
+    accessMocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(
+      failure,
+    );
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+12125550100"],
+      prisma: store as never,
+      source: SOURCE,
+    })).rejects.toBe(failure);
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
   });
 
@@ -677,6 +750,7 @@ describe("hosted address-book projection lifecycle", () => {
       storedContactCount: 0,
     });
     expect(ownerStore.contacts).toEqual([]);
+    expect(ownerStore.pendingGroupEventContextClearCount).toBe(2);
     vi.mocked(crypto.kms.macSign).mockClear();
     await expect(readHostedOwnerAddressBookAdvisoryNames({
       containerMemberId: "thread-container",
@@ -698,6 +772,7 @@ describe("hosted address-book projection lifecycle", () => {
       request: deletion,
       source: SOURCE,
     })).resolves.toMatchObject({ revision: 2 });
+    expect(ownerStore.pendingGroupEventContextClearCount).toBe(2);
   });
 
   it("drains an old-key replacement before retirement and fences stale retries", async () => {
@@ -843,6 +918,7 @@ class AddressBookPrismaStub {
   projection: ProjectionRow | null = null;
   contacts: ContactRow[] = [];
   ownerSuspendedAt: Date | null = null;
+  pendingGroupEventContextClearCount = 0;
   threadContainerExists = true;
   readonly hostedThreadContainer: {
     findUnique: () => Promise<{
@@ -889,6 +965,12 @@ class AddressBookPrismaStub {
         && condition.phoneToken.in.includes(row.phoneToken)
       )
     ),
+  };
+  readonly hostedThreadRoute = {
+    updateMany: async () => {
+      this.pendingGroupEventContextClearCount += 1;
+      return { count: 1 };
+    },
   };
   readonly $queryRaw = async () => [];
 

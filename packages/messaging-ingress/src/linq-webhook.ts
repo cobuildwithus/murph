@@ -30,6 +30,32 @@ export interface LinqMessageEditedEvent extends LinqWebhookEvent {
   data: LinqMessageEditedData;
 }
 
+export interface LinqParticipantAddedEvent extends LinqWebhookEvent {
+  event_type: "participant.added";
+  data: LinqParticipantAddedData;
+}
+
+export interface LinqParticipantRemovedEvent extends LinqWebhookEvent {
+  event_type: "participant.removed";
+  data: LinqParticipantRemovedData;
+}
+
+export type LinqParticipantChangedEvent =
+  | LinqParticipantAddedEvent
+  | LinqParticipantRemovedEvent;
+
+export interface LinqParticipantAddedData {
+  added_at?: string;
+  chat_id?: string;
+  participant: LinqChatHandle;
+}
+
+export interface LinqParticipantRemovedData {
+  chat_id?: string;
+  participant: LinqChatHandle;
+  removed_at?: string;
+}
+
 export interface LinqMessageEditedData {
   chat: LinqChatInfo;
   direction: "inbound" | "outbound";
@@ -426,6 +452,70 @@ export function parseLinqMessageEditedEvent(
   };
 }
 
+export function parseLinqParticipantChangedEvent(
+  event: LinqWebhookEvent,
+): LinqParticipantChangedEvent {
+  if (
+    event.event_type !== "participant.added"
+    && event.event_type !== "participant.removed"
+  ) {
+    throw new TypeError(
+      "Linq webhook event does not contain a supported participant change payload.",
+    );
+  }
+
+  const data = toLinqObjectRecord(event.data, `Linq ${event.event_type} data`);
+  const participant = parseOptionalChatHandle(data.participant)
+    ?? parseDeprecatedLinqParticipantHandle(data.handle, data.service);
+  if (!participant) {
+    throw new TypeError(
+      `Linq ${event.event_type} participant or deprecated handle is required.`,
+    );
+  }
+  const chatId = normalizeNullableString(data.chat_id) ?? undefined;
+  const changedAtField = event.event_type === "participant.added"
+    ? "added_at"
+    : "removed_at";
+  const changedAt = normalizeOptionalTimestamp(
+    data[changedAtField],
+    `Linq ${event.event_type} ${changedAtField}`,
+  ) ?? undefined;
+
+  if (event.event_type === "participant.added") {
+    return {
+      ...event,
+      created_at: normalizeRequiredTimestamp(
+        event.created_at,
+        "Linq webhook created_at",
+      ),
+      event_type: "participant.added",
+      trace_id: normalizeNullableString(event.trace_id ?? null),
+      partner_id: normalizeNullableString(event.partner_id ?? null),
+      data: {
+        ...(changedAt ? { added_at: changedAt } : {}),
+        ...(chatId ? { chat_id: chatId } : {}),
+        participant,
+      },
+    };
+  }
+
+  return {
+    ...event,
+    created_at: normalizeRequiredTimestamp(
+      event.created_at,
+      "Linq webhook created_at",
+    ),
+    event_type: "participant.removed",
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
+    data: {
+      ...(chatId ? { chat_id: chatId } : {}),
+      participant,
+      ...(changedAt ? { removed_at: changedAt } : {}),
+    },
+  };
+}
+
 export function buildLinqMessageText(
   parts: ReadonlyArray<LinqMessagePart> | null | undefined,
 ): string | null {
@@ -526,6 +616,21 @@ function normalizeNullableString(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseDeprecatedLinqParticipantHandle(
+  handle: unknown,
+  service: unknown,
+): LinqChatHandle | null {
+  const normalizedHandle = normalizeNullableString(handle);
+  if (!normalizedHandle) {
+    return null;
+  }
+  const normalizedService = normalizeNullableString(service);
+  return {
+    handle: normalizedHandle,
+    ...(normalizedService ? { service: normalizedService } : {}),
+  };
 }
 
 function normalizeLinqIsGroupFlag(value: unknown): boolean | undefined {

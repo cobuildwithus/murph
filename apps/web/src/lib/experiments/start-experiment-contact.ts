@@ -30,13 +30,6 @@ export interface ExperimentStartContactOption {
   href: string;
   kind: ExperimentStartContactKind;
   label: string;
-  meta: string;
-}
-
-export interface ExperimentStartProtocolReference {
-  key: string;
-  pageRevisionId: string;
-  runSpecRevisionId: string;
 }
 
 export type ExperimentStartContactAction =
@@ -53,7 +46,6 @@ interface ExperimentStartContactOptionsInput {
   accountContainer?: HostedPrivyLinkedAccountContainer | null;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
-  protocolRef?: ExperimentStartProtocolReference | null;
   protocolTitle: string;
 }
 
@@ -89,7 +81,7 @@ export function resolveExperimentStartContactOptions(
   input: ExperimentStartContactOptionsInput,
 ): ExperimentStartContactOption[] {
   const contactChannels = resolveExperimentStartContactChannelsForOptions(input);
-  const message = buildExperimentStartMessage(input.protocolTitle, input.protocolRef);
+  const message = buildExperimentStartMessage(input.protocolTitle);
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
   const textConnected = contactChannels.text && murphPhoneNumber !== null;
 
@@ -97,61 +89,43 @@ export function resolveExperimentStartContactOptions(
     {
       connected: textConnected,
       description: murphPhoneNumber
-        ? "Open Messages to text Murph about this protocol."
-        : "Open Messages and continue from your Murph text thread.",
+        ? "Open a ready-to-send text to Murph."
+        : "Open Messages and continue in your Murph thread.",
       href: buildExperimentStartSmsHref({
         body: message,
         murphPhoneNumber,
       }),
       kind: "text",
-      label: "Text",
-      meta: murphPhoneNumber ? "Messages" : "Messages fallback",
+      label: "Messages",
     },
     {
       connected: contactChannels.telegram,
-      description: `Open @${MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME} in Telegram.`,
+      description: `Open @${MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME} with the experiment name ready.`,
       href: buildMurphTelegramTextHref({
         body: message,
         username: MURPH_EXPERIMENT_TELEGRAM_BOT_USERNAME,
       }),
       kind: "telegram",
       label: "Telegram",
-      meta: "Telegram",
     },
     {
       connected: contactChannels.email,
-      description: "Draft an email to Murph with this experiment name included.",
+      description: "Open a ready-to-send email to Murph.",
       href: buildExperimentStartEmailHref({
         body: message,
         protocolTitle: input.protocolTitle,
       }),
       kind: "email",
       label: "Email",
-      meta: "Email",
     },
   ];
 }
 
-export function buildExperimentStartMessage(
-  protocolTitle: string,
-  protocolRef?: ExperimentStartProtocolReference | null,
-): string {
-  const title = normalizeOptionalString(protocolTitle) ?? "this";
-  const opening = `I want to start the ${title} experiment.`;
-
-  if (!protocolRef) {
-    return opening;
-  }
-
-  const normalizedRef = normalizeExperimentStartProtocolReference(protocolRef);
-  return [
-    opening,
-    "",
-    "Protocol reference:",
-    `key: ${normalizedRef.key}`,
-    `pageRevisionId: ${normalizedRef.pageRevisionId}`,
-    `runSpecRevisionId: ${normalizedRef.runSpecRevisionId}`,
-  ].join("\n");
+export function buildExperimentStartMessage(protocolTitle: string): string {
+  const title = normalizeOptionalString(protocolTitle);
+  return title
+    ? `I want to start the ${title} experiment.`
+    : "I want to start this experiment.";
 }
 
 export function resolveExperimentStartContactChannels(input: {
@@ -271,31 +245,4 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function normalizeExperimentStartProtocolReference(
-  input: ExperimentStartProtocolReference,
-): ExperimentStartProtocolReference {
-  const key = normalizeOptionalString(input.key);
-  const pageRevisionId = normalizeOptionalString(input.pageRevisionId);
-  const runSpecRevisionId = normalizeOptionalString(input.runSpecRevisionId);
-
-  if (
-    !isProtocolVariantKey(key) ||
-    !isSha256RevisionId(pageRevisionId) ||
-    !isSha256RevisionId(runSpecRevisionId)
-  ) {
-    throw new Error("Invalid experiment start protocol reference.");
-  }
-
-  return { key, pageRevisionId, runSpecRevisionId };
-}
-
-function isProtocolVariantKey(value: string | null): value is string {
-  return value !== null
-    && /^protocol_variant:[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/u.test(value);
-}
-
-function isSha256RevisionId(value: string | null): value is string {
-  return value !== null && /^sha256:[a-f0-9]{64}$/u.test(value);
 }

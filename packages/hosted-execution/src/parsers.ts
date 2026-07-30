@@ -182,6 +182,8 @@ export {
   parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
+  parseHostedRuntimeIMessageContactToolRequest,
+  parseHostedRuntimeIMessageContactToolResponse,
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,

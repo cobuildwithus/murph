@@ -261,6 +261,18 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.sourceRef.dedupeKey ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.eventId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.sourceRef.itemId ?? "", HASHED_IDENTIFIER_PATTERN);
+    assert.notEqual(event.sourceRef.itemId, item.item.id);
+    const hydratedInputs = await createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    }).listInputCandidates({
+      sourceId: "linq",
+    });
+    assert.equal(
+      hydratedInputs.inputs[0]?.event.hostedMailboxItemId,
+      item.item.id,
+    );
     assert.match(event.conversation?.accountId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.actorId ?? "", HASHED_IDENTIFIER_PATTERN);
     assert.match(event.conversation?.threadId ?? "", HASHED_IDENTIFIER_PATTERN);
@@ -1767,7 +1779,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
-  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+  test("uses Telegram sender for blinded actor identity and prompt attribution", async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
     );
@@ -1786,6 +1798,7 @@ describe("hosted mailbox conversation import adapter", () => {
           from: "1234567890",
           messageId: "tg_group_identity",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group_telegram",
@@ -1835,6 +1848,12 @@ describe("hosted mailbox conversation import adapter", () => {
         ? event.sourceMetadata.senderHandle
         : null,
       "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderDisplayName
+        : null,
+      "Alice Example",
     );
     assert.equal(
       event.sourceMetadata?.kind === "telegram"
@@ -1893,6 +1912,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.threadIsDirect, true);
     assert.equal(
       Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderDisplayName"),
       false,
     );
     assert.equal(

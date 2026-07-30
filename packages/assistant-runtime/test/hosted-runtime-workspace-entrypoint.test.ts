@@ -32,10 +32,12 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
+  hasDeliveredAssistantGroupPhoneCallPreview,
   listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
@@ -43,6 +45,7 @@ import {
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
+  saveAssistantOutboxIntent,
   saveAssistantSession,
   type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
@@ -88,6 +91,7 @@ import {
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
   type HostedRuntimeAssistantConfigurationControlRequest,
+  type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -9320,10 +9324,12 @@ describe("hosted workspace runtime entrypoint", () => {
         result: {
           appliesAt: "next_turn",
           availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
           model: "gpt-5.6-sol",
+          provider: "openai",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -9334,10 +9340,12 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "read",
         result: {
           availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
           model: "gpt-5.6-terra",
+          provider: "openai",
           reasoningEffort: "low",
           solAvailable: true,
         },
@@ -9347,10 +9355,12 @@ describe("hosted workspace runtime entrypoint", () => {
         result: {
           appliesAt: "next_turn",
           availableModels: [],
+          availableProviders: [],
           availableReasoningEfforts: [],
           configurationAvailable: false,
           dormantSolPreference: false,
           model: "gpt-5.6-terra",
+          provider: "openai",
           reasoningEffort: "low",
           requiredPlan: null,
           solAvailable: false,
@@ -9362,10 +9372,12 @@ describe("hosted workspace runtime entrypoint", () => {
         result: {
           appliesAt: "next_turn",
           availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
           model: "gpt-5.6-terra",
+          provider: "openai",
           reasoningEffort: "low",
           requiredPlan: null,
           solAvailable: true,
@@ -9377,10 +9389,12 @@ describe("hosted workspace runtime entrypoint", () => {
         result: {
           appliesAt: "next_turn",
           availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
           model: "gpt-5.6-sol",
+          provider: "openai",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -9392,10 +9406,12 @@ describe("hosted workspace runtime entrypoint", () => {
         result: {
           appliesAt: "next_turn",
           availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableProviders: ["openai", "venice"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
           model: "gpt-5.6-sol",
+          provider: "openai",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -18968,6 +18984,256 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    {
+      expectedAuthorized: true,
+      outcome: "sent_before_confirmation",
+    },
+    {
+      expectedAuthorized: false,
+      outcome: "sent_after_confirmation",
+    },
+    {
+      expectedAuthorized: false,
+      outcome: "retryable",
+    },
+    {
+      expectedAuthorized: false,
+      outcome: "terminal",
+    },
+    {
+      expectedAuthorized: false,
+      outcome: "ambiguous",
+    },
+  ] as const)(
+    "binds a late group confirmation to the preview delivery receipt: $outcome",
+    async ({ expectedAuthorized, outcome }) => {
+      const vaultRoot = await mkdtemp(path.join(
+        tmpdir(),
+        `murph-group-phone-preview-${outcome}-`,
+      ));
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const runtimeAbortController = new AbortController();
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const mailboxItems: HostedMailboxItem[] = [];
+      const sessionId = `session_group_phone_preview_${outcome}`;
+      let assistantPhaseCalls = 0;
+      let lateConfirmationInputId: string | null = null;
+      let phoneStartCount = 0;
+      let previewIntent: Awaited<
+        ReturnType<typeof createAssistantOutboxIntent>
+      > | null = null;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_group_phone_preview_${outcome}`,
+              idleCheckpointDelayMs: 25,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "c".repeat(64),
+                  key: `users/bundles/member-synthetic/group-phone-preview-${outcome}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_group_phone_preview",
+                threadIsDirect: false,
+                vaultRoot,
+              });
+              lateConfirmationInputId = inputId;
+              return {
+                assistantInputId: inputId,
+                linqDeliveryContext: {
+                  directRecipientPhoneNumber: null,
+                  fromPhoneNumber: null,
+                  replyToMessageId: `msg_${item.item.id}`,
+                  routeAuthority: {
+                    accountLookupKey: "hbidx:thread_group_phone_preview",
+                    channel: "linq" as const,
+                    containerMemberId: TEST_USER_ID,
+                    threadId: "thread_group_phone_preview",
+                  },
+                  service: "iMessage",
+                  target: "thread_group_phone_preview",
+                  threadIsDirect: false,
+                },
+                status: "imported",
+              };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              if (assistantPhaseCalls === 1) {
+                previewIntent = await createAssistantOutboxIntent({
+                  answeredMailboxItemIds: ["mailbox_item_group_phone_request"],
+                  channel: "linq",
+                  createdAt: "2026-04-27T00:00:00.000Z",
+                  dedupeToken: `group-phone-preview:${outcome}`,
+                  explicitTarget: "thread_group_phone_preview",
+                  identityId: "group-assistant",
+                  message: [
+                    ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
+                    "Destination: Public restaurant +12025550123",
+                    "Transfer to a participant: no",
+                  ].join("\n"),
+                  sessionId,
+                  threadId: "thread_group_phone_preview",
+                  threadIsDirect: false,
+                  turnId: `turn_group_phone_preview_${outcome}`,
+                  vault: vaultRoot,
+                });
+                mailboxItems.push(createMailboxItem({
+                  createdAt: "2026-04-27T00:00:10.000Z",
+                  id: `mailbox_item_group_phone_confirmation_${outcome}`,
+                  laneSeq: "1",
+                  occurredAt: "2026-04-27T00:00:10.000Z",
+                  updatedAt: "2026-04-27T00:00:10.000Z",
+                }));
+                runtimeWakeSignal.notify();
+                await waitUntil(() => {
+                  assert.ok(lateConfirmationInputId);
+                });
+
+                if (
+                  outcome === "sent_before_confirmation"
+                  || outcome === "sent_after_confirmation"
+                ) {
+                  const sentIntent = await markAssistantOutboxIntentSentById({
+                    delivery: {
+                      channel: "linq",
+                      idempotencyKey: null,
+                      messageLength: previewIntent.message.length,
+                      providerMessageId: `provider_${outcome}`,
+                      providerThreadId: "thread_group_phone_preview",
+                      sentAt:
+                        outcome === "sent_before_confirmation"
+                          ? "2026-04-27T00:00:05.000Z"
+                          : "2026-04-27T00:00:11.000Z",
+                      target: "thread_group_phone_preview",
+                      targetKind: "thread",
+                    },
+                    intentId: previewIntent.intentId,
+                    vault: vaultRoot,
+                  });
+                  assert.equal(sentIntent?.status, "sent");
+                } else {
+                  await saveAssistantOutboxIntent(vaultRoot, {
+                    ...previewIntent,
+                    deliveryConfirmationPending: outcome === "ambiguous",
+                    status:
+                      outcome === "retryable"
+                        ? "retryable"
+                        : outcome === "ambiguous"
+                          ? "abandoned"
+                          : "failed",
+                    updatedAt: "2026-04-27T00:00:11.000Z",
+                  });
+                }
+                return {
+                  checkpointReason: "outbox_receipt" as const,
+                  progressed: true,
+                };
+              }
+
+              const initialBatchInputIds =
+                input.initialAssistantInputBatch?.assistantInputIds ?? [];
+              const acceptedInputIds = initialBatchInputIds.length > 0
+                ? initialBatchInputIds
+                : input.initialMailboxImport.importResult.assistantInputIds
+                  ?? [];
+              if (acceptedInputIds.length === 0) {
+                return { progressed: false };
+              }
+              assert.ok(lateConfirmationInputId);
+              assert.deepEqual(acceptedInputIds, [lateConfirmationInputId]);
+              const authorized =
+                await hasDeliveredAssistantGroupPhoneCallPreview({
+                  acceptedInputIds,
+                  channel: "linq",
+                  sessionId,
+                  vault: vaultRoot,
+                });
+              if (outcome === "sent_before_confirmation") {
+                const persistedPreview =
+                  (await listAssistantOutboxIntents(vaultRoot))
+                    .find((intent) => intent.intentId === previewIntent?.intentId);
+                const confirmationInput = await readAssistantInputEvent({
+                  inputId: lateConfirmationInputId,
+                  vault: vaultRoot,
+                });
+                assert.equal(authorized, true, JSON.stringify({
+                  confirmationReceivedAt: confirmationInput?.receivedAt ?? null,
+                  preview: persistedPreview
+                    ? {
+                        answeredMailboxItemIds:
+                          persistedPreview.answeredMailboxItemIds,
+                        channel: persistedPreview.channel,
+                        sentAt: persistedPreview.sentAt,
+                        sessionId: persistedPreview.sessionId,
+                        status: persistedPreview.status,
+                        threadId: persistedPreview.threadId,
+                        threadIsDirect: persistedPreview.threadIsDirect,
+                      }
+                    : null,
+                }));
+              }
+              if (authorized) {
+                phoneStartCount += 1;
+              }
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConfirmationInputId,
+                vaultRoot,
+              });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                progressed: true,
+              };
+            },
+            signal: runtimeAbortController.signal,
+            vaultRoot,
+          },
+        );
+
+        assert.ok(assistantPhaseCalls >= 2);
+        assert.ok(lateConfirmationInputId);
+        assert.equal(phoneStartCount, expectedAuthorized ? 1 : 0);
+      } finally {
+        runtimeAbortController.abort();
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
+
   test("same selected device-sync wake keeps checkpoint gate across idle wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-same-device-gate-"));
     const events: string[] = [];
@@ -25828,6 +26094,307 @@ describe("hosted workspace runtime entrypoint", () => {
       await removeTempRoot(vaultRoot);
     }
   });
+
+  test("hands a pending turn to a fresh invocation when the live provider changes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(TEST_NOW));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let providerEgressCount = 0;
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_provider_handoff",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "1",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/provider-handoff.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            assistantConfigurationToolPort: {
+              async request() {
+                return {
+                  action: "read",
+                  result: {
+                    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                    availableProviders: ["openai", "venice"],
+                    availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                    configurationAvailable: true,
+                    dormantSolPreference: false,
+                    model: "gpt-5.6-terra",
+                    provider: "venice",
+                    reasoningEffort: "low",
+                    solAvailable: false,
+                  },
+                };
+              },
+            },
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            try {
+              await input.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{ id: "system_provider_handoff", source: "system" }],
+              });
+            } catch (error) {
+              assert.equal(
+                error instanceof Error ? error.name : null,
+                "AssistantActiveTurnInputUnavailableError",
+              );
+              return {
+                checkpointReason: "canonical_runtime_commit",
+                nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+                progressed: true,
+              };
+            }
+            providerEgressCount += 1;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(providerEgressCount, 0);
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(checkpointRequests.length, 1);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("defers provider egress when live provider authority is unavailable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(TEST_NOW));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let providerEgressCount = 0;
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_provider_authority_unavailable",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "1",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Provider authority deferral must not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            assistantConfigurationToolPort: {
+              async request() {
+                throw new Error("control plane unavailable");
+              },
+            },
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            try {
+              await input.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{ id: "system_provider_authority", source: "system" }],
+              });
+            } catch (error) {
+              assert.equal(
+                error instanceof Error ? error.name : null,
+                "AssistantActiveTurnInputUnavailableError",
+              );
+              return { progressed: false };
+            }
+            providerEgressCount += 1;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(providerEgressCount, 0);
+      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("hands a detached ask to a fresh invocation when the live provider changes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-provider-handoff-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const prepareStarted = createDeferred<void>();
+    const prepareRelease = createDeferred<void>();
+    const idleMaintenanceCallCount =
+      mocks.runHostedIdleCheckpointMaintenance.mock.calls.length;
+    const askItem = createMailboxItem({
+      dedupeKey: "ask_event_detached_provider_handoff",
+      id: "mailbox_item_detached_provider_handoff",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let completionCalls = 0;
+    let providerEgressCount = 0;
+
+    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
+      events.push("ask.started");
+      await askInput.beforeProviderEntry?.();
+      providerEgressCount += 1;
+      return { answer: "stale answer", outcome: "answered" };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_detached_provider_handoff",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "1",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "b".repeat(64),
+                  key: "users/bundles/member-synthetic/detached-provider-handoff.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push("ask.imported");
+              return await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot,
+                wake: createAssistantAskRequestedWake({
+                  eventId: askItem.dedupeKey,
+                }),
+              });
+            },
+            platform: createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  if (request.action === "complete") {
+                    events.push("ask.completed");
+                    completionCalls += 1;
+                    return { action: "complete", status: "completed" };
+                  }
+                  events.push("ask.prepared");
+                  prepareStarted.resolve();
+                  await prepareRelease.promise;
+                  return {
+                    action: "prepare",
+                    question: "What did the group decide?",
+                    status: "ready",
+                    targetLabel: "100 Club",
+                  };
+                },
+              },
+              assistantConfigurationToolPort: {
+                async request() {
+                  return {
+                    action: "read",
+                    result: {
+                      availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                      availableProviders: ["openai", "venice"],
+                      availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                      configurationAvailable: true,
+                      dormantSolPreference: false,
+                      model: "gpt-5.6-terra",
+                      provider: "venice",
+                      reasoningEffort: "low",
+                      solAvailable: false,
+                    },
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events: [],
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              events.push("foreground");
+              await prepareStarted.promise;
+              prepareRelease.resolve();
+              return { progressed: false };
+            },
+            runtimeWakeSignal,
+            vaultRoot,
+          },
+        ),
+        30_000,
+        () => JSON.stringify({
+          checkpointCount: checkpointRequests.length,
+          completionCalls,
+          events,
+          providerEgressCount,
+        }),
+      );
+
+      assert.equal(providerEgressCount, 0);
+      assert.equal(completionCalls, 0);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.ok(result.nextWakeAt);
+      assert.equal(
+        mocks.runHostedIdleCheckpointMaintenance.mock.calls[
+          idleMaintenanceCallCount
+        ]?.[0].pendingWork,
+        true,
+      );
+      assert.equal(checkpointRequests.length, 1);
+      const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.itemId, askItem.id);
+      assert.equal(pending[0]?.status, "pending");
+      assert.equal(pending[0]?.nextAttemptAt, null);
+    } finally {
+      prepareRelease.resolve();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const tiedWakeAt = "2099-04-27T00:05:00.000Z";
@@ -27342,10 +27909,44 @@ function createPlatform(input: {
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
   const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
+  const defaultAssistantConfigurationToolPort: NonNullable<
+    HostedRuntimePlatform["assistantConfigurationToolPort"]
+  > = {
+    async request(request) {
+      const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
+        availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+        availableProviders: ["openai", "venice"],
+        availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+        configurationAvailable: true,
+        dormantSolPreference: false,
+        model: "gpt-5.6-terra",
+        provider: "openai",
+        reasoningEffort: "low",
+        solAvailable: false,
+      };
+      return request.action === "read"
+        ? { action: "read", result: { ...snapshot } }
+        : {
+            action: "update",
+            result: {
+              ...snapshot,
+              appliesAt: "next_turn",
+              requiredPlan: null,
+              status: "unchanged",
+            },
+          };
+    },
+  };
+  const assistantConfigurationToolPort:
+    HostedRuntimePlatform["assistantConfigurationToolPort"] =
+    input.assistantConfigurationToolPort === null
+      ? null
+      : input.assistantConfigurationToolPort
+        ?? defaultAssistantConfigurationToolPort;
   return {
     ...(input.assistantAskPort ? { assistantAskPort: input.assistantAskPort } : {}),
-    ...(input.assistantConfigurationToolPort
-      ? { assistantConfigurationToolPort: input.assistantConfigurationToolPort }
+    ...(assistantConfigurationToolPort
+      ? { assistantConfigurationToolPort }
       : {}),
     artifactStore: {
       async get(sha256) {
@@ -27801,6 +28402,7 @@ async function stagePendingLinqAssistantInputForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
   threadId?: string;
+  threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const inputId = await stageAssistantInputEventForMailboxItem(input);

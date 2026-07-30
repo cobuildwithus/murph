@@ -159,12 +159,14 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(result.rpcResult).toMatchObject({
       success: true,
       contentItems: [{
-        text: expect.stringContaining('tell the user it is still generating'),
+        text: expect.stringContaining(
+          'should come back here in a separate message when it is ready',
+        ),
       }],
     })
     expect(result.rpcResult).toMatchObject({
       contentItems: [{
-        text: expect.stringContaining('if it succeeds'),
+        text: expect.stringContaining('usually takes about a minute'),
       }],
     })
     expect(result.rpcResult).toMatchObject({
@@ -176,7 +178,17 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     expect(result.rpcResult).not.toMatchObject({
       contentItems: [{
-        text: expect.stringContaining('will appear'),
+        text: expect.stringContaining('if it succeeds'),
+      }],
+    })
+    expect(result.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('do not guarantee success'),
+      }],
+    })
+    expect(result.rpcResult).not.toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('will send it here'),
       }],
     })
     await vi.waitFor(() => {

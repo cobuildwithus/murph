@@ -16,10 +16,13 @@ import type {
 import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
+  HostedAssistantProvider,
+  HostedAssistantProviderOverride,
   HostedAssistantReasoningEffort,
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -1176,6 +1179,8 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
+// Legacy runner-to-Web request shape retained at the old-facing control-plane
+// boundary during the accepted-message participant rollout.
 export interface HostedRuntimeGroupToolSelfOptOutContext {
   senderHandle: string;
   source: "email" | "linq";
@@ -1252,6 +1257,37 @@ export type HostedRuntimeGroupSharedReadResult =
       unavailableReason: string;
     };
 
+export const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES = [
+  "profile-name",
+  "unverified-owner-contact",
+] as const;
+
+export type HostedRuntimeGroupParticipantDisplayNameSource =
+  (typeof HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOURCES)[number];
+
+export interface HostedRuntimeGroupParticipantDisplayName {
+  displayName: string;
+  displayNameSource: HostedRuntimeGroupParticipantDisplayNameSource;
+  senderHandle: string;
+}
+
+export type HostedRuntimeGroupParticipantDisplayNamesResult =
+  | {
+      /**
+       * Requested handles for which Web successfully checked every applicable
+       * authorized name source and found no safe display name. Omitted by
+       * legacy Web deployments and never includes policy or authority
+       * omissions.
+       */
+      nameMissSenderHandles?: readonly string[];
+      participants: readonly HostedRuntimeGroupParticipantDisplayName[];
+      status: "ok";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export type HostedRuntimeGroupToolRequest =
   | {
       action: "ask";
@@ -1281,7 +1317,19 @@ export type HostedRuntimeGroupToolRequest =
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
+  | { action: "read_chat_name" }
   | { action: "read_usage" }
+  | {
+      action: "read_participant_display_names";
+      /**
+       * Exact route-admitted current-turn Linq sender evidence supplied by the
+       * hosted runtime. Web preserves exact-member profile precedence and may
+       * apply an unverified owner-contact label to an otherwise-unregistered
+       * canonical phone. It returns presentation labels only, never
+       * participant or member identifiers.
+       */
+      linqSenderHandles: readonly string[];
+    }
   | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "arm_usage_referral";
@@ -1327,6 +1375,7 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
       action: "revoke_own_email_share";
+      participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
     };
 
@@ -1369,10 +1418,25 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
+      action: "read_chat_name";
+      result:
+        | { displayName: string; status: "ok" }
+        | { displayName: null; status: "none" }
+        | {
+            displayName: null;
+            status: "unavailable";
+            unavailableReason: string;
+          };
+    }
+  | {
       action: "read_usage";
       result:
         | { status: "ok"; usage: HostedRuntimeGroupUsageStatus }
         | { status: "unavailable"; unavailableReason: string; usage: null };
+    }
+  | {
+      action: "read_participant_display_names";
+      result: HostedRuntimeGroupParticipantDisplayNamesResult;
     }
   | {
       action: "read_shared";
@@ -1692,6 +1756,22 @@ export type HostedRuntimeFamilyPlanToolResponse =
       result: HostedRuntimeFamilyPlanToolStartCheckoutResponse;
     };
 
+export interface HostedRuntimeIMessageContactToolRequest {
+  assistantInputId: string;
+}
+
+export type HostedRuntimeIMessageContactToolResponse =
+  | {
+      phoneNumber: string;
+      status: "assigned" | "existing";
+      verifiedSenderPhoneHint: string;
+    }
+  | {
+      phoneNumber: null;
+      status: "identity_required" | "unavailable";
+      verifiedSenderPhoneHint: null;
+    };
+
 export type HostedRuntimeAssistantConfigurationToolRequest =
   | {
       action: "read";
@@ -1703,10 +1783,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
 export type HostedRuntimeAssistantConfigurationChanges =
   | {
       model: HostedAssistantProductModel;
+      provider?: HostedAssistantProvider;
       reasoningEffort?: HostedAssistantReasoningEffort;
     }
   | {
       model?: never;
+      provider: HostedAssistantProvider;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      provider?: never;
       reasoningEffort: HostedAssistantReasoningEffort;
     };
 
@@ -1721,10 +1808,12 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
+  availableProviders: HostedAssistantProvider[];
   availableReasoningEfforts: HostedAssistantReasoningEffort[];
   configurationAvailable: boolean;
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
+  provider: HostedAssistantProvider;
   reasoningEffort: HostedAssistantReasoningEffort;
   solAvailable: boolean;
 }
@@ -2438,6 +2527,7 @@ export interface HostedWorkspaceState {
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
+  hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
   hostedAssistantReasoningEffortOverride?: HostedAssistantReasoningEffortOverride;
   workspace: HostedWorkspaceState | null;
 }
@@ -2683,6 +2773,11 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
+  r2Cutover?: {
+    coexisting: boolean;
+    phase: "destination_active" | "source_active";
+    protocolVersion: string;
+  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

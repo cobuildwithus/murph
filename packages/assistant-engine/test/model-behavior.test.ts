@@ -103,7 +103,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('extra nudges')
   })
 
-  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+  it('keeps one response lifecycle while preserving group floor etiquette', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         conversationScope: 'group',
@@ -112,16 +112,31 @@ describe('assistant execution prompt contract', () => {
     const directPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput(),
     )
+    const sharedIdentity =
+      'You are Murph, a durable personal health assistant.'
+    const sharedStyleOwner =
+      'Current-conversation style settings override these defaults.'
 
+    expect(groupPrompt).toContain(sharedIdentity)
+    expect(directPrompt).toContain(sharedIdentity)
+    expect(groupPrompt).toContain(sharedStyleOwner)
+    expect(directPrompt).toContain(sharedStyleOwner)
     expect(groupPrompt).toContain(
       'It does not withdraw an answer already completed in that turn; that answer still sends.',
     )
     expect(groupPrompt).toContain(
-      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+      'Messages accepted before the first completed assistant response may join this turn.',
     )
     expect(groupPrompt).toContain(
-      'Make it stand alone and carry forward anything still worth saying.',
+      'never replace, retract, or suppress completed text or media',
     )
+    expect(groupPrompt).toContain(
+      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
+    )
+    expect(groupPrompt).not.toContain('replaces the earlier answer')
+    expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('Use light humor when it fits')
+    expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
       'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
     )
@@ -134,18 +149,31 @@ describe('assistant execution prompt contract', () => {
       'Answer immediately when someone needs you or the beat is yours.',
     )
     expect(groupPrompt).toContain(
-      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+      'Messages that arrive during the sleep appear as normal messages; rule 7 governs whether they join this turn or remain pending.',
     )
-    expect(directPrompt).not.toContain(
-      'that answer still sends',
-    )
-    expect(directPrompt).not.toContain(
-      'that response replaces the earlier answer',
-    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and a brief shell `sleep` when the room is mid-volley',
     )
-    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
+  it('keeps completed group reads and participant message-ref ownership unambiguous', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+
+    expect(groupPrompt).toContain('`status="ok"` is complete')
+    expect(groupPrompt).toContain(
+      'select the exact server-issued message_ref printed beside the request-bearing message',
+    )
+    expect(groupPrompt).toContain(
+      'the host reloads that message and derives its sender',
+    )
+    expect(groupPrompt).not.toContain(
+      'only the server-selected message reference can authorize participant-scoped effects',
+    )
   })
 
   it('keeps the group social role active, low-ego, and human-first', () => {
@@ -762,19 +790,19 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never guess voice, model, or reasoning ids',
+      'never guess voice, model, provider, or reasoning ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use `/settings` for tone, model, or reasoning changes',
+      'Use `/settings` for tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model or reasoning changes',
+      'explicit user-requested model, core-reply provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',
@@ -1917,7 +1945,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd12bea1bda587aa3b5d76617a6b7facd88c4931945271c21f43b673fb585aeb1',
+      'f84ab7182f55102afe48ec7740faf9c9f05f4e0ea5388287545157053a582344',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2122,7 +2150,7 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'You are Murph, the user\'s durable, long-term personal health assistant.',
+      'You are Murph, a durable personal health assistant.',
     )
     expect(prompt).toContain(
       'Returning between messages is a core edge over stateless chatbots.',
@@ -2132,7 +2160,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('Delight is care.')
     expect(prompt).toContain(
-      'use an image, voice memo, or song only when requested, preferred, or required by a skill',
+      'use media only when requested, preferred, or skill-required',
     )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
@@ -2471,12 +2499,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
-    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain('Group audience and scope:')
     expect(prompt).toContain(
-      'Casual conversation and quick general-knowledge answers are part of being good company.',
+      'make shared decisions, plan ordinary life and leisure',
     )
     expect(prompt).toContain(
-      'Producing work output is not: decline requests to write, review, or debug code, or to produce work, school, or professional deliverables, in one plain sentence without lecturing; tool availability does not expand scope.',
+      'Classify the request by its purpose, not by whether it needs research or produces a plan.',
+    )
+    expect(prompt).toContain(
+      'Ordinary shared-life help is in scope: research public options, compare choices, plan travel or outings, build an itinerary, and coordinate or carry out group logistics with available group-safe tools.',
+    )
+    expect(prompt).toContain(
+      'A plan, comparison, or reservation for the room is not a work deliverable.',
+    )
+    expect(prompt).toContain(
+      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable, in one plain sentence without lecturing; tool availability does not expand scope.',
     )
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
@@ -2545,7 +2582,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'Model and reasoning controls remain unavailable in a group',
+      'Model, provider, and reasoning controls remain unavailable in a group',
     )
     expect(prompt).toContain(
       'Saved room-style changes begin on a later group turn',
@@ -2594,6 +2631,14 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain('Email replies can converse about this group')
+    expect(prompt).toContain('help plan from public information')
+    expect(prompt).toContain('or authorize a phone call')
+    expect(prompt).toContain(
+      'Do not offer or attempt a phone call from group email.',
+    )
+    expect(prompt).toContain(
+      'Continue the exact call preview and confirmation in the authenticated Linq or Telegram group chat.',
+    )
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
     expect(prompt).toContain("change this room's Murph style")
     expect(prompt).toContain('In group email, do not use the CLI or shell')
@@ -2662,7 +2707,13 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Conversation scope: unverified external audience.')
     expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
     expect(prompt).toContain(
-      'Casual and general-knowledge questions are fine; decline producing work output such as writing, reviewing, or debugging code, or work, school, or professional deliverables.',
+      'Casual conversation, general knowledge, and ordinary personal or shared-life planning from public information are fine.',
+    )
+    expect(prompt).toContain(
+      'Classify the request by its purpose, not by whether it needs research or produces a plan: a comparison, itinerary, or other ordinary-life plan is not a work deliverable.',
+    )
+    expect(prompt).toContain(
+      'Decline requests to write, review, or debug code, and requests whose primary purpose is a work, school, or professional deliverable; tool availability does not expand scope.',
     )
     expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
     expect(prompt).not.toContain('Conversation scope: hosted group chat.')

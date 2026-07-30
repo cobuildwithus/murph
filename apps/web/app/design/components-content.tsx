@@ -9,6 +9,7 @@ import {
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -88,6 +89,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
@@ -146,27 +148,24 @@ function resolveDesignPhoneCountryOption(value: string) {
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
-    description: "Open Messages with the note ready to send.",
-    href: "sms:?body=I%20want%20to%20start%20the%20Finnish%20Dry%20Sauna%20experiment.",
+    description: "Open a ready-to-send text to Murph.",
+    href: "sms:?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
     kind: "text",
-    label: "Text",
-    meta: "Messages",
+    label: "Messages",
   },
   {
     connected: true,
-    description: "Open Telegram with Murph.",
-    href: MURPH_TELEGRAM_URL,
+    description: "Open @withmurph_bot with the experiment name ready.",
+    href: `${MURPH_TELEGRAM_URL}?text=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.`,
     kind: "telegram",
     label: "Telegram",
-    meta: "Telegram",
   },
   {
     connected: true,
-    description: "Open an email draft to Murph.",
-    href: "mailto:murph@mail.withmurph.ai",
+    description: "Open a ready-to-send email to Murph.",
+    href: "mailto:murph@mail.withmurph.ai?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
     kind: "email",
     label: "Email",
-    meta: "Email",
   },
 ];
 
@@ -303,6 +302,129 @@ const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   { label: "Telegram", value: "telegram" },
 ];
 
+const DESIGN_HOME_HISTORY_CARDS: ExperimentLibraryCard[] = [
+  {
+    category: "Nutrition",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-earlier-evening-meals",
+    image: "/design-assets/hero-01.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Jun 2 – Jun 22",
+      day: 21,
+      metrics: [
+        {
+          current: "54.7 bpm",
+          delta: "-2.1 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "93.8 percent",
+          delta: "+1.4 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+      ],
+    },
+    searchText: "design earlier evening meals",
+    startedOn: "2026-06-02",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Earlier Evening Meals",
+  },
+  {
+    category: "Recovery",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-consistent-wake-time",
+    image: "/design-assets/hero-02.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "May 8 – May 28",
+      day: 21,
+      metrics: [
+        {
+          current: "91.3 percent",
+          delta: "+2.3 percent",
+          label: "Sleep efficiency",
+          sentiment: "positive",
+        },
+        {
+          current: "105 min",
+          delta: "+14 min",
+          label: "Deep sleep",
+          sentiment: "positive",
+        },
+        {
+          current: "57.9 ms",
+          delta: "+0.8 ms",
+          label: "HRV RMSSD",
+          sentiment: "neutral",
+        },
+        {
+          current: "57 min",
+          delta: "+9 min",
+          label: "Sleep latency",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design consistent wake time",
+    startedOn: "2026-05-08",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Consistent Wake Time",
+  },
+  {
+    category: "Movement",
+    description: "Synthetic completed run for component review.",
+    hasPrivateData: true,
+    href: "/design",
+    id: "design-easy-aerobic-base",
+    image: "/design-assets/hero-03.png",
+    privateBadgeLabel: "Private data",
+    runStatus: "finished",
+    runSummary: {
+      completionPercent: 100,
+      dateRange: "Apr 12 – May 3",
+      day: 22,
+      metrics: [
+        {
+          current: "49.8 bpm",
+          delta: "-3.2 bpm",
+          label: "Resting heart rate",
+          sentiment: "positive",
+        },
+        {
+          current: "61.4 ms",
+          delta: "+4.6 ms",
+          label: "HRV RMSSD",
+          sentiment: "positive",
+        },
+        {
+          current: "89.1 percent",
+          delta: "-0.5 percent",
+          label: "Blood oxygen saturation (SpO₂)",
+          sentiment: "negative",
+        },
+      ],
+    },
+    searchText: "design easy aerobic base",
+    startedOn: "2026-04-12",
+    statusLabel: "Completed",
+    statusVariant: "outline",
+    title: "Easy Aerobic Base",
+  },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
@@ -334,6 +456,20 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Home experiment history cards">
+          <div
+            className="grid items-start gap-5 lg:grid-cols-3"
+            data-design-home-experiment-history-cards
+            inert
+          >
+            {DESIGN_HOME_HISTORY_CARDS.map((card) => (
+              <HomeExperimentCard key={card.id} card={card} variant="history" />
+            ))}
+          </div>
+        </Section>
 
         <Separator />
 
@@ -936,12 +1072,11 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
-                Start from the app you already use
+                Continue in the app you already use
               </p>
               <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-                If several apps are connected, choose where this experiment
-                begins. Murph opens the app and prepares a note when the
-                channel supports it.
+                The compact picker keeps the selected experiment visible and
+                prepares a short message for review.
               </p>
             </div>
             <Button onClick={() => setChannelPickerOpen(true)}>
@@ -953,7 +1088,7 @@ export function ComponentsContent() {
             open={channelPickerOpen}
             options={EXPERIMENT_START_CHANNEL_OPTIONS}
             protocolDays={14}
-            protocolTitle="Finnish Dry Sauna"
+            protocolTitle="Standard, Tiny, And Fallback Bedtime Transition"
           />
         </Section>
 

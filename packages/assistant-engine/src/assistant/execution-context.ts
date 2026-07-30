@@ -33,8 +33,12 @@ import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeIMessageContactToolRequest,
+  HostedRuntimeIMessageContactToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeGroupParticipantDisplayName,
+  HostedRuntimeGroupParticipantDisplayNameSource,
   HostedRuntimeGroupSharedMember,
   HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadRequest,
@@ -241,6 +245,12 @@ export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
 }
 
+export interface AssistantHostedIMessageContactTool {
+  ensure(
+    request: HostedRuntimeIMessageContactToolRequest,
+  ): Promise<HostedRuntimeIMessageContactToolResponse>
+}
+
 export interface AssistantHostedSubscriptionTool {
   request(
     request: HostedRuntimeSubscriptionControlRequest,
@@ -290,6 +300,18 @@ export type AssistantHostedGroupSharedProjection =
 export type AssistantHostedGroupSharedMember = HostedRuntimeGroupSharedMember
 export type AssistantHostedGroupSharedReadResponse =
   HostedRuntimeGroupSharedReadResult
+
+export type AssistantGroupParticipantDisplayNameSource =
+  HostedRuntimeGroupParticipantDisplayNameSource
+export type AssistantGroupParticipantDisplayName =
+  HostedRuntimeGroupParticipantDisplayName
+
+export interface AssistantHostedGroupParticipantDisplayNameReader {
+  read(input: {
+    channel: 'linq'
+    senderHandles: readonly string[]
+  }): Promise<readonly AssistantGroupParticipantDisplayName[]>
+}
 
 export interface AssistantHostedGroupSharedReader {
   request(
@@ -385,7 +407,9 @@ export interface AssistantHostedExecutionContext {
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  imessageContactTool?: AssistantHostedIMessageContactTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
+  groupParticipantDisplayNameReader?: AssistantHostedGroupParticipantDisplayNameReader | null
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
@@ -409,6 +433,7 @@ export interface AssistantHostedExecutionContext {
     target: string
     targetKind: 'explicit' | 'thread'
   }): Promise<{
+    conversationThreadId?: string | null
     target: string
     threadIsDirect: boolean
   }>
@@ -456,9 +481,16 @@ export function normalizeAssistantExecutionContext(
     hosted?.dynamicContextPrompts,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const imessageContactTool = normalizeAssistantIMessageContactTool(
+    hosted?.imessageContactTool,
+  )
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
   )
+  const groupParticipantDisplayNameReader =
+    normalizeAssistantGroupParticipantDisplayNameReader(
+      hosted?.groupParticipantDisplayNameReader,
+    )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
     hosted?.groupPermissionOfferTool,
   )
@@ -505,7 +537,11 @@ export function normalizeAssistantExecutionContext(
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(imessageContactTool ? { imessageContactTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
@@ -706,6 +742,18 @@ function normalizeAssistantPlanUsageTool(
   }
 }
 
+function normalizeAssistantIMessageContactTool(
+  input: AssistantHostedExecutionContext['imessageContactTool'] | undefined,
+): AssistantHostedIMessageContactTool | undefined {
+  if (!input || typeof input.ensure !== 'function') {
+    return undefined
+  }
+
+  return {
+    ensure: input.ensure.bind(input),
+  }
+}
+
 function normalizeAssistantSubscriptionTool(
   input: AssistantHostedExecutionContext['subscriptionTool'] | undefined,
 ): AssistantHostedSubscriptionTool | undefined {
@@ -751,6 +799,20 @@ function normalizeAssistantGroupTool(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupParticipantDisplayNameReader(
+  input:
+    | AssistantHostedExecutionContext['groupParticipantDisplayNameReader']
+    | undefined,
+): AssistantHostedGroupParticipantDisplayNameReader | undefined {
+  if (!input || typeof input.read !== 'function') {
+    return undefined
+  }
+
+  return {
+    read: input.read.bind(input),
   }
 }
 
