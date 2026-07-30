@@ -2496,7 +2496,7 @@ describe('assistant Codex turn planning', () => {
     expect(groupTools[0]).toMatchObject({
       inputSchema: {
         properties: {
-          action: { enum: ['read_shared', 'post_join_offer'] },
+          action: { enum: ['read_shared', 'offer_access'] },
         },
       },
     })
@@ -2505,10 +2505,13 @@ describe('assistant Codex turn planning', () => {
       'current authorized scheduled group turn',
     )
     expect(groupTools[0]?.description).toContain(
-      'trusted host binds group, route, and offer copy',
+      'trusted host binds group and route and uses only the first-party link path',
     )
     expect(groupTools[0]?.description).toContain(
-      'A posted offer leaves existing membership and other grants unchanged.',
+      'unavailable proves no consent surface',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'Existing membership and other grants stay unchanged.',
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
