@@ -94,8 +94,8 @@ test("VercelTelemetry drops private handoff routes before either vendor sends", 
   );
 });
 
-test("VercelTelemetry drops Clinical Records routes before either vendor sends", () => {
-  mocks.pathname = "/";
+test("VercelTelemetry strips Clinical Records URL state before either vendor sends", () => {
+  mocks.pathname = "/records/connect";
   mocks.analyticsProps.length = 0;
   mocks.speedInsightsProps.length = 0;
 
@@ -109,19 +109,37 @@ test("VercelTelemetry drops Clinical Records routes before either vendor sends",
   }
 
   const claim = `cr_${"0".repeat(32)}`;
-  assert.equal(
+  assert.deepEqual(
     analyticsProps.beforeSend({
       type: "pageview",
       url: `https://join.example.test/records/connect?source=assistant#keep=provider&clinicalRecordsIntent=${claim}`,
     }),
-    null,
+    {
+      type: "pageview",
+      url: "https://join.example.test/records/connect",
+    },
   );
-  assert.equal(
+  assert.deepEqual(
     analyticsProps.beforeSend({
       type: "pageview",
       url: "/records?clinicalRecords=failed&source=epic#details",
     }),
-    null,
+    {
+      type: "pageview",
+      url: "/records",
+    },
+  );
+  assert.deepEqual(
+    speedInsightsProps.beforeSend({
+      route: `/records/connect#clinicalRecordsIntent=${claim}&keep=route`,
+      type: "vital",
+      url: `https://join.example.test/records/connect?source=assistant#clinicalRecordsIntent=${claim}`,
+    }),
+    {
+      route: "/records/connect",
+      type: "vital",
+      url: "https://join.example.test/records/connect",
+    },
   );
   assert.equal(
     speedInsightsProps.beforeSend({
@@ -136,21 +154,27 @@ test("VercelTelemetry drops Clinical Records routes before either vendor sends",
     redactPrivateAnalyticsUrl(
       `https://join.example.test/records/connect?source=assistant#keep=provider&clinicalRecordsIntent=${claim}`,
     ),
-    "https://join.example.test/records/connect?source=assistant#keep=provider",
+    "https://join.example.test/records/connect",
   );
   assert.equal(
     redactPrivateAnalyticsUrl(
       "/records?clinicalRecords=failed&source=epic#details",
     ),
-    "/records?source=epic#details",
+    "/records",
   );
 });
 
 test("VercelTelemetry does not mount outside the explicit page allowlist", () => {
   for (const pathname of [
+    "/approve/private-approval",
+    "/computer/handoff/private-token",
     "/family/accept/private-invite",
+    "/groups/fund/private-code",
+    "/groups/join/private-code",
     "/integrations/connect/private-claim",
-    "/search",
+    "/join/private-invite",
+    "/experiments/runs/private-run",
+    "/unknown/private-segment",
   ]) {
     mocks.pathname = pathname;
     mocks.analyticsProps.length = 0;
@@ -181,27 +205,27 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
   assert.equal(
     analyticsProps.beforeSend({
       type: "pageview",
-      url: "https://www.example.test/search",
+      url: "https://www.example.test/join/private-invite",
     }),
     null,
   );
   assert.equal(
     analyticsProps.beforeSend({
       type: "pageview",
-      url: "/search/products/food_example",
+      url: "/computer/handoff/private-token",
     }),
     null,
   );
   assert.equal(
     speedInsightsProps.beforeSend({
       type: "vital",
-      url: "https://www.example.test/search/products/food_example",
+      url: "https://www.example.test/experiments/runs/private-run",
     }),
     null,
   );
   assert.equal(
     speedInsightsProps.beforeSend({
-      route: "/search/products/[ref]",
+      route: "/family/accept/[inviteCode]",
       type: "vital",
       url: "https://www.example.test/home",
     }),
@@ -306,6 +330,89 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
   );
 });
 
+test("VercelTelemetry aggregates public dynamic routes without sending identifiers", () => {
+  const routes = [
+    {
+      expected: "/biomarkers/[biomarker]",
+      pathname: "/biomarkers/resting-heart-rate",
+      route: "/biomarkers/[biomarkerId]",
+    },
+    {
+      expected: "/biomarkers/[biomarker]/research",
+      pathname: "/biomarkers/resting-heart-rate/research",
+      route: "/biomarkers/[biomarkerId]/research",
+    },
+    {
+      expected: "/biomarkers/results/[metric]",
+      pathname: "/biomarkers/results/ldl_cholesterol",
+      route: "/biomarkers/results/[metricKey]",
+    },
+    {
+      expected: "/experiments/[experiment]",
+      pathname: "/experiments/sleep-consistency",
+      route: "/experiments/[experimentId]",
+    },
+    {
+      expected: "/experiments/[experiment]/research",
+      pathname: "/experiments/sleep-consistency/research",
+      route: "/experiments/[experimentId]/research",
+    },
+    {
+      expected: "/experiments/[experiment]/results",
+      pathname: "/experiments/sleep-consistency/results",
+      route: "/experiments/[experimentId]/results",
+    },
+    {
+      expected: "/measurement-methods/[method]",
+      pathname: "/measurement-methods/resting-heart-rate",
+      route: "/measurement-methods/[measurementMethodId]",
+    },
+    {
+      expected: "/search/products/[product]",
+      pathname: "/search/products/supplement_example",
+      route: "/search/products/[productRef]",
+    },
+  ] as const;
+
+  for (const { expected, pathname, route } of routes) {
+    mocks.pathname = pathname;
+    mocks.analyticsProps.length = 0;
+    mocks.speedInsightsProps.length = 0;
+
+    renderToStaticMarkup(createElement(VercelTelemetry));
+
+    const analyticsProps = mocks.analyticsProps[0];
+    const speedInsightsProps = mocks.speedInsightsProps[0];
+
+    if (!analyticsProps || !speedInsightsProps) {
+      assert.fail(`Vercel telemetry did not mount for ${pathname}.`);
+    }
+
+    assert.deepEqual(
+      analyticsProps.beforeSend({
+        type: "pageview",
+        url: `https://www.example.test${pathname}?private=query#private-fragment`,
+      }),
+      {
+        type: "pageview",
+        url: `https://www.example.test${expected}`,
+      },
+    );
+    assert.deepEqual(
+      speedInsightsProps.beforeSend({
+        route,
+        type: "vital",
+        url: `https://www.example.test${pathname}?private=query#private-fragment`,
+      }),
+      {
+        route: expected,
+        type: "vital",
+        url: `https://www.example.test${expected}`,
+      },
+    );
+  }
+});
+
 test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   mocks.pathname = "/";
   assert.equal(shouldSuppressVercelTelemetryForPathname("/searching"), true);
@@ -325,8 +432,12 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
 });
 
 test("Vercel telemetry has one fail-closed root owner", () => {
+  const appSources = readTypeScriptSources(
+    new URL("../app/", import.meta.url),
+    "app",
+  );
   const telemetryOwners = [
-    ...readTypeScriptSources(new URL("../app/", import.meta.url), "app"),
+    ...appSources,
     ...readTypeScriptSources(new URL("../src/", import.meta.url), "src"),
   ]
     .map(({ path, source }) => ({
@@ -338,13 +449,10 @@ test("Vercel telemetry has one fail-closed root owner", () => {
     .filter(({ importCount, mountCount }) => importCount > 0 || mountCount > 0)
     .sort((left, right) => left.path.localeCompare(right.path));
 
-  assert.deepEqual([...VERCEL_TELEMETRY_PATHNAMES], [
-    "/",
-    "/changelog",
-    "/clubs",
-    "/home",
-    "/pitch",
-  ]);
+  assert.deepEqual(
+    [...VERCEL_TELEMETRY_PATHNAMES].sort(),
+    listStaticPagePathnames(appSources),
+  );
   assert.deepEqual(telemetryOwners, [
     {
       importCount: 1,
@@ -353,6 +461,26 @@ test("Vercel telemetry has one fail-closed root owner", () => {
     },
   ]);
 });
+
+function listStaticPagePathnames(
+  appSources: Array<{ path: string; source: string }>,
+): string[] {
+  return appSources
+    .filter(({ path }) => path === "app/page.tsx" || path.endsWith("/page.tsx"))
+    .flatMap(({ path }) => {
+      const segments = path
+        .split("/")
+        .slice(1, -1)
+        .filter((segment) => !/^\(.+\)$/u.test(segment));
+
+      if (segments.some((segment) => segment.startsWith("["))) {
+        return [];
+      }
+
+      return [segments.length === 0 ? "/" : `/${segments.join("/")}`];
+    })
+    .sort();
+}
 
 function readTypeScriptSources(
   directory: URL,

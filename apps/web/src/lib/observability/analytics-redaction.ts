@@ -2,14 +2,105 @@ import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/
 
 export const VERCEL_TELEMETRY_PATHNAMES = [
   "/",
+  "/biomarkers",
   "/changelog",
   "/clubs",
+  "/connect",
+  "/consumer-health-data-privacy-policy",
+  "/design",
+  "/device-sync/connect/complete",
+  "/environment",
+  "/experiments",
+  "/growth",
+  "/history",
   "/home",
+  "/join",
+  "/knowledge",
+  "/labs",
+  "/legal",
+  "/legal/consumer-health-data-privacy-policy",
+  "/legal/health-ai-safety-disclosure",
+  "/legal/privacy",
+  "/legal/terms",
+  "/ops",
+  "/ops/email",
+  "/ops/growth",
+  "/ops/runtime-latency",
+  "/ops/runtime-maintenance",
+  "/ops/trials",
+  "/ops/usage",
+  "/overview",
   "/pitch",
+  "/records",
+  "/records/connect",
+  "/search",
+  "/security",
+  "/settings",
+  "/settings/data-privacy",
+  "/subprocessors",
 ] as const;
 const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
   VERCEL_TELEMETRY_PATHNAMES,
 );
+const PUBLIC_PATH_SEGMENT_PATTERN = String.raw`[a-z0-9][a-z0-9._~-]*`;
+const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
+  {
+    pattern: new RegExp(
+      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])$`,
+      "iu",
+    ),
+    pathname: "/biomarkers/[biomarker]",
+  },
+  {
+    pattern: new RegExp(
+      `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])/research$`,
+      "iu",
+    ),
+    pathname: "/biomarkers/[biomarker]/research",
+  },
+  {
+    pattern: new RegExp(
+      `^/biomarkers/results/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[metricKey\\])$`,
+      "iu",
+    ),
+    pathname: "/biomarkers/results/[metric]",
+  },
+  {
+    pattern: new RegExp(
+      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])$`,
+      "iu",
+    ),
+    pathname: "/experiments/[experiment]",
+  },
+  {
+    pattern: new RegExp(
+      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])/research$`,
+      "iu",
+    ),
+    pathname: "/experiments/[experiment]/research",
+  },
+  {
+    pattern: new RegExp(
+      `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])/results$`,
+      "iu",
+    ),
+    pathname: "/experiments/[experiment]/results",
+  },
+  {
+    pattern: new RegExp(
+      `^/measurement-methods/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[measurementMethodId\\])$`,
+      "iu",
+    ),
+    pathname: "/measurement-methods/[method]",
+  },
+  {
+    pattern: new RegExp(
+      `^/search/products/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[productRef\\])$`,
+      "iu",
+    ),
+    pathname: "/search/products/[product]",
+  },
+] as const;
 const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES = [
   {
     prefix: "/computer/handoff/",
@@ -81,10 +172,7 @@ export function redactVercelSpeedInsightsEvent(
 export function shouldSuppressVercelTelemetryForPathname(
   pathname: string | null | undefined,
 ): boolean {
-  const normalizedPathname = normalizeVercelTelemetryPathname(pathname);
-
-  return !normalizedPathname
-    || !VERCEL_TELEMETRY_PATHNAME_SET.has(normalizedPathname);
+  return !resolveVercelTelemetryPathname(pathname);
 }
 
 export function shouldSuppressVercelTelemetryUrl(value: string): boolean {
@@ -102,12 +190,9 @@ export function redactPrivateAnalyticsUrl(value: string): string {
   }
 
   try {
-    const telemetryPathname = normalizeVercelTelemetryPathname(parsed.pathname);
+    const telemetryPathname = resolveVercelTelemetryPathname(parsed.pathname);
 
-    if (
-      telemetryPathname
-      && VERCEL_TELEMETRY_PATHNAME_SET.has(telemetryPathname)
-    ) {
+    if (telemetryPathname) {
       parsed.pathname = telemetryPathname;
       parsed.search = "";
       parsed.hash = "";
@@ -214,6 +299,24 @@ function normalizeVercelTelemetryPathname(
   return value.length > 1 && value.endsWith("/")
     ? value.slice(0, -1)
     : value;
+}
+
+function resolveVercelTelemetryPathname(
+  value: string | null | undefined,
+): string | null {
+  const normalizedPathname = normalizeVercelTelemetryPathname(value);
+
+  if (!normalizedPathname) {
+    return null;
+  }
+
+  if (VERCEL_TELEMETRY_PATHNAME_SET.has(normalizedPathname)) {
+    return normalizedPathname;
+  }
+
+  return VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES.find(({ pattern }) =>
+    pattern.test(normalizedPathname)
+  )?.pathname ?? null;
 }
 
 function readUrlPathname(value: string): string | null {
