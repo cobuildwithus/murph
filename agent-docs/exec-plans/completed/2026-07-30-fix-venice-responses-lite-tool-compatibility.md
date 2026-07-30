@@ -1,6 +1,6 @@
 # Fix Venice Responses Lite tool compatibility
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -58,18 +58,19 @@ Updated: 2026-07-30
    post-deploy controlled inference smoke, and do not use production
    credentials locally.
 3. Risk: Worker/container skew could leave old egress behavior warm.
-   Mitigation: document immediate Cloudflare rollout and verify the deployed
-   Worker/bundle fingerprint plus a controlled Venice reply.
+   Mitigation: document that this Worker-only change needs no container
+   replacement, then verify a controlled Venice reply after the normal Worker
+   deploy converges.
 
 ## Tasks
 
 1. [x] Validate the Codex and Venice request contracts.
 2. [x] Apply and independently review the scoped ReviewGPT patch.
 3. [x] Run focused tests and TypeScript verification.
-4. [ ] Commit, push, open a PR, and run the required preliminary and final
+4. [x] Commit, push, open a PR, and run the required preliminary and final
    ReviewGPT gates concurrently with exact-head CI.
-5. [ ] Resolve actionable findings, close the plan, and provide deployment
-   proof.
+5. [x] Resolve actionable findings, close the plan, and document the
+   post-deploy proof.
 
 ## Decisions
 
@@ -93,5 +94,22 @@ Updated: 2026-07-30
   - No unrelated files change and all required checks are green.
 - Completed local outcomes:
   - Focused Venice egress tests: 5 passed.
-  - Adjacent egress intercept tests: 213 passed.
+  - Combined Venice and egress intercept tests after review remediation:
+    219 passed.
   - Cloudflare TypeScript check: passed.
+  - Pinned-Codex warm-reuse provider-switch E2E: 1 passed, including the
+    current Responses Lite envelope and ordinary delivered reply.
+  - The first local E2E invocation stopped before test execution because the
+    external Temporal worker package was not selected. The rerun supplied the
+    existing sibling package explicitly.
+  - The preliminary ReviewGPT pass returned two evidence findings. The
+    intercept-level coverage patch was inspected, applied, and corrected to
+    the actual omitted-field Codex wire shape. The broader proof gap was
+    resolved by composing the real pinned-Codex envelope/delivery scenario
+    with the production Worker-intercept normalization test instead of adding
+    a bespoke second full-stack owner.
+  - Final ReviewGPT round 1 returned `PASS` with zero findings on the immutable
+    first-reviewed head.
+  - Required GitHub Actions passed on the first-reviewed head; the final
+    base-merged, test-remediated head will rerun the same exact-head checks.
+Completed: 2026-07-30
