@@ -572,9 +572,9 @@ export function ComponentsContent() {
               Secure sign in keeps the ordinary methods visible while the
               provider initializes. A selected method owns the pending state
               immediately. If hydration discovers an existing session before
-              submission, recovery takes priority; otherwise account
-              completion stays on that production action through the next
-              view.
+              submission, method actions pause until its linked account is
+              known, then recovery takes priority. Otherwise account completion
+              stays on that production action through the next view.
             </p>
             <div
               className="grid items-start gap-5 lg:grid-cols-2"
@@ -617,6 +617,13 @@ export function ComponentsContent() {
               id="homepage-auth-hydrated-session-recovery"
               inert
             >
+              <DialogPreviewFrame label="Session identity hydration">
+                <HostedPrivyReadinessState
+                  message="Secure sign in is checking your existing session."
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                />
+              </DialogPreviewFrame>
               <DialogPreviewFrame label="Hydrated email session recovery">
                 <div className="space-y-4">
                   <HostedResumableAuthState

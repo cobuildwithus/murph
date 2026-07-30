@@ -21,14 +21,16 @@ vi.mock("@vercel/analytics", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
   HostedAuthPanel(props: {
-    onPrivyWaitChange?: (waiting: boolean) => void;
+    onPrivyWaitChange?: (
+      reason: "action" | "session" | null
+    ) => void;
   }) {
     mocks.panelRender(props);
     const ready = mocks.ready;
     const { onPrivyWaitChange } = props;
     useEffect(() => {
       if (ready) {
-        onPrivyWaitChange?.(false);
+        onPrivyWaitChange?.(null);
       }
     }, [onPrivyWaitChange, ready]);
     return createElement(
@@ -38,7 +40,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
       createElement(
         "button",
         {
-          onClick: () => props.onPrivyWaitChange?.(true),
+          onClick: () => props.onPrivyWaitChange?.("action"),
           type: "button",
         },
         "Queue phone",
@@ -46,10 +48,18 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
       createElement(
         "button",
         {
-          onClick: () => props.onPrivyWaitChange?.(false),
+          onClick: () => props.onPrivyWaitChange?.(null),
           type: "button",
         },
         "Cancel queue",
+      ),
+      createElement(
+        "button",
+        {
+          onClick: () => props.onPrivyWaitChange?.("session"),
+          type: "button",
+        },
+        "Check session",
       ),
     );
   },
@@ -157,7 +167,11 @@ test("shows compact delayed feedback only after an auth action is queued", async
 
     expect(mocks.track).toHaveBeenCalledWith(
       "hosted_auth_privy_ready_timeout",
-      expect.objectContaining({ attempt: 1, timeoutCount: 1 }),
+      expect.objectContaining({
+        attempt: 1,
+        reason: "action",
+        timeoutCount: 1,
+      }),
     );
     expect(rendered.container.textContent).not.toContain("Restart sign in");
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
@@ -170,6 +184,42 @@ test("shows compact delayed feedback only after an auth action is queued", async
     expect(rendered.container.querySelector("[role='status']")).toBeNull();
     expect(mocks.providerMount).toHaveBeenCalledTimes(1);
     expect(mocks.providerUnmount).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("shows truthful feedback immediately while an existing session hydrates", async () => {
+  vi.useFakeTimers();
+  const rendered = await renderClientComponent(renderAuthIsland(), {
+    location: bareHomepageLocation(),
+    requireButton: false,
+  });
+
+  try {
+    await clickButton(rendered, "Check session");
+
+    expect(rendered.container.textContent).toContain(
+      "Secure sign in is checking your existing session.",
+    );
+    expect(rendered.container.querySelector("[role='status']")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(mocks.track).toHaveBeenCalledWith(
+      "hosted_auth_privy_ready_timeout",
+      expect.objectContaining({
+        attempt: 1,
+        reason: "session",
+        timeoutCount: 2,
+      }),
+    );
+    expect(rendered.container.textContent).toContain("Restart sign in");
   } finally {
     await rendered.cleanup();
   }

@@ -48,6 +48,11 @@ Updated: 2026-07-30
 2. Risk: permanently forcing the default method for authenticated clients.
    Mitigation: consume only the hydration transition so later deliberate
    method selection remains possible.
+3. Risk: Privy can report an authenticated session before its linked-account
+   snapshot identifies the actual method.
+   Mitigation: keep the hydration transition pending, remove method actions,
+   and use the existing timed readiness/restart owner until the snapshot is
+   determinate.
 
 ## Tasks
 
@@ -78,6 +83,16 @@ Updated: 2026-07-30
   composes the production recovery leaf and shared alternate-method wrapper for
   both email and idle phone recovery; this is an evidence correction, not an
   additional auth-state owner.
+- The corrected preliminary pass found that `ready` and `authenticated` can
+  coexist with a null user snapshot in Privy's explicit session-repair path,
+  even though the installed SDK's ordinary cold boot resolves the user before
+  `ready`. The finding is accepted after the real phone controller path proved
+  that this indeterminate state exposed an enabled phone continuation and could
+  submit the wrong auth method. The existing readiness owner now gates that
+  narrow state until the snapshot resolves.
+- Existing readiness telemetry now includes the low-cardinality wait reason
+  (`action` or `session`) so a future provider-delay incident can distinguish a
+  retained user action from an authenticated null-user repair.
 
 ## Verification
 
@@ -90,9 +105,9 @@ Updated: 2026-07-30
   dependency, persisted state, secret, or private identifier appears.
 - Red proof: the selected-but-unsubmitted regression failed because mocked
   `sendCode` received the hydrated email address.
-- Current green proof: 10 focused auth/runtime files / 135 tests, web typecheck, scoped
-  ESLint, frontend-design-proof unit checks, diff check, and privacy/secret/cast
-  scans pass.
+- Current green proof: 11 focused auth/runtime files / 141 tests, web typecheck,
+  scoped ESLint, frontend-design-proof unit checks, and diff check pass after
+  specialist remediation.
 - Rendered proof: desktop and mobile catalog captures show production-faithful
-  hydrated email and idle phone recovery compositions with enabled Telegram
-  and Email alternatives; no production data or provider side effect is used.
+  session-snapshot waiting, hydrated email recovery, and idle phone recovery
+  compositions; no production data or provider side effect is used.

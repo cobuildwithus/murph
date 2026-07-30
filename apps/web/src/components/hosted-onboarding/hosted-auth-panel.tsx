@@ -12,6 +12,7 @@ import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/p
 import {
   extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
+  type HostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -41,6 +42,7 @@ export type HostedResumableAuth = {
 };
 
 export type HostedAuthPanelView = "auth" | "auth-active" | "consent";
+export type HostedPrivyWaitReason = "action" | "session" | null;
 
 export function HostedAuthPanel({
   inviteCode,
@@ -56,7 +58,7 @@ export function HostedAuthPanel({
   inviteCode?: string | null;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  onPrivyWaitChange?: (waiting: boolean) => void;
+  onPrivyWaitChange?: (reason: HostedPrivyWaitReason) => void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedAuthPanelView) => void;
   requireLaunchConsentOnCompletion?: boolean;
@@ -78,11 +80,14 @@ export function HostedAuthPanel({
   // not advance the journey the member just refused.
   const consentDeclinedRef = useRef(false);
   const { authenticated, logout, ready } = usePrivy();
+  const { user } = useUser();
+  const privySessionState = readHostedPrivyClientSessionState({ user });
   // A cold panel can accept a presentation choice before Privy reveals an
   // existing session. Consume that hydration boundary once so later choices
   // remain deliberate.
-  const [privyHydrationPending, setPrivyHydrationPending] = useState(!ready);
-  const { user } = useUser();
+  const [privyHydrationPending, setPrivyHydrationPending] = useState(
+    () => !ready || (authenticated && privySessionState === null),
+  );
   const completion = useHostedAuthCompletion({
     inviteCode,
     onCompleted: handleAuthCompleted,
@@ -94,7 +99,7 @@ export function HostedAuthPanel({
     authenticated,
     includesEmail,
     includesTelegram,
-    user,
+    sessionState: privySessionState,
   });
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
@@ -108,8 +113,24 @@ export function HostedAuthPanel({
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
   const authJourneyActive = completion.activeMethod !== null;
   const selectedAuthMethod = completion.activeMethod ?? queuedAuthMethod;
+  const privySessionHydrationPending =
+    ready
+    && authenticated
+    && privySessionState === null
+    && !codeSent
+    && completion.activeMethod === null
+    && completion.completingMethod === null
+    && pendingAuthCompletion === null;
 
-  if (privyHydrationPending && ready) {
+  if (privySessionHydrationPending && !privyHydrationPending) {
+    setPrivyHydrationPending(true);
+  }
+
+  if (privySessionHydrationPending && queuedAuthMethod !== null) {
+    setQueuedAuthMethod(null);
+  }
+
+  if (privyHydrationPending && ready && !privySessionHydrationPending) {
     setPrivyHydrationPending(false);
     if (
       authenticated
@@ -136,8 +157,27 @@ export function HostedAuthPanel({
     onViewChange?.(view);
   }, [onViewChange, view]);
   useLayoutEffect(() => {
-    onPrivyWaitChange?.(queuedAuthMethod !== null);
-  }, [onPrivyWaitChange, queuedAuthMethod]);
+    if (privySessionHydrationPending) {
+      queuedAuthMethodRef.current = null;
+    }
+  }, [privySessionHydrationPending]);
+  useLayoutEffect(() => {
+    onPrivyWaitChange?.(
+      privySessionHydrationPending
+        ? "session"
+        : queuedAuthMethod !== null
+          ? "action"
+          : null,
+    );
+  }, [
+    onPrivyWaitChange,
+    privySessionHydrationPending,
+    queuedAuthMethod,
+  ]);
+
+  if (privySessionHydrationPending) {
+    return null;
+  }
 
   function queueAuthMethod(method: HostedAuthMethod): boolean {
     const activeMethod = completion.activeMethod;
@@ -513,21 +553,19 @@ function resolveHostedResumableAuth(input: {
   authenticated?: boolean;
   includesEmail: boolean;
   includesTelegram: boolean;
-  user: { linkedAccounts?: unknown; linked_accounts?: unknown; telegram?: unknown } | null;
+  sessionState: HostedPrivyLinkedAccountState | null;
 }): HostedResumableAuth | null {
   if (!input.authenticated) {
     return null;
   }
 
-  const sessionState = readHostedPrivyClientSessionState({ user: input.user });
-
-  if (!sessionState || sessionState.phone) {
+  if (!input.sessionState || input.sessionState.phone) {
     return null;
   }
 
   if (input.includesTelegram) {
     const telegramAccount = extractHostedPrivyTelegramAccount({
-      linkedAccounts: sessionState.linkedAccounts,
+      linkedAccounts: input.sessionState.linkedAccounts,
     });
 
     if (telegramAccount) {
@@ -540,7 +578,7 @@ function resolveHostedResumableAuth(input: {
 
   if (input.includesEmail) {
     const emailAccount = extractHostedPrivyVerifiedEmailAccount(
-      sessionState.linkedAccounts,
+      input.sessionState.linkedAccounts,
     );
 
     if (emailAccount) {
