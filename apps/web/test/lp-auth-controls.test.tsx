@@ -8,7 +8,7 @@ import {
 } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { LandingAuthActions } from "@/app/auth-controls";
+import { LandingAuthActions, LandingAuthDialog } from "@/app/auth-controls";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -25,6 +25,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
 
   return {
     HostedAuthPanelIsland(props: {
+      autoSendPastedPhoneNumber?: boolean;
       onCompleted?: (payload: {
         activationPending: boolean;
         initialVisitEligible?: boolean;
@@ -262,7 +263,27 @@ test("LandingAuthActions preloads the auth panel on CTA intent and reuses the ca
 
   expect(mocks.hostedAuthPanelIslandModuleLoad).toHaveBeenCalledTimes(1);
   expect(mocks.hostedAuthPanelIslandRender).toHaveBeenCalledTimes(1);
+  expect(mocks.hostedAuthPanelIslandRender).toHaveBeenCalledWith(
+    expect.objectContaining({ autoSendPastedPhoneNumber: false }),
+  );
   expect(container.querySelector("[data-dialog-content='shown']")).toBeTruthy();
+});
+
+test("standalone mobile landing auth keeps pasted phones on manual submission", async () => {
+  const { cleanup } = await renderClientComponent(
+    createElement(LandingAuthDialog, {
+      open: true,
+      onOpenChange: () => {},
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await flushHostedAuthPanelIsland();
+
+  expect(mocks.hostedAuthPanelIslandRender).toHaveBeenCalledWith(
+    expect.objectContaining({ autoSendPastedPhoneNumber: false }),
+  );
 });
 
 test("LandingAuthActions opens the unified homepage auth flow", async () => {

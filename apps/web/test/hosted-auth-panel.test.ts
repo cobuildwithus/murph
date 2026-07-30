@@ -8,6 +8,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
   hostedPhoneAuthProps: null as {
+    autoSendPastedPhoneNumber?: boolean;
     interactionGated?: boolean;
     onAuthCancel?: () => void;
     onAuthQueue?: () => boolean;
@@ -119,6 +120,7 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
+    autoSendPastedPhoneNumber?: boolean;
     disableSignup?: boolean;
     interactionGated?: boolean;
     onAuthCancel?: () => void;
@@ -731,6 +733,7 @@ test("HostedAuthPanel keeps phone code entry mounted while an authenticated prov
   cleanupRender = cleanup;
 
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(false);
   expect(mocks.hostedPhoneAuthProps?.onCodeSent).toBeTypeOf("function");
 
   await act(async () => {
@@ -749,6 +752,18 @@ test("HostedAuthPanel keeps phone code entry mounted while an authenticated prov
     "Secure sign in is checking your existing session.",
   );
   expect(container.textContent).not.toContain("Continue with email");
+});
+
+test("HostedAuthPanel forwards an explicit homepage pasted-phone opt-in", async () => {
+  const { cleanup } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      autoSendPastedPhoneNumber: true,
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(mocks.hostedPhoneAuthProps?.autoSendPastedPhoneNumber).toBe(true);
 });
 
 test("HostedAuthPanel keeps a phone-less Telegram resume busy while completion is pending", async () => {

@@ -202,7 +202,10 @@ export async function deliverAssistantReply(input: {
     })
   }
 
-  const replyBubbles = splitAssistantReplyBubbles(input.response)
+  const splitReplyBubbles = splitAssistantReplyBubbles(input.response)
+  const replyBubbles = input.input.reviewedAssistantAskCompletionExpiresAt
+    ? [splitReplyBubbles.join('\n\n')]
+    : splitReplyBubbles
   if (replyBubbles.length <= 1) {
     return await deliverAssistantCurrentAudienceMessage({
       dedupeToken: baseDedupeToken,
@@ -870,6 +873,8 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    reviewedAssistantAskCompletionExpiresAt:
+      input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,

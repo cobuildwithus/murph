@@ -45,6 +45,7 @@ export type HostedAuthPanelView = "auth" | "auth-active" | "consent";
 export type HostedPrivyWaitReason = "action" | "session" | null;
 
 export function HostedAuthPanel({
+  autoSendPastedPhoneNumber = false,
   inviteCode,
   methods,
   onCompleted,
@@ -55,6 +56,7 @@ export function HostedAuthPanel({
   showPassiveLegalNotice,
   size,
 }: {
+  autoSendPastedPhoneNumber?: boolean;
   inviteCode?: string | null;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
@@ -352,6 +354,7 @@ export function HostedAuthPanel({
         />
       ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
+          autoSendPastedPhoneNumber={autoSendPastedPhoneNumber}
           inviteCode={inviteCode}
           interactionGated={
             selectedAuthMethod !== null

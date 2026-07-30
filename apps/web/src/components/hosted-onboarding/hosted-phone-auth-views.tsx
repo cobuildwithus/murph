@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import type { PhoneNumberInputChangeMetadata } from "@/src/components/ui/phone-number-input";
 import { Spinner } from "@/src/components/ui/spinner";
 
 import {
@@ -38,7 +39,10 @@ interface SharedFlowProps {
   size?: "default" | "compact";
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
-  onPhoneNumberChange: (value: string) => void;
+  onPhoneNumberChange: (
+    value: string,
+    metadata?: PhoneNumberInputChangeMetadata,
+  ) => void;
   onResendCode: () => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
   onUseDifferentNumber: () => void;
