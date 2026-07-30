@@ -160,7 +160,8 @@ export function StartExperimentChannelDialog({
 
 function ContactOptionLink({ option }: { option: ExperimentStartContactOption }) {
   const Icon = CONTACT_OPTION_ICONS[option.kind];
-  const isExternal = option.kind === "telegram";
+  const isExternal =
+    option.kind === "telegram" && /^https?:\/\//u.test(option.href);
 
   return (
     <a

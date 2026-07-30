@@ -106,7 +106,6 @@ import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
-import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
   DESIGN_AI_USAGE_DISABLED_HISTORY,
@@ -120,9 +119,17 @@ import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-da
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  children,
+  id,
+  title,
+}: {
+  children: React.ReactNode;
+  id?: string;
+  title: string;
+}) {
   return (
-    <div className="flex flex-col gap-6">
+    <div id={id} className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
@@ -161,22 +168,22 @@ function resolveDesignPhoneCountryOption(value: string) {
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
-    description: "Open a ready-to-send text to Murph.",
-    href: "sms:?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
+    description: "Preview a prepared Messages draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "text",
     label: "Messages",
   },
   {
     connected: true,
-    description: "Open @withmurph_bot with the experiment name ready.",
-    href: `${MURPH_TELEGRAM_URL}?text=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.`,
+    description: "Preview a prepared Telegram draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "telegram",
     label: "Telegram",
   },
   {
     connected: true,
-    description: "Open a ready-to-send email to Murph.",
-    href: "mailto:murph@mail.withmurph.ai?body=I%20want%20to%20start%20the%20Standard%2C%20Tiny%2C%20And%20Fallback%20Bedtime%20Transition%20experiment.",
+    description: "Preview a prepared email draft.",
+    href: "#experiment-start-channel-picker-study",
     kind: "email",
     label: "Email",
   },
@@ -1096,7 +1103,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Experiment Start Channel Picker">
+        <Section
+          id="experiment-start-channel-picker-study"
+          title="Experiment Start Channel Picker"
+        >
           <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
@@ -1116,7 +1126,7 @@ export function ComponentsContent() {
             open={channelPickerOpen}
             options={EXPERIMENT_START_CHANNEL_OPTIONS}
             protocolDays={14}
-            protocolTitle="Standard, Tiny, And Fallback Bedtime Transition"
+            protocolTitle="Example Evening Routine"
           />
         </Section>
 
