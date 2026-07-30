@@ -1,8 +1,8 @@
 # Homepage auth action readiness and Privy warmup
 
-Status: active
+Status: completed
 Created: 2026-07-29
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 ## Goal
 
@@ -117,10 +117,15 @@ Updated: 2026-07-29
   - One homepage provider is warmed and reused without mounting hidden controls.
 - Latest focused proof:
   - 10 hosted-auth/runtime Vitest files passed (133 tests).
-  - Hosted Web typecheck and scoped ESLint passed.
+  - Hosted Web typecheck and scoped ESLint passed again after merging the latest
+    `main`.
   - Frontend design-proof tests passed, with refreshed desktop/mobile catalog
     captures covering phone waiting, Telegram waiting, and Telegram's trusted
     continuation.
   - Preliminary specialist findings for stale Telegram continuation and
     misleading phone interactivity were resolved with real-panel boundary
     coverage.
+  - Parent final review traced provider ownership, queued-method handoff,
+    authenticated hydration, close/restart cancellation, and the trusted-popup
+    boundary with no remaining correctness finding.
+Completed: 2026-07-30

@@ -37,8 +37,8 @@ export function LandingAuthDialogButton({
 }) {
   const auth = useAuth();
   const [open, setOpen] = useState(false);
-  // Production landing pages are wrapped by AuthProvider and share its warmed
-  // runtime. The fallback keeps isolated catalog/test renders self-contained.
+  // The homepage provider shares its warmed runtime across landing CTAs. Other
+  // routes and isolated catalog/test renders keep the standalone fallback.
   const prepareAuth = auth.shared
     ? auth.prepareAuth
     : preloadHostedAuthPanelIsland;
