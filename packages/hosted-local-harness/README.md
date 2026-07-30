@@ -16,7 +16,6 @@ pnpm hosted-local e2e linq-webhook
 pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
-pnpm hosted-local e2e linq-group-ios-app-download --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
