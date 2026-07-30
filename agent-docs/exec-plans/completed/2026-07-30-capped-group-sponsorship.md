@@ -1,6 +1,6 @@
 # Capped group sponsorship
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -127,6 +127,21 @@ group's existing capacity owner says more credit is needed.
   durable exact-$5 reservation; later provider work rechecks authority and
   runtime access only. Focused saved-card, refill, allowance, typecheck, and
   broad-CI contract tests cover that boundary.
+- The same preliminary pass found that one real-model group fixture still mixed
+  the removed capacity/percentage payload with the new sponsorship projection
+  and did not exercise the sponsored-room privacy branch. The fixture now uses
+  the exact production `{ fundingNeeded, fundingUrl, sponsorshipStatus }`
+  shape, an adjacent sponsored-room probe permits only the binary
+  acknowledgment, and the newly landed neutral-heads-up probe uses the same
+  contract without message estimates. The pass attached no coverage patch.
+- Parent product-experience revalidation finds no remaining product finding:
+  the irreducible purpose is a trustworthy payer-capped continuation path that
+  keeps financial pressure out of the room, and the smallest complete
+  experience is one monthly primary action, silent admitted refills, binary
+  group state, and payer-private controls/recovery. Rendered desktop and mobile
+  activation, participant, active, paused, and recovery states remain direct
+  evidence. The exhausted Claude UI double-check remains the only material
+  evidence gap and is recorded below rather than treated as a pass.
 - The prior broad CI failure contained four stale expectations rather than a
   runtime failure: the migration manifest, reviewed Prisma relation surface,
   explicit one-time route arguments, and two new changelog items. Those exact
@@ -136,8 +151,14 @@ group's existing capacity owner says more credit is needed.
   prescribed Fable retry reported explicit usage-credit exhaustion. Per the
   completion workflow this is recorded as a non-blocking gap, not a passed
   review.
-- Pending preliminary specialist retry, final ReviewGPT pass, exact-head CI,
-  and PR-head preflight.
+- Rebased onto the current base after its group low-usage flow added a
+  link-free first heads-up and all-options follow-up. The merged policy keeps
+  both improvements for unsponsored rooms while sponsored rooms expose only
+  the binary acknowledgment. Post-rebase proof passes 271 focused Web tests,
+  440 hosted-execution tests, 15 focused assistant tests with 18 live-only
+  cases skipped, Web/assistant/hosted-execution typechecks, Prisma validation,
+  and the 10-test frontend design-proof contract.
+- Pending final ReviewGPT pass, exact-head CI, and PR-head preflight.
 
 ## Deployment compatibility
 
@@ -147,3 +168,4 @@ Web producer only after database and runtime convergence. Existing Web and
 runtime code treat the new authorization and purchase association as absent.
 The first monthly authorization is the old-Web rollback floor; from that point,
 recover with a forward fix on the compatible schema, Web, and runtime.
+Completed: 2026-07-30
