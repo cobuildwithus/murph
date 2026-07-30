@@ -58,14 +58,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // ordinary small authored-code growth.
 //
 // Direct/group turn parity, exact-message participant authorization, private
-// media, and hosted-alert integration add authored code to existing runner
-// chunks without adding a forbidden boot input. Their 2026-07-29 measurements
-// reached 9,856,451B total and an 8,018,225B static closure across Linux and
-// macOS. Ratchet to the higher cross-platform measurements while retaining the
-// established small-growth tolerances.
+// media, hosted-alert integration, and open-ended experiment outcomes add
+// authored code to existing runner chunks without adding a forbidden boot
+// input. The combined 2026-07-29 macOS assembly measured an 8,117,894B static
+// closure while remaining within the reviewed total budget. Ratchet the static
+// baseline to that combined measurement and retain the established small-growth
+// tolerances.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_018_225;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
