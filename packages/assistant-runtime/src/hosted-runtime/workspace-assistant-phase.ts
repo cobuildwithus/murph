@@ -18,6 +18,7 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeProductFeedbackRecord,
+  type HostedRuntimeUsageReferralSourceContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -321,6 +322,8 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
 
+type HostedUsageReferralLinqService = "imessage" | "rcs" | "sms";
+
 /**
  * The chat-scoped murph.group actions need the raw Linq chat id and the
  * thread-route egress authority, which live only in wake-derived delivery
@@ -338,6 +341,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   groupEmailIngress?: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqService?: HostedUsageReferralLinqService | null;
   telegramSenderHandles?: readonly string[];
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   const emailIngressPresent = input.groupEmailIngress === true
@@ -383,6 +387,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
             });
         const sourceContext = resolveHostedUsageReferralSourceContext(
           input.currentDeliveryRoute,
+          input.linqService,
         );
         const referralRequest = request.action === "arm_usage_referral"
           ? {
@@ -393,7 +398,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return await input.groupToolPort.request({
           ...referralRequest,
           ...senderHandles,
-          ...(request.action === "arm_usage_referral"
+          ...(request.action !== "cancel_usage_referral"
             ? sourceContext
             : {}),
         });
@@ -424,10 +429,8 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
 
 function resolveHostedUsageReferralSourceContext(
   route: AssistantCurrentDeliveryRoute | null | undefined,
-): Pick<
-  Extract<HostedRuntimeGroupToolRequest, { action: "arm_usage_referral" }>,
-  "sourceConversation"
-> {
+  linqService: HostedUsageReferralLinqService | null | undefined,
+): HostedRuntimeUsageReferralSourceContext {
   const channel = normalizeAssistantRouteString(route?.channel)?.toLowerCase();
   const threadId = normalizeAssistantRouteString(route?.threadId);
   if (
@@ -441,6 +444,7 @@ function resolveHostedUsageReferralSourceContext(
   return {
     sourceConversation: {
       channel,
+      ...(channel === "linq" && linqService ? { linqService } : {}),
       threadId,
       threadIsDirect: route.threadIsDirect,
     },
@@ -683,6 +687,7 @@ function createHostedAssistantAutomationOperationScope(
           && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
+        linqService: durableContext.linqService,
         runtimeMemberId: input.request.userId,
         telegramSenderHandles: durableContext.telegramSenderHandles,
         vaultRoot: input.restored.vaultRoot,
@@ -706,14 +711,16 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
   vaultRoot: string;
 }): Promise<{
   linqDeliveryContexts: HostedAssistantLinqDeliveryContext[];
+  linqService: HostedUsageReferralLinqService | null;
   route: AssistantCurrentDeliveryRoute | null;
   telegramSenderHandles: string[];
 }> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  const linqServices: Array<HostedUsageReferralLinqService | null> = [];
   const telegramSenderHandles: string[] = [];
   if (input.inputIds.length === 0) {
-    return { linqDeliveryContexts, route: null, telegramSenderHandles };
+    return { linqDeliveryContexts, linqService: null, route: null, telegramSenderHandles };
   }
   for (const inputId of input.inputIds) {
     try {
@@ -726,9 +733,17 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         replyTarget: event?.replyTarget ?? null,
       });
       if (!route || typeof route.threadIsDirect !== "boolean") {
-        return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+        return {
+          linqDeliveryContexts: [],
+          linqService: null,
+          route: null,
+          telegramSenderHandles: [],
+        };
       }
       routes.push(route);
+      if (normalizeAssistantRouteString(route.channel)?.toLowerCase() === "linq") {
+        linqServices.push(readHostedAssistantInputUsageReferralLinqService(event));
+      }
       const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
         event,
         memberId: input.memberId,
@@ -741,18 +756,61 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         telegramSenderHandles.push(telegramSenderHandle);
       }
     } catch {
-      return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+      return {
+        linqDeliveryContexts: [],
+        linqService: null,
+        route: null,
+        telegramSenderHandles: [],
+      };
     }
   }
   const route = resolveUnambiguousCurrentDeliveryRoute(routes);
   if (!route || typeof route.threadIsDirect !== "boolean") {
-    return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
+    return {
+      linqDeliveryContexts: [],
+      linqService: null,
+      route: null,
+      telegramSenderHandles: [],
+    };
   }
   return {
     linqDeliveryContexts,
+    linqService: resolveUnambiguousHostedUsageReferralLinqService(linqServices),
     route,
     telegramSenderHandles,
   };
+}
+
+function readHostedAssistantInputUsageReferralLinqService(
+  event: AssistantInputEventRecord | null,
+): HostedUsageReferralLinqService | null {
+  const sourceMetadata = event?.sourceMetadata;
+  if (
+    !event
+    || sourceMetadata?.kind !== "linq"
+    || event.conversation?.source !== "linq"
+    || typeof event.conversation.threadIsDirect !== "boolean"
+    || event.replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+  const service = normalizeAssistantRouteString(sourceMetadata.service)?.toLowerCase();
+  return service === "imessage" || service === "rcs" || service === "sms"
+    ? service
+    : null;
+}
+
+function resolveUnambiguousHostedUsageReferralLinqService(
+  services: readonly (HostedUsageReferralLinqService | null)[],
+): HostedUsageReferralLinqService | null {
+  let resolved: HostedUsageReferralLinqService | null = null;
+  for (const service of services) {
+    if (!service || (resolved && resolved !== service)) {
+      return null;
+    }
+    resolved = service;
+  }
+  return resolved;
 }
 
 /**
@@ -820,6 +878,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupEmailIngress: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqService: HostedUsageReferralLinqService | null;
   runtimeMemberId: string;
   telegramSenderHandles?: readonly string[];
   vaultRoot: string;
@@ -831,6 +890,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,
         linqDeliveryContexts: input.linqDeliveryContexts,
+        linqService: input.linqService,
         telegramSenderHandles: input.telegramSenderHandles ?? [],
       })
     : null;

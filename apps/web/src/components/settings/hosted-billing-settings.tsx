@@ -77,6 +77,7 @@ export function HostedBillingSettings(props: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   pulseTrialBillingContinuationPending?: boolean;
+  usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -206,6 +207,7 @@ export function HostedBillingSettings(props: {
         payerMemberId={props.payerMemberId}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
+      {props.usageActivityDetail}
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <PlanCard key={card.key} card={card} />

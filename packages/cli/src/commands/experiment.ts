@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   EVENT_SOURCES,
+  EXPERIMENT_OUTCOME_STATISTICS,
   EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS,
   EXPERIMENT_STATUSES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
@@ -12,23 +13,23 @@ import {
   experimentAssistantSupportSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
+  experimentPrimaryOutcomeSchema,
   experimentProgressCardSchema,
   experimentProgressSnapshotSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
   jsonObjectSchema,
   isStrictIsoDate,
+  type ExperimentOutcomeStatistic,
+  type ExperimentPrimaryOutcome,
   type ExperimentRunScheduleIntent,
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
 } from '@murphai/contracts'
 import type { HealthCommonsProtocolRunSpec } from '@murphai/health-commons/runtime'
 import {
-  experimentSessionMetricIsDeclared,
+  assessExperimentPrimaryMetricCapture,
   resolveExperimentSessionMetricSpec,
-  resolveExperimentSessionMetricSpecForBiomarker,
-  resolveMetricDefinition,
-  resolveMetricDefinitionForBiomarker,
 } from '@murphai/health-metrics'
 import { Cli, z } from 'incur'
 import {
@@ -63,6 +64,8 @@ import { normalizeOccurredAtOption } from './occurred-at-option.js'
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 const eventSourceOptionSchema = z.enum(EVENT_SOURCES)
 const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
+const experimentPrimaryOutcomeKindSchema = z.enum(['metric', 'structured_review'])
+const experimentOutcomeStatisticSchema = z.enum(EXPERIMENT_OUTCOME_STATISTICS)
 const experimentCheckInCadenceSchema = z.enum(['none', 'daily', 'every_3_days', 'weekly'])
 const experimentNotificationStyleSchema = z.enum([
   'skip_by_default',
@@ -505,6 +508,7 @@ function assertProtocolRevisionExpectation(input: {
 
 function assertPrimaryOutcomeIsCapturable(input: {
   biomarkerKey: string
+  primaryOutcome: ExperimentPrimaryOutcome | undefined
   sessionFields: readonly string[] | undefined
 }) {
   const seenSessionMetrics = new Map<string, string>()
@@ -523,34 +527,135 @@ function assertPrimaryOutcomeIsCapturable(input: {
     seenSessionMetrics.set(spec.key, sessionField)
   }
 
-  const normalizedBiomarkerKey = input.biomarkerKey.trim().toLowerCase()
-  const slug = normalizedBiomarkerKey.split(':').at(-1) ?? normalizedBiomarkerKey
-  const canonicalBiomarkerKey = normalizedBiomarkerKey.startsWith('biomarker:')
-    ? normalizedBiomarkerKey
-    : `biomarker:${slug}`
-  const definition =
-    resolveMetricDefinitionForBiomarker(canonicalBiomarkerKey) ??
-    resolveMetricDefinition(slug)
-
-  if (!definition) {
+  if (input.primaryOutcome?.kind === 'structured_review') {
+    return
+  }
+  const configuredCapture =
+    input.primaryOutcome?.kind === 'metric'
+      ? input.primaryOutcome.capture
+      : undefined
+  if (configuredCapture?.kind === 'session_field') {
+    if (
+      (input.sessionFields ?? []).filter(
+        (fieldId) => fieldId === configuredCapture.fieldId,
+      ).length === 1
+    ) {
+      return
+    }
     throw new VaultCliError(
       'invalid_option',
-      `Primary outcome ${input.biomarkerKey} cannot resolve to a canonical health metric, so this run cannot produce an outcome.`,
+      `Primary outcome ${input.biomarkerKey} requires --session-field ${configuredCapture.fieldId}.`,
     )
   }
+  if (configuredCapture?.kind === 'derived_metric') {
+    return
+  }
 
-  if (
-    resolveExperimentSessionMetricSpecForBiomarker(canonicalBiomarkerKey) &&
-    !experimentSessionMetricIsDeclared({
-      biomarkerKey: canonicalBiomarkerKey,
-      sessionFields: input.sessionFields,
-    })
-  ) {
+  const capture = assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: input.biomarkerKey,
+    sessionFields: input.sessionFields,
+  })
+  if (capture.issue === 'uncapturable_primary_biomarker') {
     throw new VaultCliError(
       'invalid_option',
       `Primary outcome ${input.biomarkerKey} requires a matching declared --session-field so Murph can capture and analyze it.`,
     )
   }
+}
+
+function buildPrimaryOutcomeFromOptions(input: {
+  comparisonStatistic?: ExperimentOutcomeStatistic
+  existing?: ExperimentPrimaryOutcome
+  legacyOutcomeKey?: string
+  primaryOutcomeKey?: string
+  primaryOutcomeSessionField?: string
+  primaryOutcomeSourceMetricKey?: string
+  primaryOutcomeKind?: z.infer<typeof experimentPrimaryOutcomeKindSchema>
+  primaryOutcomeLabel?: string
+  primaryOutcomeUnit?: string
+}): ExperimentPrimaryOutcome | undefined {
+  const touched =
+    input.primaryOutcomeKey !== undefined ||
+    input.primaryOutcomeKind !== undefined ||
+    input.primaryOutcomeLabel !== undefined ||
+    input.comparisonStatistic !== undefined ||
+    input.primaryOutcomeSessionField !== undefined ||
+    input.primaryOutcomeSourceMetricKey !== undefined ||
+    input.primaryOutcomeUnit !== undefined
+  if (!touched) {
+    return input.existing
+  }
+
+  const kind = input.primaryOutcomeKind ?? input.existing?.kind ?? 'metric'
+  const key =
+    input.primaryOutcomeKey?.trim() ||
+    input.existing?.key ||
+    input.legacyOutcomeKey
+  if (!key) {
+    throw new VaultCliError(
+      'invalid_option',
+      'A configured primary outcome requires --primary-outcome-key as its stable outcome key.',
+    )
+  }
+  const label = input.primaryOutcomeLabel?.trim() || input.existing?.label
+  if (kind === 'structured_review') {
+    if (
+      input.comparisonStatistic !== undefined ||
+      input.primaryOutcomeSessionField !== undefined ||
+      input.primaryOutcomeSourceMetricKey !== undefined ||
+      input.primaryOutcomeUnit !== undefined
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Comparison and metric-capture options are only valid for metric outcomes.',
+      )
+    }
+    return experimentPrimaryOutcomeSchema.parse(
+      compactRecord({ kind, key, label }),
+    )
+  }
+
+  if (
+    input.primaryOutcomeSessionField !== undefined &&
+    input.primaryOutcomeSourceMetricKey !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'A metric outcome cannot use both a session field and a derived source metric.',
+    )
+  }
+  if (
+    input.primaryOutcomeUnit !== undefined &&
+    input.primaryOutcomeSessionField === undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--primary-outcome-unit requires --primary-outcome-session-field.',
+    )
+  }
+  const existingStatistic =
+    input.existing?.kind === 'metric' ? input.existing.statistic : undefined
+  const existingCapture =
+    input.existing?.kind === 'metric' ? input.existing.capture : undefined
+  const capture = input.primaryOutcomeSessionField !== undefined
+    ? {
+        kind: 'session_field' as const,
+        fieldId: input.primaryOutcomeSessionField,
+        unit: input.primaryOutcomeUnit,
+      }
+    : input.primaryOutcomeSourceMetricKey !== undefined
+      ? {
+          kind: 'derived_metric' as const,
+          sourceMetricKey: input.primaryOutcomeSourceMetricKey,
+        }
+      : existingCapture
+  return experimentPrimaryOutcomeSchema.parse(compactRecord({
+    kind,
+    key,
+    label,
+    statistic: input.comparisonStatistic ?? existingStatistic,
+    capture,
+  }))
 }
 
 function resolveStartWindows(input: {
@@ -633,6 +738,13 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     confounderField?: string[]
     stopCondition?: string[]
     primaryBiomarkerKey?: string
+    primaryOutcomeKey?: string
+    primaryOutcomeKind?: z.infer<typeof experimentPrimaryOutcomeKindSchema>
+    primaryOutcomeLabel?: string
+    primaryOutcomeSessionField?: string
+    primaryOutcomeSourceMetricKey?: string
+    primaryOutcomeUnit?: string
+    comparisonStatistic?: z.infer<typeof experimentOutcomeStatisticSchema>
     secondaryBiomarkerKey?: string[]
     desiredDirection?: z.infer<typeof experimentSignalDirectionSchema>
     expectedDirection?: string[]
@@ -762,6 +874,26 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     input.options.primaryBiomarkerKey ??
     onboarding?.adaptationPolicy?.measurementPlan?.requiredSignals?.[0] ??
     testPlan?.primaryBiomarkerKey
+  if (
+    input.options.primaryOutcomeKey !== undefined &&
+    input.options.primaryBiomarkerKey !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'experiment start accepts either --primary-outcome-key or the legacy --primary-biomarker-key, not both.',
+    )
+  }
+  const primaryOutcome = buildPrimaryOutcomeFromOptions({
+    comparisonStatistic: input.options.comparisonStatistic,
+    legacyOutcomeKey: primaryBiomarkerKey,
+    primaryOutcomeKey: input.options.primaryOutcomeKey,
+    primaryOutcomeKind: input.options.primaryOutcomeKind,
+    primaryOutcomeLabel: input.options.primaryOutcomeLabel,
+    primaryOutcomeSessionField: input.options.primaryOutcomeSessionField,
+    primaryOutcomeSourceMetricKey: input.options.primaryOutcomeSourceMetricKey,
+    primaryOutcomeUnit: input.options.primaryOutcomeUnit,
+  })
+  const effectivePrimaryOutcomeKey = primaryOutcome?.key ?? primaryBiomarkerKey
   const secondaryBiomarkerKeys = uniqueNonEmptyStrings([
     ...(input.options.secondaryBiomarkerKey ?? []),
     ...(input.options.secondaryBiomarkerKey === undefined
@@ -770,11 +902,11 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
           ...(testPlan?.secondaryBiomarkerKeys ?? []),
         ]
       : []),
-  ]).filter((key) => key !== primaryBiomarkerKey)
+  ]).filter((key) => key !== effectivePrimaryOutcomeKey)
   const derivedExpectedDirections =
-    primaryBiomarkerKey === undefined || protocol === undefined
+    effectivePrimaryOutcomeKey === undefined || protocol === undefined
       ? undefined
-      : uniqueNonEmptyStrings([primaryBiomarkerKey, ...secondaryBiomarkerKeys]).flatMap(
+      : uniqueNonEmptyStrings([effectivePrimaryOutcomeKey, ...secondaryBiomarkerKeys]).flatMap(
           (biomarkerKey) => {
             const direction = mapExpectedSignalDirection(
               findExpectedSignal(protocol, biomarkerKey)?.expectedDirection,
@@ -789,9 +921,9 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
       : undefined)
   const desiredDirection =
     input.options.desiredDirection ??
-    (primaryBiomarkerKey && protocol
+    (effectivePrimaryOutcomeKey && protocol
       ? mapExpectedSignalDirection(
-          findExpectedSignal(protocol, primaryBiomarkerKey)?.expectedDirection,
+          findExpectedSignal(protocol, effectivePrimaryOutcomeKey)?.expectedDirection,
         )
       : undefined)
   const schedule = buildRunScheduleFromOptions(input.options)
@@ -852,7 +984,8 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
   )
   const analysisPlan = experimentAnalysisPlanSchema.parse(
     compactRecord({
-      primaryBiomarkerKey,
+      primaryBiomarkerKey: primaryOutcome ? undefined : primaryBiomarkerKey,
+      primaryOutcome,
       secondaryBiomarkerKeys:
         secondaryBiomarkerKeys.length > 0 ? secondaryBiomarkerKeys : undefined,
       desiredDirection,
@@ -869,20 +1002,23 @@ async function buildExperimentPlanPayloadFromTypedOptions(input: {
     }),
   )
 
-  if (!analysisPlan.primaryBiomarkerKey) {
-    const missingPrimaryMetricMessage =
+  const resolvedPrimaryOutcomeKey =
+    analysisPlan.primaryOutcome?.key ?? analysisPlan.primaryBiomarkerKey
+  if (!resolvedPrimaryOutcomeKey) {
+    const missingPrimaryOutcomeMessage =
       protocol === undefined
-        ? 'Custom experiment starts require --primary-biomarker-key biomarker:<metric-slug> because there is no protocol/test-plan default primary metric.'
-        : 'experiment start requires --primary-biomarker-key or a protocol/test-plan default primary metric.'
+        ? 'Custom experiment starts require --primary-outcome-key biomarker:<outcome-slug> because there is no protocol/test-plan default primary outcome.'
+        : 'experiment start requires --primary-outcome-key or a protocol/test-plan default primary outcome.'
 
     throw new VaultCliError(
       'invalid_option',
-      missingPrimaryMetricMessage,
+      missingPrimaryOutcomeMessage,
     )
   }
 
   assertPrimaryOutcomeIsCapturable({
-    biomarkerKey: analysisPlan.primaryBiomarkerKey,
+    biomarkerKey: resolvedPrimaryOutcomeKey,
+    primaryOutcome: analysisPlan.primaryOutcome,
     sessionFields: runPlan.logging?.sessionFields,
   })
 
@@ -1544,10 +1680,50 @@ export function registerExperimentCommands(
         .min(1)
         .optional()
         .describe(
-          'Primary metric/biomarker key for analysis. Required for --custom starts; use biomarker:<metric-slug>.',
+          'Legacy primary biomarker identity. Prefer --primary-outcome-key for new runs.',
+        ),
+      primaryOutcomeKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Stable first-class primary outcome identity. Required for new custom runs; use biomarker:<outcome-slug>.',
+        ),
+      primaryOutcomeKind: experimentPrimaryOutcomeKindSchema
+        .optional()
+        .describe(
+          'Primary outcome mode: metric for numeric/queryable outcomes or structured_review for qualitative evidence that should not be converted into a score.',
+        ),
+      primaryOutcomeLabel: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Human-readable primary outcome label for results and reviews.'),
+      primaryOutcomeSessionField: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Declared session field that supplies a custom numeric primary outcome.'),
+      primaryOutcomeUnit: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Unit for a custom numeric session-field outcome.'),
+      primaryOutcomeSourceMetricKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.',
+        ),
+      comparisonStatistic: experimentOutcomeStatisticSchema
+        .optional()
+        .describe(
+          'Reducer for a metric outcome inside each window: count, latest, mean, median, min, max, or sum. Defaults to mean.',
         ),
       secondaryBiomarkerKey: repeatableTextOptionSchema(
-        'Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.',
+        'Secondary metric or biomarker identities. Repeat --secondary-biomarker-key for multiple values.',
       ),
       desiredDirection: experimentSignalDirectionSchema
         .optional()
@@ -1781,9 +1957,43 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Primary Health Commons biomarker key for the analysis plan.'),
+        .describe('Legacy primary biomarker identity. Prefer --primary-outcome-key.'),
+      primaryOutcomeKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Stable first-class primary outcome identity.'),
+      primaryOutcomeKind: experimentPrimaryOutcomeKindSchema
+        .optional()
+        .describe('Primary outcome mode: metric or structured_review.'),
+      primaryOutcomeLabel: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Human-readable primary outcome label for results and reviews.'),
+      primaryOutcomeSessionField: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Declared session field that supplies a custom numeric primary outcome.'),
+      primaryOutcomeUnit: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Unit for a custom numeric session-field outcome.'),
+      primaryOutcomeSourceMetricKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Registered metric source or already observed metric source reduced into a deterministic derived outcome. User-authored formulas are not supported.',
+        ),
+      comparisonStatistic: experimentOutcomeStatisticSchema
+        .optional()
+        .describe('Reducer for a metric outcome: count, latest, mean, median, min, max, or sum.'),
       secondaryBiomarkerKey: repeatableTextOptionSchema(
-        'Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.',
+        'Secondary metric or biomarker identities. Repeat --secondary-biomarker-key for multiple values.',
       ),
       desiredDirection: experimentSignalDirectionSchema
         .optional()
@@ -1833,6 +2043,13 @@ export function registerExperimentCommands(
         options.confounderField !== undefined ||
         options.stopCondition !== undefined ||
         options.primaryBiomarkerKey !== undefined ||
+        options.primaryOutcomeKey !== undefined ||
+        options.primaryOutcomeKind !== undefined ||
+        options.primaryOutcomeLabel !== undefined ||
+        options.primaryOutcomeSessionField !== undefined ||
+        options.primaryOutcomeSourceMetricKey !== undefined ||
+        options.primaryOutcomeUnit !== undefined ||
+        options.comparisonStatistic !== undefined ||
         options.secondaryBiomarkerKey !== undefined ||
         options.desiredDirection !== undefined ||
         options.expectedDirection !== undefined ||
@@ -1921,6 +2138,13 @@ export function registerExperimentCommands(
               contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
               skipAnalysisPlanDefaults:
                 options.primaryBiomarkerKey !== undefined ||
+                options.primaryOutcomeKey !== undefined ||
+                options.primaryOutcomeKind !== undefined ||
+                options.primaryOutcomeLabel !== undefined ||
+                options.primaryOutcomeSessionField !== undefined ||
+                options.primaryOutcomeSourceMetricKey !== undefined ||
+                options.primaryOutcomeUnit !== undefined ||
+                options.comparisonStatistic !== undefined ||
                 options.secondaryBiomarkerKey !== undefined ||
                 options.desiredDirection !== undefined ||
                 options.expectedDirection !== undefined ||
@@ -1984,6 +2208,13 @@ export function registerExperimentCommands(
         ),
         stopCondition: normalizeRepeatableTextFlagOption(options.stopCondition),
         primaryBiomarkerKey: options.primaryBiomarkerKey,
+        primaryOutcomeKey: options.primaryOutcomeKey,
+        primaryOutcomeKind: options.primaryOutcomeKind,
+        primaryOutcomeLabel: options.primaryOutcomeLabel,
+        primaryOutcomeSessionField: options.primaryOutcomeSessionField,
+        primaryOutcomeSourceMetricKey: options.primaryOutcomeSourceMetricKey,
+        primaryOutcomeUnit: options.primaryOutcomeUnit,
+        comparisonStatistic: options.comparisonStatistic,
         secondaryBiomarkerKey: normalizeRepeatableFlagOption(
           options.secondaryBiomarkerKey,
           'secondary-biomarker-key',

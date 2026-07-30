@@ -2052,9 +2052,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
       linqSenderHandles: [" +15551110001 "],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     })).toEqual({
       action: "read_usage_referral",
       linqSenderHandles: ["+15551110001"],
+      sourceConversation: {
+        channel: "linq",
+        linqService: "imessage",
+        threadId: `hid_${"c".repeat(32)}`,
+        threadIsDirect: true,
+      },
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
@@ -2106,6 +2118,24 @@ describe("parseHostedRuntimeGroupTool", () => {
         threadIsDirect: true,
       },
     })).toThrow(/identityId is not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "telegram",
+        linqService: "imessage",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_usage_referral",
+      sourceConversation: {
+        channel: "linq",
+        linqService: "unknown",
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    })).toThrow(/linqService is invalid/u);
   });
 
   it("parses a closed, canonical read_shared roster and status matrix", () => {
