@@ -18,6 +18,7 @@ import {
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   hostedMailboxItemsRequireAiUsageAccess,
+  readHostedMailboxConversationAiUsageHighWater,
   readHostedMailboxConversationAiUsageReplayFloor,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
@@ -60,10 +61,10 @@ export const POST = withJsonError(async (request: Request) => {
     userId,
   });
   const usageRunningLow = await requireHostedRuntimeMailboxAiUsageAccess({
-    at: fetchedAt,
     consumedSeqByLane: projection.consumedSeqByLane,
     items: projection.items,
     lanes: body.lanes,
+    maxSeqByLane: projection.maxSeqByLane,
     prisma,
     userId,
   });
@@ -86,10 +87,12 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
-  at: Date;
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
   items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
+  maxSeqByLane: Parameters<
+    typeof readHostedMailboxConversationAiUsageHighWater
+  >[0]["lanes"];
   prisma: PrismaClient;
   userId: string;
 }): Promise<boolean> {
@@ -121,8 +124,11 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   await tryMarkHostedMailboxConversationAiUsageDenied({
     afterConversationLaneSeq:
       readHostedMailboxConversationAiUsageReplayFloor(input),
-    at: input.at,
     prisma: input.prisma,
+    throughConversationLaneSeq:
+      readHostedMailboxConversationAiUsageHighWater({
+        lanes: input.maxSeqByLane,
+      }),
     userId: input.userId,
   });
 

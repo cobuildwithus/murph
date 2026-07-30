@@ -144,34 +144,39 @@ export interface FetchHostedRuntimeMailboxProjectionResult {
 
 export async function tryMarkHostedMailboxConversationAiUsageDenied(input: {
   afterConversationLaneSeq: bigint;
-  at?: Date | string;
   prisma?: HostedMailboxStoreClient;
+  throughConversationLaneSeq: bigint;
   userId: string;
 }): Promise<boolean> {
   try {
-    if (input.afterConversationLaneSeq < 0n) {
-      throw new TypeError("Hosted mailbox conversation replay floor is invalid.");
+    if (
+      input.afterConversationLaneSeq < 0n
+      || input.throughConversationLaneSeq < 0n
+    ) {
+      throw new TypeError("Hosted mailbox conversation sequence window is invalid.");
+    }
+    if (
+      input.throughConversationLaneSeq <= input.afterConversationLaneSeq
+    ) {
+      return false;
     }
     const prisma = input.prisma ?? getPrisma();
-    const marked = await prisma.hostedMailboxItem.updateMany({
-      data: {
-        aiUsageDeniedAt: normalizeHostedMailboxDate(
-          input.at ?? new Date(),
-          "Hosted mailbox AI usage denied at",
-        ),
-      },
-      where: {
-        aiUsageDeniedAt: null,
-        consumedAt: null,
-        lane: "conversation",
-        laneSeq: {
-          gt: input.afterConversationLaneSeq,
-        },
-        userId: requireNonEmptyString(input.userId, "Hosted mailbox userId"),
-      },
-    });
+    const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+    const marked = await prisma.$executeRaw(Prisma.sql`
+      UPDATE hosted_mailbox_item
+      SET ai_usage_denied_at = GREATEST(
+        created_at,
+        statement_timestamp() AT TIME ZONE 'UTC'
+      )
+      WHERE user_id = ${userId}
+        AND lane = 'conversation'
+        AND lane_seq > ${input.afterConversationLaneSeq}
+        AND lane_seq <= ${input.throughConversationLaneSeq}
+        AND consumed_at IS NULL
+        AND ai_usage_denied_at IS NULL
+    `);
 
-    return marked.count > 0;
+    return marked > 0;
   } catch (error) {
     console.warn("Hosted mailbox usage-denial mark failed.", {
       ...formatHostedExecutionSafeLogErrorDetails(error, {

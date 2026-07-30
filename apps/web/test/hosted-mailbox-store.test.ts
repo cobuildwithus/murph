@@ -696,45 +696,43 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
 });
 
 describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
-  it("marks only fresh unconsumed conversation rows once", async () => {
-    const updateMany = vi.fn(async () => ({ count: 2 }));
+  it("marks only the observed fresh conversation sequence window once", async () => {
+    const executeRaw = vi.fn(async () => 2);
 
     await expect(tryMarkHostedMailboxConversationAiUsageDenied({
       afterConversationLaneSeq: 11n,
-      at: FIXED_NOW,
       prisma: {
-        hostedMailboxItem: { updateMany },
+        $executeRaw: executeRaw,
       } as never,
+      throughConversationLaneSeq: 14n,
       userId: "member_mailbox_1",
     })).resolves.toBe(true);
 
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        aiUsageDeniedAt: FIXED_NOW,
-      },
-      where: {
-        aiUsageDeniedAt: null,
-        consumedAt: null,
-        lane: "conversation",
-        laneSeq: {
-          gt: 11n,
-        },
-        userId: "member_mailbox_1",
-      },
-    });
+    const query = executeRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(query.strings.join("?")).toContain(
+      "lane_seq > ?\n        AND lane_seq <= ?",
+    );
+    expect(query.strings.join("?")).toContain(
+      "statement_timestamp() AT TIME ZONE 'UTC'",
+    );
+    expect(query.values).toEqual(["member_mailbox_1", 11n, 14n]);
   });
 
   it("keeps a failed observability mark non-fatal", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const updateMany = vi.fn(async () => {
+    const executeRaw = vi.fn(async () => {
       throw new Error("database unavailable");
     });
 
     await expect(tryMarkHostedMailboxConversationAiUsageDenied({
       afterConversationLaneSeq: 0n,
       prisma: {
-        hostedMailboxItem: { updateMany },
+        $executeRaw: executeRaw,
       } as never,
+      throughConversationLaneSeq: 1n,
       userId: "member_mailbox_1",
     })).resolves.toBe(false);
     expect(consoleWarn).toHaveBeenCalledWith(

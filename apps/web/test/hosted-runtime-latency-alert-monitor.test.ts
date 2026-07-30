@@ -14,6 +14,7 @@ import {
 } from "@/src/lib/hosted-runtime-latency/alert-monitor";
 
 const now = instant("2026-07-26T16:00:00.000Z");
+const HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT = 20_000;
 const alertEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
   HOSTED_LINQ_ALERT_EMAILS: "operator@example.test",
@@ -379,6 +380,64 @@ describe("hosted runtime latency health", () => {
 });
 
 describe("hosted runtime latency alert monitor", () => {
+  it("applies the bounded scan after excluding valid usage denials", async () => {
+    const fixture = createMonitorPrismaFixture(
+      Array.from(
+        { length: HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1 },
+        () => latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: "2026-07-26T15:58:01.000Z",
+        }),
+      ),
+    );
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: false,
+      scanTruncated: false,
+      unresolvedReplyCount: 0,
+    });
+    const query = fixture.traceQueryRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+    };
+    expect(query.strings.join("?")).toContain(
+      "mailbox_item.ai_usage_denied_at < trace.accepted_at",
+    );
+    expect(query.strings.join("?")).toContain(
+      "mailbox_item.ai_usage_denied_at > ?",
+    );
+  });
+
+  it("fails safe when unmarked or invalidly marked rows exceed the bounded scan", async () => {
+    const fixture = createMonitorPrismaFixture(
+      Array.from(
+        { length: HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1 },
+        (_, index) => latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          aiUsageDeniedAt: index % 2 === 0
+            ? undefined
+            : "2026-07-26T15:57:59.000Z",
+        }),
+      ),
+    );
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result.health).toMatchObject({
+      anomalous: true,
+      scanTruncated: true,
+    });
+  });
+
   it("derives usage denial from the stored mailbox item", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -1390,51 +1449,60 @@ function createMonitorPrismaFixture(
   let state: HostedLinqAlert | null = null;
   let rejectNextClaim = options.rejectNextClaim === true;
 
-  const traceFindMany = vi.fn(async () => {
+  const traceQueryRaw = vi.fn(async (query: unknown) => {
     const selectedRows = queuedRows.shift() ?? rows;
     traceReadEffects.shift()?.();
-    return selectedRows.map((row) => ({
-      acceptedAt: row.acceptedAt,
-      linqDeliveryId: row.linqDeliveryId,
-      linqDelivery: row.deliveryAcceptedAt
-      ? { acceptedAt: row.deliveryAcceptedAt }
-      : null,
-      mailboxItem: {
+    const queryNow = readLatestPrismaSqlDate(query);
+    return selectedRows
+      .filter((row) => {
+        const deniedAt = row.aiUsageDeniedAt;
+        return deniedAt === null
+          || deniedAt < row.acceptedAt
+          || deniedAt > queryNow;
+      })
+      .sort(
+        (left, right) =>
+          right.acceptedAt.getTime() - left.acceptedAt.getTime(),
+      )
+      .slice(0, HOSTED_RUNTIME_LATENCY_TEST_READ_LIMIT + 1)
+      .map((row) => ({
+        acceptedAt: row.acceptedAt,
         aiUsageDeniedAt: row.aiUsageDeniedAt,
         consumedAt: row.consumedAt,
-      },
-      phaseBreakdownJson:
-        row.terminalNonReplyCommittedAt
-        || row.checkpointPublicationExpectedBy
-        || row.progressUpdateAcceptedAt
-        ? {
-            assistant: {
-              ...(row.terminalNonReplyCommittedAt
-                ? {
-                    terminalNonReplyCommittedAtEpochMs:
-                      row.terminalNonReplyCommittedAt.getTime(),
-                  }
-                : {}),
-              ...(row.checkpointPublicationExpectedBy
-                ? {
-                    checkpointPublicationExpectedByEpochMs:
-                      row.checkpointPublicationExpectedBy.getTime(),
-                  }
-                : {}),
-              ...(row.progressUpdateAcceptedAt
-                ? {
-                    progressUpdateAcceptedAtEpochMs:
-                      row.progressUpdateAcceptedAt.getTime(),
-                  }
-                : {}),
-            },
-            schemaVersion: 1,
-          }
-        : null,
-      providerRequestOrdinal: row.providerRequestOrdinal,
-      providerStartAt: row.providerStartAt,
-      runtimeAttemptId: row.runtimeAttemptId,
-    }));
+        deliveryAcceptedAt: row.deliveryAcceptedAt,
+        linqDeliveryId: row.linqDeliveryId,
+        phaseBreakdownJson:
+          row.terminalNonReplyCommittedAt
+          || row.checkpointPublicationExpectedBy
+          || row.progressUpdateAcceptedAt
+          ? {
+              assistant: {
+                ...(row.terminalNonReplyCommittedAt
+                  ? {
+                      terminalNonReplyCommittedAtEpochMs:
+                        row.terminalNonReplyCommittedAt.getTime(),
+                    }
+                  : {}),
+                ...(row.checkpointPublicationExpectedBy
+                  ? {
+                      checkpointPublicationExpectedByEpochMs:
+                        row.checkpointPublicationExpectedBy.getTime(),
+                    }
+                  : {}),
+                ...(row.progressUpdateAcceptedAt
+                  ? {
+                      progressUpdateAcceptedAtEpochMs:
+                        row.progressUpdateAcceptedAt.getTime(),
+                    }
+                  : {}),
+              },
+              schemaVersion: 1,
+            }
+          : null,
+        providerRequestOrdinal: row.providerRequestOrdinal,
+        providerStartAt: row.providerStartAt,
+        runtimeAttemptId: row.runtimeAttemptId,
+      }));
   });
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
     if (!state) {
@@ -1477,15 +1545,14 @@ function createMonitorPrismaFixture(
   return {
     alertUpsert,
     prisma: {
-      hostedIngressLatencyTrace: {
-        findMany: traceFindMany,
-      },
+      $queryRaw: traceQueryRaw,
       hostedLinqAlert: {
         updateMany: alertUpdateMany,
         upsert: alertUpsert,
       },
     } as never,
     readState: () => state,
+    traceQueryRaw,
     queueRowsForReads(
       ...nextRows: readonly HostedRuntimeLatencyHealthRow[][]
     ) {
@@ -1515,6 +1582,25 @@ function createMonitorPrismaFixture(
       rows = [...nextRows];
     },
   };
+}
+
+function readLatestPrismaSqlDate(query: unknown): Date {
+  if (
+    typeof query !== "object"
+    || query === null
+    || !("values" in query)
+    || !Array.isArray(query.values)
+  ) {
+    throw new TypeError("Expected a Prisma SQL query.");
+  }
+  const dates = query.values.filter(
+    (value): value is Date => value instanceof Date,
+  );
+  const latestEpochMs = Math.max(...dates.map((value) => value.getTime()));
+  if (!Number.isFinite(latestEpochMs)) {
+    throw new TypeError("Expected the latency query to include its time window.");
+  }
+  return new Date(latestEpochMs);
 }
 
 interface AlertUpsertArgs {

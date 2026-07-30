@@ -681,8 +681,10 @@ Hosted onboarding extras:
   once while unresolved. Progress accepted before 30 seconds suppresses that
   turn; progress at or after the boundary remains alertable. Fresh conversation
   mailbox rows explicitly stamped by the existing AI usage gate are excluded
-  before grouping, including a later reply after usage resumes; missing or
-  impossible denial chronology remains alertable. The monitor sends
+  before the bounded scan and grouping, including a later reply after usage
+  resumes; missing or impossible denial chronology remains alertable. The
+  database-timed stamp covers only the conversation sequence window observed by
+  the denying fetch or reconciliation. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
   they do not own a user-ingress reply trace. The monitor sends one email per
   continuous incident, suppresses sends from 11 PM through 7 AM

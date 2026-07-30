@@ -696,8 +696,8 @@ describe("hosted orchestration reconciliation facts", () => {
       mocks.tryMarkHostedMailboxConversationAiUsageDenied,
     ).toHaveBeenCalledWith({
       afterConversationLaneSeq: 2n,
-      at: new Date(FIXED_NOW),
       prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 3n,
       userId: MEMBER_ID,
     });
   });
@@ -750,6 +750,16 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(firstResponse.status).toBe(500);
     expect(retryResponse.status).toBe(200);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.tryMarkHostedMailboxConversationAiUsageDenied.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock
+        .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
       chatId: "chat_runtime_denied",

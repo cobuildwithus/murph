@@ -310,7 +310,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
   excludes chronologically valid AI usage-denied traces before grouping while
-  keeping mixed unblocked rows and impossible denial chronology alertable,
+  keeping mixed unblocked rows and impossible denial chronology alertable, and
+  applies the bounded-read truncation signal only to that alertable population,
   excludes explicit committed terminal non-replies during bounded checkpoint
   grace, reopens them when durable consumption does not arrive, keeps normal
   checkpointed suppression healthy and impossible marker chronology alertable,
@@ -355,6 +356,10 @@ not enter evidence; and attachment-only input fails closed before provider work.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
+  local-PostgreSQL proof that the usage-denial write marks only the observed
+  conversation sequence window with database-owned chronology and leaves a
+  post-snapshot append available for a later denial.
 - `apps/cloudflare/test/database-health-{metrics,monitor,worker}.test.ts`
   covers the independent PlanetScale/Linq database-health plane. The tests
   prove strict metric normalization and required-series failure, positive

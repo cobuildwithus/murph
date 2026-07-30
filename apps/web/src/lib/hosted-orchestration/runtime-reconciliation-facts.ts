@@ -26,6 +26,7 @@ import {
   readHostedMailboxRedactedStatusRecord,
 } from "../hosted-mailbox/lag";
 import {
+  readHostedMailboxConversationAiUsageHighWater,
   readHostedMailboxConversationAiUsageReplayFloor,
 } from "../hosted-mailbox/ai-usage-gate";
 import {
@@ -258,6 +259,20 @@ export async function readHostedRuntimeReconciliationFacts(
     if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
+        if (freshConversationMailboxLag) {
+          await tryMarkHostedMailboxConversationAiUsageDenied({
+            afterConversationLaneSeq: readHostedConversationFreshWorkFloor({
+              consumedSeqByLane,
+              mailboxLag,
+            }),
+            prisma,
+            throughConversationLaneSeq:
+              readHostedMailboxConversationAiUsageHighWater({
+                lanes: mailboxLag,
+              }),
+            userId: input.userId,
+          });
+        }
         noticeRetryAt = await sendHostedRuntimeUsageDeniedNoticeForPendingConversation({
           consumedSeqByLane,
           decision: gate.decision,
@@ -265,17 +280,6 @@ export async function readHostedRuntimeReconciliationFacts(
           prisma,
           userId: input.userId,
         });
-        if (freshConversationMailboxLag) {
-          await tryMarkHostedMailboxConversationAiUsageDenied({
-            afterConversationLaneSeq: readHostedConversationFreshWorkFloor({
-              consumedSeqByLane,
-              mailboxLag,
-            }),
-            at: now,
-            prisma,
-            userId: input.userId,
-          });
-        }
       }
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,

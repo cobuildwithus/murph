@@ -2276,13 +2276,15 @@ leaves alone use max-timestamp merge semantics. Every other latency leaf remains
 assign-once.
 Fresh conversation mailbox rows observed at an authoritative Web AI
 usage-denial boundary receive the assign-once `ai_usage_denied_at` timestamp.
-The best-effort write updates only unconsumed rows above the existing
-import/consume replay floor and does not alter gate, mailbox-consumption, or
-reply behavior. A chronologically valid denial timestamp excludes that trace
-row before completed-delivery or unresolved-provider grouping, so a reply after
-usage resumes cannot alert for the intentionally blocked interval while an
-unblocked row sharing the same delivery remains independently alertable.
-Missing or impossible denial chronology provides no suppression.
+The best-effort write uses database UTC time, updates only unconsumed rows
+inside the observed import/consume replay-floor and conversation-high-water
+window, and precedes fallible usage-notice delivery. It does not alter gate,
+mailbox-consumption, or reply behavior. A chronologically valid denial
+timestamp excludes that trace row before the bounded read and
+completed-delivery or unresolved-provider grouping, so a reply after usage
+resumes cannot alert for the intentionally blocked interval while an unblocked
+row sharing the same delivery remains independently alertable. Missing or
+impossible denial chronology provides no suppression.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

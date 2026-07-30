@@ -318,11 +318,13 @@ Last verified: 2026-07-30
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating
-  reconciliation or mailbox-fetch denial boundary. The monitor excludes only a
-  chronologically valid stamp before delivery/provider grouping, so a later
-  reply after usage resumes does not manufacture a latency incident and an
-  unblocked row sharing that reply remains alertable. The best-effort stamp
-  reuses the existing mailbox work owner and cannot fail the usage gate.
+  reconciliation or mailbox-fetch denial boundary. The database-timed write is
+  bounded by the observed replay floor and conversation high-water, happens
+  before fallible usage-notice delivery, reuses the existing mailbox work
+  owner, and cannot fail the gate. The monitor excludes only chronologically
+  valid stamps before its bounded scan and delivery/provider grouping, so a
+  later reply after usage resumes does not manufacture a latency incident and
+  an unblocked row sharing that reply remains alertable.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

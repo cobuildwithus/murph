@@ -1186,8 +1186,8 @@ describe("hosted runtime internal web routes", () => {
       mocks.tryMarkHostedMailboxConversationAiUsageDenied,
     ).toHaveBeenCalledWith({
       afterConversationLaneSeq: 11n,
-      at: expect.any(Date),
       prisma: expect.objectContaining({ kind: "prisma" }),
+      throughConversationLaneSeq: 12n,
       userId: "member_routes_1",
     });
   });

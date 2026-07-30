@@ -47,7 +47,7 @@ type HostedRuntimeLatencyMonitorStatus =
 
 type HostedRuntimeLatencyPrismaClient = Pick<
   PrismaClient,
-  "hostedIngressLatencyTrace" | "hostedLinqAlert"
+  "$queryRaw" | "hostedLinqAlert"
 >;
 
 type HostedRuntimeLatencySend = typeof sendHostedResendPlainTextEmail;
@@ -77,6 +77,18 @@ export interface HostedRuntimeLatencyHealth {
   thresholdMs: number;
   unresolvedReplyCount: number;
   windowMinutes: number;
+}
+
+interface HostedRuntimeLatencyQueryRow {
+  acceptedAt: Date;
+  aiUsageDeniedAt: Date | null;
+  consumedAt: Date | null;
+  deliveryAcceptedAt: Date | null;
+  linqDeliveryId: string | null;
+  phaseBreakdownJson: unknown;
+  providerRequestOrdinal: number | null;
+  providerStartAt: Date | null;
+  runtimeAttemptId: string | null;
 }
 
 export type HostedRuntimeLatencyAlertMonitorOutcome =
@@ -196,45 +208,41 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 
 export async function readHostedRuntimeLatencyHealth(input: {
   now?: Date;
-  prisma?: Pick<PrismaClient, "hostedIngressLatencyTrace">;
+  prisma?: Pick<PrismaClient, "$queryRaw">;
 } = {}): Promise<HostedRuntimeLatencyHealth> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
   const windowStart = new Date(
     now.getTime() - HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS,
   );
-  const rows = await prisma.hostedIngressLatencyTrace.findMany({
-    orderBy: {
-      acceptedAt: "desc",
-    },
-    select: {
-      acceptedAt: true,
-      linqDeliveryId: true,
-      linqDelivery: {
-        select: {
-          acceptedAt: true,
-        },
-      },
-      mailboxItem: {
-        select: {
-          aiUsageDeniedAt: true,
-          consumedAt: true,
-        },
-      },
-      phaseBreakdownJson: true,
-      providerRequestOrdinal: true,
-      providerStartAt: true,
-      runtimeAttemptId: true,
-    },
-    take: HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1,
-    where: {
-      acceptedAt: {
-        gte: windowStart,
-        lte: now,
-      },
-      source: "linq",
-    },
-  });
+  const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(Prisma.sql`
+    SELECT
+      trace.accepted_at AS "acceptedAt",
+      mailbox_item.ai_usage_denied_at AS "aiUsageDeniedAt",
+      mailbox_item.consumed_at AS "consumedAt",
+      delivery.accepted_at AS "deliveryAcceptedAt",
+      trace.linq_delivery_id AS "linqDeliveryId",
+      trace.phase_breakdown_json AS "phaseBreakdownJson",
+      trace.provider_request_ordinal AS "providerRequestOrdinal",
+      trace.provider_start_at AS "providerStartAt",
+      trace.runtime_attempt_id AS "runtimeAttemptId"
+    FROM hosted_ingress_latency_trace AS trace
+    JOIN hosted_mailbox_item AS mailbox_item
+      ON mailbox_item.user_id = trace.user_id
+      AND mailbox_item.id = trace.mailbox_item_id
+    LEFT JOIN hosted_linq_delivery AS delivery
+      ON delivery.id = trace.linq_delivery_id
+    WHERE trace.source = 'linq'
+      AND trace.accepted_at >= ${windowStart}
+      AND trace.accepted_at <= ${now}
+      AND (
+        mailbox_item.ai_usage_denied_at IS NULL
+        OR mailbox_item.ai_usage_denied_at < trace.accepted_at
+        OR mailbox_item.ai_usage_denied_at > ${now}
+      )
+    ORDER BY trace.accepted_at DESC
+    LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
+  `);
   const scanTruncated = rows.length > HOSTED_RUNTIME_LATENCY_READ_LIMIT;
   const visibleRows = scanTruncated
     ? rows.slice(0, HOSTED_RUNTIME_LATENCY_READ_LIMIT)
@@ -244,11 +252,11 @@ export async function readHostedRuntimeLatencyHealth(input: {
     now,
     rows: visibleRows.map((row) => ({
       acceptedAt: row.acceptedAt,
-      aiUsageDeniedAt: row.mailboxItem.aiUsageDeniedAt,
+      aiUsageDeniedAt: row.aiUsageDeniedAt,
       checkpointPublicationExpectedBy:
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
-      consumedAt: row.mailboxItem.consumedAt,
-      deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
+      consumedAt: row.consumedAt,
+      deliveryAcceptedAt: row.deliveryAcceptedAt,
       linqDeliveryId: row.linqDeliveryId,
       progressUpdateAcceptedAt:
         readHostedRuntimeProgressUpdateAcceptedAt(row.phaseBreakdownJson),

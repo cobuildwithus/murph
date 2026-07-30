@@ -8,6 +8,11 @@ export interface HostedMailboxAiUsageGateConsumedSeq {
   lane: string;
 }
 
+export interface HostedMailboxAiUsageGateHighWater {
+  lane: string;
+  maxSeq: bigint | number | string;
+}
+
 export interface HostedMailboxAiUsageGateItem {
   consumedAt?: string | null;
   lane: string;
@@ -59,6 +64,15 @@ export function readHostedMailboxConversationAiUsageReplayFloor(input: {
   const consumedSeq = consumedSeqByLane.get("conversation") ?? 0n;
 
   return importedSeq > consumedSeq ? importedSeq : consumedSeq;
+}
+
+export function readHostedMailboxConversationAiUsageHighWater(input: {
+  lanes: readonly HostedMailboxAiUsageGateHighWater[];
+}): bigint {
+  return resolveHostedMailboxAiUsageGateSeqByLane({
+    entries: input.lanes,
+    seqKey: "maxSeq",
+  }).get("conversation") ?? 0n;
 }
 
 function hostedMailboxConversationItemHasPayloadHandle(
