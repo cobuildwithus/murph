@@ -18618,6 +18618,11 @@ describe('assistant codex event shaping', () => {
             turnId: 'turn-background-boundary-parent',
           },
         )
+        await respondToSubagentModelLookup(
+          child,
+          1,
+          'thread-background-boundary-child',
+        )
         writeCompletedTurn(
           child,
           'thread-background-boundary-parent',
@@ -18683,6 +18688,11 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-interrupted-boundary-parent',
+          'thread-interrupted-boundary-child',
+        )
+        await respondToSubagentModelLookup(
+          child,
+          1,
           'thread-interrupted-boundary-child',
         )
         writeStartedTurn(
@@ -18761,6 +18771,11 @@ describe('assistant codex event shaping', () => {
           'thread-multi-root-boundary-parent-a',
           'thread-multi-root-boundary-child-a',
         )
+        await respondToSubagentModelLookup(
+          child,
+          1,
+          'thread-multi-root-boundary-child-a',
+        )
         writeStartedTurn(
           child,
           'thread-multi-root-boundary-child-a',
@@ -18782,6 +18797,13 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-multi-root-boundary-parent-b',
+          'thread-multi-root-boundary-child-b',
+          'started',
+          { turnId: 'turn-multi-root-boundary-parent-b' },
+        )
+        await respondToSubagentModelLookup(
+          child,
+          2,
           'thread-multi-root-boundary-child-b',
         )
         writeStartedTurn(
@@ -18871,10 +18893,15 @@ describe('assistant codex event shaping', () => {
           'turn-three-child-parent',
         )
 
-        for (const suffix of ['a', 'b', 'c']) {
+        for (const [index, suffix] of ['a', 'b', 'c'].entries()) {
           writeSubAgentActivity(
             child,
             'thread-three-child-parent',
+            `thread-three-child-${suffix}`,
+          )
+          await respondToSubagentModelLookup(
+            child,
+            index + 1,
             `thread-three-child-${suffix}`,
           )
           writeStartedTurn(
@@ -18956,6 +18983,11 @@ describe('assistant codex event shaping', () => {
           'thread-failed-child-parent',
           'thread-failed-child-child',
         )
+        await respondToSubagentModelLookup(
+          child,
+          1,
+          'thread-failed-child-child',
+        )
         writeStartedTurn(
           child,
           'thread-failed-child-child',
@@ -19003,6 +19035,11 @@ describe('assistant codex event shaping', () => {
           'thread-sequential-parent',
           'thread-sequential-child-a',
         )
+        await respondToSubagentModelLookup(
+          child,
+          1,
+          'thread-sequential-child-a',
+        )
         writeStartedTurn(
           child,
           'thread-sequential-child-a',
@@ -19028,6 +19065,11 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-sequential-parent',
+          'thread-sequential-child-b',
+        )
+        await respondToSubagentModelLookup(
+          child,
+          2,
           'thread-sequential-child-b',
         )
         writeCompletedTurn(
@@ -19116,6 +19158,11 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-child-terminal-parent',
+          'thread-child-terminal-child',
+        )
+        await respondToSubagentModelLookup(
+          child,
+          1,
           'thread-child-terminal-child',
         )
         writeStartedTurn(
@@ -21684,6 +21731,26 @@ async function respondToBackgroundTerminals(
     },
   }))
   return request
+}
+
+async function respondToSubagentModelLookup(
+  child: MockChildProcess,
+  requestCount: number,
+  threadId: string,
+): Promise<void> {
+  const request = await waitForRpcMethodCount(
+    child,
+    'thread/resume',
+    requestCount,
+  )
+  expect(asRecord(request.params).threadId).toBe(threadId)
+  child.stdout.write(jsonLine({
+    id: request.id,
+    result: {
+      id: threadId,
+      model: 'gpt-5.6-terra',
+    },
+  }))
 }
 
 async function executeBackgroundBoundaryTurn(
