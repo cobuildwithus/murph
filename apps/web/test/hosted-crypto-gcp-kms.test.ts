@@ -11,6 +11,8 @@ vi.mock("@vercel/oidc", () => ({
 const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const LOCAL_KMS_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
+const LOCAL_KMS_KEY_VERSION_NAME =
+  `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/7`;
 const LOCAL_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
 const LOCAL_MAC_KEY_VERSION =
@@ -153,7 +155,7 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
       )) {
         return jsonResponse({
           ciphertext: "encrypted-root-key",
-          name: LOCAL_KMS_KEY_NAME,
+          name: LOCAL_KMS_KEY_VERSION_NAME,
         });
       }
 
@@ -198,6 +200,78 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
       scope: ["https://www.googleapis.com/auth/cloudkms"],
     });
     expect(readBearerToken(kmsRequest?.headers)).toBe("kms-service-account-token");
+  });
+
+  it("uses only exact CryptoKey or CryptoKeyVersion resource names for decrypt", async () => {
+    const plaintext = new Uint8Array([4, 5, 6]);
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
+      plaintext: Buffer.from(plaintext).toString("base64"),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
+      NODE_ENV: "test",
+    });
+
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: "encrypted-root-key",
+      keyName: LOCAL_KMS_KEY_VERSION_NAME,
+    })).resolves.toEqual({ plaintext });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://kms.example.test/v1/${LOCAL_KMS_KEY_NAME}:decrypt`,
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    for (const keyName of [
+      `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/latest`,
+      `${LOCAL_KMS_KEY_NAME}:decrypt`,
+      `${LOCAL_KMS_KEY_VERSION_NAME}/extra`,
+    ]) {
+      await expect(client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: "encrypted-root-key",
+        keyName,
+      })).rejects.toThrow(/CryptoKey or CryptoKeyVersion resource name/u);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed or mismatched EncryptResponse key version names", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        ciphertext: "encrypted-root-key",
+        name: `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/latest`,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        ciphertext: "encrypted-root-key",
+        name:
+          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/other/cryptoKeyVersions/1",
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
+      NODE_ENV: "test",
+    });
+    const input = {
+      additionalAuthenticatedData: "domain=control",
+      keyName: LOCAL_KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]),
+    };
+
+    await expect(client.encrypt(input)).rejects.toThrow(
+      /must be a CryptoKeyVersion resource name/u,
+    );
+    await expect(client.encrypt(input)).rejects.toThrow(
+      /did not match the requested CryptoKey/u,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("redacts raw Google provider messages from token exchange failures", async () => {
