@@ -74,6 +74,14 @@ function undiciConnectTimeout(): TypeError {
   });
 }
 
+function connectionReset(): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error("read ECONNRESET"), {
+      code: "ECONNRESET",
+    }),
+  });
+}
+
 function options(overrides: Partial<R2BundlesOnlineCopyOptions> = {}): R2BundlesOnlineCopyOptions {
   return {
     apply: false,
@@ -630,6 +638,137 @@ describe("R2 online immutable copy", () => {
     expect(putAttempts).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(copySuccessResponse.bodyUsed).toBe(true);
+  });
+
+  it("accepts an ECONNRESET when strong HEADs prove the copy already committed", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/reset-committed.snapshot.enc`,
+      { etag: '"14141414141414141414141414141414"', size: 12 },
+    );
+    let putAttempts = 0;
+    const headPaths: string[] = [];
+    const fixture = createProductionCopyFixture(
+      eligible,
+      async (request, init, state) => {
+        const url = new URL(String(request));
+        if (init?.method === "PUT") {
+          putAttempts += 1;
+          state.destinationInventory = [marker(), eligible];
+          throw connectionReset();
+        }
+        if (init?.method === "HEAD") {
+          headPaths.push(url.pathname);
+          return exactHeadResponse(eligible);
+        }
+        throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+      },
+    );
+
+    await fixture.run();
+
+    expect(putAttempts).toBe(1);
+    expect(headPaths).toEqual([
+      `/${destinationBucket}/${eligible.key}`,
+      `/${sourceBucket}/${eligible.key}`,
+      `/${destinationBucket}/${eligible.key}`,
+      `/${sourceBucket}/${eligible.key}`,
+    ]);
+  });
+
+  it("retries one uncommitted ECONNRESET with the identical create-only request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T00:00:00.000Z"));
+    try {
+      const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+      const eligible = entry(
+        `users/${boundaryNamespace}/workspace-snapshots/reset-recovery.snapshot.enc`,
+        { etag: '"15151515151515151515151515151515"', size: 12 },
+      );
+      const copyHeaders: Record<string, string | null>[] = [];
+      const putTimes: number[] = [];
+      let putAttempts = 0;
+      let markSourceHeadObserved!: () => void;
+      const sourceHeadObserved = new Promise<void>((resolve) => {
+        markSourceHeadObserved = resolve;
+      });
+      const fixture = createProductionCopyFixture(
+        eligible,
+        async (request, init, state) => {
+          const url = new URL(String(request));
+          if (init?.method === "PUT") {
+            putAttempts += 1;
+            putTimes.push(Date.now());
+            copyHeaders.push(criticalCopyHeaders(init));
+            if (putAttempts === 1) throw connectionReset();
+            state.destinationInventory = [marker(), eligible];
+            return new Response("<CopyObjectResult />", { status: 200 });
+          }
+          if (init?.method === "HEAD") {
+            if (
+              url.pathname === `/${destinationBucket}/${eligible.key}`
+              && !state.destinationInventory.includes(eligible)
+            ) {
+              return new Response(null, { status: 404 });
+            }
+            if (url.pathname === `/${sourceBucket}/${eligible.key}`) {
+              markSourceHeadObserved();
+            }
+            return exactHeadResponse(eligible);
+          }
+          throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+        },
+      );
+
+      const runPromise = fixture.run();
+      await sourceHeadObserved;
+      await vi.advanceTimersByTimeAsync(999);
+      expect(putAttempts).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await runPromise;
+
+      expect(putAttempts).toBe(2);
+      expect(putTimes).toEqual([
+        new Date("2026-07-30T00:00:00.000Z").getTime(),
+        new Date("2026-07-30T00:00:01.000Z").getTime(),
+      ]);
+      expect(copyHeaders[1]).toEqual(copyHeaders[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails ECONNRESET reconciliation when the planned source is missing", async () => {
+    const boundaryNamespace = createHostedStorageNamespaceId("member_1");
+    const eligible = entry(
+      `users/${boundaryNamespace}/workspace-snapshots/reset-missing-source.snapshot.enc`,
+      { etag: '"16161616161616161616161616161616"', size: 12 },
+    );
+    let putAttempts = 0;
+    const fixture = createProductionCopyFixture(eligible, async (request, init) => {
+      const url = new URL(String(request));
+      if (init?.method === "PUT") {
+        putAttempts += 1;
+        throw connectionReset();
+      }
+      if (
+        init?.method === "HEAD"
+        && url.pathname === `/${destinationBucket}/${eligible.key}`
+      ) {
+        return new Response(null, { status: 404 });
+      }
+      if (init?.method === "HEAD" && url.pathname === `/${sourceBucket}/${eligible.key}`) {
+        return new Response(null, { status: 404 });
+      }
+      throw new Error(`Unexpected online-copy fetch method: ${init?.method ?? "GET"}`);
+    });
+
+    await expect(fixture.run()).rejects.toThrow(
+      "connection reset reconciliation found the planned source object missing",
+    );
+
+    expect(putAttempts).toBe(1);
+    expect(fixture.fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("accepts one HTTP 500 when strong HEADs prove the copy already committed", async () => {

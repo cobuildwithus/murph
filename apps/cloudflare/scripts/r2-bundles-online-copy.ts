@@ -1040,14 +1040,30 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
         key: input.entry.key,
         method: "PUT",
       };
-      const response = await fetchR2CopyObjectWithPreconnectRetry(environment, request);
-      await response.arrayBuffer();
-      if (response.status === 500) {
+      let response: Response;
+      try {
+        response = await fetchR2CopyObjectWithPreconnectRetry(environment, request);
+      } catch (error) {
+        if (!isExactConnectionReset(error)) throw error;
         const recoveryNotBefore = performance.now() + R2_SAME_KEY_WRITE_INTERVAL_MS;
-        return await reconcileR2CopyObjectHttp500({
+        return await reconcileR2CopyObjectAmbiguousOutcome({
           destination: input.destination,
           entry: input.entry,
           environment,
+          failureLabel: "connection reset",
+          recoveryNotBefore,
+          request,
+          source: input.source,
+        });
+      }
+      await response.arrayBuffer();
+      if (response.status === 500) {
+        const recoveryNotBefore = performance.now() + R2_SAME_KEY_WRITE_INTERVAL_MS;
+        return await reconcileR2CopyObjectAmbiguousOutcome({
+          destination: input.destination,
+          entry: input.entry,
+          environment,
+          failureLabel: "HTTP 500",
           recoveryNotBefore,
           request,
           source: input.source,
@@ -1084,10 +1100,11 @@ function createOnlineCopyClient(environment: MigrationEnvironment): OnlineCopyCl
   };
 }
 
-async function reconcileR2CopyObjectHttp500(input: {
+async function reconcileR2CopyObjectAmbiguousOutcome(input: {
   destination: string;
   entry: R2ObjectInventoryEntry;
   environment: MigrationEnvironment;
+  failureLabel: "connection reset" | "HTTP 500";
   recoveryNotBefore: number;
   request: R2CopyRequestInput;
   source: string;
@@ -1099,19 +1116,19 @@ async function reconcileR2CopyObjectHttp500(input: {
   );
   if (destinationHead && !sameHeadIdentity(input.entry, destinationHead)) {
     throw new Error(
-      "R2 CopyObject HTTP 500 reconciliation found a conflicting destination identity.",
+      `R2 CopyObject ${input.failureLabel} reconciliation found a conflicting destination identity.`,
     );
   }
 
   const sourceHead = await headR2Object(input.environment, input.source, input.entry.key);
   if (!sourceHead) {
     throw new Error(
-      "R2 CopyObject HTTP 500 reconciliation found the planned source object missing.",
+      `R2 CopyObject ${input.failureLabel} reconciliation found the planned source object missing.`,
     );
   }
   if (!sameHeadIdentity(input.entry, sourceHead)) {
     throw new Error(
-      "R2 CopyObject HTTP 500 reconciliation found the planned source identity changed.",
+      `R2 CopyObject ${input.failureLabel} reconciliation found the planned source identity changed.`,
     );
   }
   if (destinationHead) return "destination_exists";
@@ -1122,7 +1139,8 @@ async function reconcileR2CopyObjectHttp500(input: {
   if (recoveryResponse.status === 412) return "destination_exists";
   if (!recoveryResponse.ok) {
     throw new Error(
-      `R2 create-only CopyObject recovery failed with HTTP ${recoveryResponse.status}.`,
+      `R2 create-only CopyObject ${input.failureLabel} recovery failed with HTTP `
+      + `${recoveryResponse.status}.`,
     );
   }
   return "copied";
@@ -1178,6 +1196,15 @@ function isExactUndiciConnectTimeout(error: unknown): boolean {
     && cause !== null
     && "code" in cause
     && cause.code === "UND_ERR_CONNECT_TIMEOUT";
+}
+
+function isExactConnectionReset(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const cause = error.cause;
+  return typeof cause === "object"
+    && cause !== null
+    && "code" in cause
+    && cause.code === "ECONNRESET";
 }
 
 async function fetchR2WithOneRetry(

@@ -231,15 +231,21 @@ Continue with step 6 while that exact process waits. A timing-only rehearsal
 must omit this flag; if it exits with destination-only churn, keep that
 destination as rehearsal evidence only and never restart copying into it.
 
-CopyObject has two narrow recovery cases:
+CopyObject has three narrow recovery cases:
 
 1. The initial request allows one additional attempt only when the first
    built-in-fetch rejection is a `TypeError` whose direct cause code is
    `UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
    reached the server.
-2. After the terminal response body is fully drained, exactly HTTP `500`
-   enters one reconciliation path. Cloudflare documents `500 InternalError` as
-   retryable, and R2's direct S3 reads are strongly consistent:
+2. An initial built-in-fetch `TypeError` whose direct cause code is exactly
+   `ECONNRESET` enters identity reconciliation instead of a blind retry. The
+   reset does not prove whether R2 committed the create-only request, so the
+   copier uses the same strong destination/source HEAD proof and one-second
+   same-key recovery floor described below.
+3. After the terminal response body is fully drained, exactly HTTP `500`
+   enters the same identity reconciliation path. Cloudflare documents `500
+   InternalError` as retryable, and R2's direct S3 reads are strongly
+   consistent:
    [error codes](https://developers.cloudflare.com/r2/api/error-codes/) and
    [consistency model](https://developers.cloudflare.com/r2/reference/consistency/).
    The copier HEADs the destination and source and requires the planned ETag
@@ -250,18 +256,19 @@ CopyObject has two narrow recovery cases:
    recovery attempt does not use or reset the pre-connect retry wrapper. R2
    permits only [one write per second to the same object key](https://developers.cloudflare.com/r2/platform/limits/),
    so the copier establishes a one-second recovery-not-before deadline after
-   the first `500` body drains, performs the reconciliation HEADs during that
-   interval, and waits any remaining time before the recovery PUT.
+   the ambiguous failure, performs the reconciliation HEADs during that
+   interval, and waits any remaining time before the recovery PUT. For HTTP
+   `500`, that deadline starts only after the first response body drains.
 
-The single HTTP `500` recovery accepts only a successful response or `412`,
-then the ordinary destination and source HEAD validation runs again. A second
-`404`, `500`, `429`, `503`, other HTTP response, redirect, socket or transport
-failure, or response-body failure is terminal. A body failure on the first
-`500`, failed reconciliation HEAD, missing or changed source, or conflicting
-destination is also terminal without a recovery PUT.
-Every other first-attempt terminal HTTP response, redirect, socket failure, and
+The single ambiguous-outcome recovery accepts only a successful response or
+`412`, then the ordinary destination and source HEAD validation runs again. A
+second `404`, `500`, `429`, `503`, other HTTP response, redirect, socket or
+transport failure, or response-body failure is terminal. A body failure on the
+first `500`, failed reconciliation HEAD, missing or changed source, or
+conflicting destination is also terminal without a recovery PUT. Every other
+first-attempt terminal HTTP response, redirect, socket failure, and
 response-body failure keeps its existing terminal one-shot behavior. No PUT is
-allowed after the single HTTP `500` recovery attempt; when the initial
+allowed after the single ambiguous-outcome recovery attempt; when the initial
 pre-connect retry was used, this still caps the sequence at three raw fetch
 calls while only two could have reached R2.
 
