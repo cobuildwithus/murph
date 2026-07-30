@@ -70,7 +70,10 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
+  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment, research, deterministic transformation, or verification whose result is not needed in the current reply, and reply without waiting.",
+  `When the root model is gpt-5.6-sol, and gpt-5.6-terra is listed as an available child model, pass model="gpt-5.6-terra", reasoning_effort="low", and fork_turns="none" for well-specified, low-consequence leaf work such as extracting structured values from lab files, gathering sources, or running checks.`,
+  `Put every required input, file path, constraint, and completion criterion in the child message because fork_turns="none" gives it no parent conversation history.`,
+  "Do not spawn an inherited Sol child solely for this class of work, and keep interpretation, clinical judgment, ambiguous planning, permission-sensitive actions, and final synthesis in the root.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
@@ -268,6 +271,8 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
+    "# Allow stronger roots to route bounded leaf work to a cheaper compatible model.",
+    "expose_spawn_agent_model_overrides = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -1513,6 +1518,8 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
+      "# Allow stronger roots to route bounded leaf work to a cheaper compatible model.",
+      "expose_spawn_agent_model_overrides = true",
       "# V2 counts the root in this limit: four means root plus three children.",
       "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -1594,6 +1601,7 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /^memories = true$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
+  assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^agent_max_threads/mu);
   assert.ok(config.includes(
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,

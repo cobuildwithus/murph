@@ -6,6 +6,10 @@ import {
   resolveAssistantSkillsRoot,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+} from "@murphai/hosted-execution/assistant-model";
+import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
@@ -61,7 +65,10 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
+  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment, research, deterministic transformation, or verification whose result is not needed in the current reply, and reply without waiting.",
+  `When the root model is ${HOSTED_ASSISTANT_SOL_MODEL}, and ${HOSTED_ASSISTANT_TERRA_MODEL} is listed as an available child model, pass model="${HOSTED_ASSISTANT_TERRA_MODEL}", reasoning_effort="low", and fork_turns="none" for well-specified, low-consequence leaf work such as extracting structured values from lab files, gathering sources, or running checks.`,
+  `Put every required input, file path, constraint, and completion criterion in the child message because fork_turns="none" gives it no parent conversation history.`,
+  "Do not spawn an inherited Sol child solely for this class of work, and keep interpretation, clinical judgment, ambiguous planning, permission-sensitive actions, and final synthesis in the root.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
@@ -602,6 +609,8 @@ export function buildHostedCodexConfigToml(input: {
     "# A CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",
     "enabled = true",
+    "# Allow stronger roots to route bounded leaf work to a cheaper compatible model.",
+    "expose_spawn_agent_model_overrides = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
