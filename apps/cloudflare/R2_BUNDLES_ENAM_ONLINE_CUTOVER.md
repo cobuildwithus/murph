@@ -231,15 +231,43 @@ Continue with step 6 while that exact process waits. A timing-only rehearsal
 must omit this flag; if it exits with destination-only churn, keep that
 destination as rehearsal evidence only and never restart copying into it.
 
-CopyObject allows one additional attempt only when the first built-in-fetch
-rejection is a `TypeError` whose direct cause code is
-`UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
-reached the server. Redirects, terminal HTTP responses (including `429` and
-`5xx`), socket failures, response-body failures, and any failure from the
-second attempt remain terminal and one-shot because the request may have
-committed. Keep copy admission closed after such an ambiguous outcome, wait
-out the request bound, then run the source-active read-only check below. A
-destination-only eligible object blocks reuse of that destination.
+CopyObject has two narrow recovery cases:
+
+1. The initial request allows one additional attempt only when the first
+   built-in-fetch rejection is a `TypeError` whose direct cause code is
+   `UND_ERR_CONNECT_TIMEOUT`, proving that the failed connection attempt never
+   reached the server.
+2. After the terminal response body is fully drained, exactly HTTP `500`
+   enters one reconciliation path. Cloudflare documents `500 InternalError` as
+   retryable, and R2's direct S3 reads are strongly consistent:
+   [error codes](https://developers.cloudflare.com/r2/api/error-codes/) and
+   [consistency model](https://developers.cloudflare.com/r2/reference/consistency/).
+   The copier HEADs the destination and source and requires the planned ETag
+   and byte size for every object that exists. An exact destination plus exact
+   source proves the first request committed and returns without another PUT.
+   An absent destination plus exact source permits exactly one further raw
+   create-only CopyObject with the same source and destination conditions. That
+   recovery attempt does not use or reset the pre-connect retry wrapper.
+
+The single HTTP `500` recovery accepts only a successful response or `412`,
+then the ordinary destination and source HEAD validation runs again. A second
+`404`, `500`, `429`, `503`, other HTTP response, redirect, socket or transport
+failure, or response-body failure is terminal. A body failure on the first
+`500`, failed reconciliation HEAD, missing or changed source, or conflicting
+destination is also terminal without a recovery PUT.
+Every other first-attempt terminal HTTP response, redirect, socket failure, and
+response-body failure keeps its existing terminal one-shot behavior. No PUT is
+allowed after the single HTTP `500` recovery attempt; when the initial
+pre-connect retry was used, this still caps the sequence at three raw fetch
+calls while only two could have reached R2.
+
+R2's destination and source CopyObject conditions are not atomic with one
+another, so these identity checks cannot be removed:
+[conditional CopyObject extensions](https://developers.cloudflare.com/r2/api/s3/extensions/).
+After any unresolved outcome, keep copy admission closed, preserve the
+destination as quarantine evidence, and never resume, reuse, delete, or promote
+it. Rebook the rehearsal or migration with a fresh empty destination after the
+failure is understood.
 
 ### 5. Complete normally or audit an abnormal stop
 
