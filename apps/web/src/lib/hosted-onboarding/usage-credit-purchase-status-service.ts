@@ -568,7 +568,7 @@ export async function projectHostedUsageCreditCheckoutResult(input: {
   };
 }
 
-function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
+export function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
   HostedUsageCreditPurchase,
   "status"
 >): HostedUsageCreditPublicPurchaseStatus {

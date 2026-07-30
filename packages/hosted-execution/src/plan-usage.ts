@@ -21,6 +21,7 @@ export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
 
 export const HOSTED_ADD_USAGE_SETTINGS_URL =
   "/settings?addUsage=true#subscription" as const;
+export const HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS = 50;
 
 const hostedPlanUsageGeneratedAtSchema = z.string().datetime({ offset: true });
 
@@ -57,6 +58,78 @@ const hostedPlanUsageForecastSchema = z
   })
   .strict();
 
+const hostedPlanUsageUsdSchema = z
+  .string()
+  .max(32)
+  .regex(/^(?:0|[1-9]\d*)\.\d{6}$/u);
+
+const hostedPlanUsageTopUpSchema = z
+  .object({
+    addedUsd: hostedPlanUsageUsdSchema,
+    adjustedUsd: hostedPlanUsageUsdSchema,
+    creditedAt: z.string().datetime({ offset: true }),
+    remainingUsd: hostedPlanUsageUsdSchema,
+    source: z.enum(["added_for_you", "purchased_by_you"]),
+    usedUsd: hostedPlanUsageUsdSchema,
+  })
+  .strict();
+
+const hostedPlanUsageSelfTopUpSchema = hostedPlanUsageTopUpSchema.extend({
+  source: z.literal("purchased_by_you"),
+});
+
+const hostedPlanUsageLatestSelfPurchaseSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      amountUsd: hostedPlanUsageUsdSchema,
+      attemptedAt: z.string().datetime({ offset: true }),
+      status: z.literal("fulfilled"),
+      topUp: hostedPlanUsageSelfTopUpSchema,
+    })
+    .strict(),
+  z
+    .object({
+      amountUsd: hostedPlanUsageUsdSchema,
+      attemptedAt: z.string().datetime({ offset: true }),
+      status: z.enum([
+        "checkout_open",
+        "payment_pending",
+        "expired",
+        "payment_failed",
+        "reconciling",
+      ]),
+      topUp: z.null(),
+    })
+    .strict(),
+]);
+
+const hostedPlanUsageTopUpHistorySchema = z
+  .object({
+    hasMore: z.boolean(),
+    latestSelfPurchase: hostedPlanUsageLatestSelfPurchaseSchema.nullable(),
+    topUps: z
+      .array(hostedPlanUsageTopUpSchema)
+      .max(HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS),
+    totalCount: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const expectedRows = Math.min(
+      value.totalCount,
+      HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS,
+    );
+    if (
+      value.topUps.length !== expectedRows
+      || value.hasMore
+        !== (value.totalCount > HOSTED_PLAN_USAGE_TOP_UP_HISTORY_MAX_ROWS)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Top-up history count metadata is inconsistent.",
+      });
+    }
+  });
+
 const hostedPlanUsageAvailableSchema = z
   .object({
     accessKind: z.enum(HOSTED_PLAN_USAGE_ACCESS_KINDS),
@@ -72,6 +145,7 @@ const hostedPlanUsageAvailableSchema = z
       hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
     remainingPercent: z.number().int().min(0).max(100),
     status: z.enum(["active", "exhausted"]),
+    topUpHistory: hostedPlanUsageTopUpHistorySchema.optional(),
     usedPercent: z.number().int().min(0).max(100),
   })
   .strict();
@@ -84,6 +158,7 @@ const hostedPlanUsageUnavailableSchema = z
     subscriptionActionQuote:
       hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
     status: z.literal("unavailable"),
+    topUpHistory: hostedPlanUsageTopUpHistorySchema.optional(),
   })
   .strict();
 
@@ -95,6 +170,7 @@ export const hostedPlanUsageStatusSchema = z.union([
 export const hostedPlanUsageToolRequestSchema = z
   .object({
     includeSubscriptionActionQuote: z.literal(true).optional(),
+    includeTopUpHistory: z.literal(true).optional(),
   })
   .strict();
 
@@ -107,6 +183,9 @@ export type HostedPlanUsageRecommendedAction = z.infer<
 >;
 export type HostedPlanUsageSubscriptionActionQuote = z.infer<
   typeof hostedPlanUsageSubscriptionActionQuoteSchema
+>;
+export type HostedPlanUsageTopUpHistory = z.infer<
+  typeof hostedPlanUsageTopUpHistorySchema
 >;
 export type HostedPlanUsageToolRequest = z.infer<
   typeof hostedPlanUsageToolRequestSchema

@@ -48,6 +48,9 @@ import {
   hostedRuntimeSubscriptionToolRequestSchema,
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
+import type {
+  HostedPlanUsageToolRequest,
+} from '@murphai/hosted-execution/plan-usage'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -514,11 +517,18 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. This is read-only: percentages and forecasts cover all available usage and expose no allowance/credit-source split; a recommendation or quote is not consent or a billing action.',
+    'Read the current private hosted plan and overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request or trusted low-usage context. includeTopUpHistory adds latest self-purchase status and beneficiary-scoped posted grants: added, used, adjusted, and remaining. This is read-only; a recommendation or quote is not consent.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: {},
+    properties: {
+      includeTopUpHistory: {
+        type: 'boolean',
+        enum: [true],
+        description:
+          'Include latest self-purchase status and bounded posted top-up history only when the current member explicitly asks about usage purchases or credits.',
+      },
+    },
   },
 } as const
 
@@ -1678,7 +1688,11 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
-const planUsageArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z
+  .object({
+    includeTopUpHistory: z.literal(true).optional(),
+  })
+  .strict()
 const imessageContactArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
@@ -2165,6 +2179,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'plan-usage'
+      request: HostedPlanUsageToolRequest
     }
   | {
       kind: 'imessage-contact'
@@ -2433,6 +2448,7 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+        request: parsed.request,
       }
     }
     case MURPH_IMESSAGE_CONTACT_TOOL.name: {
@@ -3095,6 +3111,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'plan-usage':
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'imessage-contact':
       return await executeIMessageContactTool({
@@ -3470,6 +3487,7 @@ async function executeFamilyPlanTool(input: {
 
 async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
+  request: HostedPlanUsageToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
   const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
   if (!planUsageTool) {
@@ -3477,7 +3495,10 @@ async function executePlanUsageTool(input: {
   }
 
   try {
-    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
+    return toolTextResult(
+      true,
+      safeToolPayloadText(await planUsageTool.read(input.request)),
+    )
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
   }
@@ -5513,7 +5534,7 @@ function parseFamilyPlanArguments(
 function parsePlanUsageArguments(
   value: unknown,
 ):
-  | { ok: true }
+  | { ok: true; request: HostedPlanUsageToolRequest }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = planUsageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5523,12 +5544,15 @@ function parsePlanUsageArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.plan_usage.input',
-        schemaRootKeys: [],
+        schemaRootKeys: ['includeTopUpHistory'],
         toolName: 'murph.plan_usage',
       }),
     }
   }
-  return { ok: true }
+  return {
+    ok: true,
+    request: parsed.data,
+  }
 }
 
 function parseIMessageContactArguments(

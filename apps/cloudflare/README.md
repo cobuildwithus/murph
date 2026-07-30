@@ -51,7 +51,12 @@ usage truth and has no billing mutation authority. The current runner opts into
 `subscriptionActionQuote`, which is current terms for an explicit member
 request rather than a recommendation or consent. The usage-thresholded
 `recommendedAction` remains separate and may carry the exact first-party
-`add_usage` Settings handoff.
+`add_usage` Settings handoff. An explicit model argument may also opt into
+`topUpHistory`; Cloudflare forwards that bounded request and validates the
+strict response but never reads or derives purchase-credit state. The original
+request and response remain valid when the expansion is absent. Deploy Web's
+optional request/response support before a Cloudflare build that can request
+the expansion; an older runtime against the newer Web shape remains compatible.
 `murph.labs` uses one allowlisted signed `web-control.worker` callback for live
 read-only `search`, `show`, and ZIP `locations` requests. Cloudflare transports
 and validates the strict normalized result but owns no Junction credential,

@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-27
+Last verified: 2026-07-29
 Status: Implemented current-state contract
 
 ## Goal
@@ -26,9 +26,12 @@ consumption order. The append-only credit ledger stores purchase and referral
 grants as the canonical source, and the compact member balance/version remains
 its bounded admission projection. The plan-usage read combines current-period
 spend with every unit of capacity the gate says remains, so Settings and the
-assistant receive one overall percentage without receiving internal allowance,
-credit, or source-split values. The response may recommend the authenticated
-Settings top-up handoff, but it cannot create Checkout or grant credit.
+assistant's default read receive one overall percentage without receiving
+internal allowance, credit, or source-split values. For an explicit private
+question about top-ups, the assistant may opt into the bounded beneficiary
+purchase-credit history described below. The response may recommend the
+authenticated Settings top-up handoff, but it cannot create Checkout or grant
+credit.
 
 The growth dashboard's tracked fulfilled-top-up total has a different,
 company-wide scope. One anonymous singleton count is seeded from retained
@@ -49,7 +52,22 @@ port into assistant-engine, which advertises `murph.plan_usage` only when the
 port exists. The original empty request remains valid and keeps the original
 response shape. The current runtime opts into a nullable
 `subscriptionActionQuote`; Web omits that field for callers that do not request
-it. Billing truth and mutation authority stay in `apps/web`.
+it. An optional `includeTopUpHistory: true` request similarly adds only the
+latest self-funded personal purchase attempt and the callback-bound member's
+beneficiary-scoped purchase grants. The attempt exposes its intended credit
+amount, creation time, and existing coarse public lifecycle status. Only a
+fulfilled attempt correlated to its purchase grant includes a posted top-up;
+an open, pending, reconciling, failed, or expired attempt carries no grant, so
+an older fulfilled grant cannot falsely confirm that newer attempt. Each posted
+row contains the credited timestamp, decimal added, usage-debited,
+non-usage-adjusted, and remaining USD values, plus whether the bound member
+funded it or someone added it for them. The projection exposes no member,
+purchase, ledger, Stripe, or payment identifier. It reports an exact total
+grant count, returns at most the newest 50 grants, and marks truncation with
+`hasMore`. Web derives the aggregate, latest attempt, and grants within one
+repeatable-read snapshot and omits this expansion for ordinary reads and for
+`group_not_supported`. Billing truth and mutation authority stay in
+`apps/web`.
 
 `@murphai/hosted-execution/subscription` owns the separate strict action
 contract. Cloudflare carries it through `subscriptionToolPort` over the same
@@ -98,10 +116,15 @@ sum to 100. Their denominator is current-period spend plus every unit of
 effective capacity still available from the plan and generic usage credit. A
 fulfilled top-up can therefore move the percentage backward immediately.
 Settings still exposes neither the exact usage-credit balance nor the internal
-included-allowance value. At a monthly reset, period spend returns to zero, the
-plan allowance replenishes, and unused usage credit remains available. The
-operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+included-allowance value. The explicit private assistant expansion is narrower
+than an aggregate balance: it reports only purchase grants credited to that
+member and their own ledger-backed usage, adjustment, and remaining amounts. It
+does not reveal included allowance, referral-credit balances, another
+beneficiary's credit, or a payer's purchases for someone else. At a monthly
+reset, period spend returns to zero, the plan allowance replenishes, and unused
+usage credit remains available. The operation that crosses effective capacity
+may finish, but subsequent usage-bearing work blocks and accepted conversation
+input remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
@@ -147,14 +170,28 @@ not a URL. It may be null when the action is ineligible. It is neither a
 recommendation nor consent, and it does not weaken the explicit-confirmation
 rule.
 
-Home and `murph.plan_usage` render only `recommendedAction`. Settings may expose
-**Add usage** at any utilization for an eligible direct paid member, using the
-same server-projected offers. Subscription actions still use the existing
-server-authorized billing route; **Add usage** uses the authenticated one-time
-Checkout route described in the top-up spec. Assistant policy uses a matching
-`subscriptionActionQuote` only to disclose current terms before seeking an
-explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
-upgrade a plan, grant credit, or claim that a billing change happened.
+Home and the default `murph.plan_usage` read render only `recommendedAction`.
+Settings may expose **Add usage** at any utilization for an eligible direct
+paid member, using the same server-projected offers. An explicit private
+top-up-history question may expand `murph.plan_usage` with the bounded
+beneficiary ledger projection; proactive low-usage reads do not. Subscription
+actions still use the existing server-authorized billing route; **Add usage**
+uses the authenticated one-time Checkout route described in the top-up spec.
+Assistant policy uses a matching `subscriptionActionQuote` only to disclose
+current terms before seeking an explicit choice. The read-only
+`murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
+claim that a billing change happened.
+
+For a question about a just-attempted personal top-up, assistant policy checks
+`latestSelfPurchase` before historical grants. `fulfilled` plus its correlated
+top-up is the only posted result. `checkout_open` remains unverified because
+checkout may still be open or a submitted payment may be awaiting its webhook;
+the assistant never contradicts a member who says they completed payment.
+`payment_pending` and `reconciling` also remain unverified;
+`payment_failed` failed; and `expired` expired. A missing latest attempt cannot
+be inferred from overall usage percentage or older grants. Historical
+`added_for_you` grants remain beneficiary history and never reveal or guess the
+payer.
 
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing

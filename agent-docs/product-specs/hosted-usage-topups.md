@@ -241,6 +241,30 @@ with the original added amount, source, and date. That history does not read or
 display aggregate or per-grant remaining capacity; the combined AI usage bar
 remains the only current-capacity view.
 
+In a private assistant conversation, an explicit top-up-history question may
+instead request the bounded `murph.plan_usage` expansion. Web selects purchase
+grants by the callback-bound beneficiary, never by payer, so a Family purchase
+for someone else is not presented as the payer's own capacity. The expansion
+may report per-grant usage debits, remaining credit, and non-usage adjustments
+because the member asked for that accounting detail. Ordinary usage reads,
+proactive low-usage warnings, group contexts, Home, and Settings keep the
+aggregate current-capacity presentation above.
+
+The same expansion separately selects the newest purchase whose payer and
+beneficiary are both the callback-bound member. It exposes only the intended
+credit amount, attempt time, and the existing public purchase status. A
+fulfilled status is correlated to that purchase's committed grant and includes
+the matching top-up projection; every other status includes no grant. Thus a
+newer open, pending, reconciling, failed, or expired attempt wins over older
+fulfilled history when the member asks whether a purchase just posted.
+`checkout_open` alone does not prove checkout was unfinished: immediately after
+a successful return, it can also mean a submitted payment is awaiting its
+fulfillment webhook. Conversation policy therefore calls that state unverified
+and does not contradict a member who says they completed payment. This read
+happens in the same repeatable snapshot as the aggregate and grant history. It
+performs no Stripe I/O and exposes no member, purchase, ledger, or
+payment-provider identifier.
+
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
 web-owned projection.

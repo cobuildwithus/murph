@@ -18,9 +18,14 @@ export function createHostedRuntimePlanUsageToolPort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["planUsageToolPort"]> {
   return {
-    async read() {
+    async read(request) {
       const payload = await fetchHostedWebControlPlaneJson({
-        body: { includeSubscriptionActionQuote: true },
+        body: {
+          includeSubscriptionActionQuote: true,
+          ...(request.includeTopUpHistory
+            ? { includeTopUpHistory: true }
+            : {}),
+        },
         boundUserId: input.boundUserId,
         description: "Hosted plan usage tool",
         fetchImpl: input.fetchImpl,

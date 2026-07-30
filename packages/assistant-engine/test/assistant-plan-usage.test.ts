@@ -28,10 +28,10 @@ describe("assistant plan usage tool", () => {
       "overall AI-usage projection",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "expose no allowance/credit-source split",
+      "includeTopUpHistory",
     );
-    expect(MURPH_PLAN_USAGE_TOOL.description).not.toContain(
-      "included/purchased",
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "beneficiary-scoped",
     );
   });
 
@@ -51,7 +51,7 @@ describe("assistant plan usage tool", () => {
         tool: "plan_usage",
       },
     });
-    expect(request).toEqual({ kind: "plan-usage" });
+    expect(request).toEqual({ kind: "plan-usage", request: {} });
     if (!request) {
       throw new Error("Expected a plan usage dynamic tool request.");
     }
@@ -89,7 +89,7 @@ describe("assistant plan usage tool", () => {
       request,
     });
 
-    expect(planUsageTool.read).toHaveBeenCalledOnce();
+    expect(planUsageTool.read).toHaveBeenCalledWith({});
     expect(result.rpcResult.success).toBe(true);
     const resultText = result.rpcResult.contentItems[0]?.text;
     expect(resultText).toContain('"usedPercent":76');
@@ -101,6 +101,90 @@ describe("assistant plan usage tool", () => {
     expect(resultText).toContain("upgrade_edge");
     expect(resultText).toContain(
       '"label":"Upgrade to Edge ($20/month)"',
+    );
+  });
+
+  it("requests top-up history only through the explicit expansion", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: { includeTopUpHistory: true },
+        namespace: "murph",
+        tool: "plan_usage",
+      },
+    });
+    expect(request).toEqual({
+      kind: "plan-usage",
+      request: { includeTopUpHistory: true },
+    });
+    if (!request) {
+      throw new Error("Expected a plan usage dynamic tool request.");
+    }
+
+    const planUsageTool = {
+      read: vi.fn(async () => ({
+        accessKind: "paid" as const,
+        forecast: null,
+        generatedAt: "2026-07-03T12:00:00.000Z",
+        periodEnd: "2026-08-01T00:00:00.000Z",
+        periodKind: "monthly" as const,
+        periodStart: "2026-07-01T00:00:00.000Z",
+        planCode: "launch_monthly" as const,
+        planName: "Pulse" as const,
+        recommendedAction: null,
+        remainingPercent: 50,
+        status: "active" as const,
+        topUpHistory: {
+          hasMore: false,
+          latestSelfPurchase: {
+            amountUsd: "5.000000",
+            attemptedAt: "2026-07-02T11:59:00.000Z",
+            status: "fulfilled" as const,
+            topUp: {
+              addedUsd: "5.000000",
+              adjustedUsd: "0.000000",
+              creditedAt: "2026-07-02T12:00:00.000Z",
+              remainingUsd: "3.750000",
+              source: "purchased_by_you" as const,
+              usedUsd: "1.250000",
+            },
+          },
+          topUps: [
+            {
+              addedUsd: "5.000000",
+              adjustedUsd: "0.000000",
+              creditedAt: "2026-07-02T12:00:00.000Z",
+              remainingUsd: "3.750000",
+              source: "purchased_by_you" as const,
+              usedUsd: "1.250000",
+            },
+          ],
+          totalCount: 1,
+        },
+        usedPercent: 50,
+      })),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: buildHostedToolContext(planUsageTool),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(planUsageTool.read).toHaveBeenCalledWith({
+      includeTopUpHistory: true,
+    });
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"remainingUsd":"3.750000"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"source":"purchased_by_you"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"fulfilled"',
     );
   });
 

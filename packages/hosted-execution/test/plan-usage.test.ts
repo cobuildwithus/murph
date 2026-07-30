@@ -38,6 +38,151 @@ describe("hosted plan usage contract", () => {
     });
   });
 
+  it("parses bounded beneficiary-scoped top-up history", () => {
+    const status = {
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: "2026-07-03T12:00:00.000Z",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      periodKind: "monthly",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: null,
+      remainingPercent: 50,
+      status: "active",
+      topUpHistory: {
+        hasMore: false,
+        latestSelfPurchase: {
+          amountUsd: "5.000000",
+          attemptedAt: "2026-07-02T12:00:00.000Z",
+          status: "fulfilled",
+          topUp: {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.000000",
+            creditedAt: "2026-07-02T12:00:00.000Z",
+            remainingUsd: "3.750000",
+            source: "purchased_by_you",
+            usedUsd: "1.250000",
+          },
+        },
+        topUps: [
+          {
+            addedUsd: "5.000000",
+            adjustedUsd: "0.000000",
+            creditedAt: "2026-07-02T12:00:00.000Z",
+            remainingUsd: "3.750000",
+            source: "purchased_by_you",
+            usedUsd: "1.250000",
+          },
+        ],
+        totalCount: 1,
+      },
+      usedPercent: 50,
+    } as const;
+
+    expect(parseHostedPlanUsageStatus(status)).toMatchObject({
+      topUpHistory: {
+        hasMore: false,
+        totalCount: 1,
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        hasMore: true,
+      },
+    })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        hasMore: true,
+        totalCount: 2,
+      },
+    })).toThrow();
+    const fiftyTopUps = Array.from(
+      { length: 50 },
+      () => status.topUpHistory.topUps[0],
+    );
+    expect(parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        hasMore: true,
+        latestSelfPurchase: status.topUpHistory.latestSelfPurchase,
+        topUps: fiftyTopUps,
+        totalCount: 51,
+      },
+    })).toMatchObject({
+      topUpHistory: {
+        hasMore: true,
+        totalCount: 51,
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        hasMore: true,
+        latestSelfPurchase: status.topUpHistory.latestSelfPurchase,
+        topUps: fiftyTopUps.slice(0, 49),
+        totalCount: 51,
+      },
+    })).toThrow();
+    expect(parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          amountUsd: "25.000000",
+          attemptedAt: "2026-07-03T12:00:00.000Z",
+          status: "payment_pending",
+          topUp: null,
+        },
+      },
+    })).toMatchObject({
+      topUpHistory: {
+        latestSelfPurchase: {
+          status: "payment_pending",
+          topUp: null,
+        },
+      },
+    });
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          status: "payment_pending",
+        },
+      },
+    })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          topUp: null,
+        },
+      },
+    })).toThrow();
+    expect(() => parseHostedPlanUsageStatus({
+      ...status,
+      topUpHistory: {
+        ...status.topUpHistory,
+        latestSelfPurchase: {
+          ...status.topUpHistory.latestSelfPurchase,
+          topUp: {
+            ...status.topUpHistory.latestSelfPurchase.topUp,
+            source: "added_for_you",
+          },
+        },
+      },
+    })).toThrow();
+  });
+
   it("parses the trial display name", () => {
     expect(parseHostedPlanUsageStatus({
       accessKind: "trial",
@@ -121,8 +266,14 @@ describe("hosted plan usage contract", () => {
     expect(parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: true,
     })).toEqual({ includeSubscriptionActionQuote: true });
+    expect(parseHostedPlanUsageToolRequest({
+      includeTopUpHistory: true,
+    })).toEqual({ includeTopUpHistory: true });
     expect(() => parseHostedPlanUsageToolRequest({
       includeSubscriptionActionQuote: false,
+    })).toThrow();
+    expect(() => parseHostedPlanUsageToolRequest({
+      includeTopUpHistory: false,
     })).toThrow();
     expect(() => parseHostedPlanUsageToolRequest({ memberId: "not-allowed" }))
       .toThrow();
