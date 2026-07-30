@@ -492,12 +492,12 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
 
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "openai-local-test",
+    "hosted-openai",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "openai-local-test"/u);
-  assert.match(config, /\[model_providers\."openai-local-test"\]/u);
+  assert.match(config, /model_provider = "hosted-openai"/u);
+  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
@@ -548,7 +548,7 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   });
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "openai-local-test"/u);
+  assert.match(config, /model_provider = "hosted-openai"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
 });
 

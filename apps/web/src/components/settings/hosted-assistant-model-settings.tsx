@@ -368,7 +368,9 @@ function HostedAssistantModelSettingsForm(
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setSaveAnnouncement(
-        `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
+        response.dormantSolPreference
+          ? `Saved. New core replies use ${readProductModelName(response.model)} through ${readProviderName(provider)} while Edge is paused; Sol remains saved.`
+          : `Saved. ${readProductModelName(response.model)} through ${readProviderName(provider)} is your default.`,
       );
     } catch (error) {
       const solNoLongerAvailable =
@@ -458,6 +460,7 @@ function HostedAssistantModelSettingsForm(
             const current = option.model === currentModel;
             const badge = readModelOptionBadge({
               current,
+              dormantSolPreference,
               model: option.model,
               selected,
               unavailable,
@@ -533,13 +536,11 @@ function HostedAssistantModelSettingsForm(
             tone={status.tone}
           />
         ) : null}
-        {saveAnnouncement ? (
-          <SettingsStatusLine
-            className="sr-only min-h-0"
-            message={saveAnnouncement}
-            tone="neutral"
-          />
-        ) : null}
+        <SettingsStatusLine
+          className="sr-only min-h-0"
+          message={saveAnnouncement}
+          tone="neutral"
+        />
       </div>
     </form>
   );
@@ -547,12 +548,17 @@ function HostedAssistantModelSettingsForm(
 
 function readModelOptionBadge(input: {
   current: boolean;
+  dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   selected: boolean;
   unavailable: boolean;
 }): React.ReactNode {
   if (input.current) {
-    return <ModelOptionBadge>Default</ModelOptionBadge>;
+    return (
+      <ModelOptionBadge>
+        {input.dormantSolPreference ? "Active" : "Default"}
+      </ModelOptionBadge>
+    );
   }
 
   if (input.selected) {

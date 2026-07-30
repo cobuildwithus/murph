@@ -94,10 +94,10 @@ test("hosted assistant target follows a provider switch in the same operator hom
     const openAiTarget = await readHostedAssistantExecutionDefaultTarget({
       runtimeEnv: {
         ...HOSTED_ASSISTANT_RUNTIME_ENV,
-        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "openai-local-test",
+        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: "hosted-openai",
       },
     });
-    assert.equal(openAiTarget?.modelProvider, "openai-local-test");
+    assert.equal(openAiTarget?.modelProvider, "hosted-openai");
 
     const veniceTarget = await readHostedAssistantExecutionDefaultTarget({
       runtimeEnv: {

@@ -359,6 +359,22 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
       veniceAvailable: true,
     }),
   );
+  const announcement = findHiddenSaveAnnouncement(view.container);
+  assert.equal(announcement.textContent, "");
+  assert.match(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Active/u,
+  );
+  assert.doesNotMatch(
+    findModelLabel(
+      view.container,
+      HOSTED_ASSISTANT_TERRA_MODEL,
+    ).textContent ?? "",
+    /Default/u,
+  );
   await act(async () => {
     findButton(view.container, "Change").click();
   });
@@ -381,6 +397,11 @@ test("a provider-only save preserves a dormant Sol preference", async () => {
     url: "/api/settings/assistant-model",
   });
   assert.match(view.container.textContent ?? "", /Sol is still saved/u);
+  assert.equal(findHiddenSaveAnnouncement(view.container), announcement);
+  assert.match(
+    announcement.textContent ?? "",
+    /Saved\. New core replies use Terra through Venice while Edge is paused; Sol remains saved\./u,
+  );
   assert.equal(findButton(view.container, "Save change").disabled, false);
 
   view.cleanup();
@@ -1045,15 +1066,20 @@ function assertHiddenSaveAnnouncement(
   container: HTMLElement,
   expected: RegExp,
 ): void {
-  const announcement = container.querySelector<HTMLElement>(
-    '[aria-live="polite"].sr-only',
-  );
-  assert.ok(announcement);
+  const announcement = findHiddenSaveAnnouncement(container);
   assert.match(announcement.textContent ?? "", expected);
   assert.equal(
     container.querySelector('[aria-live="polite"]:not(.sr-only)'),
     null,
   );
+}
+
+function findHiddenSaveAnnouncement(container: HTMLElement): HTMLElement {
+  const announcement = container.querySelector<HTMLElement>(
+    '[aria-live="polite"].sr-only',
+  );
+  assert.ok(announcement);
+  return announcement;
 }
 
 function isRadioChecked(radio: HTMLInputElement): boolean {
