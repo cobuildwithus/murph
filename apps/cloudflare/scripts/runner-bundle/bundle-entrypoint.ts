@@ -64,7 +64,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure while remaining within the reviewed total budget. Ratchet the static
 // baseline to that combined measurement and retain the established small-growth
 // tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_856_451 + 32_768;
+//
+// Exact response-context ownership and persisted predecessor-chain enforcement
+// added authored code to the existing assistant engine/runtime chunks without
+// adding a forbidden boot input. The 2026-07-30 Linux production assembly
+// measured 9,905,701B total. Ratchet the total baseline to that measurement and
+// retain the established 32KB small-growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_905_701 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_117_894;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
