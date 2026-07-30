@@ -28,8 +28,10 @@ jobs:
             echo 'already_applied=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          gzip -dc .github/agent-physical-notes-base.patch.gz | git apply --3way
-          gzip -dc .github/agent-physical-notes-corrections.patch.gz | git apply
+          cat .github/agent-physical-notes-base.patch.gz.part* > /tmp/physical-notes-base.patch.gz
+          cat .github/agent-physical-notes-corrections.patch.gz.part* > /tmp/physical-notes-corrections.patch.gz
+          gzip -dc /tmp/physical-notes-base.patch.gz | git apply --3way
+          gzip -dc /tmp/physical-notes-corrections.patch.gz | git apply
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
