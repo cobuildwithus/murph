@@ -6519,6 +6519,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
+      futureMailboxWake: false,
       label: "keeps the idle window when the provider still matches",
       providerReadOutcome: "openai" as const,
       slug: "matching_provider",
@@ -6526,13 +6527,23 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       expectImmediateRecheck: true,
       expectedElapsedBoundaryMs: 650,
+      futureMailboxWake: false,
       label: "hands off immediately when the provider changed",
       providerReadOutcome: "venice" as const,
       slug: "changed_provider",
     },
     {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      futureMailboxWake: true,
+      label: "hands off immediately with a future mailbox continuation",
+      providerReadOutcome: "venice" as const,
+      slug: "changed_provider_future_mailbox",
+    },
+    {
       expectImmediateRecheck: false,
       expectedElapsedBoundaryMs: 850,
+      futureMailboxWake: false,
       label: "keeps the idle window when provider authority is unavailable",
       providerReadOutcome: "unavailable" as const,
       slug: "provider_unavailable",
@@ -6540,6 +6551,7 @@ describe("hosted workspace runtime entrypoint", () => {
   ])("$label after an external runtime wake with no foreground work", async ({
     expectImmediateRecheck,
     expectedElapsedBoundaryMs,
+    futureMailboxWake,
     providerReadOutcome,
     slug,
   }) => {
@@ -6653,7 +6665,15 @@ describe("hosted workspace runtime entrypoint", () => {
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events: [],
-            workspace: createWorkspaceState({ version: "0" }),
+            workspace: createWorkspaceState({
+              ...(futureMailboxWake
+                ? {
+                    nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
+                    nextWakeReason: "mailbox",
+                  }
+                : {}),
+              version: "0",
+            }),
           }),
         }),
         runtimeWakeSignal,
@@ -6704,7 +6724,7 @@ describe("hosted workspace runtime entrypoint", () => {
         result.immediateRecheckRequested === true,
         expectImmediateRecheck,
       );
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, futureMailboxWake ? "scheduled" : "idle");
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;

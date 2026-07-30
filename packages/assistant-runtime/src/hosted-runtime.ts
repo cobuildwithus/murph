@@ -3863,12 +3863,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const immediateRecheckRequested =
-          immediateRecheckCandidate
-          && !isHostedRuntimeFutureMailboxContinuation({
-            nextWakeAt: checkpointReturnWake.nextWakeAt,
-            nextWakeReason: checkpointReturnWake.nextWakeReason,
-            redactedStatus,
-          });
+          assistantProviderHandoffRequested
+          || (
+            immediateRecheckCandidate
+            && !isHostedRuntimeFutureMailboxContinuation({
+              nextWakeAt: checkpointReturnWake.nextWakeAt,
+              nextWakeReason: checkpointReturnWake.nextWakeReason,
+              redactedStatus,
+            })
+          );
         const checkpointReturnWakePresent = Object.hasOwn(committedWorkspace ?? {}, "nextWakeAt")
           || pendingWake.nextWakeAt !== null
           || committedWorkspace?.inboxMediaRetentionWakeAt !== null;
