@@ -112,6 +112,7 @@ describe("hosted plan usage tool route", () => {
       usedPercent: 50,
     });
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      includeScheduledPlan: true,
       memberId: "member_bound",
     });
     expect(
@@ -132,6 +133,7 @@ describe("hosted plan usage tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+      includeScheduledPlan: true,
       includeSubscriptionActionQuote: true,
       memberId: "member_bound",
     });

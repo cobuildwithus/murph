@@ -53,6 +53,7 @@ function useHostedUsageTopUpDialog({
   buildCheckoutPayload,
   checkoutUrl = CHECKOUT_URL,
   deferTerminalRefreshUntilClose = false,
+  groupPaymentMode,
   initialOpen = false,
   offers,
   payerMemberId,
@@ -85,7 +86,8 @@ function useHostedUsageTopUpDialog({
     purchaseReturn?.kind === "cancel" ? purchaseReturn.purchaseId : null;
   const selectedOfferCode =
     state.screen.kind === "selection"
-      ? state.screen.selectedOfferCode
+      ? state.screen.selectedOfferCode ??
+        (groupPaymentMode === "monthly" ? offers[0]?.offerCode ?? null : null)
       : null;
   const selectedOffer =
     offers.find((offer) => offer.offerCode === selectedOfferCode) ?? null;

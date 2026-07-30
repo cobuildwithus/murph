@@ -116,10 +116,10 @@ describe('assistant dynamic context prompt blocks', () => {
         'never provide it for `group_not_supported` or `hosted_access_inactive`',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        '`continue_pulse` is eligible only for a current active trial and keeps it scheduled to become Pulse at trial end without charging now',
+        'For a target-specific personal plan change, use only signed `change_plan`',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'conversion-pending or ended trials require the quoted `start_pulse_now` path and exact confirmation',
+        'never use an unquoted legacy subscription action',
       )
     },
   )

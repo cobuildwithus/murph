@@ -701,6 +701,13 @@ disclosure grants. Mutation summaries from `create_join_link`, `post_join_offer`
 and `update_display_name` do not open unrelated permission text or depend on
 that secure-box operation.
 
+`post_join_offer` is an explicit request to publish the native consent surface.
+Web may satisfy it without another provider send only when a covering active
+offer already exists. Grants held by current hosted members never suppress the
+offer: a provider-room participant who has not joined the hosted group may be
+the intended recipient. A fresh request returns `sent` only after the provider
+send succeeds and its message binding is durably recorded.
+
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
 interrupts the exact child, waits a bounded grace period, terminates only that

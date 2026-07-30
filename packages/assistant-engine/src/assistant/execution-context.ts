@@ -59,6 +59,7 @@ import type {
 } from '@murphai/hosted-execution/phone-calls'
 import type {
   HostedPlanUsageStatus,
+  HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
 import type {
   HostedVaultShareSelectableProjectionScope,
@@ -246,7 +247,7 @@ export interface AssistantHostedFamilyPlanTool {
 }
 
 export interface AssistantHostedPlanUsageTool {
-  read(): Promise<HostedPlanUsageStatus>
+  read(request: HostedPlanUsageToolRequest): Promise<HostedPlanUsageStatus>
 }
 
 export interface AssistantHostedIMessageContactTool {
@@ -294,7 +295,12 @@ export interface AssistantHostedGroupPermissionOfferRequest {
 export interface AssistantHostedGroupPermissionOfferTool {
   request(
     request: AssistantHostedGroupPermissionOfferRequest,
-  ): Promise<Extract<HostedRuntimeGroupToolResponse, { action: 'post_join_offer' }>>
+  ): Promise<
+    Extract<
+      HostedRuntimeGroupToolResponse,
+      { action: 'create_join_link' | 'post_join_offer' }
+    >
+  >
 }
 
 export type AssistantHostedGroupSharedReadRequest =

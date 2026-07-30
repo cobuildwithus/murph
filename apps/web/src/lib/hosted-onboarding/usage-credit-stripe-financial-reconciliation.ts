@@ -6,6 +6,10 @@ import {
   reconcileHostedUsageCreditDisputeNetReversalTx,
   reconcileHostedUsageCreditRefundNetReversalTx,
 } from "../hosted-execution/usage-credits";
+import {
+  activateHostedGroupSponsorshipAuthorizationForPurchaseTx,
+  pauseHostedGroupSponsorshipForFinancialReversalTx,
+} from "../hosted-groups/group-sponsorship-authorization";
 import { coerceStripeObjectId } from "./billing";
 import {
   createHostedStripeBillingEventLookupKey,
@@ -752,6 +756,11 @@ export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
       tx: input.tx,
     }),
   });
+  await activateHostedGroupSponsorshipAuthorizationForPurchaseTx({
+    paidAt,
+    purchaseId: input.purchase.id,
+    tx: input.tx,
+  });
   let balanceUsdMicros = grant.balanceUsdMicros;
 
   // Pass one applies every target, including all decreases. Pass two consumes
@@ -800,6 +809,19 @@ export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
       });
       balanceUsdMicros = disputeReconciliation.balanceUsdMicros;
     }
+  }
+
+  if (
+    (input.snapshot.refund?.targetCashAmountMinor ?? 0) > 0 ||
+    input.snapshot.disputes.some((dispute) =>
+      dispute.targetCashAmountMinor > 0
+    )
+  ) {
+    await pauseHostedGroupSponsorshipForFinancialReversalTx({
+      effectiveAt: input.effectiveAt,
+      purchaseId: input.purchase.id,
+      tx: input.tx,
+    });
   }
 
   return {

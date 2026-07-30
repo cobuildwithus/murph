@@ -35,13 +35,15 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(28);
+    expect(items).toHaveLength(30);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 16 }, () => "2026-07-30"),
+      ...Array.from({ length: 18 }, () => "2026-07-30"),
       ...Array.from({ length: 12 }, () => "2026-07-29"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
+        "capped-monthly-group-sponsorship",
+        "usage-credit-without-message-estimates",
         "usage-options-together",
         "open-ended-experiment-outcomes",
         "group-voice-only-punchlines",

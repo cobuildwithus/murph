@@ -1,6 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedPlanUsageStatus,
+  type HostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
 import {
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
@@ -18,9 +19,9 @@ export function createHostedRuntimePlanUsageToolPort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["planUsageToolPort"]> {
   return {
-    async read() {
+    async read(request: HostedPlanUsageToolRequest) {
       const payload = await fetchHostedWebControlPlaneJson({
-        body: { includeSubscriptionActionQuote: true },
+        body: request,
         boundUserId: input.boundUserId,
         description: "Hosted plan usage tool",
         fetchImpl: input.fetchImpl,

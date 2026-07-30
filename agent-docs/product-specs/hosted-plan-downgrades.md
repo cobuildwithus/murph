@@ -1,10 +1,11 @@
-# Hosted Plan Downgrades
+# Hosted Scheduled Plan Changes
 
 Last verified: 2026-07-30
 
 ## Goal
 
-Maintain a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
+Maintain narrow direct-plan changes that rely on Stripe for billing state,
+timing, invoices, and future subscription changes.
 
 The product behavior is:
 
@@ -16,17 +17,19 @@ The product behavior is:
 
 ## Current State
 
-The app supports both the Pulse-to-Edge upgrade and the explicit Edge-to-Pulse
-scheduled switch:
+The app supports immediate upgrades and explicit renewal-bound changes:
 
-- `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
-- `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
-- `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
-- `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
+- `POST /api/settings/billing/upgrade-plan` accepts Pulse or Edge targets.
+- `upgradeHostedBillingPlan` permits Group to Pulse or Edge and Pulse to Edge.
+- `POST /api/settings/billing/switch-plan` schedules an eligible Group or Pulse
+  target at the current paid period or active trial end.
+- the historical Edge-to-Pulse route and service remain compatibility delegates;
+- `/settings` computes and renders only transitions admitted by the shared
+  server policy.
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
 
-The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
-transitions still stay out of scope.
+The transition graph is explicit. Arbitrary plan-code routing, reversal, and
+merging with foreign schedules stay out of scope.
 
 ## Hosted Assistant Configuration
 
@@ -254,25 +257,25 @@ member, confirm a same-invocation follow-up reports it, update style through
 personalization, and verify usage retains both requested-model and served-model
 attribution.
 
-## First-Version Scope
+## Current Scope
 
-Keep the implemented first version intentionally narrow.
+Keep the implemented transition graph intentionally narrow.
 
-The supported transition is:
+Supported scheduled transitions:
 
-- Edge paid subscription to Pulse at renewal.
+- active Pulse trial to eligible Group at trial end;
+- paid Pulse to eligible Group at renewal;
+- paid Edge to Pulse or eligible Group at renewal.
 
 Do not build:
 
-- a generic plan-transition engine
-- arbitrary `targetPlanCode` routing
+- an open-ended plan-transition engine
+- unvalidated `targetPlanCode` routing
 - in-app schedule reversal
 - Customer Portal plan switching
 - local timers or cron-based entitlement changes
 - switch-request entitlement, current plan, usage allowance, usage period, or
   runner-state updates
-
-Future plan changes can generalize after this path is proven in Stripe test clocks and production.
 
 ## Stripe Constraints
 
@@ -293,15 +296,18 @@ Relevant Stripe docs:
 
 ## Product Policy
 
-Supported transition:
+Supported scheduled transitions:
 
-- `launch_edge_monthly -> launch_monthly`
+- `launch_monthly -> launch_group_monthly` while trialing or paid;
+- `launch_edge_monthly -> launch_monthly`;
+- `launch_edge_monthly -> launch_group_monthly`.
 
 Unsupported transitions:
 
-- Pulse to Pulse
-- Edge to Edge
-- trial-state switches
+- same-plan changes
+- Group to a lower plan
+- trial-state switches other than Pulse trial to Group at trial end
+- Group selection without confirmed current membership
 - switches without a Stripe customer and subscription
 - switches while a conflicting Stripe schedule is already attached
 
@@ -456,9 +462,8 @@ Important schedule rules:
   and Temporal runtime signals happen only after subscription reconciliation
   observes Stripe's applied Pulse prices.
 
-First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
-
-- one configured Edge recurring price
+The service supports only canonical hosted subscriptions with exactly one
+configured recurring Price for the current direct plan.
 
 Reject subscriptions with unknown active licensed items, duplicate known recurring items, non-month recurring intervals, unsupported quantities, or unmarked metered add-ons. Marked legacy hosted AI usage metered items may be dropped by the schedule update; do not silently preserve unknown add-ons into the future phase.
 
