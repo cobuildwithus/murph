@@ -70,7 +70,16 @@ describe('assistant hosted low-usage skill', () => {
     const skill = await readLowUsageSkill()
 
     expect(skill).toContain('append exactly one final usage segment')
-    expect(skill).toContain('using `---` only on a bubble-supporting channel')
+    expect(skill).toContain(
+      'using `---` only when the active direct reply style expressly authorizes that',
+    )
+    expect(skill).toContain(
+      'In an interactive group, append the first assistant-initiated low-usage mention',
+    )
+    expect(skill).toContain('Never use `---` there')
+    expect(skill).toContain(
+      'even when the underlying transport supports reply bubbles',
+    )
     expect(skill).toContain('begins after one final `---` line')
     expect(skill).toContain('may still use earlier natural')
     expect(skill).toContain('current message already asks about usage')
@@ -81,9 +90,11 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('defer the entire usage heads-up')
     expect(skill).toContain('one or two short sentences')
     expect(skill).toContain('Never spread it across multiple usage')
-    expect(skill).toContain('without `---` bubble support')
+    expect(skill).toContain(
+      'active direct reply style does not expressly authorize `---`',
+    )
     expect(skill).toContain('final paragraph with no delimiter')
-    expect(skill).toContain('Never expose the internal delimiter')
+    expect(skill).toContain('internal delimiter as visible copy')
     expect(skill).toContain('ignore `usedPercent`, `remainingPercent`, `forecast`')
     expect(skill).toContain('Do not render a link or Markdown link')
     expect(skill).toContain('Do not repeat the heads-up')

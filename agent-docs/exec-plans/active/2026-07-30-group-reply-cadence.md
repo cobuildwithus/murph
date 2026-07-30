@@ -13,11 +13,14 @@ Updated: 2026-07-30
 ## Success criteria
 
 - Ordinary interactive group replies run `sleep 4` before the first text reply.
-- A human message arriving during that pause triggers one final `sleep 6`;
-  total cadence sleep never exceeds 10 seconds.
+- Ordinary human input arriving during that pause triggers one final `sleep 6`
+  only when the refreshed beat still warrants text; total cadence sleep never
+  exceeds 10 seconds.
 - Murph re-reads the current room beat after the pause, answers once rather
   than per accepted message, and does not recap the burst point by point.
-- Urgent safety and genuinely time-sensitive coordination skip the pause.
+- Urgent safety and genuinely time-sensitive coordination present initially
+  skip the pause. If first admitted during the non-interruptible initial sleep,
+  they skip the six-second extension and are answered when that sleep returns.
 - Human-owned or otherwise silent beats remain immediate no-replies rather than
   being delayed.
 - Group replies use one ordinary text bubble and do not use the `---` splitter.
@@ -29,7 +32,7 @@ Updated: 2026-07-30
 
 - In scope:
   - Group system-prompt cadence and reply-shape guidance.
-  - The packaged `group-chat` skill's matching guidance.
+  - The packaged `group-chat` and `hosted-low-usage` skills' matching guidance.
   - Prompt regression tests and the durable group social-dynamics spec.
 - Out of scope:
   - Runtime debounce or pre-provider delay.
@@ -53,8 +56,9 @@ Updated: 2026-07-30
 ## Risks and mitigations
 
 1. Risk: the cadence rule could delay a required urgent response.
-   Mitigation: explicit safety and genuinely time-sensitive coordination
-   exceptions.
+   Mitigation: initial urgency skips cadence; urgency admitted during the
+   prompt-only shell sleep skips the extension and is delayed by at most the
+   remainder of the first four-second pause.
 2. Risk: new wording could conflict with immediate silence on human-owned beats.
    Mitigation: apply the pause only before a text reply and retain explicit
    immediate no-reply branches.
@@ -82,7 +86,8 @@ Updated: 2026-07-30
 - Use prompt-level shell sleep because the live-turn steering primitive already
   admits new messages and no new durable owner is needed.
 - Use 4 seconds normally and one 6-second extension only when new human input
-  arrives during the first pause.
+  arrives during the first pause and the refreshed beat still warrants an
+  ordinary text reply.
 - Keep this first implementation prompt-only; delivery behavior is unchanged.
 
 ## Verification
@@ -101,7 +106,8 @@ Updated: 2026-07-30
 
 ## Verification log
 
-- Focused assistant-engine prompt and planning suite: 4 files, 170 tests passed.
+- Focused assistant-engine prompt, skill, and planning suite: 6 files, 187 tests
+  passed after preliminary-review remediation.
 - Assistant-engine typecheck: passed.
 - Direct/group prompt readback: direct omits group cadence and retains texting
   bubbles; group contains `sleep 4`, one optional final `sleep 6`, the 10-second
@@ -109,11 +115,25 @@ Updated: 2026-07-30
 - Complete first-provider request capture with pinned real Codex App Server,
   `gpt-5.6-terra`, low reasoning, code mode, and `gpt-tokenizer` 3.4.0
   `o200k_harmony`:
-  - Individual: 29,233 tokens / 134,110 bytes at base and head.
-  - Group: 24,125 tokens / 110,266 bytes at base; 23,960 tokens / 109,552 bytes
-    at head (`-165` tokens / `-714` bytes).
+  - Individual: 29,233 tokens / 134,110 bytes at base; 29,256 tokens /
+    134,235 bytes at final head (`+23` tokens / `+125` bytes).
+  - Group: 24,125 tokens / 110,266 bytes at base; 24,056 tokens / 110,049
+    bytes at final head (`-69` tokens / `-217` bytes).
   - The delta is entirely assembled group instructions. Dynamic tools, schemas,
     Codex-generated guidance, and other provider-visible input are unchanged.
   - Transport-only model, stream, reasoning, service tier, storage, cache key,
     and client metadata were excluded identically; local paths were normalized.
     The temporary capture harness was removed.
+- Preliminary ReviewGPT returned three findings:
+  - Accepted the low-usage delimiter conflict and made group heads-ups use the
+    same final paragraph in the one group bubble.
+  - Kept the explicitly scoped prompt-only architecture instead of adding the
+    proposed runtime wake/cancel owner; clarified that newly urgent input skips
+    the extension and can wait only for the non-interruptible initial sleep.
+  - Added representative cadence, refreshed-floor, urgency, and group
+    low-usage cases to the existing real-model transcript evaluation rather
+    than adding a synthetic runtime concurrency owner for a prompt-only change.
+- The opt-in real-model evaluation command could not execute locally because
+  its isolated harness requires `OPENAI_API_KEY`, which was not present. The
+  default Vitest lane still compiles that file while skipping its 20 opt-in
+  cases; focused prompt tests and exact-head CI remain the next-best proof.

@@ -136,15 +136,23 @@ An ordinary interactive Linq/iMessage or Telegram group reply uses the existing
 live-turn steering primitive as conversational pacing:
 
 1. Before the first text reply, Murph runs `sleep 4`.
-2. If a new human message arrives during that pause, Murph runs one final
-   `sleep 6`, absorbs anything else that arrives, and re-evaluates the room's
-   current beat.
-3. Murph then responds once or stays silent. It never answers each accepted
-   message separately, recaps the burst point by point, or mentions the pause.
+2. If new human input arrives during that pause, Murph re-evaluates safety,
+   time sensitivity, and floor ownership when the initial sleep returns. Newly
+   urgent or time-sensitive input skips the extra pause, while a human-owned or
+   otherwise silent beat finishes without text.
+3. Only when the refreshed beat still warrants an ordinary text reply does
+   Murph run one final `sleep 6`, absorb anything else that arrives, and
+   re-evaluate the room's current beat.
+4. Murph takes one terminal action for the beat: one text reply, one reaction,
+   or silence. It never answers each accepted message separately, recaps the
+   burst point by point, or mentions the pause.
 
-Urgent safety and genuinely time-sensitive coordination skip the pause. Total
-cadence sleep never exceeds 10 seconds. Human-owned and otherwise silent beats
-remain immediate no-replies and do not sleep.
+Urgent safety and genuinely time-sensitive coordination present before cadence
+starts skip it entirely. If that urgency first arrives during the initial
+non-interruptible shell sleep, the prompt-only implementation answers after
+that sleep returns and never runs the extra six seconds. Total cadence sleep
+never exceeds 10 seconds. Human-owned and otherwise silent beats remain
+immediate no-replies when first evaluated and do not sleep.
 
 Ordinary interactive group text uses one outbound bubble. Murph keeps any needed
 paragraphs or list items in that message and does not use `---` to split it into
@@ -445,12 +453,18 @@ Regression coverage should represent both restraint and initiative:
     without text, reaction, or sleep;
 30. one direct group question with no intervening message -> one reply after
     about four seconds;
-31. a new human message during the first pause -> one final six-second pause and
-    one reply to the room's current beat, never one reply per accepted message;
-32. an ordinary interactive group answer that needs several paragraphs -> one
+31. ordinary new human input during the first pause -> one final six-second
+    pause and one terminal action for the room's current beat, never one reply
+    per accepted message;
+32. urgent or time-sensitive input arriving during the first pause -> no final
+    six-second pause and one current-beat response after the initial sleep
+    returns;
+33. another human taking the floor during the first pause -> no final
+    six-second pause and no stale Murph text reply;
+34. an ordinary interactive group answer that needs several paragraphs -> one
     text bubble with no `---` split.
 
-Items 11 through 32 are judgment calls that a string assertion cannot settle;
+Items 11 through 34 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.
 
 Product research should observe ordinary rooms rather than teach people an exact

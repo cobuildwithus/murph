@@ -144,7 +144,16 @@ describe('assistant execution prompt contract', () => {
       'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
     )
     expect(groupPrompt).toContain(
-      'If any new human message arrives during that pause, the room is active: run one final `sleep 6`, absorb anything else that arrives, then re-evaluate and respond once to the room\'s current beat.',
+      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
+    )
+    expect(groupPrompt).toContain(
+      'answer newly urgent or time-sensitive input without another sleep',
+    )
+    expect(groupPrompt).toContain(
+      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
+    )
+    expect(groupPrompt).toContain(
+      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
       'Never sleep more than 10 seconds total.',

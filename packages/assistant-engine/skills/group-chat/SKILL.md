@@ -492,12 +492,16 @@ Telegram group turn, apply this cadence before the first text reply:
 
 1. Unless urgent safety or genuinely time-sensitive coordination requires an
    immediate answer, run shell `sleep 4`.
-2. If any new human message arrives during that pause, the room is active. Run
-   one final `sleep 6`, absorb anything else that arrives, then run the ladder
-   again against the room's current beat.
-3. Never sleep more than 10 seconds total. The refreshed ladder may still end
-   in a text reply, one reaction, or no response. Human-owned and otherwise
-   silent beats never sleep.
+2. If no new human message arrives, respond once. If new human input arrives,
+   run the ladder again as soon as the first sleep finishes. Answer newly
+   urgent or time-sensitive input without another sleep, and finish immediately
+   when the refreshed beat calls for a reaction or silence.
+3. Only when that refreshed beat still warrants an ordinary text reply, run one
+   final `sleep 6`, absorb anything else that arrives, then run the ladder again
+   and take one terminal action for the room's current beat: one text reply, one
+   reaction, or silence.
+4. Never sleep more than 10 seconds total. Human-owned and otherwise silent
+   beats never sleep.
 
 Do not answer each accepted message separately. Respond once to the current
 beat, never recap the burst point by point, and never mention waiting, sleeping,

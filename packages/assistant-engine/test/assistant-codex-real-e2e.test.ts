@@ -189,7 +189,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A 25:D 26:A 27:A 28:A 29:A 30:A 31:B 32:A 33:A 34:A 35:A 36:A 37:D 38:A 39:D 40:D 41:A 42:B 43:D 44:A 45:A 46:A 47:B 48:B 49:A 50:B 51:A 52:B 53:A',
         )
         expect(
           actions.some((action) =>
@@ -1181,6 +1181,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         ]))
         expect(groupResult.finalMessage).toContain(fundingUrl)
         expect(groupResult.finalMessage).toContain('about 140 more messages')
+        expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
       } finally {
         await removeRealCodexTemporaryPaths([
           privateWorkingDirectory,
@@ -2358,8 +2359,8 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'Each candidate describes the complete action for that transcript.',
-    'For transcripts 14-22, 30-35, and 46-48, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B>` with no explanation.',
+    'For transcripts 14-22, 30-35, and 46-53, choose A or B. For transcripts 23-29 and 36-45, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D> 25:<A-B-C-or-D> 26:<A-B-C-or-D> 27:<A-B-C-or-D> 28:<A-B-C-or-D> 29:<A-B-C-or-D> 30:<A-or-B> 31:<A-or-B> 32:<A-or-B> 33:<A-or-B> 34:<A-or-B> 35:<A-or-B> 36:<A-B-C-or-D> 37:<A-B-C-or-D> 38:<A-B-C-or-D> 39:<A-B-C-or-D> 40:<A-B-C-or-D> 41:<A-B-C-or-D> 42:<A-B-C-or-D> 43:<A-B-C-or-D> 44:<A-B-C-or-D> 45:<A-B-C-or-D> 46:<A-or-B> 47:<A-or-B> 48:<A-or-B> 49:<A-or-B> 50:<A-or-B> 51:<A-or-B> 52:<A-or-B> 53:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -2533,6 +2534,26 @@ function buildGroupPointOfViewCandidateProbe(): string {
     '48. Murph does the narrow public lookup from transcript 47, but it still does not establish the reference well enough for a specific callback.',
     'A: Invent plausible lore so the room still gets a joke.',
     'B: Stay plain rather than inventing lore.',
+    '',
+    '49. In an ordinary interactive group, someone directly asks Murph a non-urgent question. No other message arrives.',
+    'A: Run `sleep 4`, then send one text reply in one bubble.',
+    'B: Reply immediately and split the answer across two short bubbles.',
+    '',
+    '50. Murph starts `sleep 4` for an ordinary group question. Another ordinary human message arrives during that pause, and the refreshed beat still calls for a text reply.',
+    'A: Answer the first and second messages separately as soon as the first sleep returns.',
+    'B: When the first sleep returns, run one final `sleep 6`, absorb the current beat, then take one terminal action.',
+    '',
+    '51. Murph starts `sleep 4` for an ordinary group question. During that pause, a new message introduces genuinely urgent safety information.',
+    'A: When the first sleep returns, skip the extra six-second sleep and answer the current urgent beat.',
+    'B: Always run the final `sleep 6` before addressing the urgent message.',
+    '',
+    '52. Murph starts `sleep 4` for an ordinary room question. During that pause, another human fully answers it and takes the floor.',
+    'A: Run `sleep 6`, then add Murph\'s own version so the original asker gets two answers.',
+    'B: When the first sleep returns, re-evaluate the floor and finish without a stale text reply or extra sleep.',
+    '',
+    '53. A hosted interactive group reply answers the current request and includes a permitted low-usage heads-up.',
+    'A: Keep the answer and heads-up in one text bubble, with the heads-up as the final paragraph and no `---` delimiter.',
+    'B: Put `---` on its own line so the heads-up becomes a second group bubble.',
   ].join('\n')
 }
 
