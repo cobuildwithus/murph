@@ -141,8 +141,10 @@ Updated: 2026-07-29
 7. [x] Reconcile current `main`, remove temporary source/repair scaffolding, fix
    the unregistered first-speaker admission and roster-recovery paths, require
    room-context initialization before first reply, and run focused verification.
-8. [ ] Complete preliminary specialist review, parent final review, exact-head
-   CI, and final ReviewGPT before marking the PR ready.
+8. [x] Complete preliminary specialist review and resolve its accepted coverage
+   and prompt-contract findings.
+9. [ ] Complete parent final review, exact-head CI, and final ReviewGPT before
+   marking the PR ready.
 
 ## Decisions
 
@@ -184,10 +186,21 @@ Updated: 2026-07-29
   69 dynamic group-tool tests.
 - The required product-experience review found two blocking recovery/ordering
   gaps; both were corrected with the focused replay proofs above.
+- Preliminary specialist ReviewGPT found two valid gaps: exact-expiry authority
+  lacked real PostgreSQL proof, and the model schema presented a byte limit as
+  character `maxLength`. The isolated database suite now proves read/claim
+  expiry at the exact boundary, while the model contract uses a conservative
+  512-code-point cap inside the unchanged authoritative 2 KiB UTF-8 envelope
+  with multibyte parser coverage.
+- Broad exact-head CI exposed an unconditional dependency-construction call in
+  the required room-model prephase. The prephase now probes the existing
+  mailbox owner first and creates execution dependencies only for due work; the
+  full 266-test workspace-phase file passes.
 - An open-PR title/body/file audit found no duplicate pending-group
   implementation. The nearest overlapping PRs own line recovery (#1122),
   line/chat health (#1118), and participant display names (#1133); their shared
   hot files remain a reconciliation concern, not a reason for a second setup
   architecture.
-- Exact-head CI is running from the reconciled branch. Preliminary specialist
-  review, parent final review, final ReviewGPT, and final merge proof remain.
+- Exact-head CI is running from the reconciled remediation branch. Preliminary
+  specialist review is complete; parent final review, final ReviewGPT, and final
+  merge proof remain.
