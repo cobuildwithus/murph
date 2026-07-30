@@ -22,6 +22,7 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
+import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
@@ -74,6 +75,12 @@ export function SectionsContent() {
             murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
           />
         </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage authentication warmup">
+        <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 
       <Separator />
