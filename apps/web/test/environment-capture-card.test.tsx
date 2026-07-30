@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { test } from "vitest";
 
-import { EnvironmentCaptureCard } from "../app/(dashboard)/environment/environment-page-client";
+import {
+  EnvironmentCaptureCard,
+  EnvironmentEmptyState,
+} from "../app/(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
 
@@ -18,7 +21,7 @@ const GAP_SCRIPT: EnvironmentVoiceScript = {
       focus: ["Night temperature"],
       id: "sleep",
       prompt: "Cover only what is missing.",
-      title: "Your remaining sleep details",
+      title: "Your sleep setup",
     },
   ],
 };
@@ -45,7 +48,6 @@ test("partial reports offer to fill only what is missing", async () => {
       coverage: 30,
       known: 9,
       script: GAP_SCRIPT,
-      total: 30,
     }),
   );
 
@@ -53,7 +55,7 @@ test("partial reports offer to fill only what is missing", async () => {
     const bodyText = rendered.window.document.body.textContent ?? "";
     assert.match(bodyText, /Complete the picture/);
     assert.match(bodyText, /Fill in what's missing/);
-    assert.match(bodyText, /21 details still missing/);
+    assert.match(bodyText, /1 useful detail Murph still needs/);
     assert.doesNotMatch(bodyText, /Update by voice/);
   } finally {
     await rendered.cleanup();
@@ -67,7 +69,6 @@ test("complete reports offer a free-form update instead of more questions", asyn
       coverage: 100,
       known: 30,
       script: UPDATE_SCRIPT,
-      total: 30,
     }),
   );
 
@@ -76,6 +77,29 @@ test("complete reports offer a free-form update instead of more questions", asyn
     assert.match(bodyText, /Keep your environment current/);
     assert.match(bodyText, /Update by voice/);
     assert.doesNotMatch(bodyText, /Fill in what's missing/);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("an empty-looking profile still respects previously declined facts", async () => {
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentEmptyState, {
+      contactAction: null,
+      script: GAP_SCRIPT,
+    }),
+    {
+      location: {
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+      },
+    },
+  );
+
+  try {
+    const bodyText = rendered.window.document.body.textContent ?? "";
+    assert.match(bodyText, /Continue the walkthrough/);
+    assert.doesNotMatch(bodyText, /Start the 2-minute walkthrough/);
   } finally {
     await rendered.cleanup();
   }

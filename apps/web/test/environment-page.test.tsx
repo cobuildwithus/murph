@@ -163,6 +163,54 @@ test("optional equipment cannot lower the environment grade", () => {
   );
 });
 
+test("an optional-only category still shows useful topics without grading them", () => {
+  const recovery = deriveCategoryNote(
+    {
+      aspectIds: ["recovery-access", "health-devices"],
+      id: "recovery",
+      title: "Recovery & devices",
+    },
+    {},
+  );
+
+  assert.equal(recovery.grade.letter, null);
+  assert.equal(recovery.total, 0);
+  assert.deepEqual(
+    recovery.optionalFacts.map((fact) => fact.indicatorId),
+    [
+      "sauna_access",
+      "cold_exposure",
+      "red_light",
+      "scale",
+      "bp_cuff",
+      "thermometer",
+      "pulse_oximeter",
+    ],
+  );
+});
+
+test("mixed categories also expose optional learning topics without grading them", () => {
+  const workspace = deriveCategoryNote(
+    {
+      aspectIds: ["workspace"],
+      id: "workspace",
+      title: "Workspace",
+    },
+    {},
+  );
+
+  assert.equal(workspace.total, 3);
+  assert.equal(workspace.grade.letter, null);
+  assert.ok(
+    workspace.optionalFacts.some((fact) => fact.indicatorId === "work_mode"),
+  );
+  assert.ok(
+    workspace.optionalFacts.some(
+      (fact) => fact.indicatorId === "standing_desk",
+    ),
+  );
+});
+
 test("urgent exposures cap an otherwise strong grade at E", () => {
   for (const [indicatorId, value, expectedMet, expectedPct] of [
     ["damp_or_mold", "visible_mold", 15, 94],

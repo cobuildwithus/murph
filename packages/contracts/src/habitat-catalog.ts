@@ -53,6 +53,32 @@ function enumType(...values: string[]): HabitatIndicatorValueType {
 
 const TEXT: HabitatIndicatorValueType = { kind: "text", maxLength: 400 };
 const BOOL: HabitatIndicatorValueType = { kind: "boolean" };
+const CITY_OR_REGION_MAX_LENGTH = 120;
+const CITY_OR_REGION_CHARACTERS = /^[\p{L}\p{M}][\p{L}\p{M} .,'’()/-]*$/u;
+const PRECISE_ADDRESS_WORDS =
+  /\b(?:apartment|apt|avenue|boulevard|building|calle|drive|flat|floor|house|lane|lokal|mieszkanie|osiedle|postal|postcode|road|rue|street|suite|ulica|unit|zip)\b/iu;
+
+/**
+ * Returns provider-safe member-stated location context. This deliberately
+ * refuses to infer a city from address-shaped input: callers should ask the
+ * member for a city or approximate region instead.
+ */
+export function normalizeHabitatCityOrRegion(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (
+    normalized.length === 0
+    || normalized.length > CITY_OR_REGION_MAX_LENGTH
+    || !CITY_OR_REGION_CHARACTERS.test(normalized)
+    || /\d/u.test(normalized)
+    || PRECISE_ADDRESS_WORDS.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
 
 export const HABITAT_CATALOG: HabitatCatalog = {
   version: "2026-07-23",

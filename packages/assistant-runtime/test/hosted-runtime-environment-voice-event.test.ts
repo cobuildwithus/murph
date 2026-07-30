@@ -113,6 +113,9 @@ describe("hosted environment voice processing", () => {
           mime: "audio/webm",
           sha256,
         }),
+        ffmpeg: {
+          maxDurationSeconds: 180,
+        },
       }),
     );
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(

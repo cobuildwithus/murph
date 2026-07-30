@@ -28,6 +28,7 @@ import {
 } from "./environment-voice-script";
 
 const MAX_RECORDING_MS = 3 * 60 * 1_000;
+const UPLOAD_TIMEOUT_MS = 60 * 1_000;
 const RECORDING_AUDIO_BITS_PER_SECOND = 64_000;
 const AUDIO_METER_BAR_COUNT = 12;
 const AUDIO_NOISE_FLOOR = 0.025;
@@ -44,12 +45,16 @@ type RecordingState =
   | "sent";
 
 export function EnvironmentVoiceCapture({
-  compact = false,
+  triggerSize = "lg",
+  disabled = false,
+  onAccepted,
   script = DEFAULT_ENVIRONMENT_VOICE_SCRIPT,
   triggerLabel = "Tell Murph by voice",
   triggerVariant = "default",
 }: {
-  compact?: boolean;
+  triggerSize?: "sm" | "default" | "lg";
+  disabled?: boolean;
+  onAccepted?: () => void;
   script?: EnvironmentVoiceScript;
   triggerLabel?: string;
   triggerVariant?: "default" | "outline";
@@ -64,6 +69,7 @@ export function EnvironmentVoiceCapture({
   const [audioLevels, setAudioLevels] = useState(RESTING_AUDIO_LEVELS);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewElapsedMs, setPreviewElapsedMs] = useState(0);
+  const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const topicCount = script.topics.length;
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -189,6 +195,19 @@ export function EnvironmentVoiceCapture({
     return () => window.clearInterval(timer);
   }, [state]);
 
+  useEffect(() => {
+    if (!hasUnsentRecording(state)) {
+      return;
+    }
+
+    const preventAccidentalReload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", preventAccidentalReload);
+    return () =>
+      window.removeEventListener("beforeunload", preventAccidentalReload);
+  }, [state]);
+
   useEffect(
     () => () => {
       recorderRef.current?.stop();
@@ -211,6 +230,7 @@ export function EnvironmentVoiceCapture({
     setElapsedMs(0);
     setRecordingFile(null);
     setNotice(null);
+    setDiscardConfirmationOpen(false);
   };
 
   const startRecording = async () => {
@@ -247,7 +267,6 @@ export function EnvironmentVoiceCapture({
       });
       recorder.start();
       startedAtRef.current = Date.now();
-      setTopicIndex(0);
       setElapsedMs(0);
       setState("recording");
     } catch (error) {
@@ -271,6 +290,7 @@ export function EnvironmentVoiceCapture({
     setElapsedMs(0);
     setRecordingFile(null);
     setNotice(null);
+    setDiscardConfirmationOpen(false);
     setOpen(false);
   };
 
@@ -316,6 +336,11 @@ export function EnvironmentVoiceCapture({
   const uploadRecording = async (file: File) => {
     setState("uploading");
     setNotice(null);
+    const abortController = new AbortController();
+    const uploadTimeout = window.setTimeout(
+      () => abortController.abort(),
+      UPLOAD_TIMEOUT_MS,
+    );
     try {
       const bytes = await file.arrayBuffer();
       const captureId = await sha256Hex(bytes);
@@ -333,19 +358,25 @@ export function EnvironmentVoiceCapture({
           ),
         },
         method: "POST",
+        signal: abortController.signal,
       });
       if (!response.ok) {
         throw new Error(await readEnvironmentVoiceUploadError(response));
       }
+      onAccepted?.();
       setState("sent");
       setNotice(null);
     } catch (error) {
       setState("ready");
       setNotice(
-        error instanceof Error && error.message
+        error instanceof Error && error.name === "AbortError"
+          ? "Sending took too long. The recording is still safe here, so you can try again."
+          : error instanceof Error && error.message
           ? error.message
           : "Murph could not receive the recording. It is still safe in this browser.",
       );
+    } finally {
+      window.clearTimeout(uploadTimeout);
     }
   };
 
@@ -379,7 +410,7 @@ export function EnvironmentVoiceCapture({
   });
 
   const onOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen && (state === "recording" || state === "uploading")) {
+    if (!nextOpen && hasUnsentRecording(state)) {
       return;
     }
     setOpen(nextOpen);
@@ -395,8 +426,9 @@ export function EnvironmentVoiceCapture({
     <>
       <Button
         type="button"
-        size={compact ? "sm" : "lg"}
+        size={triggerSize}
         variant={triggerVariant}
+        disabled={disabled}
         onClick={() => setOpen(true)}
       >
         <Mic data-icon="inline-start" aria-hidden="true" />
@@ -406,13 +438,11 @@ export function EnvironmentVoiceCapture({
       <Dialog
         open={open}
         onOpenChange={onOpenChange}
-        disablePointerDismissal={
-          state === "recording" || state === "uploading"
-        }
+        disablePointerDismissal={hasUnsentRecording(state)}
       >
         <DialogContent
           className="flex max-h-[calc(100dvh-1rem)] min-h-[min(700px,calc(100dvh-1rem))] flex-col overflow-y-auto p-0 sm:max-h-[calc(100dvh-3rem)] sm:min-h-[min(620px,calc(100dvh-3rem))] sm:max-w-4xl sm:overflow-hidden"
-          showCloseButton={state !== "recording" && state !== "uploading"}
+          showCloseButton={!hasUnsentRecording(state)}
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
@@ -466,19 +496,19 @@ export function EnvironmentVoiceCapture({
                     aria-hidden="true"
                   />
                   <h2 className="mt-5 text-balance font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-                    Sent securely
+                    Recording received
                   </h2>
                   <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground">
-                    Murph is transcribing this in the background and will add
-                    only clear facts to your report. The audio is deleted after
-                    processing.
+                    You can close this and keep browsing. Murph will refresh
+                    this page when your report is ready. The recording is
+                    deleted after processing.
                   </p>
                   <Button
                     className="mt-6 self-start lg:mt-auto"
                     size="lg"
                     onClick={() => onOpenChange(false)}
                   >
-                    Done
+                    Close
                   </Button>
                 </div>
               ) : (
@@ -525,13 +555,20 @@ export function EnvironmentVoiceCapture({
                           />
                           Finish recording
                         </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={cancelRecording}
-                        >
-                          Discard recording
-                        </Button>
+                        {!discardConfirmationOpen ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setDiscardConfirmationOpen(true)}
+                          >
+                            Discard recording
+                          </Button>
+                        ) : (
+                          <DiscardRecordingConfirmation
+                            onDiscard={cancelRecording}
+                            onKeep={() => setDiscardConfirmationOpen(false)}
+                          />
+                        )}
                       </div>
                     ) : (
                       <>
@@ -614,6 +651,22 @@ export function EnvironmentVoiceCapture({
                             ? "Sending securely…"
                             : "Send to Murph"}
                         </Button>
+                        {state === "ready" && !discardConfirmationOpen ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="mt-2 w-full"
+                            onClick={() => setDiscardConfirmationOpen(true)}
+                          >
+                            Discard recording
+                          </Button>
+                        ) : null}
+                        {state === "ready" && discardConfirmationOpen ? (
+                          <DiscardRecordingConfirmation
+                            onDiscard={cancelRecording}
+                            onKeep={() => setDiscardConfirmationOpen(false)}
+                          />
+                        ) : null}
                       </>
                     )}
                   </div>
@@ -708,28 +761,78 @@ export function EnvironmentVoiceCapture({
                 ) : null}
               </div>
 
-              <div
-                className="flex gap-2"
-                aria-label={`Topic ${activeTopicIndex + 1} of ${topicCount}`}
+              <nav
+                className="flex gap-1"
+                aria-label="Walkthrough topics"
               >
                 {script.topics.map((voiceTopic, index) => (
-                  <span
+                  <button
                     key={voiceTopic.id}
-                    className={`h-1 flex-1 rounded-full ${
-                      index === activeTopicIndex
-                        ? "bg-primary"
-                        : "bg-secondary"
-                    }`}
-                    aria-hidden="true"
-                  />
+                    type="button"
+                    onClick={() => setTopicIndex(index)}
+                    aria-label={`Go to topic ${index + 1}: ${voiceTopic.title}`}
+                    aria-current={
+                      index === activeTopicIndex ? "step" : undefined
+                    }
+                    className="group flex h-8 flex-1 cursor-pointer items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <span
+                      className={`h-1 w-full rounded-full transition-colors duration-150 motion-reduce:transition-none ${
+                        index === activeTopicIndex
+                          ? "bg-primary"
+                          : "bg-secondary group-hover:bg-secondary/70"
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </button>
                 ))}
-              </div>
+              </nav>
             </section>
           </div>
         </DialogContent>
       </Dialog>
     </>
   );
+}
+
+function DiscardRecordingConfirmation({
+  onDiscard,
+  onKeep,
+}: {
+  onDiscard: () => void;
+  onKeep: () => void;
+}) {
+  return (
+    <div
+      className="mt-2 flex flex-col gap-3 border-t border-border pt-4"
+      role="group"
+      aria-labelledby="discard-recording-title"
+    >
+      <div className="flex flex-col gap-1">
+        <p
+          id="discard-recording-title"
+          className="font-medium text-foreground"
+        >
+          Discard this recording?
+        </p>
+        <p className="text-sm text-muted-foreground">
+          It cannot be recovered.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <Button type="button" variant="outline" onClick={onKeep}>
+          Keep recording
+        </Button>
+        <Button type="button" variant="destructive" onClick={onDiscard}>
+          Discard permanently
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function hasUnsentRecording(state: RecordingState): boolean {
+  return state === "recording" || state === "ready" || state === "uploading";
 }
 
 function preferredMimeType(): string | undefined {

@@ -4,10 +4,14 @@ const mocks = vi.hoisted(() => ({
   appendHostedEnvironmentVoiceMailboxEnvelopeTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   deleteEnvironmentVoice: vi.fn(),
+  hasPendingHostedEnvironmentVoiceMailboxItem: vi.fn(),
+  hasPendingHostedEnvironmentVoiceMailboxItemTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   stageEnvironmentVoice: vi.fn(),
 }));
@@ -31,8 +35,14 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedEnvironmentVoiceMailboxEnvelopeTx:
     mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx,
+  hasPendingHostedEnvironmentVoiceMailboxItem:
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItem,
+  hasPendingHostedEnvironmentVoiceMailboxItemTx:
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItemTx,
   readHostedMailboxWakeAfterDedupeLockTx:
     mocks.readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByDedupeKey:
+    mocks.readHostedMailboxWakeByDedupeKey,
 }));
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest:
@@ -49,11 +59,14 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
+vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
+  resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
+}));
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ $transaction: transaction }),
 }));
 
-import { POST } from "../app/api/environment/voice/route";
+import { GET, POST } from "../app/api/environment/voice/route";
 
 describe("environment voice upload route", () => {
   beforeEach(() => {
@@ -65,6 +78,15 @@ describe("environment voice upload route", () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       deleteEnvironmentVoice: mocks.deleteEnvironmentVoice,
       stageEnvironmentVoice: mocks.stageEnvironmentVoice,
+    });
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItemTx.mockResolvedValue(
+      false,
+    );
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItem.mockResolvedValue(false);
+    mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValue(null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "allowed",
     });
     mocks.stageEnvironmentVoice.mockImplementation(async (input: {
       bytes: Uint8Array;
@@ -80,6 +102,20 @@ describe("environment voice upload route", () => {
       duplicate: false,
       item: { id: "mailbox_123" },
     });
+  });
+
+  it("reports whether the member has an unfinished environment recording", async () => {
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItem.mockResolvedValue(true);
+
+    const response = await GET(
+      new Request("https://local.withmurph.ai/api/environment/voice"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ processing: true });
+    expect(
+      mocks.hasPendingHostedEnvironmentVoiceMailboxItem,
+    ).toHaveBeenCalledWith({ userId: "member_123" });
   });
 
   it("stages an authenticated recording, appends one mailbox wake, and signals runtime", async () => {
@@ -148,6 +184,78 @@ describe("environment voice upload route", () => {
     expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
   });
 
+  it("denies first-seen work at the existing AI usage boundary before staging", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: {
+        allowed: false,
+        reason: "ai_usage_limit_exceeded",
+      },
+      status: "denied",
+    });
+
+    const response = await POST(createRequest({
+      bytes,
+      captureId,
+      capturedAt: new Date().toISOString(),
+    }));
+
+    expect(response.status).toBe(429);
+    expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
+    expect(
+      mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("explains an expired trial instead of calling it an AI usage limit", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: {
+        allowed: false,
+        reason: "trial_expired_pending_billing",
+      },
+      status: "denied",
+    });
+
+    const response = await POST(createRequest({
+      bytes,
+      captureId,
+      capturedAt: new Date().toISOString(),
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        message:
+          "Your Murph trial has ended. Keep the recording and try again after renewing access.",
+      },
+    });
+    expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
+  });
+
+  it("allows only one distinct pending environment recording", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    mocks.hasPendingHostedEnvironmentVoiceMailboxItemTx.mockResolvedValue(true);
+
+    const response = await POST(createRequest({
+      bytes,
+      captureId,
+      capturedAt: new Date().toISOString(),
+    }));
+
+    expect(response.status).toBe(409);
+    expect(
+      mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.deleteEnvironmentVoice).toHaveBeenCalledWith({
+      audioKey: "a".repeat(40),
+      userId: "member_123",
+    });
+  });
+
   it("reuses and re-signals an exact retained recording after the freshness window", async () => {
     const bytes = createWebmBytes();
     const captureId = await sha256Hex(bytes);
@@ -193,14 +301,20 @@ describe("environment voice upload route", () => {
       expect(firstResponse.status).toBe(500);
 
       nowSpy.mockReturnValue(capturedAtMs + 11 * 60 * 1_000);
+      const existing = createExistingEnvironmentVoiceWake({
+        audioKey: firstAudioKey,
+        byteLength: bytes.byteLength,
+        captureId,
+        capturedAt,
+      });
+      mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValueOnce(existing);
       mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValueOnce(
-        createExistingEnvironmentVoiceWake({
-          audioKey: firstAudioKey,
-          byteLength: bytes.byteLength,
-          captureId,
-          capturedAt,
-        }),
+        existing,
       );
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+        decision: { allowed: false },
+        status: "denied",
+      });
 
       const retryResponse = await POST(createRequest({
         bytes,
@@ -219,6 +333,7 @@ describe("environment voice upload route", () => {
         userId: "member_123",
       });
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+      expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(1);
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenLastCalledWith({
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_123",
@@ -228,15 +343,13 @@ describe("environment voice upload route", () => {
     }
   });
 
-  it("still rejects a stale first-seen recording", async () => {
+  it("accepts a first-seen retained recording after the freshness window", async () => {
     const bytes = createWebmBytes();
     const captureId = await sha256Hex(bytes);
     const capturedAt = "2026-07-30T08:00:00.000Z";
     const nowSpy = vi
       .spyOn(Date, "now")
       .mockReturnValue(Date.parse(capturedAt) + 11 * 60 * 1_000);
-    mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValue(null);
-
     try {
       const response = await POST(createRequest({
         bytes,
@@ -244,14 +357,30 @@ describe("environment voice upload route", () => {
         capturedAt,
       }));
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(202);
       expect(
         mocks.appendHostedEnvironmentVoiceMailboxEnvelopeTx,
-      ).not.toHaveBeenCalled();
-      expect(mocks.deleteEnvironmentVoice).toHaveBeenCalledWith({
-        audioKey: "a".repeat(40),
-        userId: "member_123",
-      });
+      ).toHaveBeenCalledOnce();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("rejects a materially future capture time before staging", async () => {
+    const bytes = createWebmBytes();
+    const captureId = await sha256Hex(bytes);
+    const capturedAtMs = Date.parse("2026-07-30T08:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(capturedAtMs);
+
+    try {
+      const response = await POST(createRequest({
+        bytes,
+        captureId,
+        capturedAt: new Date(capturedAtMs + 11 * 60 * 1_000).toISOString(),
+      }));
+
+      expect(response.status).toBe(400);
+      expect(mocks.stageEnvironmentVoice).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }

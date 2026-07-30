@@ -70,6 +70,21 @@ test("environment conditions fail closed when a city cannot be resolved", async 
   assert.match(String(error), /Live conditions are unavailable/);
 });
 
+test("environment conditions reject a precise address before provider egress", async () => {
+  let providerCalls = 0;
+  const error = await loadEnvironmentConditions({
+    executeConnectedApps: async () => {
+      providerCalls += 1;
+      return [];
+    },
+    location: "123 Main Street, apartment 4, Warsaw 00-001",
+    memberId: "hbm_member",
+  }).catch((value: unknown) => value);
+
+  assert.equal(providerCalls, 0);
+  assert.match(String(error), /Confirm a city or approximate region/);
+});
+
 test("environment conditions omit malformed provider sections", async () => {
   const result = await loadEnvironmentConditions({
     executeConnectedApps: async ({ request }) => {

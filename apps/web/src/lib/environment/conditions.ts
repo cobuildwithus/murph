@@ -1,5 +1,7 @@
 import "server-only";
 
+import { normalizeHabitatCityOrRegion } from "@murphai/contracts";
+
 import { executeHostedConnectedAppsRequest } from "@/src/lib/connected-apps/service";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -24,11 +26,19 @@ export async function loadEnvironmentConditions(input: {
 }): Promise<EnvironmentConditions> {
   const executeConnectedApps =
     input.executeConnectedApps ?? executeHostedConnectedAppsRequest;
+  const location = normalizeHabitatCityOrRegion(input.location);
+  if (!location) {
+    throw hostedOnboardingError({
+      code: "ENVIRONMENT_LOCATION_INVALID",
+      httpStatus: 400,
+      message: "Confirm a city or approximate region for live conditions.",
+    });
+  }
   const geocoding = await executeConnectedApps({
     memberId: input.memberId,
     request: {
       input: {
-        arguments: { limit: 1, q: input.location },
+        arguments: { limit: 1, q: location },
         toolSlug: "OPENWEATHER_API_GET_GEOCODING_DIRECT",
       },
       operation: "execute",

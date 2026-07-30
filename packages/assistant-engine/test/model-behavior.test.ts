@@ -2840,6 +2840,9 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Habitat life-context:')
     expect(prompt).toContain('vault-cli habitat save')
     expect(prompt).toContain('Guided voice walkthroughs:')
+    expect(prompt).toContain(
+      '`home-location.location` may contain only an explicitly stated city or approximate region.',
+    )
     expect(prompt).toContain('Equipment and access are constraints, not failings.')
     expect(prompt).not.toContain('agentApproved: true')
     expect(prompt).not.toContain('event_duration_minutes')

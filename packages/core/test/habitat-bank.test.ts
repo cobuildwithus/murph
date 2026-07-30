@@ -105,6 +105,33 @@ test("habitat upsert requires recordedAt when storing indicator values", async (
   );
 });
 
+test("habitat upsert rejects a precise address but accepts a city or region", async () => {
+  const vaultRoot = await makeTempDirectory("murph-habitat-location");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertHabitatAspect({
+        vaultRoot,
+        aspect: "home-location",
+        indicators: {
+          location: "123 Main Street, apartment 4, Warsaw 00-001",
+        },
+        recordedAt: "2026-07-30",
+      }),
+    /city or approximate region/,
+  );
+
+  await upsertHabitatAspect({
+    vaultRoot,
+    aspect: "home-location",
+    indicators: { location: "Warsaw, Poland" },
+    recordedAt: "2026-07-30",
+  });
+  const record = await readHabitatAspect({ vaultRoot, slug: "home-location" });
+  assert.equal(record.indicators.location, "Warsaw, Poland");
+});
+
 test("habitat upsert rejects aspect records stored at another aspect path", async () => {
   const vaultRoot = await makeTempDirectory("murph-habitat-path-mismatch");
   await initializeVault({ vaultRoot });

@@ -9,7 +9,10 @@ import {
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   appendHostedEnvironmentVoiceMailboxEnvelopeTx,
+  hasPendingHostedEnvironmentVoiceMailboxItem,
+  hasPendingHostedEnvironmentVoiceMailboxItemTx,
   readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByDedupeKey,
 } from "@/src/lib/hosted-mailbox/store";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -23,6 +26,7 @@ import {
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { resolveHostedRuntimeAiUsageGate } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -31,10 +35,47 @@ const CAPTURED_AT_HEADER = "x-murph-environment-voice-captured-at";
 const DURATION_MS_HEADER = "x-murph-environment-voice-duration-ms";
 const CAPTURE_TIME_TOLERANCE_MS = 10 * 60 * 1_000;
 
+export const GET = withJsonError(async (request: Request) => {
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
+  const processing = await hasPendingHostedEnvironmentVoiceMailboxItem({
+    userId: auth.member.id,
+  });
+  return jsonOk({ processing });
+});
+
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const upload = await readEnvironmentVoiceUpload(request);
+  const eventId = `environment-voice:${upload.captureId}`;
+  const prisma = getPrisma();
+  const existingBeforeStage = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: eventId,
+    prisma,
+    userId: auth.member.id,
+  });
+  if (!isExactEnvironmentVoiceRetry(existingBeforeStage, upload)) {
+    const usageGate = await resolveHostedRuntimeAiUsageGate({
+      mode: "read_first",
+      prisma,
+      userId: auth.member.id,
+    });
+    if (usageGate.status === "denied") {
+      const message =
+        usageGate.decision.reason === "ai_usage_limit_exceeded"
+          ? "Murph has reached your current AI usage limit. Keep the recording and try again after it resets."
+          : usageGate.decision.reason === "trial_expired_pending_billing"
+            ? "Your Murph trial has ended. Keep the recording and try again after renewing access."
+            : "Your Murph access is not active. Keep the recording and try again after restoring access.";
+      throw hostedOnboardingError({
+        code: "ENVIRONMENT_VOICE_AI_USAGE_DENIED",
+        httpStatus:
+          usageGate.decision.reason === "ai_usage_limit_exceeded" ? 429 : 403,
+        message,
+        retryable: true,
+      });
+    }
+  }
   const control = readHostedExecutionControlClientIfConfigured();
   if (!control) {
     throw hostedOnboardingError({
@@ -52,7 +93,6 @@ export const POST = withJsonError(async (request: Request) => {
     sha256: upload.sha256,
     userId: auth.member.id,
   });
-  const eventId = `environment-voice:${upload.captureId}`;
   const envelope = buildHostedExecutionEnvironmentVoiceCapturedWake({
     audioKey: staged.audioKey,
     byteLength: staged.byteLength,
@@ -65,7 +105,6 @@ export const POST = withJsonError(async (request: Request) => {
     occurredAt: upload.capturedAt,
     sha256: staged.sha256,
   });
-  const prisma = getPrisma();
   let appended: Awaited<
     ReturnType<typeof appendHostedEnvironmentVoiceMailboxEnvelopeTx>
   >;
@@ -83,18 +122,25 @@ export const POST = withJsonError(async (request: Request) => {
           message: "Your Murph access is not active.",
         });
       }
-      if (!isEnvironmentVoiceCaptureFresh(upload.capturedAt)) {
-        const existing =
-          await readHostedMailboxWakeAfterDedupeLockTx({
-            dedupeKey: eventId,
-            tx,
-            userId: auth.member.id,
-          });
-        if (!isExactEnvironmentVoiceRetry(existing, upload)) {
-          throw invalidEnvironmentVoiceUpload(
-            "The recording time is invalid.",
-          );
-        }
+      const existing = await readHostedMailboxWakeAfterDedupeLockTx({
+        dedupeKey: eventId,
+        tx,
+        userId: auth.member.id,
+      });
+      if (
+        !isExactEnvironmentVoiceRetry(existing, upload)
+        && await hasPendingHostedEnvironmentVoiceMailboxItemTx({
+          tx,
+          userId: auth.member.id,
+        })
+      ) {
+        throw hostedOnboardingError({
+          code: "ENVIRONMENT_VOICE_ALREADY_PROCESSING",
+          httpStatus: 409,
+          message:
+            "Murph is still processing your previous environment recording.",
+          retryable: true,
+        });
       }
       return await appendHostedEnvironmentVoiceMailboxEnvelopeTx({
         envelope,
@@ -179,7 +225,10 @@ async function readEnvironmentVoiceUpload(request: Request): Promise<{
   }
   const capturedAt = request.headers.get(CAPTURED_AT_HEADER)?.trim() ?? "";
   const capturedAtMs = Date.parse(capturedAt);
-  if (!Number.isFinite(capturedAtMs)) {
+  if (
+    !Number.isFinite(capturedAtMs)
+    || capturedAtMs - Date.now() > CAPTURE_TIME_TOLERANCE_MS
+  ) {
     throw invalidEnvironmentVoiceUpload("The recording time is invalid.");
   }
 
@@ -218,11 +267,6 @@ async function readEnvironmentVoiceUpload(request: Request): Promise<{
     durationMs,
     sha256,
   };
-}
-
-function isEnvironmentVoiceCaptureFresh(capturedAt: string): boolean {
-  return Math.abs(Date.now() - Date.parse(capturedAt))
-    <= CAPTURE_TIME_TOLERANCE_MS;
 }
 
 function isExactEnvironmentVoiceRetry(

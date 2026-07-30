@@ -148,7 +148,10 @@ async function transcribeEnvironmentVoice(input: {
         sha256: input.wake.environmentVoice.sha256,
         storedPath: `environment-voice/${path.basename(audioPath)}`,
       },
-      ffmpeg: parserConfig.ffmpeg,
+      ffmpeg: {
+        ...parserConfig.ffmpeg,
+        maxDurationSeconds: 180,
+      },
       registry: parserConfig.registry,
       scratchRoot: path.join(temporaryDirectory, "parser"),
       signal: input.signal ?? undefined,

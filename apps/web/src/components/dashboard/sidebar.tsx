@@ -7,6 +7,7 @@ import {
   ChevronsUpDown,
   FlaskConical,
   Home,
+  Leaf,
 } from "lucide-react";
 import {
   useEffect,
@@ -64,6 +65,12 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
+  {
+    label: "Environment",
+    href: "/environment",
+    matchPrefix: "/environment",
+    icon: Leaf,
+  },
   {
     label: "Biomarkers",
     href: "/biomarkers",

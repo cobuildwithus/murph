@@ -138,6 +138,7 @@ import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
+  EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
@@ -155,7 +156,7 @@ const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
       id: "sleep",
       prompt:
         "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-      title: "Your remaining sleep details",
+      title: "Your sleep setup",
     },
     {
       eyebrow: "Workspace",
@@ -890,8 +891,46 @@ export function ComponentsContent() {
               coverage={70}
               known={21}
               script={DESIGN_ENVIRONMENT_GAP_SCRIPT}
-              total={30}
             />
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-voice-refresh-notice"
+          id="environment-voice-refresh-notice-component"
+          inert
+        >
+          <Section title="Environment voice processing feedback">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The open report keeps ownership after upload: processing,
+              updated, no-clear-facts, and delayed recovery remain visible
+              without requiring a reload.
+            </p>
+            <div className="grid gap-4">
+              <EnvironmentVoiceRefreshNotice
+                state={{
+                  baselineDataVersion: "data-v1",
+                  baselineValues: "{}",
+                  baselineWorkspaceVersion: "workspace-v1",
+                  status: "processing",
+                }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: true, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ factsChanged: false, status: "updated" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "delayed" }}
+                onCheckAgain={() => {}}
+              />
+            </div>
           </Section>
         </div>
 

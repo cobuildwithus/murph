@@ -39,6 +39,7 @@ export type CategoryNote = {
   total: number;
   grade: CategoryGrade;
   rows: FactRow[];
+  optionalFacts: QuietFact[];
   unknownFacts: QuietFact[];
   skippedFacts: QuietFact[];
 };
@@ -280,6 +281,7 @@ export function deriveCategoryNote(
   }
 
   const rows: Array<FactRow & { index: number }> = [];
+  const optional: Array<QuietFact & { rank: number; index: number }> = [];
   const unknown: Array<QuietFact & { rank: number; index: number }> = [];
   const skipped: Array<QuietFact & { rank: number; index: number }> = [];
   let known = 0;
@@ -296,13 +298,13 @@ export function deriveCategoryNote(
     if (value === undefined || value === null) {
       if (core) {
         unknown.push({ indicatorId: indicator.id, label, rank, index });
+      } else if (!FOLDED_INTO[indicator.id]) {
+        optional.push({ indicatorId: indicator.id, label, rank, index });
       }
       continue;
     }
     if (value === HABITAT_DECLINED_VALUE) {
-      if (core) {
-        skipped.push({ indicatorId: indicator.id, label, rank, index });
-      }
+      skipped.push({ indicatorId: indicator.id, label, rank, index });
       continue;
     }
 
@@ -389,6 +391,9 @@ export function deriveCategoryNote(
         detail,
       }),
     ),
+    optionalFacts: optional
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map(({ indicatorId, label }) => ({ indicatorId, label })),
     unknownFacts: unknown
       .sort((a, b) => a.rank - b.rank || a.index - b.index)
       .map(({ indicatorId, label }) => ({ indicatorId, label })),

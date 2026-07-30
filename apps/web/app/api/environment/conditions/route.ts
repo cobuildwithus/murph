@@ -1,3 +1,5 @@
+import { normalizeHabitatCityOrRegion } from "@murphai/contracts";
+
 import { loadEnvironmentConditions } from "@/src/lib/environment/conditions";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -38,8 +40,11 @@ export const POST = withJsonError(async (request: Request) => {
   ) {
     throw invalidRequest();
   }
-  const location = payload.location.trim();
-  if (location.length === 0 || location.length > LOCATION_MAX_LENGTH) {
+  if (payload.location.length > LOCATION_MAX_LENGTH) {
+    throw invalidRequest();
+  }
+  const location = normalizeHabitatCityOrRegion(payload.location);
+  if (!location) {
     throw invalidRequest();
   }
 

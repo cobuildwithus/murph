@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { HABITAT_DECLINED_VALUE } from "@murphai/contracts";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  HABITAT_DECLINED_VALUE,
+  normalizeHabitatCityOrRegion,
+} from "@murphai/contracts";
 import Image from "next/image";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
@@ -36,6 +46,23 @@ const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
 const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
+const VOICE_REFRESH_INTERVAL_MS = 2_000;
+const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
+
+export type VoiceRefreshState =
+  | { status: "idle" }
+  | {
+      baselineValues: string;
+      status: "processing";
+    }
+  | { baselineValues: string; status: "completed" }
+  | { status: "updated"; factsChanged: boolean }
+  | { status: "delayed" };
+
+type DisplayedVoiceRefreshState = Exclude<
+  VoiceRefreshState,
+  { status: "completed" }
+>;
 
 const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
   sleep: "Temperature, darkness, noise and bedroom air.",
@@ -50,7 +77,16 @@ export default function EnvironmentPageClient({
 }: {
   contactAction: MurphContactOption | null;
 }) {
-  const { client, error, refresh, status } = useBrowserVault();
+  const {
+    client,
+    error,
+    refresh,
+    status,
+  } = useBrowserVault();
+  const [voiceRefreshState, setVoiceRefreshState] =
+    useState<VoiceRefreshState>({ status: "idle" });
+  const checkedInitialVoiceProcessingRef = useRef(false);
+  const initialVoiceProcessingCheckRef = useRef(0);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -63,9 +99,101 @@ export default function EnvironmentPageClient({
   );
   const grade = useMemo(() => overallGrade(notes), [notes]);
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
+  const voiceScript = useMemo(
+    () => buildEnvironmentVoiceScript(values),
+    [values],
+  );
   const location = readableLocation(values);
   const conditions = useEnvironmentConditions(location);
   const hasEnvironmentData = hasKnownHabitatValue(values);
+  const valuesSignature = JSON.stringify(values);
+  const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState({
+    currentValues: valuesSignature,
+    state: voiceRefreshState,
+  });
+  const voiceCaptureDisabled =
+    displayedVoiceRefreshState.status === "processing" ||
+    displayedVoiceRefreshState.status === "delayed";
+  const onVoiceAccepted = useCallback(() => {
+    setVoiceRefreshState({
+      baselineValues: valuesSignature,
+      status: "processing",
+    });
+  }, [valuesSignature]);
+
+  useEffect(() => {
+    if (
+      status === "loading"
+      || checkedInitialVoiceProcessingRef.current
+    ) {
+      return;
+    }
+    const checkId = initialVoiceProcessingCheckRef.current + 1;
+    initialVoiceProcessingCheckRef.current = checkId;
+    void readEnvironmentVoiceProcessingStatus().then((processing) => {
+      if (initialVoiceProcessingCheckRef.current !== checkId) {
+        return;
+      }
+      checkedInitialVoiceProcessingRef.current = true;
+      if (processing === true) {
+        setVoiceRefreshState((current) =>
+          current.status === "idle"
+            ? {
+                baselineValues: valuesSignature,
+                status: "processing",
+              }
+            : current,
+        );
+      }
+    });
+    return () => {
+      if (initialVoiceProcessingCheckRef.current === checkId) {
+        initialVoiceProcessingCheckRef.current += 1;
+      }
+    };
+  }, [status, valuesSignature]);
+
+  useEffect(() => {
+    if (voiceRefreshState.status !== "processing") {
+      return;
+    }
+    let cancelled = false;
+    const startedAt = Date.now();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+      if (Date.now() - startedAt >= VOICE_REFRESH_WINDOW_MS) {
+        setVoiceRefreshState({ status: "delayed" });
+        return;
+      }
+      const processing = await readEnvironmentVoiceProcessingStatus();
+      await refresh({ background: true }).catch(() => undefined);
+      if (cancelled) {
+        return;
+      }
+      if (processing === false) {
+        setVoiceRefreshState((current) =>
+          current.status === "processing"
+            ? {
+                baselineValues: current.baselineValues,
+                status: "completed",
+              }
+            : current,
+        );
+        return;
+      }
+      timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
+    };
+    timeoutId = setTimeout(() => void poll(), VOICE_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [refresh, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -109,8 +237,22 @@ export default function EnvironmentPageClient({
 
   return (
     <EnvironmentShell
-      actions={hasEnvironmentData ? <ShareEnvironmentButton /> : undefined}
+      actions={
+        hasEnvironmentData ? (
+          <ShareEnvironmentButton disabled={grade.letter === null} />
+        ) : undefined
+      }
     >
+      <EnvironmentVoiceRefreshNotice
+        state={displayedVoiceRefreshState}
+        onCheckAgain={() => {
+          setVoiceRefreshState({
+            baselineValues: valuesSignature,
+            status: "processing",
+          });
+          void refresh({ background: true });
+        }}
+      />
       {hasEnvironmentData ? (
         <EnvironmentReport
           values={values}
@@ -120,12 +262,58 @@ export default function EnvironmentPageClient({
           coverage={coverage}
           contactAction={contactAction}
           conditions={conditions}
+          onVoiceAccepted={onVoiceAccepted}
+          voiceCaptureDisabled={voiceCaptureDisabled}
         />
       ) : (
-        <EnvironmentEmptyState contactAction={contactAction} />
+        <EnvironmentEmptyState
+          contactAction={contactAction}
+          onVoiceAccepted={onVoiceAccepted}
+          processing={voiceCaptureDisabled}
+          script={voiceScript}
+        />
       )}
     </EnvironmentShell>
   );
+}
+
+function resolveDisplayedVoiceRefreshState({
+  currentValues,
+  state,
+}: {
+  currentValues: string;
+  state: VoiceRefreshState;
+}): DisplayedVoiceRefreshState {
+  if (state.status !== "completed") {
+    return state;
+  }
+  return {
+    factsChanged: currentValues !== state.baselineValues,
+    status: "updated",
+  };
+}
+
+async function readEnvironmentVoiceProcessingStatus(): Promise<boolean | null> {
+  try {
+    const response = await fetch("/api/environment/voice", {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload: unknown = await response.json();
+    if (
+      payload
+      && typeof payload === "object"
+      && "processing" in payload
+      && typeof payload.processing === "boolean"
+    ) {
+      return payload.processing;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function EnvironmentShell({
@@ -154,8 +342,14 @@ function EnvironmentShell({
 
 export function EnvironmentEmptyState({
   contactAction,
+  onVoiceAccepted,
+  processing = false,
+  script = buildEnvironmentVoiceScript(EMPTY_HABITAT_VALUES),
 }: {
   contactAction: MurphContactOption | null;
+  onVoiceAccepted?: () => void;
+  processing?: boolean;
+  script?: EnvironmentVoiceScript;
 }) {
   return (
     <section
@@ -184,7 +378,18 @@ export function EnvironmentEmptyState({
 
           <div className="mt-8 flex flex-col items-start gap-4">
             <EnvironmentVoiceCapture
-              triggerLabel="Start the 2-minute walkthrough"
+              disabled={processing}
+              onAccepted={onVoiceAccepted}
+              script={script}
+              triggerLabel={
+                processing
+                  ? "Processing recording…"
+                  : script.flow === "walkthrough"
+                  ? "Start the 2-minute walkthrough"
+                  : script.flow === "fill-gaps"
+                    ? "Continue the walkthrough"
+                    : "Update by voice"
+              }
             />
             {contactAction ? (
               <a
@@ -246,6 +451,8 @@ function EnvironmentReport({
   coverage,
   contactAction,
   conditions,
+  onVoiceAccepted,
+  voiceCaptureDisabled,
 }: {
   values: HabitatValues;
   scene: ReturnType<typeof resolveHabitatScene>;
@@ -254,10 +461,12 @@ function EnvironmentReport({
   coverage: ReturnType<typeof resolveEnvironmentCoverage>;
   contactAction: MurphContactOption | null;
   conditions: { outdoorAir: string; weather: string };
+  onVoiceAccepted: () => void;
+  voiceCaptureDisabled: boolean;
 }) {
   const nextChecks = buildNextChecks(scene, notes);
   const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
-  const voiceScript = buildEnvironmentVoiceScript(notes, coverage.coverage);
+  const voiceScript = buildEnvironmentVoiceScript(values);
 
   return (
     <>
@@ -280,7 +489,8 @@ function EnvironmentReport({
         coverage={coverage.coverage}
         known={coverage.known}
         script={voiceScript}
-        total={coverage.total}
+        onVoiceAccepted={onVoiceAccepted}
+        processing={voiceCaptureDisabled}
       />
 
       {contactAction ? (
@@ -309,16 +519,21 @@ export function EnvironmentCaptureCard({
   coverage,
   known,
   script,
-  total,
+  onVoiceAccepted,
+  processing = false,
 }: {
   contactAction: MurphContactOption | null;
   coverage: number;
   known: number;
   script: EnvironmentVoiceScript;
-  total: number;
+  onVoiceAccepted?: () => void;
+  processing?: boolean;
 }) {
   const updating = script.flow === "update";
-  const missing = Math.max(0, total - known);
+  const missing = script.topics.reduce(
+    (sum, topic) => sum + (topic.focus?.length ?? 0),
+    0,
+  );
   const topicCount = script.topics.length;
 
   return (
@@ -338,21 +553,25 @@ export function EnvironmentCaptureCard({
             ? "Record anything that changed. You do not need to repeat what Murph already knows."
             : known === 0
               ? "Walk through sleep, air, light, recovery and work. Murph saves only the clear details."
-              : `Murph knows ${known} of ${total} core facts. This ${
+              : `This ${
                   topicCount === 1
                     ? "short recording covers the one remaining topic"
                     : `short recording covers ${topicCount} topics`
-                } and asks only about the ${missing} ${
+                } and focuses on the ${missing} useful ${
                   missing === 1 ? "detail" : "details"
-                } still missing.`}
+                } Murph still needs.`}
         </p>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
         <EnvironmentVoiceCapture
-          compact
+          triggerSize="default"
+          disabled={processing}
+          onAccepted={onVoiceAccepted}
           script={script}
           triggerLabel={
-            updating
+            processing
+              ? "Processing recording…"
+              : updating
               ? "Update by voice"
               : known === 0
                 ? "Start walkthrough"
@@ -362,7 +581,7 @@ export function EnvironmentCaptureCard({
         />
         {contactAction ? (
           <Button
-            size="sm"
+            size="default"
             variant="ghost"
             render={
               <a
@@ -379,6 +598,60 @@ export function EnvironmentCaptureCard({
         ) : null}
       </div>
     </section>
+  );
+}
+
+export function EnvironmentVoiceRefreshNotice({
+  onCheckAgain,
+  state,
+}: {
+  onCheckAgain: () => void;
+  state: DisplayedVoiceRefreshState;
+}) {
+  if (state.status === "idle") {
+    return null;
+  }
+  if (state.status === "processing") {
+    return (
+      <Alert aria-live="polite">
+        <AlertTitle>Murph is processing your recording</AlertTitle>
+        <AlertDescription>
+          This report will refresh automatically when the clear facts are ready.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (state.status === "updated") {
+    return (
+      <Alert aria-live="polite">
+        <AlertTitle>
+          {state.factsChanged
+            ? "Your environment report is updated"
+            : "The report was not updated"}
+        </AlertTitle>
+        <AlertDescription>
+          {state.factsChanged
+            ? "The new details are now visible below."
+            : "Murph could not add any details from this recording. You can try again or tell Murph in chat."}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  return (
+    <Alert aria-live="polite">
+      <AlertTitle>Murph is taking longer than usual</AlertTitle>
+      <AlertDescription>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Your recording is still safe. Check again without recording it
+            another time.
+          </span>
+          <Button size="sm" variant="outline" onClick={onCheckAgain}>
+            Check again
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -464,11 +737,9 @@ interface EnvironmentConditionsResponse {
 
 function readableLocation(values: HabitatValues): string | null {
   const value = values["home-location"]?.location;
-  return typeof value === "string" &&
-    value !== HABITAT_DECLINED_VALUE &&
-    value.trim().length > 0
-    ? value.trim()
-    : null;
+  return value === HABITAT_DECLINED_VALUE
+    ? null
+    : normalizeHabitatCityOrRegion(value);
 }
 
 function hasKnownHabitatValue(values: HabitatValues): boolean {

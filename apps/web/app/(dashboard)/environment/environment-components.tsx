@@ -311,7 +311,11 @@ function OverallGradeDialog({
   );
 }
 
-export function ShareEnvironmentButton() {
+export function ShareEnvironmentButton({
+  disabled = false,
+}: {
+  disabled?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   const share = async () => {
@@ -343,23 +347,53 @@ export function ShareEnvironmentButton() {
     }
   };
 
+  const label = copied ? (
+    <>
+      <Check className="size-3.5 text-primary" aria-hidden="true" />
+      Link copied
+    </>
+  ) : (
+    <>
+      <Share2 className="size-3.5" aria-hidden="true" />
+      Share
+    </>
+  );
+
+  if (disabled) {
+    return (
+      <TooltipProvider delay={150}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                className="inline-flex cursor-not-allowed"
+                tabIndex={0}
+              />
+            }
+          >
+            <button
+              type="button"
+              disabled
+              className="pointer-events-none inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground/50"
+            >
+              {label}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Add enough details for a fair grade before sharing.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={share}
       className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
     >
-      {copied ? (
-        <>
-          <Check className="size-3.5 text-primary" aria-hidden="true" />
-          Link copied
-        </>
-      ) : (
-        <>
-          <Share2 className="size-3.5" aria-hidden="true" />
-          Share
-        </>
-      )}
+      {label}
     </button>
   );
 }
@@ -593,13 +627,20 @@ function FactValue({ row }: { row: FactRow }) {
   return <span className="text-sm text-foreground">{row.value}</span>;
 }
 
-type FactStatusKind = "met" | "unmet" | "known" | "unknown" | "skipped";
+type FactStatusKind =
+  | "met"
+  | "unmet"
+  | "known"
+  | "unknown"
+  | "optional"
+  | "skipped";
 
 const FACT_ICON_RING: Record<FactStatusKind, string> = {
   met: "border border-secondary",
   unmet: "border border-secondary",
   known: "border border-secondary",
   unknown: "border border-dashed border-muted-foreground/70",
+  optional: "border border-secondary",
   skipped: "border border-dashed border-muted-foreground/70",
 };
 
@@ -731,6 +772,9 @@ function RowChevron() {
 
 function buildChatMessage(fact: SelectedFact): string {
   const topic = fact.label.toLowerCase();
+  if (fact.kind === "optional") {
+    return `Hey Murph, would ${topic} be useful for me?`;
+  }
   if (fact.kind === "unknown" || fact.kind === "skipped") {
     return `Hey Murph, you don't know about my ${topic} yet. Let's fill it in.`;
   }
@@ -816,7 +860,10 @@ function FactDrawer({
   position?: { index: number; total: number };
 }) {
   const guide = fact ? INDICATOR_GUIDES[fact.indicatorId] : undefined;
-  const quiet = fact?.kind === "unknown" || fact?.kind === "skipped";
+  const quiet =
+    fact?.kind === "unknown" ||
+    fact?.kind === "optional" ||
+    fact?.kind === "skipped";
 
   return (
     <Sheet open={fact !== null} onOpenChange={(open) => open || onClose()}>
@@ -857,7 +904,7 @@ function FactDrawer({
                   <span className="font-mono text-2xl text-muted-foreground">
                     –
                   </span>
-                ) : quiet || !sprite ? (
+                ) : fact.kind === "unknown" || !sprite ? (
                   <span className="font-mono text-2xl font-semibold text-primary">
                     ?
                   </span>
@@ -892,6 +939,10 @@ function FactDrawer({
                 {fact.kind === "unknown" ? (
                   <p className="text-sm text-muted-foreground">
                     Murph doesn&apos;t know this about your home yet.
+                  </p>
+                ) : fact.kind === "optional" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Optional context. This never affects your environment grade.
                   </p>
                 ) : fact.kind === "skipped" ? (
                   <p className="text-sm text-muted-foreground">
@@ -952,7 +1003,11 @@ function FactDrawer({
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <MessageCircle className="size-4" aria-hidden="true" />
-                  {quiet ? "Tell Murph about it" : "Talk to Murph about it"}
+                  {fact.kind === "optional"
+                    ? "Ask Murph about it"
+                    : quiet
+                      ? "Tell Murph about it"
+                      : "Talk to Murph about it"}
                 </a>
               </SheetFooter>
             ) : null}
@@ -1124,7 +1179,7 @@ export function NextChecksStrip({
 
 function quietToSelected(
   fact: QuietFact,
-  kind: "unknown" | "skipped",
+  kind: "unknown" | "optional" | "skipped",
 ): SelectedFact {
   return {
     indicatorId: fact.indicatorId,
@@ -1158,6 +1213,7 @@ function CategoryFactList({
 }) {
   const facts: SelectedFact[] = [
     ...note.rows.map(rowToSelected),
+    ...note.optionalFacts.map((fact) => quietToSelected(fact, "optional")),
     ...note.unknownFacts.map((fact) => quietToSelected(fact, "unknown")),
     ...note.skippedFacts.map((fact) => quietToSelected(fact, "skipped")),
   ];
@@ -1237,11 +1293,33 @@ function CategoryFactList({
               <RowChevron />
             </FactRowButton>
           ))}
+          {note.optionalFacts.map((fact, index) => (
+            <FactRowButton
+              key={`optional-${fact.indicatorId}`}
+              muted
+              onClick={() => openIndex(note.rows.length + index)}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FactIcon
+                  kind="optional"
+                  sprite={spriteFor(fact.indicatorId)}
+                />
+                <span className="text-sm font-medium">{fact.label}</span>
+              </span>
+              <span className="pl-13 text-sm sm:pl-0">
+                optional · not graded
+              </span>
+              <span aria-hidden="true" />
+              <RowChevron />
+            </FactRowButton>
+          ))}
           {note.unknownFacts.map((fact, index) => (
             <FactRowButton
               key={`unknown-${fact.indicatorId}`}
               muted
-              onClick={() => openIndex(note.rows.length + index)}
+              onClick={() =>
+                openIndex(note.rows.length + note.optionalFacts.length + index)
+              }
             >
               <span className="flex min-w-0 items-center gap-3">
                 <FactIcon kind="unknown" />
@@ -1257,7 +1335,12 @@ function CategoryFactList({
               key={`skipped-${fact.indicatorId}`}
               muted
               onClick={() =>
-                openIndex(note.rows.length + note.unknownFacts.length + index)
+                openIndex(
+                  note.rows.length +
+                    note.optionalFacts.length +
+                    note.unknownFacts.length +
+                    index,
+                )
               }
             >
               <span className="flex min-w-0 items-center gap-3">

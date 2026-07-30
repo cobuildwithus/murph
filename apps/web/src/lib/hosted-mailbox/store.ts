@@ -1526,6 +1526,44 @@ export async function readHostedMailboxWakeAfterDedupeLockTx(input: {
   });
 }
 
+export async function hasPendingHostedEnvironmentVoiceMailboxItemTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<boolean> {
+  return await hasPendingHostedEnvironmentVoiceMailboxItem({
+    prisma: input.tx,
+    userId: input.userId,
+  });
+}
+
+export async function hasPendingHostedEnvironmentVoiceMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const laneCounter = await prisma.hostedMailboxLaneCounter.findUnique({
+    select: { consumedSeq: true },
+    where: {
+      userId_lane: {
+        lane: "system",
+        userId: input.userId,
+      },
+    },
+  });
+  const item = await prisma.hostedMailboxItem.findFirst({
+    select: { id: true },
+    where: {
+      kind: "environment-voice.captured",
+      lane: "system",
+      laneSeq: {
+        gt: laneCounter?.consumedSeq ?? 0n,
+      },
+      userId: input.userId,
+    },
+  });
+  return item !== null;
+}
+
 export async function hasHostedMailboxItemByKind(input: {
   kind: HostedMailboxKind | string;
   prisma?: HostedMailboxStoreClient;

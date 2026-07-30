@@ -1,20 +1,31 @@
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
+  EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
+
+const DESIGN_CONTACT_ACTION = {
+  href: "sms:+15555550100",
+  kind: "text" as const,
+  label: "Text Murph",
+};
 
 const GAP_SCRIPTS: Readonly<Record<10 | 30 | 70, EnvironmentVoiceScript>> = {
   10: gapScript([
     ["sleep", "Sleep", ["Night temperature", "Darkness", "Night noise"]],
-    ["air", "Air & water", ["Ventilation", "Damp or mold", "Smoke sources"]],
+    [
+      "air",
+      "Air & water",
+      ["City / region", "Ventilation", "Damp or mold"],
+    ],
     ["light", "Light", ["Morning light access", "Evening light"]],
     ["recovery", "Recovery & devices", ["Sauna access", "Scale"]],
     ["workspace", "Workspace", ["Desk hours", "Screen setup", "Breaks"]],
   ]),
   30: gapScript([
     ["sleep", "Sleep", ["Night temperature", "Night noise"]],
-    ["air", "Air & water", ["Ventilation", "Radon tested"]],
+    ["air", "Air & water", ["City / region", "Ventilation"]],
     ["light", "Light", ["Evening light"]],
     ["workspace", "Workspace", ["Screen setup", "Breaks"]],
   ]),
@@ -50,42 +61,55 @@ export function EnvironmentProgressStudy() {
       inert
     >
       <StudyState label="0% · First walkthrough">
-        <EnvironmentEmptyState contactAction={null} />
+        <EnvironmentEmptyState contactAction={DESIGN_CONTACT_ACTION} />
       </StudyState>
       <StudyState label="10% · Build the core picture">
         <EnvironmentCaptureCard
-          contactAction={null}
+          contactAction={DESIGN_CONTACT_ACTION}
           coverage={10}
           known={3}
           script={GAP_SCRIPTS[10]}
-          total={30}
         />
       </StudyState>
       <StudyState label="30% · Continue from known facts">
         <EnvironmentCaptureCard
-          contactAction={null}
+          contactAction={DESIGN_CONTACT_ACTION}
           coverage={30}
           known={9}
           script={GAP_SCRIPTS[30]}
-          total={30}
         />
       </StudyState>
       <StudyState label="70% · Ask only for remaining gaps">
         <EnvironmentCaptureCard
-          contactAction={null}
+          contactAction={DESIGN_CONTACT_ACTION}
           coverage={70}
           known={21}
           script={GAP_SCRIPTS[70]}
-          total={30}
         />
       </StudyState>
       <StudyState label="100% · Free-form update">
         <EnvironmentCaptureCard
-          contactAction={null}
+          contactAction={DESIGN_CONTACT_ACTION}
           coverage={100}
           known={30}
           script={UPDATE_SCRIPT}
-          total={30}
+        />
+      </StudyState>
+      <StudyState label="After upload · Processing on the open report">
+        <EnvironmentVoiceRefreshNotice
+          state={{
+            baselineDataVersion: "data-v1",
+            baselineValues: "{}",
+            baselineWorkspaceVersion: "workspace-v1",
+            status: "processing",
+          }}
+          onCheckAgain={() => {}}
+        />
+      </StudyState>
+      <StudyState label="Long delay · Explicit recovery">
+        <EnvironmentVoiceRefreshNotice
+          state={{ status: "delayed" }}
+          onCheckAgain={() => {}}
         />
       </StudyState>
     </div>

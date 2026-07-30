@@ -1,4 +1,6 @@
-import type { CategoryNote } from "./category-notes";
+import { HABITAT_CATALOG } from "@murphai/contracts";
+
+import type { HabitatValues } from "./home-model";
 
 export type EnvironmentVoiceFlow = "walkthrough" | "fill-gaps" | "update";
 
@@ -31,7 +33,7 @@ const WALKTHROUGH_TOPICS = [
     title: "The air and water",
     eyebrow: "Air & water",
     prompt:
-      "Tell Murph how you ventilate, whether there is damp or mold, what you cook on, any smoke indoors, and whether you drink tap, filtered, or bottled water.",
+      "Start with your city or approximate region — never your address. Then describe ventilation, damp or mold, cooking, indoor smoke, and drinking water.",
   },
   {
     id: "light",
@@ -86,38 +88,96 @@ const UPDATE_SCRIPT: EnvironmentVoiceScript = {
 };
 
 const GAP_TOPIC_TITLES: Readonly<Record<string, string>> = {
-  sleep: "Your remaining sleep details",
-  air: "Your remaining air and water details",
-  light: "Your remaining light details",
-  recovery: "Your remaining recovery details",
-  workspace: "Your remaining workspace details",
+  sleep: "Your sleep setup",
+  air: "Air and water at home",
+  light: "Your lighting",
+  recovery: "Recovery and devices",
+  workspace: "Your workspace",
 };
 
+const COLLECTION_TOPICS = [
+  {
+    aspectIds: ["sleep-environment"],
+    id: "sleep",
+    title: "Sleep",
+  },
+  {
+    aspectIds: ["home-location", "home-air", "water", "allergens-home"],
+    id: "air",
+    title: "Air & water",
+  },
+  {
+    aspectIds: ["lighting"],
+    id: "light",
+    title: "Light",
+  },
+  {
+    aspectIds: ["recovery-access", "health-devices"],
+    id: "recovery",
+    title: "Recovery & devices",
+  },
+  {
+    aspectIds: ["workspace"],
+    id: "workspace",
+    title: "Workspace",
+  },
+] as const;
+
 export function buildEnvironmentVoiceScript(
-  notes: readonly CategoryNote[],
-  coverage: number,
+  values: HabitatValues,
 ): EnvironmentVoiceScript {
-  if (coverage <= 0) {
+  const gaps = COLLECTION_TOPICS.map((topic) => {
+    const focus: string[] = [];
+    let resolved = 0;
+    let total = 0;
+    for (const aspectId of topic.aspectIds) {
+      const aspect = HABITAT_CATALOG.aspects.find(
+        (candidate) => candidate.id === aspectId,
+      );
+      if (!aspect) {
+        continue;
+      }
+      const aspectValues = values[aspectId] ?? {};
+      for (const indicator of aspect.indicators) {
+        if (indicator.priority === "low") {
+          continue;
+        }
+        total += 1;
+        const value = aspectValues[indicator.id];
+        if (value !== undefined && value !== null) {
+          resolved += 1;
+          continue;
+        }
+        focus.push(indicator.label);
+      }
+    }
+    return { ...topic, focus, resolved, total };
+  });
+  const resolved = gaps.reduce((sum, topic) => sum + topic.resolved, 0);
+  const total = gaps.reduce((sum, topic) => sum + topic.total, 0);
+  if (resolved === 0) {
     return DEFAULT_ENVIRONMENT_VOICE_SCRIPT;
   }
 
-  const incompleteNotes = notes.filter((note) => note.unknownFacts.length > 0);
-  const [firstIncompleteNote, ...remainingIncompleteNotes] = incompleteNotes;
-  if (coverage >= 95 || !firstIncompleteNote) {
+  const incompleteTopics = gaps.filter((topic) => topic.focus.length > 0);
+  const [firstIncompleteTopic, ...remainingIncompleteTopics] = incompleteTopics;
+  if (!firstIncompleteTopic || resolved === total) {
     return UPDATE_SCRIPT;
   }
 
-  const buildGapTopic = (note: CategoryNote): EnvironmentVoiceTopic => ({
-    id: note.id,
-    title: GAP_TOPIC_TITLES[note.id] ?? `Your remaining ${note.title} details`,
-    eyebrow: note.title,
+  const buildGapTopic = (
+    gap: (typeof incompleteTopics)[number],
+  ): EnvironmentVoiceTopic => ({
+    id: gap.id,
+    title: GAP_TOPIC_TITLES[gap.id] ?? gap.title,
+    eyebrow: gap.title,
     prompt:
       "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-    focus: note.unknownFacts.map((fact) => fact.label),
+    focus: gap.focus,
   });
   const topics: [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]] = [
-    buildGapTopic(firstIncompleteNote),
-    ...remainingIncompleteNotes.map(buildGapTopic),
+    buildGapTopic(firstIncompleteTopic),
+    ...remainingIncompleteTopics.map(buildGapTopic),
   ];
 
   return {

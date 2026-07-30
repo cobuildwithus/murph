@@ -70,7 +70,7 @@ test("renders a user-specific missing-data script", async () => {
         focus: ["Night temperature", "Darkness"],
         id: "sleep",
         prompt: "Cover only the details Murph is still missing.",
-        title: "Your remaining sleep details",
+        title: "Your sleep setup",
       },
     ],
   };
@@ -118,7 +118,7 @@ test("explains microphone failure without handing private audio to another app",
   }
 });
 
-test("keeps the dialog open when a recording is in progress", async () => {
+test("keeps the dialog open until an unsent recording is explicitly discarded", async () => {
   const rendered = await renderClientComponent(
     createElement(EnvironmentVoiceCapture),
   );
@@ -152,6 +152,12 @@ test("keeps the dialog open when a recording is in progress", async () => {
   }
 
   const originalMediaRecorder = Reflect.get(globalThis, "MediaRecorder");
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+  const originalPause = Object.getOwnPropertyDescriptor(
+    rendered.window.HTMLMediaElement.prototype,
+    "pause",
+  );
   try {
     const mediaDevices = {
       getUserMedia: async () => ({
@@ -168,8 +174,22 @@ test("keeps the dialog open when a recording is in progress", async () => {
     });
     Reflect.set(globalThis, "MediaRecorder", FakeMediaRecorder);
     Reflect.set(rendered.window, "MediaRecorder", FakeMediaRecorder);
+    URL.createObjectURL = vi.fn(() => "blob:environment-recording");
+    URL.revokeObjectURL = vi.fn();
+    Object.defineProperty(rendered.window.HTMLMediaElement.prototype, "pause", {
+      configurable: true,
+      value: vi.fn(),
+    });
 
     await clickButton(rendered.window, "Tell Murph by voice");
+    await clickButton(
+      rendered.window,
+      "Go to topic 3: Light through the day",
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Light through the day/,
+    );
     await clickButton(rendered.window, "Start recording");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -177,6 +197,7 @@ test("keeps the dialog open when a recording is in progress", async () => {
 
     const bodyText = rendered.window.document.body.textContent ?? "";
     assert.match(bodyText, /Finish recording/, bodyText);
+    assert.match(bodyText, /Light through the day/, bodyText);
     const dialog = rendered.window.document.querySelector(
       "[data-pointer-dismissal-disabled]",
     );
@@ -194,19 +215,81 @@ test("keeps the dialog open when a recording is in progress", async () => {
       rendered.window.document.body.textContent ?? "",
       /Finish recording/,
     );
+
+    await clickButton(rendered.window, "Finish recording");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+    const previewAudio = rendered.window.document.querySelector("audio");
+    assert.ok(previewAudio);
+    Object.defineProperty(previewAudio, "pause", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    assert.equal(
+      dialog?.getAttribute("data-pointer-dismissal-disabled"),
+      "true",
+    );
+    await clickButton(rendered.window, "Dismiss dialog");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+
+    await clickButton(rendered.window, "Discard recording");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Discard this recording\?/,
+    );
+
+    await clickButton(rendered.window, "Keep recording");
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Discard this recording\?/,
+    );
+
+    await clickButton(rendered.window, "Discard recording");
+    await clickButton(rendered.window, "Discard permanently");
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Play preview/,
+    );
   } finally {
     if (originalMediaRecorder === undefined) {
       Reflect.deleteProperty(globalThis, "MediaRecorder");
     } else {
       Reflect.set(globalThis, "MediaRecorder", originalMediaRecorder);
     }
+    URL.createObjectURL = originalCreateObjectUrl;
+    URL.revokeObjectURL = originalRevokeObjectUrl;
+    if (originalPause) {
+      Object.defineProperty(
+        rendered.window.HTMLMediaElement.prototype,
+        "pause",
+        originalPause,
+      );
+    }
     await rendered.cleanup();
   }
 });
 
 test("keeps a failed recording for retry and reuses its capture time", async () => {
+  const onAccepted = vi.fn();
   const rendered = await renderClientComponent(
-    createElement(EnvironmentVoiceCapture),
+    createElement(EnvironmentVoiceCapture, { onAccepted }),
   );
   const uploadRequests: RequestInit[] = [];
   const trackStop = vi.fn();
@@ -292,28 +375,35 @@ test("keeps a failed recording for retry and reuses its capture time", async () 
       /Play preview/,
     );
     await clickButton(rendered.window, "Send to Murph");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => {
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Murph cannot receive this recording right now/,
+      );
     });
 
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Murph cannot receive this recording right now/,
-    );
     assert.match(
       rendered.window.document.body.textContent ?? "",
       /Download/,
     );
 
     await clickButton(rendered.window, "Send to Murph");
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => {
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Recording received/,
+      );
     });
-
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Sent securely/,
+      /You can close this and keep browsing/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /The recording is deleted after processing/,
+    );
+
+    assert.equal(onAccepted.mock.calls.length, 1);
     assert.equal(uploadRequests.length, 2);
     const firstHeaders = new Headers(uploadRequests[0]?.headers);
     const secondHeaders = new Headers(uploadRequests[1]?.headers);
@@ -343,7 +433,9 @@ async function clickButton(
   label: string,
 ): Promise<void> {
   const button = Array.from(window.document.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.includes(label),
+    (candidate) =>
+      candidate.textContent?.includes(label) ||
+      candidate.getAttribute("aria-label")?.includes(label),
   );
   assert.ok(button, `Could not find button "${label}".`);
   await act(async () => {

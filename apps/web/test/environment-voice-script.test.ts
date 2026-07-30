@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { CategoryNote } from "../app/(dashboard)/environment/category-notes";
+import {
+  HABITAT_CATALOG,
+  HABITAT_DECLINED_VALUE,
+} from "@murphai/contracts";
+
 import { buildEnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
+import type { HabitatValues } from "../app/(dashboard)/environment/home-model";
 
 describe("environment voice script", () => {
-  it("uses the complete five-topic walkthrough when coverage is zero", () => {
-    const script = buildEnvironmentVoiceScript([], 0);
+  it("uses one five-topic walkthrough at zero coverage and asks only for city-level location", () => {
+    const script = buildEnvironmentVoiceScript({});
 
     expect(script.flow).toBe("walkthrough");
     expect(script.topics).toHaveLength(5);
@@ -16,101 +21,54 @@ describe("environment voice script", () => {
       "recovery",
       "workspace",
     ]);
+    expect(script.topics[1].prompt).toMatch(/city or approximate region/i);
+    expect(script.topics[1].prompt).toMatch(/never your address/i);
   });
 
-  it.each([10, 30, 70, 94])(
-    "asks only about unknown, non-skipped details at %i%% coverage",
-    (coverage) => {
-      const script = buildEnvironmentVoiceScript(
-        [
-          categoryNote({
-            id: "sleep",
-            skipped: ["Phone by bed"],
-            title: "Sleep",
-            unknown: ["Night temperature", "Darkness"],
-          }),
-          categoryNote({
-            id: "air",
-            title: "Air & water",
-            unknown: [],
-          }),
-          categoryNote({
-            id: "workspace",
-            title: "Workspace",
-            unknown: ["Breaks"],
-          }),
-        ],
-        coverage,
-      );
+  it("asks about unknown high and medium context without mixing it into grade coverage", () => {
+    const script = buildEnvironmentVoiceScript({
+      "sleep-environment": {
+        night_temp_c: 19,
+        phone_by_bed: HABITAT_DECLINED_VALUE,
+      },
+    });
 
-      expect(script.flow).toBe("fill-gaps");
-      expect(script.topics.map((topic) => topic.id)).toEqual([
-        "sleep",
-        "workspace",
-      ]);
-      expect(script.topics[0].focus).toEqual([
-        "Night temperature",
-        "Darkness",
-      ]);
-      expect(script.topics[0].focus).not.toContain("Phone by bed");
-      expect(script.topics[1].focus).toEqual(["Breaks"]);
-    },
-  );
+    expect(script.flow).toBe("fill-gaps");
+    const focus = script.topics.flatMap((topic) => topic.focus ?? []);
+    expect(focus).toContain("City / region");
+    expect(focus).toContain("Ventilation");
+    expect(focus).toContain("Work mode");
+    expect(focus).toContain("Screen setup");
+    expect(focus).not.toContain("Phone by bed");
+    expect(focus).not.toContain("Radon tested");
+    expect(focus).not.toContain("Drinking water");
+  });
 
-  it.each([95, 100])(
-    "switches to one open update prompt at %i%% coverage",
-    (coverage) => {
-      const script = buildEnvironmentVoiceScript(
-        [
-          categoryNote({
-            id: "sleep",
-            title: "Sleep",
-            unknown: coverage === 95 ? ["Mattress age"] : [],
-          }),
-        ],
-        coverage,
-      );
+  it("omits declined gaps and switches to an open update only when collection gaps are resolved", () => {
+    const script = buildEnvironmentVoiceScript(
+      resolvedCollectionValues(),
+    );
 
-      expect(script.flow).toBe("update");
-      expect(script.dialogTitle).toBe("Update your environment");
-      expect(script.topics).toHaveLength(1);
-      expect(script.topics[0].id).toBe("update");
-    },
-  );
+    expect(script.flow).toBe("update");
+    expect(script.dialogTitle).toBe("Update your environment");
+    expect(script.topics).toHaveLength(1);
+    expect(script.topics[0].id).toBe("update");
+  });
 });
 
-function categoryNote({
-  id,
-  skipped = [],
-  title,
-  unknown,
-}: {
-  id: string;
-  skipped?: string[];
-  title: string;
-  unknown: string[];
-}): CategoryNote {
-  return {
-    grade: {
-      eligible: 0,
-      graded: 0,
-      letter: null,
-      met: 0,
-      pct: null,
-      redFlags: 0,
-    },
-    id,
-    known: 0,
-    rows: [],
-    skippedFacts: skipped.map((label, index) => ({
-      indicatorId: `skipped-${index}`,
-      label,
-    })),
-    title,
-    total: unknown.length,
-    unknownFacts: unknown.map((label, index) => ({
-      indicatorId: `unknown-${index}`,
-      label,
-    })),
-  };
+function resolvedCollectionValues(): HabitatValues {
+  const values: HabitatValues = {};
+  for (const aspect of HABITAT_CATALOG.aspects) {
+    if (aspect.domain !== "environment" && aspect.domain !== "workspace") {
+      continue;
+    }
+    const indicators: Record<string, typeof HABITAT_DECLINED_VALUE> = {};
+    for (const indicator of aspect.indicators) {
+      if (indicator.priority !== "low") {
+        indicators[indicator.id] = HABITAT_DECLINED_VALUE;
+      }
+    }
+    values[aspect.id] = indicators;
+  }
+  return values;
 }
