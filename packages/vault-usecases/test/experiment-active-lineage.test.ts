@@ -8,6 +8,7 @@ import {
   initializeVault,
   parseFrontmatterDocument,
 } from "@murphai/core";
+import { loadGeneratedHealthCommonsProtocolRunSpecs } from "@murphai/health-commons/runtime";
 import { test } from "vitest";
 
 import { updateExperimentRecord } from "../src/usecases/experiment-journal-vault.ts";
@@ -502,6 +503,86 @@ test("active withdrawn experiment cannot become non-active while rewriting its s
       /withdrawn Health Commons protocol.*cannot be changed in place.*saved run remains unchanged/u,
     );
 
+    assert.equal(await fs.readFile(experimentPath, "utf8"), before);
+  });
+});
+
+test("planned withdrawn experiment cannot replace its lineage while activating", async () => {
+  await withWithdrawnExperiment("planned", async ({
+    vaultRoot,
+    experimentId,
+    experimentPath,
+  }) => {
+    const services = createIntegratedVaultServices();
+    const alternative = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+      (entry) =>
+        entry.key ===
+        "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    assert.ok(alternative?.protocol);
+    const alternativeRunSpecRevisionId =
+      alternative.revision.runSpecRevisionId;
+    if (alternativeRunSpecRevisionId === null) {
+      throw new Error("Expected a runnable alternative revision.");
+    }
+    const before = await fs.readFile(experimentPath, "utf8");
+
+    await assert.rejects(
+      services.core.applyExperimentOnboarding({
+        vault: vaultRoot,
+        requestId: null,
+        lookup: experimentId,
+        status: "active",
+        protocolKey: alternative.key,
+        pageRevisionId: alternative.revision.pageRevisionId,
+        runSpecRevisionId: alternativeRunSpecRevisionId,
+        onboardingCompletedAt: "2026-05-31T12:00:00.000Z",
+      }),
+      /withdrawn Health Commons protocol.*cannot be changed in place.*saved run remains unchanged/u,
+    );
+
+    assert.equal(await fs.readFile(experimentPath, "utf8"), before);
+
+    const startedAlternative = await services.core.startExperiment({
+      vault: vaultRoot,
+      requestId: null,
+      payload: {
+        source: { kind: "health_commons_protocol" },
+        experiment: {
+          slug: "current-sauna-alternative",
+          title: "Current Sauna Alternative",
+          startedOn: "2026-06-01",
+          status: "active",
+        },
+        commonsProtocolRef: {
+          key: alternative.key,
+          pageRevisionId: alternative.revision.pageRevisionId,
+          runSpecRevisionId: alternativeRunSpecRevisionId,
+        },
+        effectiveProtocolSnapshot: {
+          effectiveSpecHash: alternativeRunSpecRevisionId,
+          doseSignature: "Use the current sauna alternative",
+        },
+        runPlan: {
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-07",
+          modality: "dry_sauna",
+          targetSessions: 3,
+          minimumUsefulSessions: 2,
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        },
+        onboarding: {
+          completedAt: "2026-05-31T12:00:00.000Z",
+        },
+      },
+    });
+
+    assert.notEqual(
+      startedAlternative.experiment.experimentId,
+      experimentId,
+    );
     assert.equal(await fs.readFile(experimentPath, "utf8"), before);
   });
 });

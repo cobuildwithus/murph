@@ -1291,15 +1291,18 @@ export async function updateExperimentRecord(input: {
         frontmatter.analysisPlan,
       )
       const nextStatus = input.status ?? frontmatter.status
-      if (
-        nextStatus !== 'active' &&
+      const preservesActiveRunPlanTuning =
+        frontmatter.status === 'active' && nextStatus === 'active'
+      const changesWithdrawnProtectedState =
+        changesCommonsProtocolRef ||
+        changesProtocolRef ||
+        changesEffectiveProtocolSnapshot ||
         (
-          changesCommonsProtocolRef ||
-          changesProtocolRef ||
-          changesEffectiveProtocolSnapshot ||
-          changesRunPlan ||
-          changesAnalysisPlan
-        ) &&
+          !preservesActiveRunPlanTuning &&
+          (changesRunPlan || changesAnalysisPlan)
+        )
+      if (
+        changesWithdrawnProtectedState &&
         frontmatter.commonsProtocolRef &&
         !(await findCurrentHealthCommonsProtocol(frontmatter.commonsProtocolRef))
       ) {
