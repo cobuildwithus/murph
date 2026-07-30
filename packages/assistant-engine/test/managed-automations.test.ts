@@ -2374,7 +2374,7 @@ describe('applyMurphManagedAutomations', () => {
       })
   })
 
-  it('reconciles an existing active onboarding follow-up definition by owned slug', async () => {
+  it('reconciles and bounds an existing recurring onboarding follow-up by owned slug', async () => {
     const existingRoute = {
       channel: 'linq',
       deliveryTarget: 'existing-thread',
@@ -2413,6 +2413,12 @@ describe('applyMurphManagedAutomations', () => {
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         lookup: 'automation_onboarding_followup',
+        schedule: {
+          at: expect.stringMatching(
+            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          ),
+          kind: 'at',
+        },
         summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
@@ -2421,15 +2427,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
       .not.toHaveProperty('route')
     expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
-      .not.toHaveProperty('schedule')
-    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
       .not.toHaveProperty('status')
     expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
       .toMatchObject({
         route: existingRoute,
         schedule: {
-          kind: 'dailyLocal',
-          localTime: '08:00',
+          at: expect.stringMatching(
+            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          ),
+          kind: 'at',
         },
         status: 'active',
       })
@@ -2471,10 +2477,52 @@ describe('applyMurphManagedAutomations', () => {
       .toMatchObject({
         route: defaultRoute,
         schedule: {
-          kind: 'dailyLocal',
-          localTime: '08:00',
+          at: expect.stringMatching(
+            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          ),
+          kind: 'at',
         },
         status: 'paused',
+      })
+  })
+
+  it('updates one-shot onboarding instructions without moving the occurrence', async () => {
+    const scheduledAt = '2026-06-24T14:00:00.000Z'
+    managedAutomationMocks.records.set('automation_onboarding_followup', {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'old onboarding follow-up instructions',
+      route: defaultRoute,
+      schedule: {
+        at: scheduledAt,
+        kind: 'at',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Old summary',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Old onboarding follow-up',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.patchAutomation.mock.calls[0]?.[0])
+      .not.toHaveProperty('schedule')
+    expect(managedAutomationMocks.records.get('automation_onboarding_followup'))
+      .toMatchObject({
+        instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+        schedule: {
+          at: scheduledAt,
+          kind: 'at',
+        },
       })
   })
 
@@ -2510,8 +2558,10 @@ describe('applyMurphManagedAutomations', () => {
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         route: defaultRoute,
         schedule: {
-          everyMs: 90_000,
-          kind: 'every',
+          at: expect.stringMatching(
+            /^2026-06-24T(?:13:[3-5]\d|14:[0-2]\d):00\.000Z$/u,
+          ),
+          kind: 'at',
         },
         status: 'active',
         summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,

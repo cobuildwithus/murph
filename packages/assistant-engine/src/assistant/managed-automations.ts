@@ -13,6 +13,7 @@ import {
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   MURPH_PRODUCT_ORIGIN,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -31,6 +32,9 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import {
+  computeAssistantCronFirstRunAfterCurrentLocalDay,
+} from './cron/schedule.js'
+import {
   prepareExperimentLifecycleAutomations,
 } from './experiment-support-automations.js'
 import { readAssistantOnboardingState } from './onboarding-state.js'
@@ -40,7 +44,10 @@ import {
   prepareOnboardingGoalCheckinAutomation,
 } from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
-import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
+import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  resolveMurphOnboardingFollowupSchedule,
+} from './onboarding-followup-automation.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -1373,8 +1380,37 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     return { updated: true, yielded: false }
   }
 
-  if (!onboardingFollowupAutomationDefinitionChanged(existing)) {
+  const migrateRecurringSchedule = existing.schedule.kind !== 'at'
+  if (
+    !migrateRecurringSchedule &&
+    !onboardingFollowupAutomationDefinitionChanged(existing)
+  ) {
     return { updated: false, yielded: false }
+  }
+
+  let migratedSchedule: AutomationSchedule | undefined
+  if (migrateRecurringSchedule) {
+    const vault = await loadVault({ vaultRoot: input.vaultRoot })
+    if (input.shouldYield?.() === true) {
+      return { updated: false, yielded: true }
+    }
+    const vaultId = typeof vault.metadata.vaultId === 'string'
+      ? vault.metadata.vaultId.trim()
+      : ''
+    const schedule = resolveMurphOnboardingFollowupSchedule(
+      vaultId || existing.automationId,
+    )
+    const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
+    migratedSchedule = {
+      kind: 'at',
+      at: computeAssistantCronFirstRunAfterCurrentLocalDay({
+        after: input.now,
+        schedule: {
+          ...schedule,
+          timeZone,
+        },
+      }),
+    }
   }
 
   if (input.shouldYield?.() === true) {
@@ -1385,6 +1421,9 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     lookup: existing.automationId,
     now: input.now,
+    ...(migratedSchedule === undefined
+      ? {}
+      : { schedule: migratedSchedule }),
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,

@@ -1583,7 +1583,7 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
-      firstOccurrencePolicy: "after-current-local-day",
+      firstOccurrencePolicy: "once-after-current-local-day",
       instructions: expect.stringContaining(
         "vault-cli assistant onboarding resume-context --format json",
       ),
@@ -1598,10 +1598,10 @@ describe("executeHostedMailboxEvent", () => {
       },
       schedule: {
         kind: "dailyLocal",
-        localTime: "13:30",
+        localTime: expect.stringMatching(/^(?:13:[3-5]\d|14:[0-2]\d)$/u),
       },
       slug: "finish-onboarding-followup",
-      summary: "Daily aspiration-and-foundation continuation check until Murph onboarding is complete.",
+      summary: "One finite next-day invitation to continue unfinished Murph onboarding.",
       tags: [
         "assistant",
         "scheduled",
@@ -1609,7 +1609,7 @@ describe("executeHostedMailboxEvent", () => {
         "onboarding",
         "murph-managed:onboarding-followup",
       ],
-      title: "Finish Murph onboarding follow-up",
+      title: "Final Murph onboarding follow-up",
       vault: "/tmp/assistant-runtime-events",
     });
     const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
@@ -1630,22 +1630,22 @@ describe("executeHostedMailboxEvent", () => {
       },
       {
         clause:
-          "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip.",
+          "If the latest onboarding question is still unanswered, do not repeat it or rotate to another setup question.",
         state: "latest question unanswered",
       },
       {
         clause:
-          "Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, or decline. Do not re-ask known or resolved context.",
+          "Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win.",
         state: "checkpoint answered or category skipped",
       },
       {
         clause:
-          "Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.",
+          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever even that nudge would not be timely or useful.",
         state: "deferred until later",
       },
       {
         clause:
-          "Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip.",
+          "It must contain exactly one easy, reply-oriented question; otherwise return skip.",
         state: "eligible continuation",
       },
     ] as const;
@@ -1659,7 +1659,7 @@ describe("executeHostedMailboxEvent", () => {
       "The managed-automation owner archives this follow-up deterministically.",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: advance Murph onboarding through an anchored health aspiration, a finite health-context foundation, and a contextual return without turning it into a drip questionnaire or unsolicited plan.",
+      "Goal: make one finite, low-pressure final attempt to reopen unfinished Murph onboarding and get a reply.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain(
@@ -1684,14 +1684,14 @@ describe("executeHostedMailboxEvent", () => {
       "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
     );
     expect(seedInput?.instructions).toContain(
-      "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding.",
+      "Output: send at most one brief, natural, low-pressure in-chat continuation.",
     );
     expect(seedInput?.instructions).toContain(
       "The user's reply will be handled by the next normal Murph onboarding turn",
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "exactly one skill-approved, reply-oriented onboarding question usefully advances the relationship",
+      "one brief, skill-compatible question gives the member an easy way to reply and continue",
     );
     expect(seedInput?.instructions).not.toContain("The six checkpoints are");
     expect(seedInput?.instructions).toContain("return skip");

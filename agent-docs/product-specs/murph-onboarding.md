@@ -523,11 +523,13 @@ decline for one skipped category.
 Onboarding may remain open indefinitely without blocking ordinary help. Do not
 claim completion until the command reports it.
 
-## Daily Continuation
+## Finite Scheduled Continuation
 
-The existing daily onboarding automation is a recovery path, not a category
-drip or a support-obligation resolver. It should read recent conversation and
-the resume snapshot, then do one of four things:
+The onboarding follow-up automation is one finite recovery attempt, not a
+category drip or a support-obligation resolver. It is scheduled for the next
+local day in a stable per-member window from 1:30 PM through 2:29 PM, and its
+one-shot is consumed after either a send or a skip. It should read recent
+conversation and the resume snapshot, then do one of four things:
 
 1. return skip because onboarding is complete or declined; the existing
    managed-automation reconciler archives the follow-up deterministically;
@@ -539,12 +541,15 @@ the resume snapshot, then do one of four things:
    question.
 
 If the last onboarding question is unanswered, do not rotate to another
-category or repeat it through the daily automation; skip quietly. Any promised
-proactive support continues through its dedicated canonical automation,
-including after onboarding closes. Honor requested timing and skip whenever
-there is no timely onboarding continuation. Every user-facing scheduled
-continuation includes exactly one easy question that invites a reply; a
-reflection-only scheduled message returns skip.
+category or repeat it. This single final attempt may instead use one natural,
+low-pressure reopening question that lets the member choose whether to
+continue. Skip after an explicit decline, a request not to follow up, or when
+the nudge would not be timely or useful. Any promised proactive support
+continues through its dedicated canonical automation, including after
+onboarding closes. Every user-facing scheduled continuation includes exactly
+one easy question that invites a reply; a reflection-only scheduled message
+returns skip. Normal member replies may continue open onboarding indefinitely,
+but they do not create another scheduled recovery attempt.
 
 ## Post-Onboarding Choice Point
 

@@ -1,6 +1,5 @@
 import { upsertAutomation } from '@murphai/core'
 import {
-  formatTimeZoneDateTimeParts,
   type AutomationRoute,
 } from '@murphai/contracts'
 import { showAutomation as showCanonicalAutomation } from '@murphai/query'
@@ -31,7 +30,10 @@ import {
   upsertAssistantCronCanonicalRuntimeRecord,
   writeAssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
-import { computeAssistantCronNextRunAt } from './schedule.js'
+import {
+  computeAssistantCronFirstRunAfterCurrentLocalDay,
+  computeAssistantCronNextRunAt,
+} from './schedule.js'
 import {
   assertAssistantCronJobNameIsAvailable,
   buildAssistantCronTarget,
@@ -65,7 +67,9 @@ export interface AddAssistantCronJobInput
 
 export interface UpsertAssistantCronAutomationInput {
   activeUntil?: string | null
-  firstOccurrencePolicy?: 'after-current-local-day'
+  firstOccurrencePolicy?:
+    | 'after-current-local-day'
+    | 'once-after-current-local-day'
   instructions: string
   now?: Date
   route: AutomationRoute
@@ -224,6 +228,21 @@ export async function upsertAssistantCronAutomation(
       return null
     }
 
+    const materializeOneShot =
+      input.firstOccurrencePolicy === 'once-after-current-local-day'
+    const schedule =
+      materializeOneShot && existingAutomation?.schedule.kind === 'at'
+        ? existingAutomation.schedule
+        : materializeOneShot
+          ? {
+              kind: 'at' as const,
+              at: resolveFirstOccurrenceAfterCurrentLocalDay({
+                now: resolvedCreation.now,
+                schedule: resolvedCreation.resolvedSchedule,
+              }),
+            }
+          : resolvedCreation.schedule
+
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         activeUntil: input.activeUntil,
@@ -232,7 +251,7 @@ export async function upsertAssistantCronAutomation(
         automation: existingAutomation,
         title: resolvedCreation.name,
         status,
-        schedule: resolvedCreation.schedule,
+        schedule,
         route: buildCanonicalAutomationRoute(target),
         instructions: resolvedCreation.prompt,
         slug: input.slug,
@@ -373,35 +392,14 @@ function resolveFirstOccurrenceAfterCurrentLocalDay(input: {
     )
   }
 
-  const first = computeAssistantCronNextRunAt(schedule, input.now)
-  if (!first) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The assistant cron schedule does not produce a future run time.',
-    )
-  }
-
-  const nowDayKey = formatTimeZoneDateTimeParts(
-    input.now,
-    timeZone,
-  ).dayKey
-  const firstDayKey = formatTimeZoneDateTimeParts(
-    first,
-    timeZone,
-  ).dayKey
-  if (firstDayKey !== nowDayKey) {
-    return first
-  }
-
-  const next = computeAssistantCronNextRunAt(schedule, new Date(first))
-  if (!next) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_INVALID_SCHEDULE',
-      'The assistant cron schedule does not produce a deferred future run time.',
-    )
-  }
-
-  return next
+  return computeAssistantCronFirstRunAfterCurrentLocalDay({
+    after: input.now,
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: schedule.localTime,
+      timeZone,
+    },
+  })
 }
 
 function requireCanonicalAutomationCronRecord(
