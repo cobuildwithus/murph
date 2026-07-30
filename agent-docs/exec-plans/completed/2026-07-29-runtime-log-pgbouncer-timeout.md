@@ -1,6 +1,6 @@
 # Runtime-log PgBouncer timeout compatibility
 
-Status: active
+Status: completed
 
 ## Outcome
 
@@ -62,7 +62,11 @@ without moving application traffic to direct Postgres.
   exercise the rejected timeout boundaries through production SQL.
 - The reviewed test-only coverage patch was inspected, dry-run, applied, and
   proved with all eight real-PostgreSQL runtime-log concurrency tests passing.
-- Parent final review, exact-head CI, final ReviewGPT, merge, deploy, drain,
-  cutover, and post-cutover verification remain pending.
+- Parent final review found no remaining correctness, scope, privacy, or proof
+  gaps, and the branch rebases cleanly onto the latest non-overlapping `main`.
+- Repository implementation and local verification are complete. Exact-head CI,
+  final ReviewGPT, merge, deploy, drain, cutover, and post-cutover verification
+  remain external completion gates for the current PR and rollout.
 
 Updated: 2026-07-29
+Completed: 2026-07-29
