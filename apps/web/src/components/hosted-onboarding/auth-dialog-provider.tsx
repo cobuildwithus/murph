@@ -4,13 +4,17 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
 
-import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
+import {
+  AuthDialog,
+  type AuthDialogPrivyRuntimeState,
+} from "@/src/components/hosted-onboarding/auth-dialog";
 import {
   HOSTED_APP_HOME_PATH,
   HOSTED_APP_INITIAL_VISIT_HOME_PATH,
@@ -30,6 +34,21 @@ import {
   reloadCurrentHostedAuthDocument,
 } from "./hosted-auth-navigation";
 
+type HostedAuthRuntimeComponent = typeof import(
+  "./hosted-auth-runtime"
+)["HostedAuthRuntime"];
+
+type WindowWithIdleCallback = typeof window & {
+  cancelIdleCallback?: (handle: number) => void;
+  requestIdleCallback?: (
+    callback: () => void,
+    options?: { timeout?: number },
+  ) => number;
+};
+
+let hostedAuthRuntimeComponent: HostedAuthRuntimeComponent | null = null;
+let hostedAuthRuntimeLoadPromise: Promise<HostedAuthRuntimeComponent> | null = null;
+
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
 const ACTION_APPROVAL_PATH_PATTERN = /^\/approve\/haa_[A-Za-z0-9_-]{32}$/u;
@@ -41,15 +60,53 @@ const SETTINGS_PATH = "/settings";
 interface AuthContextValue {
   authenticated: boolean;
   openAuthDialog: () => void;
+  prepareAuth: () => void;
+  shared: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   openAuthDialog: () => {},
+  prepareAuth: () => {},
+  shared: false,
 });
 
 export function useAuth() {
   return useContext(AuthContext);
+}
+
+export function useAuthRuntimeIdlePreload(enabled: boolean) {
+  const { prepareAuth } = useAuth();
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      return;
+    }
+
+    let cancelled = false;
+    const prepare = () => {
+      if (!cancelled) {
+        prepareAuth();
+      }
+    };
+    const idleWindow = window as WindowWithIdleCallback;
+
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
+
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const handle = window.setTimeout(prepare, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [enabled, prepareAuth]);
 }
 
 export function AuthProvider({
@@ -60,10 +117,38 @@ export function AuthProvider({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [runtimeRequested, setRuntimeRequested] = useState(false);
+  const [AuthRuntime, setAuthRuntime] =
+    useState<HostedAuthRuntimeComponent | null>(null);
+  const [runtimeLoadError, setRuntimeLoadError] = useState<string | null>(null);
+
+  const prepareAuth = useCallback(() => {
+    if (!isHomepage()) {
+      return;
+    }
+
+    setRuntimeRequested(true);
+    const loaded = hostedAuthRuntimeComponent;
+    if (loaded) {
+      setRuntimeLoadError(null);
+      setAuthRuntime(() => loaded);
+      return;
+    }
+
+    setRuntimeLoadError(null);
+    void loadHostedAuthRuntime()
+      .then((Component) => {
+        setAuthRuntime(() => Component);
+      })
+      .catch(() => {
+        setRuntimeLoadError("Sign in did not load. Try again.");
+      });
+  }, []);
 
   const openAuthDialog = useCallback(() => {
+    prepareAuth();
     setOpen(true);
-  }, []);
+  }, [prepareAuth]);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
     if (source === "cross-document" || source === "same-document-expired") {
@@ -95,23 +180,78 @@ export function AuthProvider({
   }, [authenticated]);
 
   const value = useMemo(
-    () => ({ authenticated, openAuthDialog }),
-    [authenticated, openAuthDialog],
+    () => ({
+      authenticated,
+      openAuthDialog,
+      prepareAuth,
+      shared: true,
+    }),
+    [authenticated, openAuthDialog, prepareAuth],
   );
+  const dialogProps = {
+    onCompleted: handleAuthCompleted,
+    onOpenChange: setOpen,
+    open,
+    requireLaunchConsentOnCompletion: !authenticated,
+    ...(authenticated
+      ? {
+          description: "Verify this device to manage secure approvals.",
+          title: "Sign in again",
+        }
+      : {}),
+  } as const;
+  const pendingRuntime: AuthDialogPrivyRuntimeState = runtimeLoadError
+    ? { kind: "error", message: runtimeLoadError }
+    : { kind: "loading" };
 
   return (
     <AuthContext.Provider value={value}>
       {children}
-      <AuthDialog
-        open={open}
-        title={authenticated ? "Sign in again" : undefined}
-        description={authenticated ? "Verify this device to manage secure approvals." : undefined}
-        onCompleted={handleAuthCompleted}
-        onOpenChange={setOpen}
-        requireLaunchConsentOnCompletion={!authenticated}
-      />
+      {runtimeRequested ? (
+        AuthRuntime ? (
+          <AuthRuntime>
+            {(runtime) => (
+              <AuthDialog
+                {...dialogProps}
+                privyRuntime={runtime}
+              />
+            )}
+          </AuthRuntime>
+        ) : (
+          <AuthDialog
+            {...dialogProps}
+            privyRuntime={pendingRuntime}
+          />
+        )
+      ) : (
+        <AuthDialog {...dialogProps} />
+      )}
     </AuthContext.Provider>
   );
+}
+
+function isHomepage(): boolean {
+  return typeof window !== "undefined" && window.location.pathname === "/";
+}
+
+function loadHostedAuthRuntime(): Promise<HostedAuthRuntimeComponent> {
+  if (hostedAuthRuntimeComponent) {
+    return Promise.resolve(hostedAuthRuntimeComponent);
+  }
+
+  if (!hostedAuthRuntimeLoadPromise) {
+    hostedAuthRuntimeLoadPromise = import("./hosted-auth-runtime")
+      .then((module) => {
+        hostedAuthRuntimeComponent = module.HostedAuthRuntime;
+        return module.HostedAuthRuntime;
+      })
+      .catch((error: unknown) => {
+        hostedAuthRuntimeLoadPromise = null;
+        throw error;
+      });
+  }
+
+  return hostedAuthRuntimeLoadPromise;
 }
 
 function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): boolean {
