@@ -53,7 +53,9 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
       phoneNumberLookupKey: storedLine.phoneNumberLookupKey,
       prisma: input.prisma,
       providerUpdatedAt: observedAt,
-      reputationStatus: line.providerReputationStatus,
+      ...(line.providerReputationStatus
+        ? { reputationStatus: line.providerReputationStatus }
+        : {}),
       ...(line.providerServiceStatus
         ? { serviceStatus: line.providerServiceStatus }
         : {}),

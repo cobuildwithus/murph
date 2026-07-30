@@ -26,7 +26,11 @@ CREATE INDEX "hosted_linq_chat_health_status_updated_idx"
 
 ALTER TABLE "hosted_linq_line"
   ADD COLUMN "provider_service_status" TEXT,
-  ADD COLUMN "provider_reputation_status" TEXT;
+  ADD COLUMN "provider_service_updated_at" TIMESTAMP(3),
+  ADD COLUMN "last_service_status_event_id" TEXT,
+  ADD COLUMN "provider_reputation_status" TEXT,
+  ADD COLUMN "provider_reputation_updated_at" TIMESTAMP(3),
+  ADD COLUMN "last_reputation_status_event_id" TEXT;
 
 CREATE INDEX "hosted_linq_line_provider_service_status_idx"
   ON "hosted_linq_line"("provider_service_status");
@@ -51,23 +55,28 @@ SET "provider_service_status" = CASE
       THEN UPPER("provider_status")
     ELSE NULL
   END,
+  "provider_service_updated_at" = CASE
+    WHEN UPPER("provider_status") IN ('ACTIVE', 'FLAGGED')
+      THEN "provider_updated_at"
+    ELSE NULL
+  END,
+  "last_service_status_event_id" = CASE
+    WHEN UPPER("provider_status") IN ('ACTIVE', 'FLAGGED')
+      THEN "last_status_event_id"
+    ELSE NULL
+  END,
   "provider_reputation_status" = CASE
     WHEN UPPER("provider_status") IN ('HEALTHY', 'AT_RISK', 'CRITICAL')
       THEN UPPER("provider_status")
     ELSE NULL
+  END,
+  "provider_reputation_updated_at" = CASE
+    WHEN UPPER("provider_status") IN ('HEALTHY', 'AT_RISK', 'CRITICAL')
+      THEN "provider_updated_at"
+    ELSE NULL
+  END,
+  "last_reputation_status_event_id" = CASE
+    WHEN UPPER("provider_status") IN ('HEALTHY', 'AT_RISK', 'CRITICAL')
+      THEN "last_status_event_id"
+    ELSE NULL
   END;
-
--- The legacy health_status mixed provider reputation with Murph-observed
--- delivery outcomes. Rebuild it only from local delivery evidence.
-UPDATE "hosted_linq_line"
-SET "health_status" = CASE
-  WHEN "consecutive_failures" > 0
-    THEN 'warning'
-  WHEN "last_delivered_at" IS NOT NULL
-    AND (
-      "last_failed_at" IS NULL
-      OR "last_delivered_at" >= "last_failed_at"
-    )
-    THEN 'healthy'
-  ELSE 'unknown'
-END;

@@ -671,6 +671,13 @@ describe("hosted web production migration guard", () => {
       ),
       true,
     );
+    assert.equal(
+      migrations.some(
+        ({ id }) =>
+          id === "20260729183000_rebuild_linq_delivery_health_after_drain",
+      ),
+      true,
+    );
   });
 
   test("checks the canonical owner before contract migration SQL", async () => {

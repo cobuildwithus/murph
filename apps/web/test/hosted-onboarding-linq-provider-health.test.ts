@@ -251,13 +251,46 @@ describe("Linq provider health inventory synchronization", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         providerReputationStatus: "AT_RISK",
-        providerServiceStatus: "ACTIVE",
-        providerUpdatedAt: observedAt,
+        providerReputationUpdatedAt: observedAt,
       }),
       where: expect.objectContaining({
         phoneNumberLookupKey: "line-key",
       }),
     }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerServiceStatus: "ACTIVE",
+        providerServiceUpdatedAt: observedAt,
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: "line-key",
+      }),
+    }));
+  });
+
+  it("does not clear stored provider state from unknown inventory values", async () => {
+    const updateMany = vi.fn();
+    const prisma = {
+      hostedLinqLine: { updateMany },
+    } as never;
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      phone_numbers: [{
+        id: "line-future",
+        phone_number: "+1 (202) 555-0123",
+        reputation: { status: "FUTURE_REPUTATION" },
+        status: "FUTURE_SERVICE",
+      }],
+    }));
+    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
+      phoneNumberLookupKey: "line-key",
+    });
+
+    await expect(syncHostedLinqPhoneNumberInventory({
+      observedAt: new Date("2026-07-29T16:08:00.000Z"),
+      prisma,
+    })).resolves.toEqual({ syncedCount: 1 });
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("associates inventoried chat health with its resolved sending line", async () => {
@@ -327,23 +360,39 @@ describe("Linq provider health projections", () => {
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        providerReputationStatus: "AT_RISK",
         providerServiceStatus: "ACTIVE",
+        providerServiceUpdatedAt: new Date("2026-07-29T16:04:00.000Z"),
       }),
       where: {
         phoneNumberLookupKey: "line-key",
         OR: expect.arrayContaining([
-          { providerUpdatedAt: null },
-          { providerUpdatedAt: { lt: new Date("2026-07-29T16:04:00.000Z") } },
+          { providerServiceUpdatedAt: null },
+          { providerServiceUpdatedAt: { lt: new Date("2026-07-29T16:04:00.000Z") } },
           expect.objectContaining({
-            providerUpdatedAt: new Date("2026-07-29T16:04:00.000Z"),
+            providerServiceUpdatedAt: new Date("2026-07-29T16:04:00.000Z"),
+          }),
+        ]),
+      },
+    }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerReputationStatus: "AT_RISK",
+        providerReputationUpdatedAt: new Date("2026-07-29T16:04:00.000Z"),
+      }),
+      where: {
+        phoneNumberLookupKey: "line-key",
+        OR: expect.arrayContaining([
+          { providerReputationUpdatedAt: null },
+          { providerReputationUpdatedAt: { lt: new Date("2026-07-29T16:04:00.000Z") } },
+          expect.objectContaining({
+            providerReputationUpdatedAt: new Date("2026-07-29T16:04:00.000Z"),
           }),
         ]),
       },
     }));
   });
 
-  it("clears a supplied unknown provider value instead of retaining stale health", async () => {
+  it("does not clear an independent provider dimension for an unknown value", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
 
     await expect(projectHostedLinqLineProviderStateTx({
@@ -359,11 +408,134 @@ describe("Linq provider health projections", () => {
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        providerReputationStatus: null,
         providerServiceStatus: "ACTIVE",
+        providerServiceUpdatedAt: new Date("2026-07-29T16:05:00.000Z"),
       }),
     }));
+    expect(updateMany.mock.calls.some(([query]) =>
+      Object.hasOwn(query.data, "providerReputationStatus"),
+    )).toBe(false);
   });
+
+  it("orders delayed service and reputation updates independently", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      hostedLinqLine: { updateMany },
+    } as never;
+
+    await projectHostedLinqLineProviderStateTx({
+      eventId: "event-service",
+      phoneNumberLookupKey: "line-key",
+      prisma,
+      providerUpdatedAt: new Date("2026-07-29T16:10:00.000Z"),
+      serviceStatus: "ACTIVE",
+    });
+    await projectHostedLinqLineProviderStateTx({
+      eventId: "event-reputation",
+      phoneNumberLookupKey: "line-key",
+      prisma,
+      providerUpdatedAt: new Date("2026-07-29T16:05:00.000Z"),
+      reputationStatus: "CRITICAL",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerReputationStatus: "CRITICAL",
+      }),
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { providerReputationUpdatedAt: null },
+          {
+            providerReputationUpdatedAt: {
+              lt: new Date("2026-07-29T16:05:00.000Z"),
+            },
+          },
+        ]),
+      }),
+    }));
+    expect(updateMany.mock.calls.some(([query]) =>
+      query.data.providerReputationStatus === "CRITICAL"
+      && Object.hasOwn(query.data, "providerServiceStatus"),
+    )).toBe(false);
+  });
+
+  it.each([
+    {
+      data: {
+        changed_at: "2026-07-29T16:11:00.000Z",
+        new_reputation: "HEALTHY",
+        phone_number: "+1 (202) 555-0123",
+      },
+      expectedBlockCode: "line_flagged",
+      initialReputationStatus: "AT_RISK",
+      initialServiceStatus: "FLAGGED",
+    },
+    {
+      data: {
+        changed_at: "2026-07-29T16:11:00.000Z",
+        new_status: "ACTIVE",
+        phone_number: "+1 (202) 555-0123",
+      },
+      expectedBlockCode: "line_critical",
+      initialReputationStatus: "CRITICAL",
+      initialServiceStatus: "FLAGGED",
+    },
+  ] as const)(
+    "preserves an independent $expectedBlockCode hard block through a partial webhook",
+    async ({
+      data,
+      expectedBlockCode,
+      initialReputationStatus,
+      initialServiceStatus,
+    }) => {
+      const state: {
+        reputationStatus: string;
+        serviceStatus: string;
+      } = {
+        reputationStatus: initialReputationStatus,
+        serviceStatus: initialServiceStatus,
+      };
+      const health = parseHostedLinqProviderHealthEvent(buildProviderEvent({
+        data,
+        eventType: "phone_number.status_updated",
+      }));
+      const updateMany = vi.fn(async (query: {
+        data: Record<string, unknown>;
+      }) => {
+        if (typeof query.data.providerReputationStatus === "string") {
+          state.reputationStatus = query.data.providerReputationStatus;
+        }
+        if (typeof query.data.providerServiceStatus === "string") {
+          state.serviceStatus = query.data.providerServiceStatus;
+        }
+        return { count: 1 };
+      });
+
+      expect(health.line).not.toBeNull();
+      await projectHostedLinqLineProviderStateTx({
+        eventId: health.line?.eventId,
+        phoneNumberLookupKey: "line-key",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+        providerUpdatedAt: health.line?.providerUpdatedAt,
+        reputationStatus: health.line?.reputationStatus,
+        serviceStatus: health.line?.serviceStatus,
+      });
+
+      expect(evaluateHostedLinqEgressPolicy({
+        chatHealthStatus: "HEALTHY",
+        lineDeliveryHealthStatus: "healthy",
+        lineEgressPolicy: "enabled",
+        lineReputationStatus: state.reputationStatus,
+        lineServiceStatus: state.serviceStatus,
+        newConversation: false,
+      })).toEqual({
+        code: expectedBlockCode,
+        kind: "block",
+      });
+    },
+  );
 
   it("cannot let an older chat snapshot overwrite newer provider state", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });

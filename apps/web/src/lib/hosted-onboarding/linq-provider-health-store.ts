@@ -35,13 +35,11 @@ export async function projectHostedLinqLineProviderStateTx(input: {
   serviceStatus?: unknown;
 }): Promise<boolean> {
   const phoneNumberLookupKey = normalizeNullableString(input.phoneNumberLookupKey);
-  const reputationStatusSupplied = input.reputationStatus !== undefined;
-  const serviceStatusSupplied = input.serviceStatus !== undefined;
   const serviceStatus = parseHostedLinqLineServiceStatus(input.serviceStatus);
   const reputationStatus = parseHostedLinqLineReputationStatus(input.reputationStatus);
   if (
     !phoneNumberLookupKey
-    || (!serviceStatusSupplied && !reputationStatusSupplied)
+    || (!serviceStatus && !reputationStatus)
   ) {
     return false;
   }
@@ -51,7 +49,31 @@ export async function projectHostedLinqLineProviderStateTx(input: {
   const lastStatusEventId = input.eventId
     ? createHostedLinqProviderEventLookupKey(input.eventId)
     : null;
-  const sameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
+  const serviceSameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
+    lastStatusEventId
+      ? [
+          {
+            providerServiceUpdatedAt: providerUpdatedAt,
+            OR: [
+              { lastServiceStatusEventId: null },
+              { lastServiceStatusEventId: { lt: lastStatusEventId } },
+            ],
+          },
+        ]
+      : [];
+  const reputationSameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
+    lastStatusEventId
+      ? [
+          {
+            providerReputationUpdatedAt: providerUpdatedAt,
+            OR: [
+              { lastReputationStatusEventId: null },
+              { lastReputationStatusEventId: { lt: lastStatusEventId } },
+            ],
+          },
+        ]
+      : [];
+  const overallSameTimestampWhere: Prisma.HostedLinqLineWhereInput[] =
     lastStatusEventId
       ? [
           {
@@ -63,29 +85,59 @@ export async function projectHostedLinqLineProviderStateTx(input: {
           },
         ]
       : [];
-  const updated = await input.prisma.hostedLinqLine.updateMany({
+
+  const serviceUpdated = serviceStatus
+    ? await input.prisma.hostedLinqLine.updateMany({
+        data: {
+          lastServiceStatusEventId: lastStatusEventId,
+          providerServiceStatus: serviceStatus,
+          providerServiceUpdatedAt: providerUpdatedAt,
+        },
+        where: {
+          phoneNumberLookupKey,
+          OR: [
+            { providerServiceUpdatedAt: null },
+            { providerServiceUpdatedAt: { lt: providerUpdatedAt } },
+            ...serviceSameTimestampWhere,
+          ],
+        },
+      })
+    : { count: 0 };
+  const reputationUpdated = reputationStatus
+    ? await input.prisma.hostedLinqLine.updateMany({
+        data: {
+          lastReputationStatusEventId: lastStatusEventId,
+          providerReputationStatus: reputationStatus,
+          providerReputationUpdatedAt: providerUpdatedAt,
+        },
+        where: {
+          phoneNumberLookupKey,
+          OR: [
+            { providerReputationUpdatedAt: null },
+            { providerReputationUpdatedAt: { lt: providerUpdatedAt } },
+            ...reputationSameTimestampWhere,
+          ],
+        },
+      })
+    : { count: 0 };
+
+  await input.prisma.hostedLinqLine.updateMany({
     data: {
       lastStatusEventId,
       providerLastSeenAt: providerObservedAt,
       providerSeenAt: providerObservedAt,
       providerUpdatedAt,
-      ...(reputationStatusSupplied
-        ? { providerReputationStatus: reputationStatus }
-        : {}),
-      ...(serviceStatusSupplied
-        ? { providerServiceStatus: serviceStatus }
-        : {}),
     },
     where: {
       phoneNumberLookupKey,
       OR: [
         { providerUpdatedAt: null },
         { providerUpdatedAt: { lt: providerUpdatedAt } },
-        ...sameTimestampWhere,
+        ...overallSameTimestampWhere,
       ],
     },
   });
-  return updated.count === 1;
+  return serviceUpdated.count === 1 || reputationUpdated.count === 1;
 }
 
 export async function projectHostedLinqChatHealthTx(input: {

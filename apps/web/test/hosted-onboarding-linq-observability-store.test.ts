@@ -1123,10 +1123,26 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        providerReputationStatus: "CRITICAL",
+        providerReputationUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
+    });
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerServiceStatus: "FLAGGED",
+        providerServiceUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      }),
+      where: expect.objectContaining({
+        phoneNumberLookupKey: expect.any(String),
+      }),
+    });
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
         providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-        providerReputationStatus: "CRITICAL",
-        providerServiceStatus: "FLAGGED",
       }),
       where: expect.objectContaining({
         phoneNumberLookupKey: expect.any(String),

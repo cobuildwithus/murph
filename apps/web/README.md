@@ -1055,6 +1055,18 @@ deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
 
+The Linq provider-health rollout follows the same boundary. Predeploy adds the
+independent service/reputation columns and their per-dimension ordering
+metadata, but does not rewrite legacy `hosted_linq_line.health_status` while an
+old Web build can still use that column for provider blocks. After the
+replacement build is live and the standard prior-function drain and alias
+proofs pass, contract migration
+`20260729183000_rebuild_linq_delivery_health_after_drain` first preserves any
+final legacy provider update written during the rollout window, then
+reconstructs that column from Murph-observed delivery evidence. Independent
+`FLAGGED` and `CRITICAL` provider fields continue to block through the existing
+egress policy.
+
 The Linq weighted-capacity rollout follows that rule. Predeploy adds nullable
 `HostedThreadRoute.accountLookupKey` and its index; old application code remains
 compatible if the build fails after migration. Once the replacement build is

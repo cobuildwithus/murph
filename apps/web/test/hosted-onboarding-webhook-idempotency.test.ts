@@ -1058,8 +1058,14 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          providerReputationStatus: "AT_RISK",
           providerServiceStatus: "FLAGGED",
+        }),
+      }),
+    );
+    expect(prisma.hostedLinqLine.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerReputationStatus: "AT_RISK",
         }),
       }),
     );
