@@ -45,12 +45,7 @@ export const POST = withJsonError(async (request: Request) => {
       existingAppSession
       && existingAppSession.privyUserId !== auth.identity.userId
     ) {
-      throw hostedOnboardingError({
-        code: "PRIVY_SESSION_MEMBER_MISMATCH",
-        message:
-          "This Privy login does not match your current Murph session. Sign out and sign back in.",
-        httpStatus: 409,
-      });
+      throw privySessionMemberMismatchError();
     }
     const body = await readOptionalJsonObject(request);
     const authMethod = resolveHostedPrivyCompletionAuthMethod({
@@ -69,6 +64,12 @@ export const POST = withJsonError(async (request: Request) => {
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });
+    if (
+      existingAppSession
+      && existingAppSession.member.id !== result.memberId
+    ) {
+      throw privySessionMemberMismatchError();
+    }
     const [status, launchConsent] = await Promise.all([
       getHostedInviteStatus({
         authenticatedMember: result.member,
@@ -108,6 +109,15 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+function privySessionMemberMismatchError() {
+  return hostedOnboardingError({
+    code: "PRIVY_SESSION_MEMBER_MISMATCH",
+    message:
+      "This Privy login does not match your current Murph session. Sign out and sign back in.",
+    httpStatus: 409,
+  });
+}
 
 async function readHostedCompletionLaunchConsent(memberId: string): Promise<{
   granted: boolean;

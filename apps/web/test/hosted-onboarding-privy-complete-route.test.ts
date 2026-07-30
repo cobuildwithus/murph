@@ -171,6 +171,48 @@ describe("hosted onboarding Privy completion route", () => {
     });
   });
 
+  it("rejects same-identity completion when it resolves to a different member", async () => {
+    mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: createHostedMember(),
+      privyUserId: "did:privy:user_123",
+    });
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      activationPending: false,
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      member: {
+        ...createHostedMember(),
+        id: "member_other",
+      },
+      memberId: "member_other",
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "phone",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_SESSION_MEMBER_MISMATCH",
+        retryable: false,
+      },
+    });
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
   it("returns the public completion payload when checkout is next", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
