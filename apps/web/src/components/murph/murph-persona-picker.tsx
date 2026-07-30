@@ -338,7 +338,7 @@ export function MurphPersonaPicker({
     >
       <fieldset disabled={saving}>
         <legend className="sr-only">Murph tone</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           <ToneChoiceCard
             disabled={saving}
             groupId={toneGroupId}
