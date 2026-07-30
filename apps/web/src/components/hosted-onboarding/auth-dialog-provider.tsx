@@ -75,40 +75,6 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function useAuthRuntimeIdlePreload(enabled: boolean) {
-  const { prepareAuth } = useAuth();
-
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined") {
-      return;
-    }
-
-    let cancelled = false;
-    const prepare = () => {
-      if (!cancelled) {
-        prepareAuth();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(prepare, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [enabled, prepareAuth]);
-}
-
 export function AuthProvider({
   authenticated,
   children,
@@ -183,6 +149,22 @@ export function HomepageAuthRuntimeProvider({
   authenticated: boolean;
   children?: ReactNode;
 }) {
+  if (authenticated) {
+    return <>{children}</>;
+  }
+
+  return (
+    <UnauthenticatedHomepageAuthRuntimeProvider>
+      {children}
+    </UnauthenticatedHomepageAuthRuntimeProvider>
+  );
+}
+
+function UnauthenticatedHomepageAuthRuntimeProvider({
+  children,
+}: {
+  children?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [runtimeRequested, setRuntimeRequested] = useState(false);
   const [AuthRuntime, setAuthRuntime] =
@@ -190,10 +172,6 @@ export function HomepageAuthRuntimeProvider({
   const [runtimeLoadError, setRuntimeLoadError] = useState<string | null>(null);
 
   const prepareAuth = useCallback(() => {
-    if (authenticated) {
-      return;
-    }
-
     setRuntimeRequested(true);
     const loaded = hostedAuthRuntimeComponent;
     if (loaded) {
@@ -210,11 +188,37 @@ export function HomepageAuthRuntimeProvider({
       .catch(() => {
         setRuntimeLoadError("Sign in did not load. Try again.");
       });
-  }, [authenticated]);
+  }, []);
 
   const openAuthDialog = useCallback(() => {
     prepareAuth();
     setOpen(true);
+  }, [prepareAuth]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const prepare = () => {
+      if (!cancelled) {
+        prepareAuth();
+      }
+    };
+    const idleWindow = window as WindowWithIdleCallback;
+
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
+
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const handle = window.setTimeout(prepare, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
   }, [prepareAuth]);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
@@ -232,12 +236,12 @@ export function HomepageAuthRuntimeProvider({
 
   const value = useMemo(
     () => ({
-      authenticated,
+      authenticated: false,
       openAuthDialog,
       prepareAuth,
       shared: true,
     }),
-    [authenticated, openAuthDialog, prepareAuth],
+    [openAuthDialog, prepareAuth],
   );
   const dialogProps = {
     onCompleted: handleAuthCompleted,
