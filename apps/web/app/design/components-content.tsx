@@ -147,9 +147,17 @@ function Section({
   );
 }
 
-function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
+function DialogPreviewFrame({
+  children,
+  id,
+  label,
+}: {
+  children: React.ReactNode;
+  id?: string;
+  label: string;
+}) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex scroll-mt-24 flex-col gap-3" id={id}>
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
       <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
         <DialogPreviewHeader />
@@ -563,12 +571,15 @@ export function ComponentsContent() {
           <div
             className="flex flex-col gap-6"
             data-design-homepage-auth-transitions
+            id="homepage-auth-transitions"
           >
             <p className="text-sm text-muted-foreground">
               Secure sign in keeps the ordinary methods visible while the
               provider initializes. A selected method owns the pending state
-              immediately, then account completion stays on that production
-              action through the next view.
+              immediately. If hydration discovers an existing session before
+              submission, recovery takes priority; otherwise account
+              completion stays on that production action through the next
+              view.
             </p>
             <div
               className="grid items-start gap-5 lg:grid-cols-2"
@@ -603,6 +614,18 @@ export function ComponentsContent() {
                   active
                   onClick={() => {}}
                   readyToContinue
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame
+                id="homepage-auth-hydrated-session-recovery"
+                label="Hydrated email session recovery"
+              >
+                <HostedResumableAuthState
+                  auth={{ identityLabel: "member@example.com", method: "email" }}
+                  disabled={false}
+                  onContinue={() => {}}
+                  onSignOut={() => {}}
+                  pending={false}
                 />
               </DialogPreviewFrame>
             </div>

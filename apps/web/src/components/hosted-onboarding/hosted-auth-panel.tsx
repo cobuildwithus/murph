@@ -77,7 +77,11 @@ export function HostedAuthPanel({
   // Decline is terminal. A status read or acceptance that resolves after it must
   // not advance the journey the member just refused.
   const consentDeclinedRef = useRef(false);
-  const { authenticated, logout } = usePrivy();
+  const { authenticated, logout, ready } = usePrivy();
+  // A cold panel can accept a presentation choice before Privy reveals an
+  // existing session. Consume that hydration boundary once so later choices
+  // remain deliberate.
+  const [privyHydrationPending, setPrivyHydrationPending] = useState(!ready);
   const { user } = useUser();
   const completion = useHostedAuthCompletion({
     inviteCode,
@@ -104,6 +108,24 @@ export function HostedAuthPanel({
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
   const authJourneyActive = completion.activeMethod !== null;
   const selectedAuthMethod = completion.activeMethod ?? queuedAuthMethod;
+
+  if (privyHydrationPending && ready) {
+    setPrivyHydrationPending(false);
+    if (
+      authenticated
+      && !codeSent
+      && queuedAuthMethod === null
+      && completion.activeMethod === null
+      && completion.completingMethod === null
+      && pendingAuthCompletion === null
+    ) {
+      if (includesPhone || resumableAuth !== null) {
+        setPrimaryMethod("phone");
+      }
+      setTelegramActive(false);
+      setTelegramNotice(null);
+    }
+  }
 
   const view: HostedAuthPanelView = pendingAuthCompletion
     ? "consent"
