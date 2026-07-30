@@ -287,7 +287,10 @@ Last verified: 2026-07-29
   pre-provider lease. Its claim compares and advances the existing `updatedAt`
   row version while preserving the original `attemptedAt` authority timestamp,
   so one concurrent replay wins without erasing proof that recovery preceded
-  an earlier replacement-line event. For a
+  an earlier replacement-line event. Failure persistence is fenced to the
+  physical attempt timestamp: a genuine first attempt may fail, while a replay
+  that retained earlier authority cannot erase it with a later provider error.
+  For a
   newly created route, sparse style is committed in the same transaction
   through the existing
   synthetic-member preference owner. Optional room context rides the existing

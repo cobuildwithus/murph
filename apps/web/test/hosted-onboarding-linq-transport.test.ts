@@ -484,6 +484,9 @@ describe("hosted Linq webhook transport", () => {
     );
     expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        expectedAttemptedAt: vi.mocked(
+          claimHostedLinqDeliveryProviderDispatchTx,
+        ).mock.calls[0]?.[0].attemptedAt,
         failureReason: "send failed",
         idempotencyKey: effect.effectId,
         prisma: expect.objectContaining({
@@ -494,6 +497,60 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
+  });
+
+  it("fences a recovery replay failure to its physical provider attempt", async () => {
+    vi.useFakeTimers();
+    const replayAttemptedAt = new Date("2026-03-27T12:01:00.000Z");
+    vi.setSystemTime(replayAttemptedAt);
+    vi.mocked(createHostedLinqChat).mockRejectedValueOnce(
+      new Error("provider replay timed out"),
+    );
+    vi.mocked(markHostedLinqDeliverySendFailedTx).mockResolvedValueOnce();
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      incomingRecipientPhone: "+15550100000",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      participantContact: {
+        kind: "phone",
+        value: "+15551234567",
+      },
+      sourceEventId: "event-group-line-recovery-timeout",
+      template: "group_line_recovery",
+      threadId: "chat-group-replay-timeout",
+    });
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      })).rejects.toThrow("provider replay timed out");
+
+      expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedAttemptedAt: replayAttemptedAt,
+          failureReason: null,
+          idempotencyKey: effect.effectId,
+          prisma,
+        }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("rolls back before provider entry when the full request budget no longer remains", async () => {

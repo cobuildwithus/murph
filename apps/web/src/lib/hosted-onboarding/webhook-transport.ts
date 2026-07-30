@@ -924,6 +924,7 @@ async function sendHostedLinqSideEffect(
         await markHostedLinqDeliveryFailedBestEffort({
           effect: deliveryEffect,
           error,
+          expectedAttemptedAt: new Date(startedAtMs),
           prisma: options.prisma,
         });
       }
@@ -950,6 +951,7 @@ async function sendHostedLinqSideEffect(
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
           effect: deliveryEffect,
           error,
+          expectedAttemptedAt: new Date(startedAtMs),
           prisma: options.prisma,
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,

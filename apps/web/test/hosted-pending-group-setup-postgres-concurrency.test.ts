@@ -24,6 +24,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliverySendFailedTx,
   readHostedLinqGroupLineRecoveryAuthorityTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -528,8 +529,55 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           claim.id === recoveryDeliveryId
         )).toBe(true);
 
+        await markHostedLinqDeliverySendFailedTx({
+          expectedAttemptedAt: recoveryReplayedAt,
+          failedAt: new Date(recoveryReplayedAt.getTime() + 1_000),
+          failureCode: "provider_replay_timeout",
+          idempotencyKey: recoveryEffectId,
+          prisma: client,
+        });
+        await expect(client.hostedLinqDelivery.findUniqueOrThrow({
+          select: {
+            attemptedAt: true,
+            failedAt: true,
+            status: true,
+          },
+          where: { id: recoveryDeliveryId },
+        })).resolves.toEqual({
+          attemptedAt: recoveryAttemptedAt,
+          failedAt: null,
+          status: "attempted",
+        });
+        await expect(readHostedLinqGroupLineRecoveryAuthorityTx({
+          memberId: ownerMemberId,
+          occurredAt: retryOccurredAt,
+          originalRecipientPhone,
+          pendingGroupSetupId: setup.id,
+          prisma: client,
+          recoveredRecipientPhoneLookupKey,
+          setupArmedAt: setup.armedAt,
+          threadId,
+        })).resolves.toBe("in_flight");
+        await expect(client.$transaction((tx) =>
+          resolveHostedLinqRecoveredPendingGroupSetup({
+            occurredAt: retryOccurredAt,
+            participantMemberIds: [
+              ownerMemberId,
+              firstSpeakerMemberId,
+            ],
+            recoveredRecipientPhoneLookupKey,
+            senderMemberId: firstSpeakerMemberId,
+            threadId,
+            tx,
+          })
+        )).rejects.toMatchObject({
+          code: "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT",
+          httpStatus: 503,
+          retryable: true,
+        });
+
         await expect(markHostedLinqDeliveryAcceptedTx({
-          acceptedAt: new Date(recoveryReplayedAt.getTime() + 1_000),
+          acceptedAt: new Date(recoveryReplayedAt.getTime() + 2_000),
           idempotencyKey: recoveryEffectId,
           linqChatId: `recovery-chat-${fixtureId}`,
           messageId: `provider-message-recovery-${fixtureId}`,
