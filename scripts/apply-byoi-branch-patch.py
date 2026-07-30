@@ -33,6 +33,27 @@ def write_new(path: str, content: str) -> None:
     target.write_text(content)
 
 
+def patch_crypto_lane() -> None:
+    replace_once(
+        "packages/runtime-state/src/hosted-domain-crypto.ts",
+        '  "hosted-member-private-field",\n',
+        '  "hosted-member-private-field",\n'
+        '  "hosted-inference-connection",\n',
+    )
+    replace_once(
+        "packages/runtime-state/src/hosted-domain-crypto.ts",
+        '  "hosted-member-private-field": "control",\n',
+        '  "hosted-member-private-field": "control",\n'
+        '  "hosted-inference-connection": "control",\n',
+    )
+    replace_once(
+        "apps/web/src/lib/hosted-crypto/secure-box.ts",
+        '  "hosted-member-private-field",\n',
+        '  "hosted-member-private-field",\n'
+        '  "hosted-inference-connection",\n',
+    )
+
+
 def patch_prisma_schema() -> None:
     replace_once(
         "apps/web/prisma/schema.prisma",
@@ -97,6 +118,7 @@ COMMIT;
 
 
 def main() -> None:
+    patch_crypto_lane()
     patch_prisma_schema()
 
 
