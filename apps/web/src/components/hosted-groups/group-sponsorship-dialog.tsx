@@ -108,7 +108,7 @@ function GroupSponsorshipDialog({
                 />
               }
             >
-              Make it funny (optional)
+              Add a note (optional)
               <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
             </CollapsibleTrigger>
             <CollapsibleContent className="h-auto">
