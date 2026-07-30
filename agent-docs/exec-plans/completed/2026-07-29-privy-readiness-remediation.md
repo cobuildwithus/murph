@@ -62,5 +62,6 @@ invite-bearing URLs.
   at explicit usage-credit exhaustion as required by the completion workflow.
 - Pushed-head ReviewGPT and CI evidence remain pending.
 
-Status: active
+Status: completed
 Updated: 2026-07-29
+Completed: 2026-07-29
