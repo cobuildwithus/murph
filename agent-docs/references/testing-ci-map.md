@@ -223,10 +223,10 @@ route creation and a completed oversized roster preserves sender-owner
 admission. Transport tests prove group-line recovery persists its accepted
 milestone before returning provider success, retries that write with the stable
 provider idempotency key, and does not misclassify a provider-successful send as
-failed. They also prove provider failure is fenced to the current physical
-attempt. Delivery-store tests prove the exact pinned replay bypasses the generic
-lease, rejects changed source or target identity, and preserves its original
-authority timestamp. The opt-in PostgreSQL concurrency
+failed. They also prove an uncorrelated recovery provider error does not invoke
+local failure settlement. Delivery-store tests prove the exact pinned replay
+bypasses the generic lease, rejects changed source or target identity, and
+preserves its original authority timestamp. The opt-in PostgreSQL concurrency
 proof verifies one encrypted setup can be claimed at most once, exact restore
 preserves its payload, stale restore cannot overwrite a replacement, corrupt
 payload does not block admission, and member deletion cascades pending state.
@@ -234,10 +234,10 @@ The same real-database proof composes a provider-correlated line-recovery
 delivery with a different roster member's first message: the exact prepared
 owner is selected, an accepted-milestone failure leaves the exact attempt
 route-free, one immediate concurrent replay wins on the same delivery row
-without changing its pre-event authority timestamp, a failure from that physical
-replay cannot settle the retained older attempt, foreign rosters and threads fail
-closed, and the encrypted style/context payload remains one-use even with less
-than the generic lease left before setup expiry. Prepared-route coverage
+without changing its pre-event authority timestamp, advances the row version
+while leaving the uncorrelated delivery in flight, rejects foreign rosters and
+threads, and preserves the encrypted style/context payload as one-use even with
+less than the generic lease left before setup expiry. Prepared-route coverage
 also keeps a recovery-pinned message
 route-free when its exact claim races or disappears, instead of committing the
 first speaker as a fallback owner.

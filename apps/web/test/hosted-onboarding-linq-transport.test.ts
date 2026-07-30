@@ -484,9 +484,6 @@ describe("hosted Linq webhook transport", () => {
     );
     expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        expectedAttemptedAt: vi.mocked(
-          claimHostedLinqDeliveryProviderDispatchTx,
-        ).mock.calls[0]?.[0].attemptedAt,
         failureReason: "send failed",
         idempotencyKey: effect.effectId,
         prisma: expect.objectContaining({
@@ -499,14 +496,10 @@ describe("hosted Linq webhook transport", () => {
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
   });
 
-  it("fences a recovery replay failure to its physical provider attempt", async () => {
-    vi.useFakeTimers();
-    const replayAttemptedAt = new Date("2026-03-27T12:01:00.000Z");
-    vi.setSystemTime(replayAttemptedAt);
+  it("leaves uncorrelated recovery provider errors in flight", async () => {
     vi.mocked(createHostedLinqChat).mockRejectedValueOnce(
       new Error("provider replay timed out"),
     );
-    vi.mocked(markHostedLinqDeliverySendFailedTx).mockResolvedValueOnce();
     const effect = createHostedWebhookLinqMessageSideEffect({
       incomingRecipientPhone: "+15550100000",
       memberId: "member-1",
@@ -539,17 +532,9 @@ describe("hosted Linq webhook transport", () => {
         sideEffects: [effect],
       })).rejects.toThrow("provider replay timed out");
 
-      expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
-        expect.objectContaining({
-          expectedAttemptedAt: replayAttemptedAt,
-          failureReason: null,
-          idempotencyKey: effect.effectId,
-          prisma,
-        }),
-      );
+      expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
-      vi.useRealTimers();
     }
   });
 

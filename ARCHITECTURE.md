@@ -1193,9 +1193,9 @@ through to first-speaker ownership. That exact pinned recovery alone bypasses
 the generic pre-provider claim lease: it replays immediately with the same
 provider idempotency key, compares and advances the row's existing `updatedAt`
 version, and preserves the original `attemptedAt` as the proof that recovery
-preceded the replacement-line event. Provider failure may settle only the
-physical attempt whose timestamp it claimed; a replay that retained earlier
-authority therefore cannot overwrite that authority with a later failure.
+preceded the replacement-line event. An uncorrelated recovery provider error
+surfaces without locally settling this shared row; accepted correlation or
+provider-correlated terminal evidence remains the only settlement authority.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

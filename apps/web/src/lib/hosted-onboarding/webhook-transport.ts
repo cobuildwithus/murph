@@ -908,9 +908,12 @@ async function sendHostedLinqSideEffect(
     }
   } catch (error) {
     if (
+      effect.payload.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    ) {
+      await deliveryAttemptTask;
+    } else if (
       effect.payload.template === "invite_signup"
       || effect.payload.template === "invite_signup_fallback"
-      || effect.payload.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
     ) {
       await deliveryAttemptTask;
       if (
@@ -924,7 +927,6 @@ async function sendHostedLinqSideEffect(
         await markHostedLinqDeliveryFailedBestEffort({
           effect: deliveryEffect,
           error,
-          expectedAttemptedAt: new Date(startedAtMs),
           prisma: options.prisma,
         });
       }
@@ -951,7 +953,6 @@ async function sendHostedLinqSideEffect(
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
           effect: deliveryEffect,
           error,
-          expectedAttemptedAt: new Date(startedAtMs),
           prisma: options.prisma,
         }),
         scheduleAfterResponse: options.scheduleAfterResponse,

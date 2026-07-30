@@ -24,7 +24,6 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
   markHostedLinqDeliveryAcceptedTx,
-  markHostedLinqDeliverySendFailedTx,
   readHostedLinqGroupLineRecoveryAuthorityTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -465,6 +464,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
         deliveryId = initialClaim.id;
         const recoveryDeliveryId = initialClaim.id;
+        const initialDelivery =
+          await client.hostedLinqDelivery.findUniqueOrThrow({
+            select: { updatedAt: true },
+            where: { id: recoveryDeliveryId },
+          });
         await expect(markHostedLinqDeliveryAcceptedTx({
           acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
           idempotencyKey: recoveryEffectId,
@@ -529,25 +533,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           claim.id === recoveryDeliveryId
         )).toBe(true);
 
-        await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt: recoveryReplayedAt,
-          failedAt: new Date(recoveryReplayedAt.getTime() + 1_000),
-          failureCode: "provider_replay_timeout",
-          idempotencyKey: recoveryEffectId,
-          prisma: client,
-        });
-        await expect(client.hostedLinqDelivery.findUniqueOrThrow({
-          select: {
-            attemptedAt: true,
-            failedAt: true,
-            status: true,
-          },
-          where: { id: recoveryDeliveryId },
-        })).resolves.toEqual({
+        const replayedDelivery =
+          await client.hostedLinqDelivery.findUniqueOrThrow({
+            select: {
+              attemptedAt: true,
+              failedAt: true,
+              status: true,
+              updatedAt: true,
+            },
+            where: { id: recoveryDeliveryId },
+          });
+        expect(replayedDelivery).toMatchObject({
           attemptedAt: recoveryAttemptedAt,
           failedAt: null,
           status: "attempted",
         });
+        expect(replayedDelivery.updatedAt.getTime()).toBeGreaterThan(
+          initialDelivery.updatedAt.getTime(),
+        );
         await expect(readHostedLinqGroupLineRecoveryAuthorityTx({
           memberId: ownerMemberId,
           occurredAt: retryOccurredAt,
