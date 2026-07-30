@@ -916,11 +916,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
     expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
-    expect(raw).toContain('current local Monday through yesterday')
-    expect(raw).toMatch(/Exclude earlier\s+rolling-window dates and today/u)
-    expect(raw).toMatch(/only when every compared date\s+set is identical/u)
+    expect(raw).toContain('seven local calendar days before today')
+    expect(raw).toMatch(/Exclude today and\s+anything older than that rolling window/u)
+    expect(raw).toMatch(/only when every compared\s+date set is identical/u)
     expect(raw).toMatch(
-      /When coverage differs, report scoped values or an unranked\s+pattern\./u,
+      /When coverage differs, report scoped values or an\s+unranked pattern\./u,
     )
     expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
@@ -937,6 +937,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('After any email `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
+    expect(raw).toContain('never attribute the absence to sync or permissions')
+    expect(raw).toContain('authorized current permission or data-availability state')
+    expect(raw).toContain('do not present it as the historical cause')
+    expect(raw).toContain('The consented eight-record projection')
+    expect(raw).not.toContain('direct tool evidence')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).toContain('### Example 1: close race')
