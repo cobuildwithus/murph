@@ -302,6 +302,7 @@ describe("R2 online immutable copy", () => {
       const url = new URL(String(request));
       if (init?.method === "PUT") {
         const headers = new Headers(init.headers);
+        expect(init.redirect).toBe("error");
         expect(url.pathname).toBe(`/${destinationBucket}/${eligible.key}`);
         expect(headers.get("cf-copy-destination-if-none-match")).toBe("*");
         expect(headers.get("x-amz-copy-source")).toBe(`/${sourceBucket}/${eligible.key}`);
@@ -315,6 +316,7 @@ describe("R2 online immutable copy", () => {
         return new Response(null, { status: 412 });
       }
       if (init?.method === "HEAD") {
+        expect(init.redirect).toBe("error");
         expect([
           `/${destinationBucket}/${eligible.key}`,
           `/${sourceBucket}/${eligible.key}`,
@@ -362,6 +364,14 @@ describe("R2 online immutable copy", () => {
       label: "transport failure",
       response: () => {
         throw new TypeError("ambiguous transport failure");
+      },
+    },
+    {
+      label: "rejected redirect",
+      response: () => {
+        throw new TypeError("fetch failed", {
+          cause: new Error("unexpected redirect"),
+        });
       },
     },
     {
@@ -472,6 +482,7 @@ describe("R2 online immutable copy", () => {
     ): Promise<Response> => {
       const url = new URL(String(request));
       if (init?.method === "PUT") {
+        expect(init.redirect).toBe("error");
         putAttempts += 1;
         if (putAttempts === 1) {
           throw undiciConnectTimeout();
@@ -480,6 +491,7 @@ describe("R2 online immutable copy", () => {
         return new Response(null, { status: 200 });
       }
       if (init?.method === "HEAD") {
+        expect(init.redirect).toBe("error");
         expect([
           `/${destinationBucket}/${eligible.key}`,
           `/${sourceBucket}/${eligible.key}`,

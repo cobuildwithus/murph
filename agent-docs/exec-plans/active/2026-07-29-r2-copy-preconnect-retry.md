@@ -58,6 +58,9 @@ Updated: 2026-07-29
 - Do not add a dependency or change the global Undici dispatcher.
 - Do not retry `UND_ERR_SOCKET`, generic `fetch failed`, HTTP 429/5xx, or any
   other CopyObject failure.
+- Disable automatic redirects on every signed R2 fetch. ReviewGPT identified
+  that a redirect followed by a connect timeout could otherwise make an
+  already-started fetch operation look pre-request.
 
 ## Verification
 
@@ -65,3 +68,5 @@ Updated: 2026-07-29
   ReviewGPT preliminary/final gates, and required PR CI.
 - Expected outcomes: exact pre-connect timeout retries once; all ambiguous
   failures make one PUT attempt; no production resource is mutated.
+- Current focused result: 36 online-copy tests and Cloudflare typecheck pass
+  after the redirect remediation.

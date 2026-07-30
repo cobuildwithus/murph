@@ -1152,6 +1152,7 @@ async function fetchR2Once(
   return await fetch(signed.url, {
     headers: signed.headers,
     method: input.method,
+    redirect: "error",
   });
 }
 
