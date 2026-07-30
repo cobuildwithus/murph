@@ -2505,7 +2505,10 @@ describe('assistant Codex turn planning', () => {
       'current authorized scheduled group turn',
     )
     expect(groupTools[0]?.description).toContain(
-      'trusted host binds group and route and chooses native consent or a first-party link',
+      'trusted host binds group and route and uses only the first-party link path',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'unavailable proves no consent surface',
     )
     expect(groupTools[0]?.description).toContain(
       'Existing membership and other grants stay unchanged.',

@@ -610,17 +610,15 @@ automation action rules with a `dailyLocal` schedule and
    presentation, and active-offer/all-granted dedupe. Never author generic
    permission copy or tell someone to Like the standings.
 
-   Treat `status="ok"` as an opaque handled result. For
-   `presentation="native"`, the host may have posted or reused native consent UI
-   or found that no UI was needed; do not infer, announce, or append a companion
-   message claiming a card is visible. For `presentation="link"`, include the
-   exact returned `joinUrl` once in the same substantive standings response.
+   Treat `status="ok"` as an opaque handled result. This scheduled surface
+   returns `presentation="link"`; include the exact returned `joinUrl` once in
+   the same substantive standings response. Do not infer, announce, or append a
+   companion message claiming native consent UI is visible.
    For each participant whose same read showed `not_granted`, record that the
    offer action was handled for that exact participant and scope so future
    standings do not retry or nag; never record that a card was visible. When
-   native consent is the only user-facing outcome, call
-   `murph.finish_without_reply`. If the tool is absent or returns `unavailable`,
-   do not claim a consent surface exists or record the action as handled. If
+   the tool is absent or returns `unavailable`, do not claim a consent surface
+   exists or record the action as handled. If
    a participant explicitly says they do not want to share a scope, record that
    choice and do not offer, repeat, or nag. A permission offer cannot connect a
    source, grant Apple Health or operating-system Steps access, or fix missing

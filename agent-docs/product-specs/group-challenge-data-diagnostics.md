@@ -295,20 +295,16 @@ first-party customize page. Native consent grants only the disclosed snapshot.
 A returned link grants nothing until the member accepts the first-party page.
 The standings message itself never grants permission.
 
-A semantic `status="ok"` is an opaque handled result. With
-`presentation="native"`, Web may have posted or reused native consent UI or found
-that no UI was needed because every current member already grants the scopes;
-Murph does not infer or announce that a card is visible or newly posted. With
-`presentation="link"`, Murph includes the exact returned `joinUrl` once in the
-same substantive standings response. For each participant whose same read
-showed `not_granted`, Murph records only that the offer action was handled for
-that exact participant and scope, without claiming native UI was visible. When
-native consent is the only user-facing outcome, Murph finishes without an
-assistant reply. An explicit sharing decline is also recorded and excludes that
-participant from the scope decision. The scoring scope is never offered merely
-because its grant exists but current data is missing. Apart from the exact
-missing diagnostic grant above, stale, disconnected, reconnect, and other
-sync/device cases never enter the permission path.
+A semantic `status="ok"` from this scheduled adapter is an opaque handled link
+result. Murph includes the exact returned `joinUrl` once in the same substantive
+standings response; it does not imply that anyone accepted the page. For each
+participant whose same read showed `not_granted`, Murph records only that the
+offer action was handled for that exact participant and scope. An explicit
+sharing decline is also recorded and excludes that participant from the scope
+decision. The scoring scope is never offered merely because its grant exists
+but current data is missing. Apart from the exact missing diagnostic grant
+above, stale, disconnected, reconnect, and other sync/device cases never enter
+the permission path.
 
 ## Message shape
 
@@ -316,9 +312,9 @@ The standings update stays one conversational group message. It leads with
 completeness, then separates the ranked standings from named participants
 waiting on data. For example, the semantic shape is "partial standings: 2 of 5
 current," a ranked section, then a waiting section with one status/action per
-person. Native consent UI is provider-owned and separate from the assistant
-message; a link presentation is included once in that same substantive message.
-Murph never authors generic consent copy or tells members to react to standings.
+person. The scheduled link presentation is included once in that same
+substantive message. Murph never authors generic consent copy or tells members
+to react to standings.
 
 Names in the waiting section are operational status, not performance shaming.
 Each update may include the participant's current evidence-backed status and
@@ -402,8 +398,8 @@ cross-member fanout, polling, a scheduler, or persisted rollout state.
   neither a recorded decline nor a prior handled offer action.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
   produces ordinary-language recovery guidance and no access offer.
-- A native result does not prove consent UI is visible or newly posted. A link
-  result exposes only the exact first-party `joinUrl`. Murph records only that
-  the participant-and-scope offer action was handled so it is not retried.
+- A scheduled link result exposes only the exact first-party `joinUrl`; it does
+  not prove acceptance. Murph records only that the participant-and-scope offer
+  action was handled so it is not retried.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

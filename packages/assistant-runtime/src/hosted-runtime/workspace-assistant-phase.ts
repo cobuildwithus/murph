@@ -732,15 +732,24 @@ function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
 ): HostedGroupToolLinqRouteContext | null {
   const eligible = new Map<string, HostedGroupToolLinqRouteContext>();
+  let hasInvalidAuthoritativeCandidate = false;
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    if (!authority || context.threadIsDirect === true) {
+      continue;
+    }
+    if (context.threadIsDirect !== false) {
+      hasInvalidAuthoritativeCandidate = true;
+      continue;
+    }
     const service = normalizeHostedGroupToolLinqService(context.service);
     if (
-      !authority
-      || !service
+      !service
+      || authority.channel !== "linq"
+      || authority.containerMemberId.trim().length === 0
       || authority.threadId.trim().length === 0
-      || context.threadIsDirect !== false
     ) {
+      hasInvalidAuthoritativeCandidate = true;
       continue;
     }
     const routeKey = JSON.stringify([
@@ -767,10 +776,10 @@ function resolveHostedGroupToolLinqRouteContext(
     }
   }
 
-  // A service mismatch or a second authorized route makes the provider target
-  // ambiguous. Fail closed rather than choosing iMessage or SMS by iteration
-  // order during a provider re-key or mixed input batch.
-  if (eligible.size !== 1) {
+  // An incomplete candidate, service mismatch, or second authorized route
+  // makes the provider target ambiguous. Fail closed rather than choosing
+  // iMessage or SMS by iteration order during a provider re-key or mixed batch.
+  if (hasInvalidAuthoritativeCandidate || eligible.size !== 1) {
     return null;
   }
   return [...eligible.values()][0] ?? null;

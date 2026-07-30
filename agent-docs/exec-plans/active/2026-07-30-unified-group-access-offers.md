@@ -73,6 +73,37 @@ Updated: 2026-07-30
   state owner.
 - Treat scheduled execution as link presentation until the durable scheduled
   route records a trustworthy Linq service subtype.
+- Treat every authoritative non-direct Linq candidate as part of one route
+  proof. Any unsupported service, malformed authority, or disagreement makes
+  the whole operation unbound instead of allowing a valid neighboring event to
+  supply provider capabilities.
+- Treat `presentation="native"` as an opaque handled native path. It does not
+  prove that consent UI was newly posted or is currently visible; scheduled
+  offers are explicitly link-only.
+
+## Review dispositions
+
+- The preliminary completion-specialist review returned findings. Accepted and
+  corrected:
+  - mixed supported/unsupported or missing-service Linq contexts now fail
+    closed as one authoritative set;
+  - prompt and skill guidance no longer equates a native result with visible or
+    newly posted UI, and the scheduled tool contract is link-only;
+  - the engine now has a regression seam proving that its default native wire
+    request can receive a host-selected link response and return the exact link
+    to the model;
+  - a production-operation-scope scenario now proves current accepted iMessage,
+    SMS, Telegram, and mixed SMS/RCS routing through the Web port boundary.
+- The specialist's stale-test finding was already resolved on the prior pushed
+  head. Its optional coverage patch was not applied: the stale assertions were
+  corrected independently, and the missing seams were implemented directly
+  against the corrected current head.
+- Parent product-experience revalidation after the behavior corrections:
+  `NO FINDINGS`. The irreducible purpose is one explicit group-access request
+  that reaches the safest supported consent surface without provider-specific
+  model branching. The implementation keeps that experience to one semantic
+  action, the existing native or link surface, no extra confirmation, and a
+  truthful unavailable result when route proof is incomplete.
 
 ## Verification
 
@@ -90,6 +121,14 @@ Updated: 2026-07-30
   - focused assistant-runtime Vitest files: 287 tests passed
   - `pnpm docs:drift`
   - `git diff --check`
+- Preliminary-remediation proof:
+  - assistant-engine typecheck passed;
+  - five focused assistant-engine files passed, 212 tests total;
+  - assistant-runtime typecheck passed;
+  - the focused Linq context file passed, 25 tests total;
+  - the production operation-scope route scenario passed;
+  - corrected route cases include iMessage+SMS, iMessage+RCS, SMS+RCS,
+    SMS+missing-service, and SMS+unknown-direction authority sets.
 - Complete initial provider-input measurement used the pinned Codex App Server,
   the repository's scripted Responses endpoint, model `gpt-5.6-terra` with low
   reasoning in code mode, identical synthetic direct/group Linq turns, and the

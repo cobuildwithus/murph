@@ -273,9 +273,11 @@ newsletter and group-health uses:
 
 Pass the set as `projectionScopes` on `offer_access`. This is a permission
 request, not automatic sharing. A returned `presentation="native"` means the
-trusted host already handled the provider-supported consent UI; a returned
+trusted host handled the provider-supported native consent path; it does not
+prove UI was newly posted or is currently visible. A returned
 `presentation="link"` includes the exact first-party `joinUrl` to place once in
-the ordinary reply. The join page opens with every requested permission
+the ordinary reply. A returned `status="unavailable"` proves no consent surface.
+The join page opens with every requested permission
 preselected, and every item stays individually selectable: a member can uncheck
 any of them before joining, and nothing is shared until they accept. Never claim
 you cannot preselect a permission; a request prefills the join page but grants
@@ -314,11 +316,13 @@ unless the room explicitly asks for a standalone URL. The trusted host chooses
 the best supported presentation without exposing provider plumbing to the
 model.
 
-When the result is `status="ok"` with `presentation="native"`, the host already
-handled canonical consent UI. Never send a companion confirmation that a card
-is available, posted, or ready. When that native UI is the turn's only useful
-user-facing outcome, call `murph.finish_without_reply`; otherwise answer only
-the substantive question.
+When the result is `status="ok"` with `presentation="native"`, the host handled
+the native consent path, but the result does not prove UI was newly posted or is
+currently visible. Never send a companion confirmation that a card is
+available, posted, or ready. When that handled native path is the turn's only
+useful user-facing outcome, call `murph.finish_without_reply`; otherwise answer
+only the substantive question. On `status="unavailable"`, do not claim a
+consent surface exists.
 
 When the result is `status="ok"` with `presentation="link"`, include the exact
 returned `joinUrl` once in the ordinary reply. Do not call it a fallback or ask

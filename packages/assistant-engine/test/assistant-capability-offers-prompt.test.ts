@@ -185,7 +185,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('SMS supports the same roster and group-access workflow')
     expect(section).toContain('`action="offer_access"` is the sole model-facing join or permission action')
     expect(section).toContain('`presentation="native"`')
+    expect(section).toContain('does not prove UI was newly posted or is currently visible')
     expect(section).toContain('`presentation="link"` with the exact first-party URL')
+    expect(section).toContain('`status="unavailable"` when no consent surface is proven')
+    expect(section).not.toContain('when it already posted consent UI')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',
     )

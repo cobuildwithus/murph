@@ -2683,6 +2683,67 @@ describe("murph.group dynamic tool", () => {
     );
   });
 
+  it("normalizes a host-substituted access link after requesting the native path", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+      expect(request).toEqual({
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
+          projectionScopes: [{ projectionKind: "steps-days.v0" }],
+        },
+      });
+      return {
+        action: "create_join_link",
+        result: {
+          group: {
+            displayName: null,
+            id: "private-group-id",
+            kind: "friends",
+            memberCount: 0,
+            members: [],
+            requestedVaultShareProjectionKinds: ["steps-days.v0"],
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: "steps-days.v0" },
+            ],
+            status: "active",
+          },
+          joinUrl: "https://example.test/groups/join/host-selected",
+          status: "ok",
+        },
+      };
+    });
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "offer_access",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected access-offer request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(groupRequest).toHaveBeenCalledOnce();
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "offer_access",
+      result: {
+        joinUrl: "https://example.test/groups/join/host-selected",
+        presentation: "link",
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+      "private-group-id",
+    );
+  });
+
   it("forwards only the runtime-owned legacy offer template", async () => {
     const modelAuthoredCopy = "Model-authored consent copy must never be forwarded.";
     expect(readMurphDynamicToolRequest(groupToolCall({

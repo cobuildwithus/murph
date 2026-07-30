@@ -717,7 +717,40 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
-  it("fails closed instead of choosing between conflicting Linq services", async () => {
+  it.each([
+    {
+      label: "iMessage and SMS",
+      second: { service: "sms" },
+      service: "imessage",
+    },
+    {
+      label: "iMessage and RCS",
+      second: { service: "RCS" },
+      service: "imessage",
+    },
+    {
+      label: "SMS and RCS",
+      second: { service: "RCS" },
+      service: "sms",
+    },
+    {
+      label: "SMS and a missing service",
+      second: { service: null },
+      service: "sms",
+    },
+    {
+      label: "SMS and unknown thread direction",
+      second: { service: "sms", threadIsDirect: null },
+      service: "sms",
+    },
+  ] satisfies readonly {
+    label: string;
+    second: Partial<HostedAssistantLinqDeliveryContext>;
+    service: string;
+  }[])("fails closed for authoritative $label contexts", async ({
+    second,
+    service,
+  }) => {
     const request = vi.fn().mockResolvedValue({
       action: "post_join_offer",
       result: {
@@ -732,12 +765,12 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000001",
           routeAuthority: ROUTE_AUTHORITY,
-          service: "imessage",
+          service,
         }),
         buildLinqDeliveryContext({
           directRecipientPhoneNumber: "+15550000002",
           routeAuthority: ROUTE_AUTHORITY,
-          service: "sms",
+          ...second,
         }),
       ],
     });
@@ -753,6 +786,9 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({ action: "share_contact_card" });
     expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
+
+    await groupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
 
     await groupTool.request({
       action: "read_shared",

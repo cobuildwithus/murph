@@ -529,18 +529,22 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('lets server-owned native consent UI stand alone', async () => {
+  it('treats native consent as an opaque handled path', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
+    expect(normalized).toContain(
+      'does not prove UI was newly posted or is currently visible',
+    )
     expect(normalized).toContain(
       'Never send a companion confirmation that a card is available, posted, or ready',
     )
     expect(normalized).toContain(
-      'When that native UI is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',
+      'When that handled native path is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',
     )
     expect(normalized).toContain(
       'otherwise answer only the substantive question',
     )
+    expect(normalized).not.toContain('host already handled canonical consent UI')
   })
 
   it('targets laugh reactions at the laughable instead of a laughter token', async () => {

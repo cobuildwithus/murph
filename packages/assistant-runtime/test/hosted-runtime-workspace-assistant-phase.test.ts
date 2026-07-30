@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   type HostedMailboxItem,
+  type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
@@ -3986,6 +3987,195 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.afterCheckpoint).toBeUndefined();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+  });
+
+  it("routes accepted group inputs through the production operation scope to the supported access surface", async () => {
+    const inputIds = {
+      imessage: "ain_10101010101010101010101010101010",
+      mixedRcs: "ain_20202020202020202020202020202020",
+      mixedSms: "ain_30303030303030303030303030303030",
+      sms: "ain_40404040404040404040404040404040",
+      telegram: "ain_50505050505050505050505050505050",
+    } as const;
+    const syntheticGroup: HostedRuntimeGroupSummary = {
+      displayName: null,
+      id: "synthetic_group",
+      kind: "friends",
+      memberCount: 0,
+      members: [],
+      requestedVaultShareProjectionKinds: ["steps-days.v0"],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "steps-days.v0" },
+      ],
+      status: "active",
+    };
+    const groupToolRequests: HostedRuntimeGroupToolRequest[] = [];
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        groupToolRequests.push(request);
+        if (request.action === "post_join_offer") {
+          return "linqThread" in request
+            ? {
+                action: "post_join_offer" as const,
+                result: {
+                  group: syntheticGroup,
+                  joinUrl: "https://example.test/private-native-url",
+                  status: "sent" as const,
+                },
+              }
+            : {
+                action: "post_join_offer" as const,
+                result: {
+                  group: null,
+                  status: "unavailable" as const,
+                  unavailableReason: "linq_thread_unavailable",
+                },
+              };
+        }
+        if (request.action === "create_join_link") {
+          return {
+            action: "create_join_link" as const,
+            result: {
+              group: syntheticGroup,
+              joinUrl: "https://example.test/groups/join/exact",
+              status: "ok" as const,
+            },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const buildGroupEvent = (input: {
+      channel: "linq" | "telegram";
+      service?: string;
+      threadId: string;
+    }) => ({
+      conversation: {
+        accountId: `${input.channel}_identity`,
+        actorId: `${input.channel}_participant`,
+        actorIsSelf: false,
+        source: input.channel,
+        threadId: input.threadId,
+        threadIsDirect: false,
+      },
+      replyTarget: {
+        channel: input.channel,
+        messageId: `${input.threadId}_message`,
+        threadId: input.threadId,
+      },
+      sourceMetadata: input.channel === "linq"
+        ? {
+            externalThreadRouteAuthorityPresent: true,
+            kind: "linq" as const,
+            partCount: 0,
+            reactionEligible: false,
+            replyToMessageId: null,
+            senderHandle: "+15555550123",
+            service: input.service ?? null,
+          }
+        : {
+            externalThreadRouteAuthorityPresent: true,
+            kind: "telegram" as const,
+            mediaGroupId: null,
+            replyContext: null,
+            senderHandle: "1234567890",
+            senderUsername: "example_user",
+          },
+    });
+    mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => {
+      if (inputId === inputIds.imessage) {
+        return buildGroupEvent({
+          channel: "linq",
+          service: "iMessage",
+          threadId: "imessage_group_chat",
+        });
+      }
+      if (inputId === inputIds.sms) {
+        return buildGroupEvent({
+          channel: "linq",
+          service: "SMS",
+          threadId: "sms_group_chat",
+        });
+      }
+      if (inputId === inputIds.telegram) {
+        return buildGroupEvent({
+          channel: "telegram",
+          threadId: "telegram_group_chat",
+        });
+      }
+      return buildGroupEvent({
+        channel: "linq",
+        service: inputId === inputIds.mixedSms ? "SMS" : "RCS",
+        threadId: "mixed_group_chat",
+      });
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: Object.values(inputIds),
+      importedCount: Object.values(inputIds).length,
+      runtimeGroupToolPort: groupToolPort,
+    }));
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const operationScope = laneInput?.operationScope as
+      | AssistantAutomationOperationScope
+      | undefined;
+    if (!laneInput?.executionContext || !operationScope) {
+      throw new Error("Expected hosted automation operation scope.");
+    }
+    const offer = {
+      action: "post_join_offer" as const,
+      joinOffer: { projectionKinds: ["steps-days.v0" as const] },
+    };
+    const runOffer = async (ids: readonly string[]) =>
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: ids,
+        operation: async (executionContext) =>
+          await executionContext.hosted?.groupTool?.request(offer),
+        turnEnvironment: null,
+      });
+
+    await expect(runOffer([inputIds.imessage])).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+    await expect(runOffer([inputIds.sms])).resolves.toMatchObject({
+      action: "create_join_link",
+      result: {
+        joinUrl: "https://example.test/groups/join/exact",
+        status: "ok",
+      },
+    });
+    await expect(runOffer([inputIds.telegram])).resolves.toMatchObject({
+      action: "create_join_link",
+      result: {
+        joinUrl: "https://example.test/groups/join/exact",
+        status: "ok",
+      },
+    });
+    await expect(runOffer([inputIds.mixedSms, inputIds.mixedRcs]))
+      .resolves.toMatchObject({
+        action: "post_join_offer",
+        result: { status: "unavailable" },
+      });
+
+    expect(groupToolRequests).toEqual([
+      expect.objectContaining({
+        action: "post_join_offer",
+        linqThread: expect.objectContaining({ chatId: "imessage_group_chat" }),
+      }),
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      offer,
+    ]);
   });
 
   it("carries persisted direct Linq service through the real operation scope to referral tools", async () => {
