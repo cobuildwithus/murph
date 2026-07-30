@@ -17409,7 +17409,7 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('attributes V2 overrides after child usage and keeps V1 parent fallback', async () => {
+    it('uses protocol-carried V2 child models without a lookup and keeps V1 parent fallback', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -17430,8 +17430,7 @@ describe('assistant codex event shaping', () => {
               threadId: 'thread-subagent-parent',
               turnId: 'turn-subagent-parent',
             })
-            // V2 activity omits the model. Once the child has emitted usage,
-            // its sticky model is safe to resolve without racing startup.
+            // Newer V2 activity can carry the effective child model directly.
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -17441,6 +17440,7 @@ describe('assistant codex event shaping', () => {
                   kind: 'started',
                   agentThreadId: 'thread-subagent-child-a',
                   agentPath: 'root/terra_check',
+                  model: 'gpt-5.6-terra',
                 },
                 threadId: 'thread-subagent-parent',
                 turnId: 'turn-subagent-parent',
@@ -17478,20 +17478,6 @@ describe('assistant codex event shaping', () => {
                     reasoningOutputTokens: 0,
                   },
                 },
-              },
-            }))
-            const childModelLookup = await waitForRpcMethod(
-              child,
-              'thread/resume',
-            )
-            expect(asRecord(childModelLookup.params).threadId).toBe(
-              'thread-subagent-child-a',
-            )
-            child.stdout.write(jsonLine({
-              id: childModelLookup.id,
-              result: {
-                id: 'thread-subagent-child-a',
-                model: 'gpt-5.6-terra',
               },
             }))
             child.stdout.write(jsonLine({
@@ -17632,7 +17618,7 @@ describe('assistant codex event shaping', () => {
         readWrittenRpcMessages(
           requireMockChildProcess(spawnedChildren[0] ?? null),
         ).filter((message) => message.method === 'thread/resume'),
-      ).toHaveLength(1)
+      ).toHaveLength(0)
     })
 
     it('answers subagent thread server requests with an error without failing the turn', async () => {

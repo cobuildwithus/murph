@@ -1231,19 +1231,17 @@ export interface CodexSubagentTokenUsageSample {
 // sendInput, wait, resume — covering freshly spawned and reused children) or
 // by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
 // activity items instead of collab tool calls) become drafts. The model is
-// attributed from the effective child-thread model when the runtime resolved
-// it, from V1 spawn items, or from the V2 raw spawn response item whose call id
-// becomes the activity id; genuinely inherited children fall back to
-// parentModel. Warm processes are reused across threads, so a foreign thread
-// id alone is not proof of a subagent — a stale flush from a previous thread
-// must never mint a usage row.
+// attributed directly from V1 spawn items or optional V2 activity evidence;
+// same-model children without explicit evidence inherit parentModel. Warm
+// processes are reused across threads, so a foreign thread id alone is not
+// proof of a subagent — a stale flush from a previous thread must never mint a
+// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
   parentRawEvents: readonly unknown[]
   serviceTier?: AssistantProviderServiceTier | null
-  subagentModelByThread?: ReadonlyMap<string, string>
   subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
 }): AssistantProviderUsageDraft[] {
   if (input.subagentTokenUsageByThread.size === 0) {
@@ -1272,11 +1270,7 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model =
-      input.subagentModelByThread?.get(threadId) ??
-      spawnModelByThreadId.get(threadId) ??
-      input.parentModel ??
-      null
+    const model = spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
     const inputTokens = readAssistantProviderInteger(
       delta,
       'inputTokens',
@@ -1357,14 +1351,11 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 // subAgentActivity item (V2) is a key — that membership is what authorizes
 // billing a foreign thread's usage, covering both freshly spawned children
 // and reused existing children. V1 spawn items carry the effective model
-// directly. V2 spawn activity is joined to the raw provider response item by
-// call id so an explicit requested model does not silently inherit the parent
-// model for usage attribution.
+// directly. V2 activity may carry the effective model in newer protocol
+// versions; when absent, the child inherits the parent model.
 function readCodexCollabSpawnModelsByThread(
   rawEvents: readonly unknown[],
 ): Map<string, string | null> {
-  const v2RequestedModelByCallId =
-    readCodexV2RequestedSpawnModelsByCallId(rawEvents)
   const modelByThreadId = new Map<string, string | null>()
   for (const rawEvent of rawEvents) {
     const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
@@ -1373,14 +1364,9 @@ function readCodexCollabSpawnModelsByThread(
     }
 
     for (const receiverThreadId of collabToolCall.receiverThreadIds) {
-      const requestedV2Model = collabToolCall.v2SpawnCallId
-        ? v2RequestedModelByCallId.get(collabToolCall.v2SpawnCallId) ?? null
-        : null
       modelByThreadId.set(
         receiverThreadId,
-        modelByThreadId.get(receiverThreadId) ??
-          collabToolCall.spawnModel ??
-          requestedV2Model,
+        modelByThreadId.get(receiverThreadId) ?? collabToolCall.spawnModel,
       )
     }
   }
@@ -1398,23 +1384,9 @@ export function readCodexCollabReceiverThreadIds(
   return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
 }
 
-// V2 activity identifies the child but omits its model. The live runtime uses
-// these ids to resolve the sticky model only after child usage proves startup
-// is complete; V1 items already carry their effective spawn model.
-export function readCodexV2SubagentActivityThreadIds(
-  rawEvent: unknown,
-): readonly string[] {
-  const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
-  return collabToolCall?.isV2SubagentActivity
-    ? collabToolCall.receiverThreadIds
-    : []
-}
-
 function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
-  isV2SubagentActivity: boolean
   receiverThreadIds: string[]
   spawnModel: string | null
-  v2SpawnCallId: string | null
 } | null {
   const record = readAssistantProviderRecord(rawEvent)
   const params = readAssistantProviderRecord(record?.params)
@@ -1435,22 +1407,17 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   // Multi-agent V2 emits subAgentActivity items (started/interacted/
   // interrupted) instead of collab tool calls; any of them names the child
   // thread this parent turn engaged, which is exactly the spawn evidence the
-  // billing gate needs. A started activity's id matches the raw provider spawn
-  // call, which carries an explicit requested model when one was supplied.
+  // billing gate needs. Newer protocol versions may also carry the effective
+  // child model on that activity.
   if (itemType === 'subAgentActivity' || itemType === 'sub_agent_activity') {
     const agentThreadId = readAssistantProviderString(
       item.agentThreadId,
       item.agent_thread_id,
     )
-    const activityKind = readAssistantProviderString(item.kind)
-    const activityId = readAssistantProviderString(item.id)
     return agentThreadId
       ? {
-          isV2SubagentActivity: true,
           receiverThreadIds: [agentThreadId],
-          spawnModel: null,
-          v2SpawnCallId:
-            activityKind === 'started' ? activityId ?? null : null,
+          spawnModel: readAssistantProviderString(item.model) ?? null,
         }
       : null
   }
@@ -1474,73 +1441,10 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   const tool = readAssistantProviderString(item.tool)
   const isSpawnTool = tool === 'spawnAgent' || tool === 'spawn_agent'
   return {
-    isV2SubagentActivity: false,
     receiverThreadIds,
     spawnModel: isSpawnTool
       ? readAssistantProviderString(item.model) ?? null
       : null,
-    v2SpawnCallId: null,
-  }
-}
-
-function readCodexV2RequestedSpawnModelsByCallId(
-  rawEvents: readonly unknown[],
-): Map<string, string> {
-  const modelByCallId = new Map<string, string>()
-  for (const rawEvent of rawEvents) {
-    const record = readAssistantProviderRecord(rawEvent)
-    const eventType = readAssistantProviderString(
-      record?.method,
-      record?.type,
-      record?.event,
-    )
-    if (
-      eventType !== 'rawResponseItem/completed' &&
-      eventType !== 'raw_response_item/completed'
-    ) {
-      continue
-    }
-
-    const params = readAssistantProviderRecord(record?.params)
-    const item = readAssistantProviderRecord(params?.item)
-    const itemType = readAssistantProviderString(item?.type)
-    if (itemType !== 'function_call' && itemType !== 'custom_tool_call') {
-      continue
-    }
-
-    const toolName = readAssistantProviderString(item?.name)
-    const namespace = readAssistantProviderString(item?.namespace)
-    if (
-      toolName !== 'spawn_agent' ||
-      (namespace !== null && namespace !== 'collaboration')
-    ) {
-      continue
-    }
-
-    const callId = readAssistantProviderString(item?.callId, item?.call_id)
-    const rawArguments =
-      itemType === 'custom_tool_call' ? item?.input : item?.arguments
-    const argumentsRecord = readAssistantProviderJsonRecord(rawArguments)
-    const requestedModel = readAssistantProviderString(argumentsRecord?.model)
-    if (callId && requestedModel) {
-      modelByCallId.set(callId, requestedModel)
-    }
-  }
-
-  return modelByCallId
-}
-
-function readAssistantProviderJsonRecord(
-  value: unknown,
-): Record<string, unknown> | null {
-  if (typeof value !== 'string') {
-    return readAssistantProviderRecord(value)
-  }
-
-  try {
-    return readAssistantProviderRecord(JSON.parse(value))
-  } catch {
-    return null
   }
 }
 

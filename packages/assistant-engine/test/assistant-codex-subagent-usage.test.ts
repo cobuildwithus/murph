@@ -737,32 +737,12 @@ describe('extractCodexSubagentUsageDrafts', () => {
     ).toBe(1_200)
   })
 
-  it('joins a V2 raw spawn call to its activity so an explicit Terra child does not inherit Sol usage', () => {
+  it('uses a protocol-carried V2 activity model instead of inheriting the parent model', () => {
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 2,
       parentModel: 'gpt-5.6-sol',
       parentRawEvents: [
-        {
-          method: 'rawResponseItem/completed',
-          params: {
-            threadId: 'thread-parent-v2-override',
-            turnId: 'turn-parent-v2-override',
-            item: {
-              type: 'function_call',
-              name: 'spawn_agent',
-              namespace: 'collaboration',
-              arguments: JSON.stringify({
-                message: 'synthetic read-only check',
-                task_name: 'terra_check',
-                model: 'gpt-5.6-terra',
-                reasoning_effort: 'low',
-                fork_turns: 'none',
-              }),
-              call_id: 'spawn-v2-terra',
-            },
-          },
-        },
         {
           method: 'item/completed',
           params: {
@@ -774,6 +754,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
               kind: 'started',
               agentThreadId: 'thread-child-v2-terra',
               agentPath: 'root/terra_check',
+              model: 'gpt-5.6-terra',
             },
           },
         },
@@ -816,7 +797,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
         totalTokens: 300,
       },
     })
-    expect(JSON.stringify(drafts)).not.toContain('synthetic read-only check')
     expect(JSON.stringify(drafts)).not.toContain('thread-child-v2-terra')
   })
 })

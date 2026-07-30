@@ -120,7 +120,6 @@ import {
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
   readCodexCollabReceiverThreadIds,
-  readCodexV2SubagentActivityThreadIds,
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImagePaths,
@@ -3160,13 +3159,10 @@ async function runCodexAppServerTurnOnProcess(
   const askGrokTurnState = createAskGrokTurnState()
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
-  const subagentModelByThread = new Map<string, string>()
-  const attemptedSubagentModelLookupThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
   const collabReceiverThreadIds = new Set<string>()
-  const v2SubagentActivityThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3265,7 +3261,6 @@ async function runCodexAppServerTurnOnProcess(
       parentModel: normalizeNullableString(input.model) ?? null,
       parentRawEvents: jsonEvents,
       serviceTier: input.serviceTier ?? null,
-      subagentModelByThread,
       subagentTokenUsageByThread,
     })
 
@@ -4467,15 +4462,6 @@ async function runCodexAppServerTurnOnProcess(
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
     }
-    for (
-      const receiverThreadId of
-      readCodexV2SubagentActivityThreadIds(message)
-    ) {
-      v2SubagentActivityThreadIds.add(receiverThreadId)
-      if (subagentTokenUsageByThread.has(receiverThreadId)) {
-        scheduleSubagentModelLookup(receiverThreadId)
-      }
-    }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
@@ -4685,9 +4671,6 @@ async function runCodexAppServerTurnOnProcess(
     const sample = subagentTokenUsageByThread.get(threadId)
     if (sample) {
       sample.lastEvent = message
-      if (v2SubagentActivityThreadIds.has(threadId)) {
-        scheduleSubagentModelLookup(threadId)
-      }
       return
     }
     if (subagentTokenUsageByThread.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS) {
@@ -4708,9 +4691,6 @@ async function runCodexAppServerTurnOnProcess(
       firstEvent: message,
       lastEvent: message,
     })
-    if (v2SubagentActivityThreadIds.has(threadId)) {
-      scheduleSubagentModelLookup(threadId)
-    }
   }
 
   const handleStaleParentTurnMessage = (message: CodexRpcMessage): void => {
@@ -4889,24 +4869,6 @@ async function runCodexAppServerTurnOnProcess(
     method: string,
     params: Record<string, unknown>,
   ): Promise<unknown> => codexProcess.sendRequest(method, params)
-
-  const scheduleSubagentModelLookup = (threadId: string): void => {
-    if (attemptedSubagentModelLookupThreadIds.has(threadId)) {
-      return
-    }
-    attemptedSubagentModelLookupThreadIds.add(threadId)
-    void sendRequest('thread/resume', {
-      excludeTurns: true,
-      threadId,
-    }).then((result) => {
-      const model = normalizeNullableString(
-        asCodexString(asCodexRecord(result)?.model),
-      )
-      if (model) {
-        subagentModelByThread.set(threadId, model)
-      }
-    }).catch(() => undefined)
-  }
 
   const requireLiveTurnIds = (): {
     threadId: string
