@@ -529,17 +529,17 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
-  it('lets a server-owned permission card stand alone', async () => {
+  it('lets server-owned native consent UI stand alone', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'never send a companion confirmation that the card is available, posted, or ready',
+      'Never send a companion confirmation that a card is available, posted, or ready',
     )
     expect(normalized).toContain(
-      'When the server-owned card is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`.',
+      'When that native UI is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`',
     )
     expect(normalized).toContain(
-      'send only that content in the assistant response and do not mention the card',
+      'otherwise answer only the substantive question',
     )
   })
 
@@ -578,7 +578,7 @@ describe('assistant group-chat style guidance', () => {
       'Never force a callback merely because the page mentions it',
     )
     expect(normalized).toContain(
-      'When the authenticated Linq/iMessage or Telegram room explicitly asks Murph to remember, correct, retire, or forget room-local social context, use `murph.group_room_model`',
+      'When the authenticated Linq (iMessage or SMS) or Telegram room explicitly asks Murph to remember, correct, retire, or forget room-local social context, use `murph.group_room_model`',
     )
     expect(normalized).toContain(
       'If `show` fails or the write is stale, stop and do not claim the requested change was saved.',
