@@ -187,6 +187,7 @@ export interface AssistantNotificationCommitContext {
 }
 
 export interface AssistantNotificationPostTurnDeliveryExpectations {
+  newsletterPendingDeliveryIntentId?: string | null
   newsletterSendResult?: Extract<
     HostedRuntimeNewsletterToolResponse,
     { action: 'send' }
@@ -237,6 +238,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  onNewsletterPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
@@ -288,6 +290,7 @@ export async function sendAssistantNotificationLocal(
               unavailableReason: 'newsletter_send_not_observed',
             }
           : null
+      let newsletterPendingDeliveryIntentId: string | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -313,6 +316,9 @@ export async function sendAssistantNotificationLocal(
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
+                ...(newsletterPendingDeliveryIntentId
+                  ? { newsletterPendingDeliveryIntentId }
+                  : {}),
                 newsletterSendResult,
               },
             }
@@ -394,6 +400,10 @@ export async function sendAssistantNotificationLocal(
                 current: newsletterSendResult ?? null,
                 next: result.result,
               })
+            },
+            recordNewsletterPendingDeliveryIntentId: (intentId) => {
+              newsletterPendingDeliveryIntentId = intentId
+              input.onNewsletterPendingDeliveryIntentId?.(intentId)
             },
             route,
             session: resolved.session,
