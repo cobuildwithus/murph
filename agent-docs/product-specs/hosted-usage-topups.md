@@ -259,6 +259,9 @@ The target composition is:
 - Description: **Choose a one-time credit amount for your account. We’ll use
   your saved card when available. Stripe will ask when card details or
   verification are needed.**
+- Group description: **Choose a one-time contribution to keep Murph talking for
+  everyone here.** Do not repeat saved-card or verification mechanics in the
+  group dialog.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**
