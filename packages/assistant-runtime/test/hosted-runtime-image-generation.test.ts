@@ -68,6 +68,73 @@ describe("hosted image generation", () => {
     await controller.close();
   });
 
+  test("distinguishes retained completions from unfinished generation work", async () => {
+    let resolveFirstReady = (): void => undefined;
+    const firstReady = new Promise<void>((resolve) => {
+      resolveFirstReady = resolve;
+    });
+    let resolveSecondReady = (): void => undefined;
+    const secondReady = new Promise<void>((resolve) => {
+      resolveSecondReady = resolve;
+    });
+    let resolveSecondImage = (): void => undefined;
+    const secondImage = new Promise<void>((resolve) => {
+      resolveSecondImage = resolve;
+    });
+    let readyCount = 0;
+    const controller = createHostedImageGenerationController({
+      notifyReady() {
+        readyCount += 1;
+        if (readyCount === 1) {
+          resolveFirstReady();
+        } else if (readyCount === 2) {
+          resolveSecondReady();
+        }
+      },
+      onStarted: () => undefined,
+      vaultRoot: "/unused",
+      withCanonicalWritePersistence: async (run) => await run(),
+    });
+
+    assert.equal(controller.launcher.launch({
+      operationId: "image_completed",
+      originAssistantInputId: "input_completed",
+      async run() {
+        return {
+          media: null,
+          runtimeIssue: null,
+          savedImageRef: null,
+        };
+      },
+    }), "started");
+    await firstReady;
+    await Promise.resolve();
+    assert.equal(controller.hasCompleted(), true);
+    assert.equal(controller.hasUnfinishedWork(), false);
+
+    assert.equal(controller.launcher.launch({
+      operationId: "image_running",
+      originAssistantInputId: "input_running",
+      async run() {
+        await secondImage;
+        return {
+          media: null,
+          runtimeIssue: null,
+          savedImageRef: null,
+        };
+      },
+    }), "started");
+    assert.equal(controller.hasCompleted(), true);
+    assert.equal(controller.hasUnfinishedWork(), true);
+
+    resolveSecondImage();
+    await secondReady;
+    await Promise.resolve();
+    assert.equal(controller.hasCompleted(), true);
+    assert.equal(controller.hasUnfinishedWork(), false);
+    await controller.close();
+  });
+
   test("stages a completed image once on the original trusted route", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-"));
     tempRoots.push(vaultRoot);
@@ -180,8 +247,8 @@ describe("hosted image generation", () => {
       },
     }), "started");
     assert.equal(controller.launcher.readStatus?.("session_1"), "pending");
-    assert.equal(controller.hasWork(), true);
     assert.equal(controller.hasCompleted(), false);
+    assert.equal(controller.hasUnfinishedWork(), true);
     assert.equal(onStarted.mock.calls.length, 1);
     const duplicateRun = vi.fn(async () => ({
       media: null,
@@ -209,6 +276,7 @@ describe("hosted image generation", () => {
     await ready;
     assert.equal(notifyReadyOnce.mock.calls.length, 1);
     assert.equal(controller.hasCompleted(), false);
+    assert.equal(controller.hasUnfinishedWork(), true);
     const canonicalBoundary = vi.fn(async (write: () => Promise<void>) => {
       await write();
     });
@@ -218,10 +286,12 @@ describe("hosted image generation", () => {
       assert.equal(notifyReadyOnce.mock.calls.length, 2);
     });
     assert.equal(controller.hasCompleted(), true);
+    assert.equal(controller.hasUnfinishedWork(), false);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
     assert.equal(await controller.stageCompleted(), 1);
     assert.equal(enqueueAttempt, 2);
     assert.equal(controller.hasCompleted(), false);
+    assert.equal(controller.hasUnfinishedWork(), false);
     const completionInputId = await findCompletionInputId(vaultRoot);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
     assert.equal(controller.launcher.launch({

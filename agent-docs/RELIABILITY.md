@@ -490,25 +490,27 @@ Last verified: 2026-07-29
    bounded grace period, terminates only that proven-owned process if needed,
    requeues unfinished work, and proves exit before releasing the workspace.
 - Detached image generation keeps the dirty runtime on the existing runtime
-  wake signal until the image controller has no work. Image readiness and fresh
-  conversation input both interrupt that wait; an already-due idle checkpoint
-  must not turn unresolved image work into a synchronous retry loop that can
-  starve foreground admission. Completed image work that remains queued after
-  an enqueue failure keeps an invocation-local retry deadline instead of
-  waiting only for a new wake. Each exhausted immediate staging batch sets that
-  deadline once before another batch; fresh foreground input may interrupt the
-  wait and reset the shared checkpoint debounce, but cannot postpone the image
-  retry. Before a graceful snapshot can release retained completed work, the
-  controller performs one final event-stage attempt when needed and awaits
-  exact idempotent pending-index registration for every completion input ID.
-  Either failure aborts the checkpoint, so a later foreground cursor cannot
-  strand an earlier unindexed completion beyond backfill range. If a non-abort
-  foreground mailbox import fails after consuming its notification, that exact
-  notification returns to the existing signal before failure logging and the
-  watcher hands off, so another watcher or runtime pass can retry without a
-  second ingress wake or a hot retry loop. The image controller remains the
-  sole work owner, and the ordinary idle checkpoint window resumes after it
-  drains.
+  wake signal while provider tasks or canonical writes remain unfinished.
+  Image readiness and fresh conversation input both interrupt that wait; an
+  already-due idle checkpoint must not turn unresolved image work into a
+  synchronous retry loop that can starve foreground admission. Completed image
+  work that remains queued after an enqueue failure keeps an invocation-local
+  retry deadline instead of waiting only for a new wake. Each exhausted
+  immediate staging batch sets that deadline once before another batch; fresh
+  foreground input may interrupt the wait and reset the shared checkpoint
+  debounce, but cannot postpone the image retry. A completed-only retained item
+  may cross shutdown or provider handoff only after a final event-stage attempt
+  when needed, exact idempotent pending-index registration, and projection of a
+  due `assistant` wake. Either persistence failure aborts the checkpoint, so a
+  later foreground cursor cannot strand an earlier unindexed completion beyond
+  backfill range. On provider handoff, the old invocation checkpoints and
+  stops without post-checkpoint consumption; the fresh invocation owns the
+  completion. Mixed completed-plus-unfinished work remains blocked until the
+  unfinished work drains. If a non-abort foreground mailbox import fails after
+  consuming its notification, that exact notification returns to the existing
+  signal before failure logging and the watcher hands off, so another watcher
+  or runtime pass can retry without a second ingress wake or a hot retry loop.
+  The image controller remains the sole work owner.
 - Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
 - Automatic meal import is complete only after the stable 9pm managed automation exists. Capture enrollment and upload require a current active private route, including a verified email fallback, which Web includes in the private mailbox envelope. The import writes the canonical meal first, then idempotently ensures that automation from the envelope route; if the upsert fails, the mailbox item stays retryable. Direct email delivery replaces the saved address with the current verified address through the existing signed Web-control boundary before every provider call, and fails closed when Web no longer returns one. Reconciliation evaluates engagement and AI usage for runnable model work even when system lag is present, while blocked model work can still admit deterministic import-only processing. System-only import must checkpoint the generic cron projection from the mutated vault before running post-checkpoint staging cleanup; a projection read failure leaves the import uncheckpointed for retry. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, so ordinary due automations may resume; it does not bypass AI-usage authorization. Authorized fresh conversation owns the ordinary foreground pass so a retryable system item cannot starve it. A same-workspace retry finds the existing meal, while a retry from the last checkpoint safely repeats the deterministic canonical write before ensuring the missing postcondition. The automation uses the ordinary cron planner and delivery path. `meal closeout-work` derives one bounded batch directly from canonical meals: same-occurrence removal revisions first, then the oldest retained automatic-capture photos. The photos remain the only pending-work queue, so old captures eventually drain without a cursor or another state store. If the provider fails after cleanup begins, a photo-removal revision recorded at or after the scheduled occurrence instant remains evidence only for that occurrence's retry; remaining photos and those revisions reconstruct partial work, while a later occurrence cannot resend the completed one. Photo cleanup is a canonical, idempotent meal mutation that fails closed on changed bytes, mismatched manifest ownership, ordinary meal photos, or partial writes.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
@@ -538,7 +540,58 @@ Last verified: 2026-07-29
   401/invalid-grant requires
   reauthorization, a 403 degrades only the affected family, and retryable
   transport/429/5xx failures do not silently terminalize useful credentials.
-- Hosted generated-image turns require a writable canonical vault capture before the model-provider call. A successful generation persists the image under `raw/captures/**` and returns a hash-bound `vault_image` descriptor. When the model selects that private ref, the attachment boundary reloads it and derives canonical byte metadata before accepting response media; a missing artifact or schema-invalid replacement clears the current media batch and remains a recoverable, reply-required tool failure instead of retaining stale media, becoming an undeliverable outbox item, or permitting accidental silence. The reply requirement remains unresolved for the rest of the turn across later steer contexts and successful output tools; neither ordinary `finish_without_reply` nor an approved vault-file delivery may replace it. If final provider text is blank, the finalizer supplies one neutral requested-attachment failure sentence in delivery and transcript state and routes it through the requirement's originating context and selected target. Same-context valid media accompanies that recovery; media selected for a later steered context remains on its own final context and target while the recovery is an earlier segment. The existing segment idempotency-key order persists both outbox intents, and media alone never replaces the recovery. When an approved vault file coexists with that reply requirement, the same final-action patch retains vault-file ownership and rejects later response-media tools without hiding the recovery text or clearing an explicitly selected reply target. Successful approval records the vault-file owner independently of generic no-reply eligibility, so earlier visible output is preserved without dropping the later media fence. Stateful media and final-action tools apply in request order, so receipt of a later request cannot suppress an earlier queued media mutation. Progress remains an independently delivered visible output: an in-flight progress send makes no-reply unavailable instead of being silently discarded. Final delivery reloads and verifies the artifact again before provider-entry bookkeeping so a post-attachment change, missing file, oversized file, mislabeled file, or invalid image fails before external dispatch. Linq retries reuse the stable delivery identity while uploading through the existing attachment boundary. Telegram rebuilds multipart `FormData` for each attempt, and its image transport remains non-replay-safe unless the provider documents idempotency. The legacy public upload route returns `410 Gone`, so an older warm runner degrades to its existing text fallback instead of creating a new public object.
+- Hosted generated-image turns require a writable canonical vault capture before
+  the model-provider call. A successful generation persists the image under
+  `raw/captures/**` and returns a hash-bound `vault_image` descriptor. When the
+  model selects that private ref, the attachment boundary reloads it and derives
+  canonical byte metadata before accepting response media; a missing artifact
+  or schema-invalid replacement clears the current media batch and remains a
+  recoverable, reply-required tool failure instead of retaining stale media,
+  becoming an undeliverable outbox item, or permitting accidental silence. The
+  reply requirement remains unresolved for the rest of the turn across later
+  steer contexts and successful output tools; neither ordinary
+  `finish_without_reply` nor an approved vault-file delivery may replace it. If
+  final provider text is blank, the finalizer supplies `An attachment couldn't
+  be included in this reply.` in delivery and transcript state and routes it
+  through the requirement's originating context and selected target.
+  Same-context valid media accompanies that recovery; media selected for a
+  later steered context remains on its own final context and target while the
+  recovery is an earlier segment. The explicitly marked final sequence base is
+  `<base>:required-before-final`; required predecessors add
+  `:segment:<ordinal>` before any bubble suffix and retain their original route
+  and native target. The final is eligible only after every predecessor is
+  `sent` with a non-null
+  receipt. Missing, failed, abandoned, sent-without-receipt, or non-idempotent
+  confirmation-pending predecessor evidence makes the marked predecessor
+  unavailable without mutating it. Only a final proved never attempted is
+  terminal-failed for predecessor unavailability. An attempted final is
+  reconciliation-only: idempotent transport may pace another receipt
+  confirmation but never re-enter provider delivery, while non-idempotent
+  transport ends in terminal ambiguity. An `awaiting_approval` final remains
+  parked. The shared assistant-engine resolver groups by session, turn, and
+  sequence base across route and target changes; local queueing, hosted
+  collection/wake/preparation/drain, generic engine drain, and locked core
+  dispatch all read or revalidate it. This contract applies only to explicitly
+  marked recovery sequences and does not redefine ordinary outbox ordering.
+  Media alone never replaces the recovery. When an approved vault file
+  coexists with that reply requirement, the same final-action patch retains
+  vault-file ownership and rejects later response-media tools without hiding
+  the recovery text or clearing an explicitly selected reply target.
+  Successful approval records the vault-file owner independently of generic
+  no-reply eligibility, so earlier visible output is preserved without dropping
+  the later media fence. Stateful media and final-action tools apply in request
+  order, so receipt of a later request cannot suppress an earlier queued media
+  mutation. Progress remains an independently delivered visible output: an
+  in-flight progress send makes no-reply unavailable instead of being silently
+  discarded. Final delivery reloads and verifies the artifact again before
+  provider-entry bookkeeping so a post-attachment change, missing file,
+  oversized file, mislabeled file, or invalid image fails before external
+  dispatch. Linq retries reuse the stable delivery identity while uploading
+  through the existing attachment boundary. Telegram rebuilds multipart
+  `FormData` for each attempt, and its image transport remains non-replay-safe
+  unless the provider documents idempotency. The legacy public upload route
+  returns `410 Gone`, so an older warm runner degrades to its existing text
+  fallback instead of creating a new public object.
 - Hosted generated voice memo turns must treat ElevenLabs generation, Linq attachment upload, or Telegram delivery-time generation failures as structured tool or delivery failures. When response media carries a transcript, the existing final channel adapter uses that transcript as the text fallback if audio preparation or delivery fails and reports success only after either audio or fallback text is accepted; it adds no queue or delivery owner. Linq derives the fallback provider-effect identity from the persisted delivery key, or from the attachment identity when no delivery intent exists, so the fallback crosses the existing dispatch fence without reusing the text or native-voice claim. Final Linq and Telegram voice memo sends are not replay-safe unless the provider later documents idempotency for those native voice-message endpoints, so outbox transport idempotency must stay false for voice memo media and retries must follow the confirmation-pending/fail-closed path when the fallback is absent or also fails.
 - Hosted clinical-record retrieval is finite by resource-family, page-count, page-size, total-byte, per-page resource-count, and total resource-count caps. Runtime stops with a fixed terminal result before import when a provider page would cross a raw-manifest resource cap. Its durable work identity is the pointer-only mailbox `{runId, generation}`; exact validated page URLs—not randomized cursor ciphertext—own logical provider-page identity. Web owns run-bound opaque cursors and provider claims, while vault-usecases atomically checkpoints each accepted bounded page under `.runtime/operations/clinical-records/**` before honoring foreground preemption. A retry resumes at the next unfinished cursor without replaying completed pages. Raw pages plus the manifest commit atomically only after semantic validation and a fresh web authority check; canonical mutation receives a second authority check. Byte-identical replays are idempotent, conflicting replay bytes fail closed, and terminal completion or rejection clears the operational checkpoint. `authorization-required` is terminalized by web and must not receive a second runtime outcome.
 - Clinical retrieval plans are frozen per run. Query-aware work is ordered by

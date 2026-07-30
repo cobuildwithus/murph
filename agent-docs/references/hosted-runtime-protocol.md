@@ -1258,9 +1258,37 @@ recorder without awaiting it, and image delivery never waits for accounting or
 diagnostic writes. When the model attaches the private ref, the assistant
 boundary reloads it and derives canonical byte metadata before response media
 can enter the outbox; final delivery reloads it again to prove the selected
-bytes have not changed. This adds no image-specific sender, durable image job,
+bytes have not changed. The controller distinguishes retained completed items
+from unfinished provider tasks and canonical writes. At shutdown or provider
+handoff, completed-only work must be exact-staged and indexed before snapshot,
+and the runtime projects a due `assistant` wake. On provider handoff, the old
+invocation checkpoints and stops without servicing that wake; a fresh
+invocation consumes the pending input after re-reading current provider
+authority. Mixed completed-plus-unfinished work remains blocked until the
+unfinished work drains. This adds no image-specific sender, durable image job,
 mailbox kind, scheduler, reservation, allowance implementation, or usage
 lifecycle. Runner loss may drop unfinished provider work.
+
+Private-media recovery ordering is explicit rather than generic segment
+ordering. The normalized final sequence base is
+`<base>:required-before-final`; every required predecessor adds
+`:segment:<ordinal>` before any bubble suffix and retains its original route
+and native reply target. The shared assistant-engine resolver groups the
+sequence by session, turn, and base across delivery
+boundaries. Hosted collection, wake calculation, preparation, and drain use
+that resolver, keep unavailable finals observable but unprepared, and rely on
+core dispatch to revalidate the complete group under the assistant-runtime
+write lock. Local and generic engine drains use the same dependency. Only a
+final whose predecessors are all `sent` with non-null receipts may enter
+provider delivery. This marker applies only to the private-media recovery
+sequence and does not change ordinary or cross-turn outbox ordering.
+
+The marker writer and all local, hosted, and core readers ship in one
+fingerprinted runner artifact. Its first production release is a runtime-only
+immediate hard cut: exact source and bundle fingerprint admission must converge
+before the release is accepted. Once production traffic is admitted, treat
+that dependency-aware bundle as the runner rollback floor because marked
+outbox intent or checkpoint state may already depend on it.
 
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone

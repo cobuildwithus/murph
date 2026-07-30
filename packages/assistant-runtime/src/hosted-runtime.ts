@@ -2693,7 +2693,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             && !deferRetainedCompletionRetry
             && imageCompletionRetryAtMs !== null
           ) {
-            setIdleCheckpointStartBy(imageCompletionRetryAtMs);
+            setIdleCheckpointStartBy(
+              assistantProviderHandoffRequested
+                ? Date.now()
+                : imageCompletionRetryAtMs,
+            );
           } else {
             markIdleCheckpointTimerAfterDirtyWork();
           }
@@ -3347,8 +3351,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const imageGenerationWorkPending =
           options.runtimeWakeSignal !== null
           && options.runtimeWakeSignal !== undefined
-          && imageGenerationController?.hasWork() === true
-          && imageGenerationController.hasCompleted() === false;
+          && imageGenerationController?.hasUnfinishedWork() === true;
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           // An idle checkpoint cannot release the workspace while detached
           // image work is still running. Both image readiness and new mailbox
@@ -3382,25 +3385,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           continue;
         }
+        const retainedCompletionCanCheckpointForProviderHandoff =
+          options.shutdownSignal?.aborted !== true
+          && assistantProviderHandoffRequested
+          && imageGenerationController?.hasCompleted() === true
+          && imageGenerationController.hasUnfinishedWork() === false;
         if (
           options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasCompleted()
+          && !retainedCompletionCanCheckpointForProviderHandoff
         ) {
           continue;
         }
         if (
           options.shutdownSignal?.aborted !== true
-          && imageGenerationController?.hasWork()
+          && imageGenerationController?.hasUnfinishedWork()
         ) {
           markIdleCheckpointTimerAfterDirtyWork();
           continue;
         }
         if (imageGenerationController?.hasCompleted()) {
-          // Graceful shutdown cannot carry the controller's invocation-local
-          // queue into the next runtime. Establish exact durable ownership for
-          // every retained completion and project its existing assistant wake
-          // before snapshotting; a staging or index write failure must abort
-          // the checkpoint instead of orphaning it.
+          // Graceful shutdown or provider handoff cannot carry the controller's
+          // invocation-local queue into the next runtime. Establish exact
+          // durable ownership for every retained completion and project its
+          // existing assistant wake before snapshotting; a staging or index
+          // write failure must abort the checkpoint instead of orphaning it.
           await imageGenerationController
             .prepareRetainedCompletionsForCheckpoint();
           pendingWake = selectEarliestHostedRuntimeWake([
@@ -3695,7 +3704,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // that previously let inboxMediaRetentionWakeAt drift.
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
-          && options.shutdownSignal?.aborted !== true;
+          && options.shutdownSignal?.aborted !== true
+          && !assistantProviderHandoffRequested;
         const postCheckpointWorkSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;

@@ -34,7 +34,7 @@ export interface HostedImageGenerationController {
     persist: (write: () => Promise<void>) => Promise<void>,
   ): Promise<number>;
   hasCompleted(): boolean;
-  hasWork(): boolean;
+  hasUnfinishedWork(): boolean;
   prepareRetainedCompletionsForCheckpoint(): Promise<void>;
   releaseAcceptedInputs(
     inputIds: readonly string[],
@@ -248,10 +248,8 @@ export function createHostedImageGenerationController(input: {
     hasCompleted() {
       return completed.length > 0;
     },
-    hasWork() {
-      return tasks.size > 0
-        || completed.length > 0
-        || canonicalWrites.length > 0;
+    hasUnfinishedWork() {
+      return tasks.size > 0 || canonicalWrites.length > 0;
     },
     async releaseAcceptedInputs(inputIds, hasCompleteTerminalEvidence) {
       for (const inputId of inputIds) {

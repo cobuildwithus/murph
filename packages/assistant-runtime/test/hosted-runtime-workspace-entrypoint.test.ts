@@ -18389,6 +18389,310 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("checkpoints a retained image completion immediately for provider handoff", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-provider-handoff-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const imageGenerationStarted = createDeferred<void>();
+    const imageGenerationRelease = createDeferred<void>();
+    const pendingIndexFailuresFinished = createDeferred<void>();
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_provider_handoff_origin",
+      laneSeq: "1",
+    })];
+    let assistantPhaseCalls = 0;
+    let completionEnqueueAttempts = 0;
+    let completionInputId: string | null = null;
+    let liveProvider: "openai" | "venice" = "openai";
+    let providerEgressCount = 0;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      assert.ok(actualEnqueue);
+      mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+        async (request) => {
+          const event = await readAssistantInputEvent({
+            inputId: request.inputId,
+            vault: request.vaultRoot,
+          });
+          if (
+            event?.sourceRef.kind !== "hosted-mailbox"
+            || event.sourceRef.payloadSchema
+              !== "murph.hosted-image-completion.v1"
+          ) {
+            return await actualEnqueue(request);
+          }
+          completionInputId ??= request.inputId;
+          assert.equal(request.inputId, completionInputId);
+          completionEnqueueAttempts += 1;
+          if (completionEnqueueAttempts === 2) {
+            pendingIndexFailuresFinished.resolve();
+          }
+          if (completionEnqueueAttempts <= 2) {
+            throw new Error("Synthetic retained image pending-index failure.");
+          }
+          return await actualEnqueue(request);
+        },
+      );
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_image_provider_handoff",
+            budget: { maxMailboxItems: 4 },
+            idleCheckpointDelayMs: 1_000,
+            leaseGeneration: "8",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const retainedCompletionInputId = completionInputId;
+            assert.ok(retainedCompletionInputId);
+            assert.equal(completionEnqueueAttempts, 3);
+            assert.equal(
+              (
+                await readHostedPendingAssistantInputIds({ vaultRoot })
+              ).includes(retainedCompletionInputId),
+              true,
+            );
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/image-provider-handoff.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            const assistantInputId =
+              await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_image_provider_handoff",
+                vaultRoot,
+              });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            assistantConfigurationToolPort: {
+              async request() {
+                return {
+                  action: "read",
+                  result: {
+                    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
+                    availableProviders: ["openai", "venice"],
+                    availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
+                    configurationAvailable: true,
+                    dormantSolPreference: false,
+                    model: "gpt-5.6-terra",
+                    provider: liveProvider,
+                    reasoningEffort: "low",
+                    solAvailable: false,
+                  },
+                };
+              },
+            },
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            const assistantInputIds =
+              phaseInput.initialAssistantInputBatch?.assistantInputIds
+              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            if (assistantInputIds.length === 0) {
+              return { progressed: false };
+            }
+            assistantPhaseCalls += 1;
+            assert.equal(assistantInputIds.length, 1);
+            const assistantInputId = assistantInputIds[0]!;
+
+            if (assistantPhaseCalls === 2) {
+              const event = await readAssistantInputEvent({
+                inputId: assistantInputId,
+                vault: vaultRoot,
+              });
+              assert.equal(
+                event?.sourceRef.kind === "hosted-mailbox"
+                  ? event.sourceRef.itemId
+                  : null,
+                "mailbox_item_image_provider_handoff_followup",
+              );
+              await assert.rejects(
+                async () =>
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    acceptedInputs: [{
+                      id: assistantInputId,
+                      source: "assistant-input",
+                    }],
+                  }),
+                (error: unknown) =>
+                  error instanceof Error
+                  && error.name === "AssistantActiveTurnInputUnavailableError",
+              );
+              return {
+                checkpointReason: "canonical_runtime_commit" as const,
+                nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+                progressed: true,
+              };
+            }
+
+            assert.equal(assistantPhaseCalls, 1);
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: assistantInputId,
+                  source: "assistant-input",
+                }],
+              });
+            providerEgressCount += 1;
+            assert.equal(
+              phaseInput.imageGenerationLauncher?.launch({
+                operationId: "image_operation_provider_handoff",
+                originAssistantInputId: assistantInputId,
+                scopeId: "session_image_provider_handoff",
+                async run() {
+                  imageGenerationStarted.resolve();
+                  await imageGenerationRelease.promise;
+                  return {
+                    media: null,
+                    runtimeIssue: null,
+                    savedImageRef: null,
+                  };
+                },
+              }),
+              "started",
+            );
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+            await releaseProviderInputs?.();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        imageGenerationStarted.promise,
+        15_000,
+        () => "Image generation did not start.",
+      );
+      await waitForFakeTimerScheduled(() =>
+        `No hosted runtime timer was installed after image launch; attempts=${completionEnqueueAttempts}`
+      );
+      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 30_000));
+      imageGenerationRelease.resolve();
+      await withRealTimeout(
+        pendingIndexFailuresFinished.promise,
+        15_000,
+        () => `Retained image staging did not fail twice; attempts=${completionEnqueueAttempts}`,
+      );
+      await new Promise<void>((resolve) => REAL_SET_TIMEOUT(resolve, 25));
+      assert.equal(completionEnqueueAttempts, 2);
+
+      liveProvider = "venice";
+      await vi.advanceTimersByTimeAsync(500);
+      const providerHandoffAtMs = Date.now();
+      mailboxItems.push(createMailboxItem({
+        createdAt: "2026-04-27T00:00:30.250Z",
+        id: "mailbox_item_image_provider_handoff_followup",
+        laneSeq: "2",
+        occurredAt: "2026-04-27T00:00:30.250Z",
+      }));
+      runtimeWakeSignal.notify();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => `Retained image provider handoff did not checkpoint; attempts=${completionEnqueueAttempts}`,
+      );
+      assert.equal(Date.now(), providerHandoffAtMs);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(providerEgressCount, 1);
+      assert.equal(completionEnqueueAttempts, 3);
+      assert.equal(checkpointRequests.length, 1);
+      const checkpoint = checkpointRequests[0]!;
+      assert.equal(checkpoint.reason, "idle_shutdown");
+      assert.equal(checkpoint.idleCheckpointTrigger, "idle_window");
+      assert.equal(checkpoint.nextWakeReason, "assistant");
+      assert.ok(checkpoint.nextWakeAt);
+      assert.ok(Date.parse(checkpoint.nextWakeAt) <= Date.now());
+      assert.equal(result.nextWakeAt, checkpoint.nextWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.status, "scheduled");
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: true,
+          indexComplete: true,
+        },
+      );
+
+      const retainedCompletionInputId = completionInputId;
+      assert.ok(retainedCompletionInputId);
+      const retainedEvents = await Promise.all(
+        (
+          await readHostedPendingAssistantInputIds({ vaultRoot })
+        ).map((inputId) =>
+          readAssistantInputEvent({
+            inputId,
+            vault: vaultRoot,
+          })
+        ),
+      );
+      assert.deepEqual(
+        retainedEvents.filter((event) =>
+          event?.sourceRef.kind === "hosted-mailbox"
+          && event.sourceRef.payloadSchema
+            === "murph.hosted-image-completion.v1"
+        ).map((event) => event?.inputId),
+        [retainedCompletionInputId],
+      );
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      imageGenerationRelease.resolve();
+      await resultPromise?.catch(() => undefined);
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      if (actualEnqueue) {
+        mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+          actualEnqueue,
+        );
+      }
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("retains queued image state until its committed delivery intent is terminal", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-evidence-retry-"));
     const events: string[] = [];

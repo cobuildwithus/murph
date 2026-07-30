@@ -1001,8 +1001,14 @@ application code.
   transaction. Immediately before core provider entry, the runtime re-reads
   that owner; an unavailable read defers the accepted turn without provider
   egress, while a changed provider checkpoints and hands the pending turn to a
-  fresh invocation. The vault, workspace snapshot, assistant runtime, and
-  Cloudflare Durable Object do not keep another provider preference.
+  fresh invocation. A changed provider never lets the old invocation enter
+  either core provider. If only retained image completions remain, the old
+  invocation exact-stages and indexes them, projects a due `assistant` wake,
+  checkpoints, skips post-checkpoint work, and stops; a fresh invocation
+  re-reads Web and consumes that pending work under the current provider.
+  Unfinished image-provider or canonical-write work still blocks checkpoint
+  release. The vault, workspace snapshot, assistant runtime, and Cloudflare
+  Durable Object do not keep another provider preference.
 - Cloudflare remains the credential and translation boundary for both core
   providers. The runner holds a signed provider/user/runner credential rather
   than either real API key. OpenAI uses its existing Responses intercept;
@@ -1080,14 +1086,24 @@ current response-media batch and establishes a visible-reply obligation. That
 obligation remains authoritative for the rest of the turn, across later steer
 contexts and successful outputs, so neither `finish_without_reply` nor a
 vault-file completion can turn recovery into silence. If the provider supplies
-no nonblank recovery text, finalization emits one neutral attachment-failure
-sentence in both delivery and transcript state, using the obligation's original
-delivery context and selected reply target. Valid media selected in the same
-context accompanies that sentence. Valid media selected for a later steered
-context remains the final segment on its own context and target, while the
-recovery becomes an earlier response segment; the existing segment
-idempotency-key ordering persists both outbox intents before the later input can
-be terminal. Media alone never discharges the recovery obligation. When an
+no nonblank recovery text, finalization emits `An attachment couldn't be
+included in this reply.` in both delivery and transcript state, using the
+obligation's original delivery context and selected reply target. Valid media
+selected in the same context accompanies that sentence. Valid media selected
+for a later steered context remains the final segment on its own context and
+target, while the recovery becomes an earlier response segment. For that
+explicitly marked sequence, the normalized final sequence base is
+`<base>:required-before-final`; each required predecessor adds
+`:segment:<ordinal>` before any bubble suffix while retaining its original
+route and native target. The shared assistant-engine resolver groups by
+session, turn, and sequence base across route or target changes. Local queueing
+plus hosted
+collection, wake, preparation, and drain read the same dependency; core
+dispatch revalidates the full group under the assistant-runtime write lock.
+The final may dispatch only after every marked predecessor is `sent` with a
+non-null receipt. This contract applies only to explicitly marked recovery
+sequences; it does not redefine ordinary reply, cross-turn, or generic outbox
+ordering. Media alone never discharges the recovery obligation. When an
 approved vault-file send shares that obligation, the same final-action patch
 retains vault-file ownership so later response-media tools cannot create a
 second competing delivery while recovery text and any explicitly selected
@@ -1323,10 +1339,15 @@ is released. If pending-index registration exhausts its bounded immediate
 attempts, the controller retains the completion and the runtime sets one
 dedicated retry deadline before the next staging batch. Foreground work may
 interrupt that wait and reset the shared checkpoint debounce, but cannot slide
-the completion deadline. Before any graceful snapshot can release a retained
-completion, the controller performs one final event-stage attempt when needed
-and awaits exact idempotent registration of that completion input ID in the
-existing pending index; a staging or index failure aborts the checkpoint.
+the completion deadline. A retained completed item is distinct from unfinished
+generation or canonical-write work. Before shutdown or provider handoff can
+release a retained completion, the controller performs one final event-stage
+attempt when needed, awaits exact idempotent registration of that completion
+input ID in the existing pending index, and projects a due `assistant` wake; a
+staging or index failure aborts the checkpoint. On provider handoff, the old
+invocation checkpoints and returns without consuming that wake, and a fresh
+invocation owns the next pass. Any unfinished provider task or canonical write
+continues to block checkpoint release.
 Normal foreground selection keeps fresh conversation ahead of the completion
 and owns retry and terminal evidence. Provider completion starts the existing
 generic usage recorder without awaiting it, and image delivery never waits for

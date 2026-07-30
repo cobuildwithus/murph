@@ -151,6 +151,32 @@ every bubble, and one reaction reaches its selected accepted message. Confirm
 no strict outbox parse failures or stale runner fingerprints appear in Workers
 Observability.
 
+## Required-Before-Final Recovery Ordering Hard Cut
+
+Private-media recovery ordering is a runtime-only persisted-outbox contract.
+Its `:required-before-final` writer, shared resolver, local and hosted readers,
+and locked core-dispatch revalidation must ship in the same exact-fingerprint
+runner artifact. There is no Web/Vercel, Temporal, database, or migration
+ordering dependency.
+
+Deploy Cloudflare and the runner with `container_rollout=immediate`, then require
+managed-container smoke and normal invocation admission to report the exact new
+source and bundle fingerprints before accepting convergence. The configured
+active grace may let a proven-active old invocation finish as one
+old-writer/old-reader unit, but a stale fingerprint must not begin later work.
+Once production traffic is admitted, treat the dependency-aware runner as the
+rollback floor because marked outbox or checkpoint state may already exist.
+Forward-fix from that bundle or newer; do not restore an older reader, inspect
+private outbox contents to prove a drain, or add a second writer.
+
+After convergence, use controlled synthetic routes to verify that a predecessor
+on its original target blocks a final on a different target until persisted
+`sent` receipt evidence exists. Check missing, terminal, sent-without-receipt,
+and confirmation-ambiguous predecessor outcomes without a new final provider
+call. Also verify that provider handoff exact-stages a retained image
+completion, checkpoints a due `assistant` wake, and leaves its consumption to a
+fresh invocation. Keep observability aggregate and identifier-free.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an
