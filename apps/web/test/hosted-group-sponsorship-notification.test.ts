@@ -151,6 +151,9 @@ describe("group sponsorship notification", () => {
       "a surprising hook that could only belong to this group",
     );
     expect(envelope.notification.instructions).toContain(
+      "prefer it as the creative seed and blend it with the current conversation",
+    );
+    expect(envelope.notification.instructions).toContain(
       "fill the song naturally instead of treating it as a short sting",
     );
     expect(envelope.notification.instructions).not.toContain("5–15 seconds");
