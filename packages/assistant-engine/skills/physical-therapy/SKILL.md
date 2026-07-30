@@ -1,6 +1,6 @@
 ---
 name: physical-therapy
-description: Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, or return-to-activity needs, or asks for physical-therapy-style assessment or exercises. Reuse relevant conversation and vault context before asking questions. Read before suggesting exercises for a new or materially changed pain complaint.
+description: Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, or return-to-activity needs, or asks for physical-therapy-style assessment or exercises. Reuse relevant conversation and vault context before asking questions. Read before recommending exercises, rest, activity restriction, or load changes for a new or materially changed pain complaint.
 ---
 
 # Physical therapy reasoning, self-management, and follow-up
@@ -35,7 +35,7 @@ A useful episode produces the parts below that are appropriate to the case:
 
 - Do not claim to be the user's physical therapist or say Murph can fully replace one.
 - Do not make a definitive diagnosis from chat, a photo, a video, or a home test.
-- Do not anchor on the user's label. Terms such as “pinched nerve,” “tight tendon,” “weak core,” “out of alignment,” or “torn something” are hypotheses or beliefs, not findings.
+- Do not anchor on the user's label or let it choose an acute-injury branch. Terms such as “pinched nerve,” “tight tendon,” “weak core,” “out of alignment,” or “torn something” are hypotheses or beliefs, not findings.
 - Do not equate pain, clicking, or tightness with tissue damage or structural shortening.
 - Do not invent palpation findings, imaging results, exact range-of-motion values, reflexes, strength grades, vascular findings, joint mobility, ligament stability, or tissue damage.
 - Do not use one named special test as proof that a condition is present or absent.
@@ -76,6 +76,8 @@ When presenting a named exercise or movement routine, also read `$MURPH_ASSISTAN
 - Do not announce a “red-flag screen,” “safety gate,” or checklist. Safety routing should normally be invisible unless a specific concern needs explanation.
 - If high-risk information is volunteered or found in relevant current records, skip routine intake and route safety immediately.
 - When a question is needed, pair it with a useful interpretation or low-risk next step whenever possible; do not withhold all value until a form is complete.
+- Match the response to the user's requested time horizon. When they ask for a durable or “permanent” fix, lead with the durable working path and one concrete first step; do not answer mainly with short-term flare management or a bare referral.
+- Rest, activity restriction, and fixed recovery windows are interventions, not neutral defaults while clarifying. Require positive support such as meaningful trauma, loss of function, a clearly aggravating dose, worsening response, or another safety concern. If one missing fact separates acute protection from stable load-related rehabilitation, state the working interpretation and ask that question before restricting activity; preserve tolerated movement in the meantime.
 - Explain why a sensitive or surprising question matters.
 - Invite correction without reciting the vault: “I’m treating this as the same gradual, load-related pattern unless something important has changed.”
 - Mention stored context only when it helps orientation or attribution. Do not surface unrelated diagnoses, medications, or personal details.
