@@ -38,6 +38,13 @@ turn:
   Venice rollout flag is enabled, an active personal member may choose Venice
   instead. The choice changes core assistant inference only; specialized tools
   can continue to use their own managed providers.
+- Settings may state that Murph disables OpenAI response storage because the
+  direct Responses path sends `store: false`, which [disables Responses API
+  storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
+  This does not promise zero data retention: OpenAI separately documents
+  [abuse-monitoring, prompt-cache, and endpoint retention
+  controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
+  and third-party tools remain subject to their own retention policies.
 - Settings may call Venice privacy-first and state that Venice stores no prompts
   or replies, consistent with [Venice's API privacy
   documentation](https://docs.venice.ai/welcome/privacy). This is a

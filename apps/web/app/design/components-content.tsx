@@ -995,8 +995,8 @@ export function ComponentsContent() {
 
         <Section title="Radio Group, Choice Cards & Provider Picker">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Compare model choice cards and the compact, save-gated provider
-            picker used by assistant settings.
+            Compare model choice cards and review the compact provider-storage
+            disclosures used by assistant settings.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"

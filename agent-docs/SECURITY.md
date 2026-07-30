@@ -99,6 +99,13 @@ Last verified: 2026-07-30
   only the two Responses POST paths, canonical product model ids, a bounded
   20 MiB request body, and fixed operator model mappings; it disables Venice's
   added system prompt, web search, and web scraping at the final egress rewrite.
+  Settings may say that Murph disables OpenAI response storage because the
+  direct OpenAI Responses path sends `store: false`, which [disables Responses
+  API storage](https://developers.openai.com/api/docs/guides/migrate-to-responses#4-decide-when-to-use-statefulness).
+  This is an application-state setting, not a zero-data-retention promise:
+  OpenAI documents separate [abuse-monitoring, prompt-cache, and endpoint
+  retention controls](https://developers.openai.com/api/docs/guides/your-data#v1responses),
+  and third-party tools retain data under their own policies.
   Settings may describe Venice as privacy-first and state that Venice stores no
   prompts or replies, matching [Venice's API privacy
   documentation](https://docs.venice.ai/welcome/privacy). Treat that as a
