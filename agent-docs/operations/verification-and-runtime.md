@@ -370,10 +370,9 @@ assistant-runtime bridge, and assistant-engine tool/prompt tests. Exact-head CI
 owns the broad diff and scenario-integrity surfaces; direct shared-default
 pushes use `pnpm verify:acceptance`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete the local
-`product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
-pass, the review-only Fable or Opus UI pass, and the separate final ReviewGPT gate
-before handoff.
+putting a real query or ZIP in a durable artifact. Complete the preliminary
+ReviewGPT product-experience/prompt/frontend/coverage pass, the review-only
+Fable or Opus UI pass, and the separate final ReviewGPT gate before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
