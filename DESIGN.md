@@ -389,15 +389,16 @@ credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-and $20 as monthly maximums, explain that activation is one ordinary $5
-usage-credit purchase, and say that later $5 purchases happen only when the
-group needs capacity. Keep an explicit one-time contribution as the secondary
-action. Dollar amounts are cost-weighted usage credit, never an owned or
-promised number of messages. Do not imply that selecting a maximum charges the
-card; only the explicit sponsor action authorizes activation, and every cap
-increase requires a fresh payer confirmation. Keep the alias, note, and
-eligible temporary running bit behind one optional disclosure and attach them
-only to the activation or one-time purchase, never to automatic refills.
+and $20 as visually prominent monthly maximums. Keep the dialog explanation to
+one concise sentence: Murph adds $5 only when the chat needs it, up to the
+selected maximum. The explicit sponsor action authorizes the initial $5
+activation purchase, whose amount is shown before payment; selecting a maximum
+alone does not charge the card. Keep an explicit one-time contribution as the
+secondary action. Dollar amounts are cost-weighted usage credit, never an owned
+or promised number of messages. Every cap increase requires fresh payer
+confirmation. Keep the alias, note, and eligible temporary running bit behind
+one optional disclosure and attach them only to the activation or one-time
+purchase, never to automatic refills.
 Optional text fields use the sage focus border without an outer glow. Stack
 maximum cards and actions on narrow screens, preserve visible focus and
 selection states, and render the production activation, active-management,

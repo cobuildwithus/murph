@@ -633,13 +633,11 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
     );
     assert.doesNotMatch(dialogText, /required first \$5 activation purchase/u);
     assert.match(dialogText, /Add a fun note/u);
-    const amountLabels =
-      rendered.container.querySelectorAll("span.font-serif.text-2xl");
-    assert.equal(amountLabels.length, 3);
-    for (const amountLabel of amountLabels) {
-      assert.equal(amountLabel.classList.contains("font-serif"), true);
-      assert.equal(amountLabel.classList.contains("text-2xl"), true);
-    }
+    const amountLabels = Array.from(
+      rendered.container.querySelectorAll("span.font-serif.text-3xl"),
+      (amountLabel) => amountLabel.textContent,
+    );
+    assert.deepEqual(amountLabels, ["$5", "$10", "$20"]);
 
     await clickRadio(rendered.container, rendered.window, "2000");
     assert.equal(

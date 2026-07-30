@@ -161,7 +161,7 @@ function GroupSponsorshipDialog({
                       value={String(option.monthlyCapMinor)}
                       disabled={disabled || recoveringFrozenPurchase}
                       title={
-                        <span className="font-serif text-2xl font-semibold leading-none tracking-tight">
+                        <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
                           {option.amountLabel}
                         </span>
                       }
