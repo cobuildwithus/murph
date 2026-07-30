@@ -342,6 +342,43 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits capped sponsorship predeploy compatibility to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260730120000_hosted_capped_group_sponsorship";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  ADD CONSTRAINT "sponsorship_shape"',
+          '    CHECK ("group_sponsorship_authorization_id" IS NULL) NOT VALID;',
+          'DROP INDEX "hosted_usage_credit_purchase_active_payer_key";',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("keeps known post-baseline destructive migration history exempt", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

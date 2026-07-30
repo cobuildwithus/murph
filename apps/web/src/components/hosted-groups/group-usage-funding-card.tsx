@@ -30,8 +30,9 @@ function GroupUsageFundingCard({
             </h1>
           </CardTitle>
           <CardDescription className="max-w-md text-pretty text-base leading-7">
-            Sponsor messages for everyone and let Murph make the thank-you part
-            of the entertainment.
+            Add cost-weighted usage credit for the group. Monthly sponsorship
+            charges only in $5 increments when the group needs more, up to the
+            maximum you choose.
           </CardDescription>
         </div>
       </CardHeader>

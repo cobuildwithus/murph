@@ -263,7 +263,6 @@ export function HostedAuthPanel({
     if (onCompleted) {
       await onCompleted(result.payload);
       pendingAuthCompletionRef.current = null;
-      setPendingAuthCompletion(null);
       return;
     }
 

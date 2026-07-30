@@ -34,11 +34,13 @@ export const POST = withJsonError(async (
   const checkout = await createHostedGroupUsageCreditCheckout({
     clientRequestKey: checkoutRequest.clientRequestKey,
     joinCode,
+    monthlyCapMinor: checkoutRequest.monthlyCapMinor ?? undefined,
     offerCode: checkoutRequest.offerCode,
     payerMemberId: auth.member.id,
     prisma: getPrisma(),
     ...(checkoutRequest.recoveryOnly ? { recoveryOnly: true } : {}),
     sponsorship: checkoutRequest.sponsorship,
+    sponsorshipKind: checkoutRequest.sponsorshipKind,
   });
 
   return jsonOk(checkout);

@@ -338,7 +338,7 @@ export function MurphPersonaPicker({
     >
       <fieldset disabled={saving}>
         <legend className="sr-only">Murph tone</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           <ToneChoiceCard
             disabled={saving}
             groupId={toneGroupId}
@@ -501,7 +501,7 @@ export function MurphPersonaPicker({
               ? "min(44rem, calc(100dvh - 2rem))"
               : undefined,
           maxWidth: "calc(100vw - 2rem)",
-          width: "52rem",
+          width: step === "tone" ? "42rem" : "52rem",
         }}
         className="flex min-w-0 max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
       >

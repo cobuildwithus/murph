@@ -8,6 +8,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
+  isHostedBillingPlanSelectionAvailable: vi.fn(),
   getPrisma: vi.fn(),
   readHostedPulseTrialContinuationCookie: vi.fn(),
   PulseTrialBillingContinuation: vi.fn((props: {
@@ -87,13 +88,17 @@ const mocks = vi.hoisted(() => ({
     authenticated: boolean;
     canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
+    canSwitchToGroup?: boolean;
+    canUpgradeToPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
     pulseTrialBillingContinuationPending?: boolean;
+    showGroupPlan?: boolean;
     usageActivityDetail?: React.ReactNode;
     usageStatus?: unknown;
     usageTopUpActivePurchase?: unknown;
@@ -129,6 +134,9 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
+      findFirst: vi.fn(async (): Promise<{ id: string } | null> => null),
     },
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
@@ -195,6 +203,11 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  isHostedBillingPlanSelectionAvailable:
+    mocks.isHostedBillingPlanSelectionAvailable,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -299,6 +312,7 @@ function mockSettingsPageSnapshot(input: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
@@ -326,6 +340,7 @@ beforeEach(() => {
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -435,8 +450,29 @@ test("SettingsPage keeps a signed-out Stripe payment return recoverable", async 
   // absent from the URL, so anyone could craft these parameters. Murph must not
   // vouch for a payment it has not checked.
   assert.match(markup, /One more step/);
-  assert.match(markup, /Sign in to verify and finish your Pulse update\./);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
   assert.doesNotMatch(markup, /card is saved/i);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out Group payment return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.doesNotMatch(markup, /Payment method saved/);
+  assert.doesNotMatch(markup, /Group has not started/);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -581,6 +617,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     "usage_10_usd",
     "usage_25_usd",
   ]);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({
+    id: "group_member_123",
+  });
+  mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(false);
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -742,23 +782,21 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
       payerMemberId: "member_123",
+      showGroupPlan: false,
       usageStatus,
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -770,6 +808,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
       configurationAvailable: true,
+      expectedCurrentPlanCode: "launch_monthly",
       initialDormantSolPreference: false,
       initialModel: "gpt-5.6-sol",
       initialProvider: "openai",
@@ -784,6 +823,11 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prisma,
+      publicBaseUrl: null,
+    });
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledTimes(1);
+    expect(mocks.isHostedBillingPlanSelectionAvailable).toHaveBeenCalledWith({
+      billingPlanCode: "launch_group_monthly",
     });
     expect(mocks.readHostedAiUsageActivity).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -1008,17 +1052,14 @@ test("SettingsPage surfaces and opens the authenticated active Family owner's ow
       usageTopUpOffers: [
         {
           amountLabel: "$5",
-          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
-          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
-          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -1867,6 +1908,48 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
     currentBillingPhase: null,
     currentBillingPlanCode: "launch_monthly",
     currentCheckoutOffer: "pulse_trial_7d",
+  }), undefined);
+});
+
+test("SettingsPage preserves the Group payment-method receipt and fresh start action", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue({ id: "membership_123" });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      startGroup: "payment_method_saved",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    canStartPaidPulse: true,
+    groupPaymentMethodSaved: true,
+    showGroupPlan: true,
   }), undefined);
 });
 

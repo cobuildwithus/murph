@@ -1,5 +1,7 @@
 export const HOSTED_START_PAID_PULSE_RETURN_PARAM = "startPulse";
 export const HOSTED_START_PAID_PULSE_RETURN_VALUE = "complete";
+export const HOSTED_START_PAID_GROUP_RETURN_PARAM = "startGroup";
+export const HOSTED_START_PAID_GROUP_RETURN_VALUE = "payment_method_saved";
 
 export const HOSTED_PULSE_TRIAL_CONTINUATION_PATH =
   "/api/settings/billing/pulse-trial-continuation";

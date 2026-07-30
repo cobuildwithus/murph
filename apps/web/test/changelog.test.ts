@@ -151,9 +151,9 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 21 through July 30 shipment set", () => {
+  it("publishes the complete July 20 through July 30 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 10).map((edition) => ({
+      listChangelogEditions().slice(0, 11).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
@@ -161,6 +161,8 @@ describe("changelog registry", () => {
       {
         id: "2026-07-30",
         itemIds: [
+          "capped-monthly-group-sponsorship",
+          "usage-credit-without-message-estimates",
           "usage-options-together",
           "open-ended-experiment-outcomes",
           "core-reply-provider-choice",
@@ -325,7 +327,50 @@ describe("changelog registry", () => {
           "experiment-results-match-the-dashboard",
         ],
       },
+      {
+        id: "2026-07-20",
+        itemIds: [
+          "challenge-standings-explain-missing-data",
+          "phone-link-settings-recovery",
+          "weekly-insights-skip-obvious-weekend",
+          "scheduled-messages-get-the-full-murph",
+          "pulse-finishes-after-payment-setup",
+          "contaminant-tests-on-product-pages",
+          "private-experiments-open-from-home",
+          "named-lab-marker-answers-faster",
+          "dense-voice-memo-keeps-onboarding-moving",
+          "welcome-continues-your-conversation",
+          "approval-page-sign-in-recovery",
+          "strava-connections-paused",
+        ],
+      },
     ]);
+  });
+
+  it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {
+    const items = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
+    );
+    const historical = items.get("group-sponsorship-moments");
+    const current = items.get("capped-monthly-group-sponsorship");
+    const estimateRemoval = items.get("usage-credit-without-message-estimates");
+
+    expect(historical).toMatchObject({
+      publishedOn: "2026-07-28",
+      sourcePullRequests: [1026, 1135],
+      summary: expect.stringContaining("one $5, $10, or $20 contribution"),
+    });
+    expect(`${historical?.summary} ${historical?.details}`).not.toMatch(
+      /monthly sponsorship|monthly maximum/iu,
+    );
+    expect(current).toMatchObject({
+      publishedOn: "2026-07-30",
+      summary: expect.stringContaining("up to $5, $10, or $20 per month"),
+    });
+    expect(estimateRemoval).toMatchObject({
+      publishedOn: "2026-07-30",
+      summary: expect.stringContaining("without converting it into an approximate number of messages"),
+    });
   });
 
   it("keeps internal provider branding out of published changelog copy", () => {

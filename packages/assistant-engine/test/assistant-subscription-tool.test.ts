@@ -24,7 +24,7 @@ describe("assistant subscription tool", () => {
     "continue_pulse",
     "start_pulse_now",
     "upgrade_edge",
-  ] as const)("accepts the closed %s action", (action) => {
+  ] as const)("keeps legacy %s parsing only for backend compatibility", (action) => {
     expect(readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -36,6 +36,21 @@ describe("assistant subscription tool", () => {
       kind: "subscription",
       request: { action },
     });
+  });
+
+  it("exposes only signed change_plan to the model", () => {
+    expect(MURPH_SUBSCRIPTION_TOOL.inputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        action: {
+          enum: ["change_plan"],
+        },
+      },
+      required: ["action", "targetPlanCode", "quoteId"],
+      type: "object",
+    });
+    expect(JSON.stringify(MURPH_SUBSCRIPTION_TOOL.inputSchema))
+      .not.toMatch(/continue_pulse|start_pulse_now|upgrade_edge/u);
   });
 
   it("keeps input authority out of model arguments", () => {
@@ -171,17 +186,40 @@ describe("assistant subscription tool", () => {
     expect(readToolText(result)).not.toContain(sensitiveDetail);
   });
 
-  it("states current-turn authority and retry-safe result semantics", () => {
+  it("turns stale quotes into a fresh-terms recovery without exposing details", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        subscriptionTool: {
+          request: vi.fn(async () => {
+            throw Object.assign(new Error("private billing state"), {
+              code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+            });
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: readQuotedSubscriptionRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(readToolText(result)).toContain("call plan_usage again");
+    expect(readToolText(result)).toContain("fresh confirmation");
+    expect(readToolText(result)).not.toContain("private billing state");
+  });
+
+  it("states current-turn authority and scheduled-result semantics", () => {
     const contract = MURPH_SUBSCRIPTION_TOOL.description;
 
-    expect(contract.length).toBeLessThanOrEqual(520);
+    expect(contract.length).toBeLessThanOrEqual(640);
     expect(contract).toContain("explicitly confirmed by the current user in this turn");
-    expect(contract).toContain("Exact replay of the same input and action is idempotent");
-    expect(contract).toContain("a different action requires new eligible user input");
+    expect(contract).toContain("a different target requires new eligible user input");
+    expect(contract).toContain("scheduled result includes authoritative effectiveAt");
     expect(contract).toContain("Only payment_required includes paymentUrl");
-    expect(contract).toContain(
-      "completed, pending, and no_action_required do not prove a payment method or future charge",
-    );
+    expect(contract).toContain("other results do not prove a payment method");
   });
 });
 
@@ -192,6 +230,25 @@ function readSubscriptionRequest(
     method: "item/tool/call",
     params: {
       arguments: { action },
+      namespace: "murph",
+      tool: "subscription",
+    },
+  });
+  if (!request || request.kind !== "subscription") {
+    throw new Error("Expected a subscription dynamic tool request.");
+  }
+  return request;
+}
+
+function readQuotedSubscriptionRequest() {
+  const request = readMurphDynamicToolRequest({
+    method: "item/tool/call",
+    params: {
+      arguments: {
+        action: "change_plan",
+        quoteId: "quote_group_123",
+        targetPlanCode: "launch_group_monthly",
+      },
       namespace: "murph",
       tool: "subscription",
     },

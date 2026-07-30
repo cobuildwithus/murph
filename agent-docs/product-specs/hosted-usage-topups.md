@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
-Status: Implemented personal, Family-member, and hosted-group sponsorship
-Last verified: 2026-07-29
+Status: Implemented personal, Family-member, and hosted-group funding
+Last verified: 2026-07-30
 
 ## Decision
 
@@ -26,18 +26,20 @@ The personal and Family offer catalog is:
 | `usage_10_usd` | $10 USD | $10 of Murph usage credit |
 | `usage_25_usd` | $25 USD | $25 of Murph usage credit |
 
-The group sponsorship catalog is:
+The one-time group contribution catalog is:
 
-| Offer code | Checkout subtotal | Group capacity shown in product copy |
+| Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
-| `usage_5_usd` | $5 USD | Approximately 100 messages |
-| `usage_10_usd` | $10 USD | Approximately 200 messages |
-| `usage_20_usd` | $20 USD | Approximately 400 messages |
+| `usage_5_usd` | $5 USD | $5 of Murph usage credit |
+| `usage_10_usd` | $10 USD | $10 of Murph usage credit |
+| `usage_20_usd` | $20 USD | $20 of Murph usage credit |
 
-Message counts are estimates over the existing cost-weighted usage ledger, not
-a second entitlement or exact-message accounting system. `usage_25_usd`
-remains parseable for historical purchases and available only to current
-personal and Family surfaces.
+Group funding presents capped monthly sponsorship as the primary choice and a
+one-time contribution as the secondary choice. A monthly sponsor selects a
+$5, $10, or $20 maximum; the activation and automatic refills are ordinary
+exact $5 purchases. No public surface converts dollars or cost-weighted usage
+into an estimated message count. `usage_25_usd` remains parseable for historical
+purchases and available only to current personal and Family surfaces.
 
 The cash subtotal and granted usage value are separate immutable purchase
 facts even when the initial offer is one-for-one. One dollar of v1 usage credit
@@ -109,15 +111,15 @@ An eligible paid Pulse or Edge member can:
    consumed.
 
 An authenticated member can open `/groups/fund/[joinCode]`, see only the
-group's coarse `healthy`, `low`, or `exhausted` usage state, and sponsor one of
-the fixed group packs for that group's synthetic runtime beneficiary. This
-does not require the payer to have an individual paid plan. The browser still
-submits only an offer code, request key, and bounded optional sponsorship
-draft for creation; a recovery attempt adds only the literal recovery-only
-capability. Web resolves payer, beneficiary, amount, grant, and sponsorship
-policy.
-Pressing **Sponsor ~100 messages · $5** authorizes exactly one charge for the
-selected fixed amount.
+group's coarse `healthy`, `low`, or `exhausted` usage state, and either sponsor
+the chat up to $5, $10, or $20 per month or make one fixed one-time
+contribution for that group's synthetic runtime beneficiary. This does not
+require the payer to have an individual paid plan. The browser submits only
+the server-owned fixed $5 activation offer, selected monthly maximum, request
+key, and bounded optional sponsorship draft for monthly creation. A one-time
+contribution submits the selected fixed offer without a monthly maximum. A
+recovery attempt adds only the literal recovery-only capability. Web resolves
+payer, beneficiary, amount, grant, and sponsorship policy.
 If a payment is recovered, Web restores the authenticated payer's exact
 encrypted sponsor draft, shows that it is still attached, and resubmits it
 unchanged. Every active-purchase recovery compares the normalized draft,
@@ -142,13 +144,58 @@ sponsored member cannot buy a personal pack, and Family credit is neither
 shared nor transferable. The same conservative saved-card selection and
 Checkout fallback apply.
 
+## Capped Monthly Group Sponsorship
+
+The monthly authorization is a payer-approved maximum, not a Stripe
+Subscription, prepaid bundle, balance, or promise to charge the maximum. One
+live authorization per beneficiary records the payer, status, selected cap,
+activation-anchored period, and optional cap decrease for the next period. It
+does not store charged spend or capacity.
+
+Current-period committed spend is derived from the authorization's `created`,
+`checkout_open`, `payment_pending`, and `fulfilled` purchases. Payer-visible
+charged spend is derived only from fulfilled purchases, with pending commitment
+shown separately. A new refill is admitted only when the existing group
+capacity owner reports low or exhausted capacity and at least $5 remains under
+the cap. The beneficiary lock serializes this check and deterministic
+authorization-period-ordinal purchase creation.
+
+The existing post-settlement usage path may create that local purchase. It
+never calls Stripe or waits for payment. The bounded Web billing sweep performs
+saved-card work after commit. Stripe event reconciliation is the only authority
+that grants the $5 through the existing append-only credit ledger and reopens
+pending group work. Failed or authentication-required payment moves the
+authorization to private recovery and blocks later automatic charges. A
+same-period recovery may reset that exact failed purchase only while its $5
+charge still fits under the current cap. If the payer has since reduced the cap
+to fulfilled spend, recovery leaves the failed purchase as immutable history
+and returns the authorization to active-at-cap without starting Stripe.
+
+Periods roll forward lazily from the successful activation anchor with
+calendar-month and end-of-month semantics. The cap resets, but unused credit
+remains available in the existing ledger. An increase requires explicit payer
+confirmation and may apply immediately. A decrease below current committed
+spend is staged for the next period. The sponsor may pause, resume, cancel, or
+recover privately; payer deletion and financial reversals fail closed without
+rewriting purchase history.
+
+Ordinary participants see only whether the chat is sponsored. They do not see
+the payer, maximum, amount charged or pending, credit, percentage, message
+count, or automatic refill events. The exact payer privately sees the current
+period's fulfilled and pending amounts, maximum, period end, status, and
+management controls. A near-cap notice is private and revalidated against the
+current authorization. The room is notified only when the existing usage gate
+actually pauses work, using neutral language without a funding prompt.
+
 ## Group Sponsorship Moment
 
-Every new group purchase has one purchase-linked sponsorship-moment row. It is
-not a financial status or balance. The row freezes an HMAC-bound request
-configuration and, only for a current owner or active participant, may encrypt
-an optional public alias, group note, and temporary running-bit request using
-the hosted member secure-box owner.
+Every explicit one-time group contribution and monthly activation purchase has
+one purchase-linked sponsorship-moment row. Automatic $5 refills do not create
+another moment, song, group notice, or running bit. The moment is not a
+financial status or balance. It freezes an HMAC-bound request configuration
+and, only for a current owner or active participant, may encrypt an optional
+public alias, group note, and temporary running-bit request using the hosted
+member secure-box owner.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
@@ -159,11 +206,16 @@ changing the grant.
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
 
-1. activates a requested bit for 24 hours on `$10` or 72 hours on `$20`;
+1. activates a requested bit for 24 hours on a `$10` one-time contribution or
+   72 hours on a `$20` one-time contribution;
 2. resolves the exact current non-direct group destination, with no personal
    fallback; and
 3. appends one purchase-deduplicated creative notification to the existing
    mailbox.
+
+A monthly activation is the actual `$5` purchase socially acknowledged in the
+room. Its private monthly maximum never changes the public acknowledgment or
+creates a running bit.
 
 The creative turn is isolated, projects only `generate_song`, applies the
 output-only native-capability deny set, and runs as a fresh ephemeral thread on
@@ -197,9 +249,10 @@ challenge scoring, access, and response quality are unchanged. Failure to read
 the optional bit projects no bit and never blocks ordinary mailbox work.
 
 Private Murph may list a server-built sponsorship URL for each current group
-membership. The model cannot choose an amount, attach sponsor copy, or charge a
-card. Recurring refill, sponsor tiers, public spend rankings, exact-message
-accounting, and provider-level delivery deadlines remain out of scope.
+membership. The model cannot choose a monthly maximum, attach sponsor copy,
+change an authorization, or charge a card. Multiple simultaneous automatic
+sponsors, public spend rankings, exact-message accounting, and provider-level
+delivery deadlines remain out of scope.
 
 ## Individual MVP
 
@@ -273,12 +326,11 @@ The target composition is:
 - Title: **Add usage**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
-- Description: **Choose a one-time credit amount for your account. We’ll use
-  your saved card when available. Stripe will ask when card details or
-  verification are needed.**
-- Group description: **Choose a one-time contribution to keep Murph talking for
-  everyone here.** Do not repeat saved-card or verification mechanics in the
-  group dialog.
+- No visible explanatory paragraph; the dollar choices and action label carry
+  the flow. Keep a concise screen-reader description for the amount selector.
+- The group funding page uses a separate dialog: **Sponsor this chat** is the
+  primary capped-monthly action and **Make a one-time contribution** is the
+  secondary action. Do not repeat saved-card or verification mechanics there.
 - Primary action after selection: **Add usage · $10**
 - Pending action: **Adding usage…**
 - Secondary action: **Cancel**
@@ -959,9 +1011,10 @@ expose debt in a group chat, or charge another participant.
 An authenticated contributor opens `/groups/fund/[joinCode]`. Possession of the
 group's existing opaque join code is the public targeting capability; no second
 funding code or rotation policy exists. Web resolves the active group and its
-synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
-fixed $5, $10, and $20 sponsorship packs. The browser never submits payer or
-beneficiary identity.
+synthetic member, shows only `healthy`, `low`, or `exhausted`, and presents
+capped monthly sponsorship before the fixed $5, $10, and $20 one-time
+contributions. Monthly activation is available only when capacity is low or
+exhausted. The browser never submits payer or beneficiary identity.
 
 A group chat that has only ever talked to Murph has no `HostedGroup` row or
 join code. Its funding URL uses a signed funding-only locator instead:
@@ -981,11 +1034,20 @@ Checkout status remains visible only to its authenticated payer; group state
 does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
 
-Choosing an amount has no payment effect. The explicit **Sponsor ~200 messages · $10** click
-authorizes only that one fixed contribution. Murph uses the payer Customer's
-attached default card, or its sole attached card.
-If there is no canonical choice, Stripe Checkout collects a card. This is
-neither recurring billing nor auto-recharge.
+Choosing a monthly maximum or one-time amount has no payment effect. The
+explicit **Sponsor this chat** action authorizes the initial exact $5 purchase
+and later exact $5 off-session purchases only when the existing group-capacity
+owner requests them, never above the current period's maximum. The explicit
+**Contribute $10** action authorizes only that one contribution. Murph uses the
+payer Customer's attached default card, or its sole attached card. If there is
+no canonical choice, Stripe Checkout collects a card. The monthly authorization
+is capped auto-refill authority, not a fixed-price Stripe Subscription. Because
+provider work happens after admission, the beneficiary-locked admission is the
+linearization point for need and cap headroom. Its deterministic purchase is the
+durable exact-$5 reservation. The later provider sweep rechecks the
+authorization, period, cap, purchase identity, and runtime access without
+holding a database transaction open across Stripe I/O or reinterpreting need
+after admission. Any unused granted credit remains available across periods.
 
 ## Family Member Funding
 
@@ -1076,9 +1138,14 @@ and call the same idempotent reconciler by purchase ID.
    Verify the exact runner fingerprint converges before Web can produce either
    new sponsorship contract. Existing Web sends neither sponsorship field
    during this compatibility window.
-4. Deploy Web next. It contains the group sponsorship producer, target-aware
+4. Apply the additive capped-sponsorship authorization migration after the
+   tolerant runtime reader is live. Confirm both the migration and compatible
+   Web have converged before enabling monthly authorization creation or
+   automatic refill admission.
+5. Deploy Web next. It contains the group sponsorship producer, target-aware
    saved-card/Checkout flow, webhook-owned grant and moment materialization,
-   optional running-bit projection, and existing usage/exhaustion projections.
+   bounded automatic-refill sweep, private management and notices, optional
+   running-bit projection, and existing usage/exhaustion projections.
    The new stable hosted developer guidance deliberately
    changes the assistant contract fingerprint: every existing direct or group
    session that would otherwise use native resume starts one new provider
@@ -1086,12 +1153,12 @@ and call the same idempotent reconciler by purchase ID.
    committed transcript fallback, bounded to 24 messages, 4,000 bytes per
    message, and 12,000 bytes total; later turns resume the new thread. A rollback
    rotates sessions that already adopted the new fingerprint once more.
-5. Do not run a second postdeploy constraint installer. The historical
+6. Do not run a second postdeploy constraint installer. The historical
    `20260720233000_hosted_group_usage_funding_invariants` contract migration is
    retained as immutable history but is superseded and omitted by the runner;
    reapplying it would incorrectly require a Checkout Session for fulfilled
    direct payments.
-6. Before widening exposure, smoke one pre-existing healthy hosted session:
+7. Before widening exposure, smoke one pre-existing healthy hosted session:
    its first turn must rotate and reply without low context, and its second turn
    must resume the new provider thread. Also smoke group funding, a paid webhook
    grant, the runtime recheck and subsequent usage debit, low direct/group
@@ -1112,6 +1179,11 @@ while compatible consumers remain deployed before any rollback, then stay at
 that floor or forward-fix. Rolling a consumer below the floor requires an
 explicit migration or proof that no purchase state remains; merely hiding the
 Settings action is insufficient.
+
+The first monthly authorization is the old-Web rollback floor because preceding
+Web cannot activate or safely manage it. Recover from that point with a forward
+fix on the compatible schema, Web, and runtime rather than restoring the older
+producer.
 
 ## Verification
 
@@ -1150,9 +1222,9 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- group usage reads with a remaining percentage but no currency accounting,
-  trusted low-capacity next-turn context, and the route-authorized
-  exhausted-notice funding link; and
+- group usage reads with only binary sponsorship/funding state, trusted
+  low-capacity next-turn context, the route-authorized unsponsored funding
+  link, and neutral sponsored pause copy with no payer or depletion detail; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser
@@ -1162,10 +1234,10 @@ plus webhook smoke.
 
 ## Non-Goals
 
-The implementation does not add arbitrary amounts, auto-recharge, recurring
-charges, discounts, transfers, cash redemption, public or anonymous funding, a
-Family or group wallet, Stripe Meter reporting, or a second usage/accounting
-service.
+The implementation does not add arbitrary amounts, a fixed-price Stripe
+subscription, uncapped recharge, multiple simultaneous automatic sponsors,
+discounts, transfers, cash redemption, public payer attribution, a Family or
+group wallet, Stripe Meter reporting, or a second usage/accounting service.
 
 ## Rejected Alternatives
 

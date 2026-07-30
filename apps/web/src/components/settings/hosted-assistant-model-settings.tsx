@@ -126,6 +126,7 @@ interface AssistantModelSettingsResponse {
 interface HostedAssistantModelSettingsProps {
   canUpgradeToEdge: boolean;
   configurationAvailable: boolean;
+  expectedCurrentPlanCode?: "launch_group_monthly" | "launch_monthly";
   initialDormantSolPreference: boolean;
   initialModel: HostedAssistantProductModel;
   initialProvider?: HostedAssistantProvider;
@@ -516,7 +517,13 @@ function HostedAssistantModelSettingsForm(
             Sol requires an active Edge plan.
           </p>
           {props.canUpgradeToEdge ? (
-            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+            <UpgradeToEdgeButton
+              expectedCurrentPlanCode={
+                props.expectedCurrentPlanCode ?? "launch_monthly"
+              }
+            >
+              Upgrade to Edge
+            </UpgradeToEdgeButton>
           ) : null}
         </div>
       ) : null}
