@@ -26,12 +26,17 @@ import {
   readHostedMailboxRedactedStatusRecord,
 } from "../hosted-mailbox/lag";
 import {
+  readHostedMailboxConversationAiUsageHighWater,
+  readHostedMailboxConversationAiUsageReplayFloor,
+} from "../hosted-mailbox/ai-usage-gate";
+import {
   decodeHostedMailboxStoredPayload,
   hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
+  tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
@@ -254,6 +259,20 @@ export async function readHostedRuntimeReconciliationFacts(
     if (gate.status === "denied") {
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
+        if (freshConversationMailboxLag) {
+          await tryMarkHostedMailboxConversationAiUsageDenied({
+            afterConversationLaneSeq: readHostedConversationFreshWorkFloor({
+              consumedSeqByLane,
+              mailboxLag,
+            }),
+            prisma,
+            throughConversationLaneSeq:
+              readHostedMailboxConversationAiUsageHighWater({
+                lanes: mailboxLag,
+              }),
+            userId: input.userId,
+          });
+        }
         noticeRetryAt = await sendHostedRuntimeUsageDeniedNoticeForPendingConversation({
           consumedSeqByLane,
           decision: gate.decision,
@@ -586,14 +605,10 @@ function readHostedConversationFreshWorkFloor(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   mailboxLag: readonly HostedMailboxLaneLag[];
 }): bigint {
-  const importedSeq = parseHostedMailboxReconciliationSeq(
-    readHostedMailboxLaneImportedSeq(input.mailboxLag, "conversation"),
-  ) ?? 0n;
-  const consumedSeq = parseHostedMailboxReconciliationSeq(
-    input.consumedSeqByLane.find((entry) => entry.lane === "conversation")?.consumedSeq,
-  ) ?? 0n;
-
-  return consumedSeq > importedSeq ? consumedSeq : importedSeq;
+  return readHostedMailboxConversationAiUsageReplayFloor({
+    consumedSeqByLane: input.consumedSeqByLane,
+    lanes: input.mailboxLag,
+  });
 }
 
 function parseHostedMailboxReconciliationSeq(
@@ -602,13 +617,6 @@ function parseHostedMailboxReconciliationSeq(
   return typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;
-}
-
-function readHostedMailboxLaneImportedSeq(
-  mailboxLag: readonly HostedMailboxLaneLag[],
-  lane: HostedMailboxLaneLag["lane"],
-): string {
-  return mailboxLag.find((laneLag) => laneLag.lane === lane)?.importedSeq ?? "0";
 }
 
 function emitHostedRuntimeReconciliationFacts(event: {

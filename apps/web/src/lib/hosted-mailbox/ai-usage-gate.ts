@@ -8,6 +8,11 @@ export interface HostedMailboxAiUsageGateConsumedSeq {
   lane: string;
 }
 
+export interface HostedMailboxAiUsageGateHighWater {
+  lane: string;
+  maxSeq: bigint | number | string;
+}
+
 export interface HostedMailboxAiUsageGateItem {
   consumedAt?: string | null;
   lane: string;
@@ -21,14 +26,7 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
   items: readonly HostedMailboxAiUsageGateItem[];
   lanes: readonly HostedMailboxAiUsageGateLaneCursor[];
 }): boolean {
-  const consumedSeqByLane = resolveHostedMailboxAiUsageGateSeqByLane({
-    entries: input.consumedSeqByLane,
-    seqKey: "consumedSeq",
-  });
-  const importedSeqByLane = resolveHostedMailboxAiUsageGateSeqByLane({
-    entries: input.lanes,
-    seqKey: "importedSeq",
-  });
+  const replayFloor = readHostedMailboxConversationAiUsageReplayFloor(input);
 
   return input.items.some((item) => {
     if (item.lane !== "conversation") {
@@ -46,12 +44,35 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
       return false;
     }
 
-    const importedSeq = importedSeqByLane.get("conversation") ?? 0n;
-    const consumedSeq = consumedSeqByLane.get("conversation") ?? 0n;
-    const replayFloor = importedSeq > consumedSeq ? importedSeq : consumedSeq;
-
     return itemSeq > replayFloor;
   });
+}
+
+export function readHostedMailboxConversationAiUsageReplayFloor(input: {
+  consumedSeqByLane: readonly HostedMailboxAiUsageGateConsumedSeq[];
+  lanes: readonly HostedMailboxAiUsageGateLaneCursor[];
+}): bigint {
+  const consumedSeqByLane = resolveHostedMailboxAiUsageGateSeqByLane({
+    entries: input.consumedSeqByLane,
+    seqKey: "consumedSeq",
+  });
+  const importedSeqByLane = resolveHostedMailboxAiUsageGateSeqByLane({
+    entries: input.lanes,
+    seqKey: "importedSeq",
+  });
+  const importedSeq = importedSeqByLane.get("conversation") ?? 0n;
+  const consumedSeq = consumedSeqByLane.get("conversation") ?? 0n;
+
+  return importedSeq > consumedSeq ? importedSeq : consumedSeq;
+}
+
+export function readHostedMailboxConversationAiUsageHighWater(input: {
+  lanes: readonly HostedMailboxAiUsageGateHighWater[];
+}): bigint {
+  return resolveHostedMailboxAiUsageGateSeqByLane({
+    entries: input.lanes,
+    seqKey: "maxSeq",
+  }).get("conversation") ?? 0n;
 }
 
 function hostedMailboxConversationItemHasPayloadHandle(
