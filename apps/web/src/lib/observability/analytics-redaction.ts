@@ -88,17 +88,20 @@ export function shouldSuppressVercelTelemetryForPathname(
 }
 
 export function shouldSuppressVercelTelemetryUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value, URL_PARSE_BASE);
-    return shouldSuppressVercelTelemetryForPathname(parsed.pathname);
-  } catch {
-    return shouldSuppressVercelTelemetryForPathname(value);
-  }
+  const parsed = parseVercelTelemetryUrl(value);
+
+  return !parsed
+    || shouldSuppressVercelTelemetryForPathname(parsed.pathname);
 }
 
 export function redactPrivateAnalyticsUrl(value: string): string {
+  const parsed = parseVercelTelemetryUrl(value);
+
+  if (!parsed) {
+    return value;
+  }
+
   try {
-    const parsed = new URL(value, URL_PARSE_BASE);
     const telemetryPathname = normalizeVercelTelemetryPathname(parsed.pathname);
 
     if (
@@ -150,7 +153,32 @@ function redactEventUrl<TEvent extends { url: string }>(event: TEvent): TEvent {
 }
 
 function hasExplicitOrigin(value: string): boolean {
-  return /^[a-z][a-z\d+.-]*:\/\//iu.test(value);
+  return /^https?:\/\//iu.test(value);
+}
+
+function parseVercelTelemetryUrl(value: string): URL | null {
+  if (!value || /[\s\\]/u.test(value)) {
+    return null;
+  }
+
+  const isRootRelative = value.startsWith("/") && !value.startsWith("//");
+  const isHttpAbsolute = hasExplicitOrigin(value);
+
+  if (!isRootRelative && !isHttpAbsolute) {
+    return null;
+  }
+
+  try {
+    const parsed = isRootRelative
+      ? new URL(value, URL_PARSE_BASE)
+      : new URL(value);
+
+    return parsed.username || parsed.password
+      ? null
+      : parsed;
+  } catch {
+    return null;
+  }
 }
 
 function redactClinicalRecordsUrl(url: URL): boolean {

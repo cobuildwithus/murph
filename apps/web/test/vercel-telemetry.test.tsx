@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -209,6 +209,57 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
   );
 });
 
+test("VercelTelemetry drops malformed and pathless vendor URLs", () => {
+  mocks.pathname = "/";
+  mocks.analyticsProps.length = 0;
+  mocks.speedInsightsProps.length = 0;
+
+  renderToStaticMarkup(createElement(VercelTelemetry));
+
+  const analyticsProps = mocks.analyticsProps[0];
+  const speedInsightsProps = mocks.speedInsightsProps[0];
+
+  if (!analyticsProps || !speedInsightsProps) {
+    assert.fail("Vercel telemetry components did not receive beforeSend props.");
+  }
+
+  for (const url of [
+    "",
+    "?private=1",
+    "#private",
+    ".",
+    " /home",
+    "//www.example.test/home",
+    "\\home",
+    "https:home",
+    "https:/home",
+  ]) {
+    assert.equal(
+      analyticsProps.beforeSend({ type: "pageview", url }),
+      null,
+      `Analytics should reject ${JSON.stringify(url)}`,
+    );
+    assert.equal(
+      speedInsightsProps.beforeSend({
+        route: "/home",
+        type: "vital",
+        url,
+      }),
+      null,
+      `Speed Insights should reject ${JSON.stringify(url)}`,
+    );
+  }
+
+  assert.equal(
+    speedInsightsProps.beforeSend({
+      route: "https:home",
+      type: "vital",
+      url: "https://www.example.test/home",
+    }),
+    null,
+  );
+});
+
 test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () => {
   mocks.pathname = "/home";
   mocks.analyticsProps.length = 0;
@@ -286,23 +337,62 @@ test("Vercel telemetry ownership is explicit and matches the allowlist", () => {
   };
   const readAppFile = (path: string) =>
     readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  const telemetryOwners = [
+    ...readTypeScriptSources(new URL("../app/", import.meta.url), "app"),
+    ...readTypeScriptSources(new URL("../src/", import.meta.url), "src"),
+  ]
+    .map(({ path, source }) => ({
+      importCount:
+        source.match(/from\s+["'][^"']*vercel-telemetry["'];/gu)?.length ?? 0,
+      mountCount: source.match(/<VercelTelemetry\b[^>]*\/>/gu)?.length ?? 0,
+      path,
+    }))
+    .filter(({ importCount, mountCount }) => importCount > 0 || mountCount > 0)
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const expectedOwnerPaths = Object.values(pageOwners).sort();
 
   assert.deepEqual(Object.keys(pageOwners), [...VERCEL_TELEMETRY_PATHNAMES]);
+  assert.deepEqual(
+    telemetryOwners.map(({ path }) => path),
+    expectedOwnerPaths,
+  );
 
-  for (const path of Object.values(pageOwners)) {
+  for (const path of expectedOwnerPaths) {
     const source = readAppFile(path);
+    const owner = telemetryOwners.find((candidate) => candidate.path === path);
 
-    assert.match(
-      source,
-      /import \{ VercelTelemetry \} from "@\/src\/components\/observability\/vercel-telemetry";/u,
-      `${path} should import VercelTelemetry directly`,
-    );
-    assert.match(
-      source,
-      /<VercelTelemetry \/>/u,
-      `${path} should render VercelTelemetry directly`,
-    );
+    assert.equal(owner?.importCount, 1, `${path} should have one direct import`);
+    assert.equal(owner?.mountCount, 1, `${path} should have one direct mount`);
+    assert.match(source, /<VercelTelemetry \/>/u);
   }
 
   assert.doesNotMatch(readAppFile("app/layout.tsx"), /VercelTelemetry/u);
 });
+
+function readTypeScriptSources(
+  directory: URL,
+  relativeDirectory: string,
+): Array<{ path: string; source: string }> {
+  const sources: Array<{ path: string; source: string }> = [];
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = `${relativeDirectory}/${entry.name}`;
+    const url = new URL(entry.name, directory);
+
+    if (entry.isDirectory()) {
+      sources.push(...readTypeScriptSources(new URL(`${entry.name}/`, directory), path));
+      continue;
+    }
+
+    if (!entry.isFile() || !/\.[cm]?tsx?$/u.test(entry.name)) {
+      continue;
+    }
+
+    sources.push({
+      path,
+      source: readFileSync(url, "utf8"),
+    });
+  }
+
+  return sources;
+}

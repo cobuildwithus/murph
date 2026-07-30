@@ -85,6 +85,14 @@ Updated: 2026-07-29
   when the page context is health-, identity-, or trust-sensitive.
 - Retained `/home` because it is explicitly part of the supplied patch, while
   continuing to suppress every other authenticated route.
+- Accepted preliminary specialist finding 1: URL parsing now admits only
+  canonical single-slash root-relative or explicit HTTP(S) inputs and rejects
+  pathless, whitespace-bearing, protocol-relative, backslash-led, credentialed,
+  and malformed scheme inputs before allowlist evaluation.
+- Accepted preliminary specialist finding 2: ownership proof now enumerates
+  telemetry imports and JSX mounts across `app` and `src`, requires the complete
+  owner set to equal the allowlisted page files, and requires exactly one import
+  and one mount per owner. The specialist supplied no patch artifact.
 
 ## Verification
 
@@ -98,3 +106,12 @@ Updated: 2026-07-29
   - All commands and review gates pass with no unresolved actionable findings.
   - The final diff contains no credentials, direct identifiers, private sample
     data, or local filesystem paths.
+- Completed evidence:
+  - Focused Vitest: 8 tests passed after preliminary remediation.
+  - ESLint: all touched web files passed.
+  - Web typecheck: passed after replacing one unsupported test-only
+    `toSorted()` call with `sort()`.
+  - Direct scenario: public changelog URL state was stripped; pathless,
+    malformed, Records, and route-mismatched events were dropped.
+  - Preliminary specialists: coverage findings resolved; prompt and frontend
+    lenses not applicable; no patch artifact returned.
