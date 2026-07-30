@@ -34,6 +34,50 @@ export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
   "Murph helps you build healthier habits that fit your life.";
 
+function resolveAuthDialogHeaderCopy(
+  panelView: HostedAuthPanelView,
+  title: string,
+  description: string,
+) {
+  return panelView === "consent"
+    ? {
+        description: "Review how Murph uses health data before continuing.",
+        title: "Use your health data with Murph",
+      }
+    : { description, title };
+}
+
+export function AuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const consentPresentation = panelView === "consent";
+  const resolvedCopy = resolveAuthDialogHeaderCopy(
+    panelView,
+    title,
+    description,
+  );
+
+  return (
+    <DialogHeader
+      className={cn({
+        "pr-10": !consentPresentation,
+        "sr-only": consentPresentation,
+      })}
+    >
+      <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+        {resolvedCopy.title}
+      </DialogTitle>
+      <DialogDescription>{resolvedCopy.description}</DialogDescription>
+    </DialogHeader>
+  );
+}
+
 function loadHostedAuthPanelIsland(): Promise<HostedAuthPanelIslandComponent> {
   if (hostedAuthPanelIslandComponent) {
     return Promise.resolve(hostedAuthPanelIslandComponent);
@@ -157,12 +201,6 @@ export function AuthDialog({
     };
   }, [open, AuthPanelIsland]);
 
-  const resolvedTitle = panelView === "consent"
-    ? "Use your health data with Murph"
-    : title;
-  const resolvedDescription = panelView === "consent"
-    ? "Review how Murph uses health data before continuing."
-    : description;
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
 
@@ -186,17 +224,11 @@ export function AuthDialog({
         )}
         showCloseButton={!dismissLocked}
       >
-        <DialogHeader
-          className={cn({
-            "pr-10": !consentPresentation,
-            "sr-only": consentPresentation,
-          })}
-        >
-          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {resolvedTitle}
-          </DialogTitle>
-          <DialogDescription>{resolvedDescription}</DialogDescription>
-        </DialogHeader>
+        <AuthDialogHeaderPresentation
+          description={description}
+          panelView={panelView}
+          title={title}
+        />
         {AuthPanelIsland ? (
           <AuthPanelIsland
             inviteCode={inviteCode}
