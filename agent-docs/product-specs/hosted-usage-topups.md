@@ -166,9 +166,11 @@ fulfilled group purchase, Web idempotently:
    mailbox.
 
 The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, retains the bound provider transport
-required by that application-owned tool, and uses the ordinary delivery path.
-Its prompt tells the model to call that tool exactly once for one
+output-only native-capability deny set, and runs as a fresh ephemeral thread on
+the resident App Server. The application-owned song tool retains the existing
+provider and authority-free public transports needed for generation and its
+validated signed upload; neither becomes native Codex browsing. The turn uses
+the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
 5–15-second original sponsor song.
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
 song gentle and non-comedic. A creative provider failure terminally settles
