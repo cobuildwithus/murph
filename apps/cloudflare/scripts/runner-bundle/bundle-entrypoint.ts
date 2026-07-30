@@ -72,12 +72,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Private Environment voice processing reuses the existing hosted-runtime,
 // parser, and vault paths, but keeps the capture-to-checkpoint handling in the
 // static runner graph. CI measured an 8,196,760B static closure and macOS
-// measured 9,894,078B total on 2026-07-30. The static closure is higher than
-// the main measurement while its total remains below the current cross-platform
-// total baseline, so preserve the higher measurement for each independent cap.
+// measured 9,894,078B total on 2026-07-30. After rebasing both changes together,
+// the final macOS assembly measured 9,971,103B total and an 8,295,095B static
+// closure. No forbidden subsystem entered the boot graph. Preserve that static
+// measurement alongside main's higher cross-platform total measurement.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_979_011 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_196_760;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_295_095;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
