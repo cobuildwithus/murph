@@ -321,6 +321,15 @@ export function createHostedStripeCheckoutSessionLookupKey(value: string | null 
   return createHostedLookupKey("stripe-checkout-session", normalizeHostedOpaqueInput(value));
 }
 
+export function createHostedStripeCheckoutSessionLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "stripe-checkout-session",
+    normalizeHostedOpaqueInput(value),
+  );
+}
+
 export function createHostedStripeBillingEventLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("stripe-billing-event", normalizeHostedOpaqueInput(value));
 }

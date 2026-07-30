@@ -450,7 +450,7 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(parsed)).not.toContain("provider_msg_123");
   });
 
-  it("parses phone number status updates conservatively", () => {
+  it("keeps phone-number service and reputation status independent", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
         createdAt: "2026-03-26T11:59:59.000Z",
@@ -471,11 +471,18 @@ describe("parseHostedLinqProviderEvent", () => {
       phoneNumberRole: "line",
       providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
       providerReason: null,
-      providerStatus: "CRITICAL",
+      providerHealth: {
+        chat: null,
+        line: expect.objectContaining({
+          reputationStatus: "CRITICAL",
+          serviceStatus: "FLAGGED",
+        }),
+      },
+      providerStatus: "FLAGGED",
     });
   });
 
-  it("does not let healthy reputation mask a flagged provider status", () => {
+  it("does not merge healthy reputation into a flagged service status", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
         createdAt: "2026-03-26T11:59:59.000Z",

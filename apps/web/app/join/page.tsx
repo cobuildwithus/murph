@@ -10,12 +10,36 @@ import { HOSTED_APP_SUBSCRIPTION_PATH } from "@/src/lib/hosted-onboarding/app-ro
 import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
-export default async function JoinResumePage() {
+export default async function JoinResumePage(input: {
+  searchParams: Promise<{
+    family_checkout?: string | string[];
+    session_id?: string | string[];
+  }>;
+}) {
+  const searchParams = await input.searchParams;
   const auth = await getHostedPageAuthSnapshot();
   const member = auth.authenticatedMember;
 
   if (!member) {
     redirect("/");
+  }
+
+  const familyCheckoutSuccessSessionId =
+    searchParams.family_checkout === "success"
+    && typeof searchParams.session_id === "string"
+    && /^cs_(?:test|live)_[A-Za-z0-9]+$/u.test(searchParams.session_id)
+      ? searchParams.session_id
+      : null;
+  if (familyCheckoutSuccessSessionId) {
+    const invite = await issueHostedInvite({
+      channel: "web",
+      memberId: member.id,
+    });
+    redirect(
+      `/join/${encodeURIComponent(invite.inviteCode)}/success?session_id=${
+        encodeURIComponent(familyCheckoutSuccessSessionId)
+      }`,
+    );
   }
 
   const sponsoredAccessActive = await readActiveHostedMemberAccess({ memberId: member.id });

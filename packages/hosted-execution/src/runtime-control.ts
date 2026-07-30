@@ -1217,8 +1217,9 @@ export interface HostedRuntimeGroupChatParticipant {
   /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
   /**
-   * Optional, unverified, current-turn label from the human group owner's
-   * address-book projection. It grants no identity or routing authority.
+   * Optional, host-sanitized current-turn presentation name from the human
+   * group owner's address-book projection. It grants no identity or routing
+   * authority.
    */
   ownerAdvisoryName?: string;
 }

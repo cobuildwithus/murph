@@ -707,6 +707,13 @@ describe("hosted web production migration guard", () => {
       ),
       true,
     );
+    assert.equal(
+      migrations.some(
+        ({ id }) =>
+          id === "20260729183000_rebuild_linq_delivery_health_after_drain",
+      ),
+      true,
+    );
   });
 
   test("checks the canonical owner before contract migration SQL", async () => {
@@ -1362,6 +1369,7 @@ describe("hosted web production migration guard", () => {
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-growth/usage-referral/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
+      "/api/internal/hosted-onboarding/linq/health/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
       "/api/internal/hosted-runtime/latency-alert/cron",
     ]);

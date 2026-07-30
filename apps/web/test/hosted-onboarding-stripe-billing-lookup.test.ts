@@ -2,6 +2,9 @@ import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  readHostedMemberPulseTrialBillingDecisionSnapshot,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberStripeBillingRefByStripeCustomerId: vi.fn(),
@@ -53,8 +56,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 });
 
 import {
+  findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
+  listHostedStripeCheckoutSessionMemberIds,
 } from "@/src/lib/hosted-onboarding/stripe-billing-lookup";
 
 describe("hosted onboarding stripe billing lookup", () => {
@@ -102,6 +107,97 @@ describe("hosted onboarding stripe billing lookup", () => {
     expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {},
+    });
+  });
+
+  it("resolves a Family Checkout Session to its owner before webhook binding", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: "member_owner" }]);
+
+    await expect(listHostedStripeCheckoutSessionMemberIds({
+      prisma: {
+        hostedMember: { findMany },
+      } as never,
+      session: makeStripeCheckoutSession(),
+    })).resolves.toEqual(["member_owner"]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: {
+          in: ["member_owner", "hbag_family"],
+        },
+      },
+    });
+  });
+
+  it("uses direct Checkout metadata only to resolve a core-only member", async () => {
+    await expect(findMemberForStripeCheckoutSession({
+      prisma: {} as never,
+      session: {
+        client_reference_id: "member_123",
+        customer: "cus_checkout",
+        metadata: {
+          memberId: "member_123",
+        },
+        subscription: "sub_checkout",
+      } as never,
+    })).resolves.toEqual({
+      billingRef: null,
+      core: makeHostedMemberCoreState(),
+    });
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {},
+    });
+    expect(mocks.readHostedMemberBillingSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reads Pulse decision authority without encrypted billing fields", async () => {
+    const core = makeHostedMemberCoreState({
+      billingStatus: "incomplete",
+    });
+    const findUnique = vi.fn().mockResolvedValue({
+      ...core,
+      billingRef: {
+        currentBillingPhase: null,
+        pulseTrialRedeemedAt: new Date("2025-04-11T00:00:00.000Z"),
+        stripeSubscriptionLookupKey: "subscription-lookup",
+      },
+    });
+
+    await expect(
+      readHostedMemberPulseTrialBillingDecisionSnapshot({
+        memberId: "member_123",
+        prisma: {
+          hostedMember: { findUnique },
+        } as never,
+      }),
+    ).resolves.toEqual({
+      core,
+      currentBillingPhase: null,
+      pulseTrialRedeemedAt: new Date("2025-04-11T00:00:00.000Z"),
+      stripeSubscriptionLookupKey: "subscription-lookup",
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        id: "member_123",
+      },
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+        billingRef: {
+          select: {
+            currentBillingPhase: true,
+            pulseTrialRedeemedAt: true,
+            stripeSubscriptionLookupKey: true,
+          },
+        },
+      },
     });
   });
 
@@ -452,6 +548,20 @@ function makeStripeInvoice(
     id: overrides?.id ?? "in_123",
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;
+}
+
+function makeStripeCheckoutSession(): Stripe.Checkout.Session {
+  // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Checkout.Session.
+  return {
+    client_reference_id: "hbag_family",
+    customer: null,
+    metadata: {
+      accountGroupId: "hbag_family",
+      kind: "hosted_family_plan",
+      ownerMemberId: "member_owner",
+    },
+    subscription: null,
+  } as Stripe.Checkout.Session;
 }
 
 function makeStripeSubscription(
