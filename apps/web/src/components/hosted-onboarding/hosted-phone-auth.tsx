@@ -6,13 +6,11 @@ import {
 } from "./hosted-phone-auth-views";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
-import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthProps {
   autoSendPastedPhoneNumber?: boolean;
   disableSignup?: boolean;
   inviteCode?: string | null;
-  intent?: HostedPhoneAuthIntent;
   interactionGated?: boolean;
   onAuthCancel?: () => void;
   onAuthQueue?: () => boolean;
@@ -20,7 +18,6 @@ interface HostedPhoneAuthProps {
   onAuthStart?: () => boolean;
   onAuthenticated?: (input: { authMethod: "phone" }) => Promise<void> | void;
   onCodeSent?: () => void;
-  onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   phoneFieldLabel?: string | null;
   phoneInputAutoFocus?: boolean;
@@ -33,7 +30,6 @@ export function HostedPhoneAuth({
   autoSendPastedPhoneNumber = false,
   disableSignup = false,
   inviteCode,
-  intent = "auth",
   interactionGated = false,
   onAuthCancel,
   onAuthQueue,
@@ -41,7 +37,6 @@ export function HostedPhoneAuth({
   onAuthStart,
   onAuthenticated,
   onCodeSent,
-  onLinked,
   onSignOut,
   phoneFieldLabel,
   phoneInputAutoFocus = false,
@@ -53,7 +48,6 @@ export function HostedPhoneAuth({
     autoSendPastedPhoneNumber,
     disableSignup,
     inviteCode,
-    intent,
     interactionGated,
     onAuthCancel,
     onAuthQueue,
@@ -61,7 +55,6 @@ export function HostedPhoneAuth({
     onAuthStart,
     onAuthenticated,
     onCodeSent,
-    onLinked,
     onSignOut,
     suppressAuthenticatedSessionIssue,
   });
