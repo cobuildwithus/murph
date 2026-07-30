@@ -174,7 +174,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       buildAssistantProviderRequestDerivedMurphToolCall(
         "attach_response_media",
         ({ requestMatchText }) => ({
-          media: readPrivateGeneratedMedia(requestMatchText),
+          media: readPrivateGeneratedMediaWithStaleHash(requestMatchText),
         }),
       ),
       generatedImageReplyText,
@@ -398,6 +398,15 @@ function readLatestSavedGeneratedImageRef(): string {
   throw new Error(
     `Expected the generated-image tool output to expose a saved vault ref; outcome: ${knownOutcome}.`,
   );
+}
+
+function readPrivateGeneratedMediaWithStaleHash(
+  requestMatchText: string,
+): unknown[] {
+  return readPrivateGeneratedMedia(requestMatchText).map((item) => ({
+    ...(isRecord(item) ? item : {}),
+    sha256: "a".repeat(64),
+  }));
 }
 
 function readPrivateGeneratedMedia(requestMatchText: string): unknown[] {
