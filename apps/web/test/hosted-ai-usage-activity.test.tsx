@@ -499,6 +499,30 @@ describe("HostedAiUsageActivity", () => {
     assert.doesNotMatch(markup, /<table/);
   });
 
+  it("can expose history by default for an inert design study", async () => {
+    const { HostedAiUsageActivity } = await import(
+      "@/src/components/settings/hosted-ai-usage-activity"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
+      activity: {
+        credits: [{
+          addedLabel: "$5.00",
+          dateLabel: "Jul 29, 2026",
+          id: "credit_expanded_study",
+          sourceLabel: "Added for you",
+        }],
+        missions: [],
+        missionsEnabled: false,
+      },
+      historyInitiallyOpen: true,
+      missionContactOption: null,
+    }));
+
+    const detailOpeningTag = /<details\b[^>]*>/u.exec(markup)?.[0];
+    assert.ok(detailOpeningTag);
+    assert.match(detailOpeningTag, /\sopen=""/u);
+  });
+
   it("keeps completed history while hiding the mission handoff when new missions are disabled", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"

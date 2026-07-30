@@ -422,6 +422,7 @@ function PersonalUsageCreditOwnerStudy() {
               </div>
               <HostedAiUsageActivity
                 activity={DESIGN_AI_USAGE_ACTIVITY}
+                historyInitiallyOpen
                 missionContactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION}
               />
             </section>

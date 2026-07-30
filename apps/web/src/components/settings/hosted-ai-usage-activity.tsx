@@ -10,6 +10,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 export function HostedAiUsageActivity(props: {
   activity: HostedAiUsageActivitySnapshot;
+  historyInitiallyOpen?: boolean;
   missionContactOption: MurphContactOption | null;
 }) {
   const canStartMissions =
@@ -77,7 +78,10 @@ export function HostedAiUsageActivity(props: {
           aria-label={hasMissionSurface ? "History" : "Purchased credits"}
           className={hasMissionSurface ? "border-t border-border/70" : undefined}
         >
-          <details className="group">
+          <details
+            className="group"
+            open={props.historyInitiallyOpen || undefined}
+          >
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-sm py-3 text-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
               {hasMissionSurface ? "History" : "Purchased credits"}
               <ChevronDown
