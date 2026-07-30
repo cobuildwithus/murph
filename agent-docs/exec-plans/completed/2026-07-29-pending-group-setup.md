@@ -1,6 +1,6 @@
 # Prepare the next Murph group
 
-Status: active
+Status: completed
 Created: 2026-07-29
 Updated: 2026-07-29
 
@@ -143,7 +143,8 @@ Updated: 2026-07-29
    room-context initialization before first reply, and run focused verification.
 8. [x] Complete preliminary specialist review and resolve its accepted coverage
    and prompt-contract findings.
-9. [ ] Complete exact-head CI and final ReviewGPT before marking the PR ready.
+9. [x] Complete parent final review, final focused verification, and the
+   immutable exact-head handoff to concurrent CI and final ReviewGPT.
 
 ## Decisions
 
@@ -206,6 +207,10 @@ Updated: 2026-07-29
   and flow into the existing reconciliation owner, preserving the provider
   outage fallback while keeping the successful hot path to one provider call.
   All 92 Linq thread-route tests and the Web typecheck pass.
-- Exact-head CI is running from the reconciled remediation branch. Preliminary
-  specialist and parent final reviews are complete; final ReviewGPT and final
-  merge proof remain.
+- The final candidate merged the latest base update, which was confined to the
+  distinct R2 live-copy surface. The 92 Linq thread-route tests and Web
+  typecheck pass again on that reconciled head.
+- Preliminary specialist and parent final reviews are complete. Exact-head CI,
+  final ReviewGPT, and final merge proof now own the remaining PR readiness
+  gate outside this completed implementation plan.
+Completed: 2026-07-29
