@@ -408,6 +408,21 @@ Last verified: 2026-07-29
   and its binding is cleared under the same reconciliation fence. Direct
   PaymentIntent events reuse the existing Stripe receipt and financial
   reconciliation owner rather than adding a retry queue.
+- Capped group sponsorship extends that same reliability owner rather than
+  adding a subscription, scheduler, queue, or balance. Low-capacity settlement
+  admits at most one deterministic $5 purchase while the beneficiary row is
+  locked. Its id is derived from authorization, anchored period, and ordinal;
+  fulfilled plus nonterminal purchases consume cap headroom. The existing
+  minute Stripe sweep performs post-commit provider work, and the verified
+  Stripe-event receipt remains the only grant and continuation authority.
+  Safe no-card or authentication-required outcomes terminalize the exact
+  purchase, move the authorization to `recovery_required`, and stop later
+  admissions without delaying the ordinary reply. Provider ambiguity retains
+  the same purchase for bounded retry/reconciliation. Lazy month rollover never
+  expires ledger credit, never clears recovery, and applies a deferred cap
+  decrease only at the next anchored boundary. Activation owns the sole public
+  sponsorship moment; refill fulfillment is silent and private notices are
+  period-deduped.
 - The Vercel predeploy migration replaces the detached-payer checks before the
   saved-card producer can serve traffic. That replacement is backward
   compatible with the old application, retains the PaymentIntent/Charge and

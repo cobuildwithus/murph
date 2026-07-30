@@ -250,7 +250,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Sponsor more messages: group funding, recovery, and fulfilled receipt">
+      <StudySection title="Capped monthly group sponsorship and one-time contribution">
         <GroupUsageFundingStudy />
       </StudySection>
 

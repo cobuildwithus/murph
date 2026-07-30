@@ -8,6 +8,7 @@ import type {
 
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
@@ -20,31 +21,34 @@ import {
 } from "@/src/lib/murph-contact-routing";
 
 const DESIGN_USAGE_OFFERS = [
-  { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_5_usd" },
-  { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_10_usd" },
-  { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
+  { amountLabel: "$5", offerCode: "usage_5_usd" },
+  { amountLabel: "$10", offerCode: "usage_10_usd" },
+  { amountLabel: "$25", offerCode: "usage_25_usd" },
 ] as const;
 const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
 
 const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
   {
     amountLabel: "$5",
-    estimatedMessages: 100,
     offerCode: "usage_5_usd",
     runningBitDurationLabel: null,
   },
   {
     amountLabel: "$10",
-    estimatedMessages: 200,
     offerCode: "usage_10_usd",
     runningBitDurationLabel: "1 day",
   },
   {
     amountLabel: "$20",
-    estimatedMessages: 400,
     offerCode: "usage_20_usd",
     runningBitDurationLabel: "3 days",
   },
+] as const;
+
+const DESIGN_GROUP_MONTHLY_CAPS = [
+  { amountLabel: "$5", monthlyCapMinor: 500, runningBitDurationLabel: null },
+  { amountLabel: "$10", monthlyCapMinor: 1_000, runningBitDurationLabel: "1 day" },
+  { amountLabel: "$20", monthlyCapMinor: 2_000, runningBitDurationLabel: "3 days" },
 ] as const;
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
@@ -230,162 +234,234 @@ const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 };
 
 function GroupUsageFundingStudy() {
-  const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
-  const [groupPaymentRecoveryPreviewKey, setGroupPaymentRecoveryPreviewKey] =
-    useState(0);
-  const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
-  const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
+  const endpoint = "/api/design/group-sponsorship-management";
+  const oneTimeContribution = (state: "desktop" | "mobile") => (
+    <div className="space-y-4">
+      <p className="text-center text-sm text-muted-foreground">
+        Murph is sponsored in this chat.
+      </p>
+      <GroupSponsorshipDialog
+        checkoutUrl="/api/design/usage-credit-preview"
+        customizationAllowed
+        mode="one_time"
+        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+        payerMemberId={DESIGN_PAYER_MEMBER_ID}
+        triggerVariant="outline"
+        {...(state === "mobile" ? { triggerSize: "lg" } : {})}
+      />
+    </div>
+  );
+  const oneTimeRecovery = () => (
+    <div className="space-y-4">
+      <p className="text-center text-sm text-muted-foreground">
+        Murph is sponsored in this chat.
+      </p>
+      <GroupSponsorshipDialog
+        activePurchase={{
+          cancelAllowed: true,
+          offerCode: "usage_10_usd",
+          purchaseId: "hucp_design_one_time_recovery",
+          retryAllowed: true,
+          status: "checkout_open",
+          url: "https://checkout.stripe.test/design-group-one-time",
+        }}
+        checkoutUrl="/api/design/usage-credit-preview"
+        customizationAllowed
+        frozenSponsorship={null}
+        mode="one_time"
+        offers={[]}
+        payerMemberId={DESIGN_PAYER_MEMBER_ID}
+      />
+    </div>
+  );
 
   return (
     <div
-      className="flex min-h-[42rem] flex-col items-center justify-center gap-8 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8"
+      className="space-y-10 rounded-3xl border border-border bg-background px-4 py-10 sm:px-8"
       data-design-study="group-usage-funding"
       id="group-usage-funding"
     >
-      <div className="w-full max-w-xl">
+      <div className="space-y-2">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Production components · inert synthetic states
+        </p>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+          Monthly sponsorship is the primary flow. It starts with one ordinary
+          $5 usage-credit purchase and permits later $5 refills only when the
+          group needs capacity, up to the payer&apos;s private monthly maximum.
+          One-time contribution remains a separate secondary action.
+        </p>
+      </div>
+
+      <DesignSponsorshipState
+        label="Activation · desktop · only open dialog"
+        state="monthly-activation-desktop"
+      >
         <GroupUsageFundingCard
-          action={
-            <GroupSponsorshipDialog
-              checkoutUrl="/api/design/usage-credit-preview"
-              customizationAllowed
-              offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-              payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            />
-          }
+          action={(
+            <div inert>
+              <GroupSponsorshipDialog
+                checkoutUrl="/api/design/usage-credit-preview"
+                customizationAllowed
+                initialOpen
+                mode="monthly"
+                monthlyCapMinor={1_000}
+                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              />
+            </div>
+          )}
           groupName="Sunday sleep crew"
         />
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          The amount dialog authorizes one contribution at a time. Optional
-          sponsor details open behind Add a note and use a quiet sage
-          border-only focus state.
-        </p>
-      </div>
-      <PersonalUsageCreditState
-        label="Historical activity without a current usage bar"
-        state="usage-history-without-overall-bar"
-        usageStatus={DESIGN_UNAVAILABLE_USAGE_STATUS}
-        usageActivityDetail={
-          <section className="flex flex-col gap-4">
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              AI usage
-            </div>
-            <HostedAiUsageActivity
-              activity={DESIGN_AI_USAGE_DISABLED_HISTORY}
-              missionContactOption={null}
-            />
-          </section>
-        }
-      />
-      <div
-        className="flex w-full max-w-xl flex-col items-start gap-3"
-        data-design-state="usage-added-follow-up"
+      </DesignSponsorshipState>
+
+      <DesignSponsorshipState
+        label="Activation · mobile"
+        mobile
+        state="monthly-activation-mobile"
       >
-        <p className="text-sm text-muted-foreground">
-          After a group payment completes, the confirmation makes the added
-          capacity unmistakable, then offers Open Messages. Messages cannot
-          deep-link to the group thread, so the handoff says to choose the
-          group. Personal and Family top-ups keep the Text Murph action: one
-          channel renders a direct link; several channels render inline rows in
-          the same dialog.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setGroupFulfilledPreviewKey((key) => key + 1)}
-          >
-            Preview group usage added
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setGroupPaymentRecoveryPreviewKey((key) => key + 1)}
-          >
-            Preview group payment recovery
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setFulfilledPreviewKey((key) => key + 1)}
-          >
-            Preview usage added with Text Murph
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setMultiChannelPreviewKey((key) => key + 1)}
-          >
-            Preview usage added with channel choices
-          </Button>
-        </div>
-        {groupFulfilledPreviewKey > 0 ? (
-          <GroupSponsorshipDialog
-            key={groupFulfilledPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_0",
-              retryAllowed: false,
-              status: "fulfilled",
-            }}
-            deferTerminalRefreshUntilClose
-            customizationAllowed
-            frozenSponsorship={{
-              publicAlias: "Sunday sleep crew",
-              runningBitRequest: "Keep the recovery jokes going.",
-              sponsorMessage: "More room for the group.",
-            }}
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+        <GroupUsageFundingCard
+          action={(
+            <div inert>
+              <GroupSponsorshipDialog
+                checkoutUrl="/api/design/usage-credit-preview"
+                customizationAllowed
+                mode="monthly"
+                monthlyCapMinor={500}
+                monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
+                offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
+                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              />
+            </div>
+          )}
+          groupName="Sunday sleep crew"
+        />
+      </DesignSponsorshipState>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <DesignSponsorshipState
+          label="Ordinary sponsored participant + one-time action · desktop"
+          state="ordinary-sponsored-one-time-desktop"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeContribution("desktop")}</div>}
+            groupName="Sunday sleep crew"
           />
-        ) : null}
-        {groupPaymentRecoveryPreviewKey > 0 ? (
-          <GroupSponsorshipDialog
-            key={groupPaymentRecoveryPreviewKey}
-            activePurchase={{
-              cancelAllowed: true,
-              offerCode: "usage_20_usd",
-              purchaseId: "hucp_design_pending_0",
-              retryAllowed: true,
-              status: "payment_pending",
-            }}
-            checkoutUrl="/api/design/usage-credit-preview"
-            customizationAllowed
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Ordinary sponsored participant + one-time action · mobile"
+          mobile
+          state="ordinary-sponsored-one-time-mobile"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeContribution("mobile")}</div>}
+            groupName="Sunday sleep crew"
           />
-        ) : null}
-        {fulfilledPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
-            key={fulfilledPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_1",
-              retryAllowed: false,
-              status: "fulfilled",
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Active management near cap · desktop"
+          state="monthly-active-desktop"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_active",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 500,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "active",
             }}
-            contactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
-            deferTerminalRefreshUntilClose
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
-        ) : null}
-        {multiChannelPreviewKey > 0 ? (
-          <HostedUsageTopUpDialog
-            key={multiChannelPreviewKey}
-            activePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_added_2",
-              retryAllowed: false,
-              status: "fulfilled",
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Paused with next-period decrease · mobile"
+          mobile
+          state="monthly-paused-mobile"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_paused",
+              chargedThisPeriodMinor: 1_000,
+              monthlyCapMinor: 2_000,
+              pendingMonthlyCapMinor: 500,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "paused",
             }}
-            contactOptions={DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS}
-            deferTerminalRefreshUntilClose
-            initialOpen
-            offers={[]}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
           />
-        ) : null}
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Payment recovery · desktop"
+          state="monthly-recovery-desktop"
+        >
+          <GroupSponsorshipManagementCard
+            endpoint={endpoint}
+            groupName="Sunday sleep crew"
+            inert
+            management={{
+              authorizationId: "hgsa_design_recovery",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "recovery_required",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Sponsored-chat one-time purchase recovery · desktop"
+          state="sponsored-one-time-recovery-desktop"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeRecovery()}</div>}
+            groupName="Sunday sleep crew"
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Sponsored-chat one-time purchase recovery · mobile"
+          mobile
+          state="sponsored-one-time-recovery-mobile"
+        >
+          <GroupUsageFundingCard
+            action={<div inert>{oneTimeRecovery()}</div>}
+            groupName="Sunday sleep crew"
+          />
+        </DesignSponsorshipState>
       </div>
     </div>
+  );
+}
+
+function DesignSponsorshipState(props: {
+  children: ReactNode;
+  label: string;
+  mobile?: boolean;
+  state: string;
+}) {
+  return (
+    <section className="space-y-3" data-design-state={props.state}>
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {props.label}
+      </p>
+      <div className={props.mobile ? "mx-auto w-full max-w-[23rem]" : "w-full max-w-xl"}>
+        {props.children}
+      </div>
+    </section>
   );
 }
 
@@ -511,6 +587,7 @@ export {
   DESIGN_AI_USAGE_DISABLED_HISTORY,
   DESIGN_AI_USAGE_EMPTY_ACTIVITY,
   DESIGN_AI_USAGE_WAITING_ACTIVITY,
+  DESIGN_GROUP_MONTHLY_CAPS,
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,

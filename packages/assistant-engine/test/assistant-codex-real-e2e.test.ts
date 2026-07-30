@@ -1253,7 +1253,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                         requirementsLabel:
                           'Start a fresh group with one genuinely new person who activates their own Murph and says hi there.',
                         rewardLabel:
-                          'about 100 more messages on the model your Murph is using now',
+                          '$2.00 of cost-weighted usage credit for your Murph',
                       }],
                       trialCreditNotice: null,
                     },
@@ -1317,7 +1317,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privatePlanUsageReads).toBe(1)
         expect(privateGroupActions).toEqual(['read_usage_referral'])
         expect(privateResult.finalMessage).toMatch(/add (?:one-time )?usage/iu)
-        expect(privateResult.finalMessage).toContain('about 100 more messages')
+        expect(privateResult.finalMessage).toContain('$2.00 of cost-weighted usage credit')
 
         const groupResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -1348,9 +1348,11 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                       status: 'ok',
                       usage: {
                         capacityState: 'healthy',
+                        fundingNeeded: true,
                         fundingUrl,
                         periodEnd: '2026-08-29T00:00:00.000Z',
                         remainingPercent: 80,
+                        sponsorshipStatus: 'not_sponsored',
                       },
                     },
                   }
@@ -1367,7 +1369,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                           requirementsLabel:
                             'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                           rewardLabel:
-                            'about 140 more messages on the model your Murph is using now',
+                            '$3.50 of cost-weighted usage credit for your Murph',
                         }],
                         trialCreditNotice: null,
                       },
@@ -1414,7 +1416,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           'read_usage_referral',
         ]))
         expect(groupResult.finalMessage).toContain(fundingUrl)
-        expect(groupResult.finalMessage).toContain('about 140 more messages')
+        expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
       } finally {
         await removeRealCodexTemporaryPaths([

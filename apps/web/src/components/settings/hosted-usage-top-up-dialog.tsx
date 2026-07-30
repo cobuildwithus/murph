@@ -32,7 +32,11 @@ import {
 import { useHostedUsageTopUpDialog } from "./use-hosted-usage-top-up-dialog";
 
 function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
-  const controller = useHostedUsageTopUpDialog(props);
+  const groupPaymentMode = props.groupPaymentMode ?? "one_time";
+  const controller = useHostedUsageTopUpDialog({
+    ...props,
+    groupPaymentMode,
+  });
   const { screen } = controller.state;
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const firstOfferRef = useRef<HTMLSpanElement>(null);
@@ -138,7 +142,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
-    (props.scope === "group" ? "Sponsor this chat" : "Add usage");
+    (props.scope === "group"
+      ? groupPaymentMode === "one_time"
+        ? "Make a one-time contribution"
+        : "Sponsor this chat"
+      : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -242,7 +250,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "Usage credit unavailable"
                 : props.scope === "group"
-                  ? "Sponsor more messages"
+                  ? groupPaymentMode === "monthly"
+                    ? "Sponsor this chat"
+                    : "Make a one-time contribution"
                   : familyTarget
                     ? `Choose an amount for ${familyTarget}`
                     : "Choose an amount"}
@@ -271,7 +281,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Choose a one-time contribution to keep Murph talking for everyone here."
+                  ? groupPaymentMode === "monthly"
+                    ? "Choose the most Murph may spend each month. The required first $5 activation purchase is fixed by the server, and later $5 refills happen only when the group needs them."
+                    : "Choose one explicit contribution of cost-weighted usage credit for this chat."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}. We’ll use your saved card when available. Stripe will ask when card details or verification are needed.`
                     : "Choose a one-time credit amount for your account. We’ll use your saved card when available. Stripe will ask when card details or verification are needed."}
@@ -440,41 +452,40 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           </div>
         ) : selection ? (
           <div className="flex flex-col gap-5">
-            <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
-              <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
-              <FieldDescription className="sr-only">
-                Choose one usage credit amount.
-              </FieldDescription>
-              <RadioGroup
-                value={selection.selectedOfferCode ?? ""}
-                onValueChange={controller.selectOffer}
-                className="grid gap-3 sm:grid-cols-3"
-              >
-                {props.offers.map((offer, index) => (
-                  <ChoiceCard
-                    key={offer.offerCode}
-                    ref={index === 0 ? firstOfferRef : undefined}
-                    id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
-                    value={offer.offerCode}
-                    disabled={hasAttempt}
-                    className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
-                    title={
-                      <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
-                        <span className="sr-only">About </span>
-                        <span aria-hidden="true">~</span>
-                        {offer.estimatedMessages}
-                      </span>
-                    }
-                    description={
-                      <span className="text-sm font-medium text-muted-foreground">
-                        messages ·{" "}
-                        <span className="tabular-nums">{offer.amountLabel}</span>
-                      </span>
-                    }
-                  />
-                ))}
-              </RadioGroup>
-            </FieldSet>
+            {groupPaymentMode === "monthly" ? null : (
+              <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
+                <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
+                <FieldDescription className="sr-only">
+                  Choose one usage credit amount.
+                </FieldDescription>
+                <RadioGroup
+                  value={selection.selectedOfferCode ?? ""}
+                  onValueChange={controller.selectOffer}
+                  className="grid gap-3 sm:grid-cols-3"
+                >
+                  {props.offers.map((offer, index) => (
+                    <ChoiceCard
+                      key={offer.offerCode}
+                      ref={index === 0 ? firstOfferRef : undefined}
+                      id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
+                      value={offer.offerCode}
+                      disabled={hasAttempt}
+                      className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
+                      title={
+                        <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
+                          {offer.amountLabel}
+                        </span>
+                      }
+                      description={
+                        <span className="text-sm font-medium text-muted-foreground">
+                          Cost-weighted usage credit
+                        </span>
+                      }
+                    />
+                  ))}
+                </RadioGroup>
+              </FieldSet>
+            )}
             {props.renderSelectionDetails?.({
               disabled: hasAttempt || !controller.requestIdentityReady,
               selectedOffer: controller.selectedOffer,
@@ -584,7 +595,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                       : "Adding usage…"
                     : controller.selectedOffer
                       ? props.scope === "group"
-                        ? `Sponsor ~${controller.selectedOffer.estimatedMessages} messages · ${controller.selectedOffer.amountLabel}`
+                        ? groupPaymentMode === "monthly"
+                          ? "Sponsor this chat"
+                          : `Contribute ${controller.selectedOffer.amountLabel}`
                         : `Add usage · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
                 </Button>

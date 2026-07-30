@@ -344,6 +344,43 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
+## Group Usage Projection Privacy and Monthly Sponsorship Rollout
+
+The group-tool `read_usage` parser temporarily accepts the exact current
+privacy-safe response and the immediately preceding exact response. This
+read-side tolerance is only the first deployment step.
+
+1. Deploy the Cloudflare Worker and runner bundle first with
+   `container_rollout=immediate`. Require managed-container smoke to report the
+   new bundle fingerprint and drain older warm runners. During this phase, old
+   Web may still emit
+   `{capacityState,fundingUrl,periodEnd,remainingPercent?}`; the new runtime
+   validates that exact shape, derives only whether funding is needed, maps it
+   to `not_sponsored`, and discards the period and percentage.
+2. Apply the additive capped-sponsorship migration, then deploy the compatible
+   Web release. Confirm both the migration and new Web have converged before
+   enabling monthly authorization creation or automatic refill admission. Web
+   must emit only `{fundingNeeded,fundingUrl,sponsorshipStatus}` before the
+   feature is enabled.
+3. Smoke one unsponsored and one sponsored group read. The runtime and assistant
+   may learn only `not_sponsored` or `sponsored`; quantitative fields must not
+   reappear.
+
+The first monthly authorization is the old-Web rollback floor. The preceding
+Web reconciliation code cannot activate that authorization, so after the first
+one is created, do not restore the old Web producer and do not roll
+Cloudflare/runner below the dual-reader bundle. Recover with a forward fix on
+that schema and compatible Web/runtime bundle. Before the first authorization,
+Web may be rolled back only while monthly creation and refill admission remain
+disabled and the additive schema is retained.
+
+The legacy reader exists only for the bounded cutover window. Remove it after
+old Web is neither routable nor rollback-eligible, all pre-reader warm runners
+have drained, and production evidence shows no preceding-shape responses. This
+is a narrow read-side seam, not a permanent rollout framework, and it must never
+restore group percentages, period boundaries, or other quantitative accounting
+to runtime or assistant policy.
+
 ## Thread Usage Crossing Notice Rollout
 
 The assistant runtime usage-record request has an additive, optional Linq group

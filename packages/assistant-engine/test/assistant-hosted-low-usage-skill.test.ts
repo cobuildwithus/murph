@@ -141,6 +141,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('**Family sponsored:**')
     expect(skill).toContain('**Hosted group:**')
     expect(normalizedSkill).toContain('Do not promise a link')
+    expect(skill).toContain('never invent one')
     expect(skill).toContain('Personal top-ups are unavailable')
     expect(skill).toContain('Family plan owner may')
     expect(skill).toContain('add one-time usage for this active member')
@@ -207,7 +208,7 @@ describe('assistant hosted low-usage skill', () => {
       'sponsoring more Murph time for the room, not buying messages',
     )
     expect(normalizedSkill).toContain(
-      'Do not volunteer a message count',
+      'Do not volunteer message counts',
     )
     expect(normalizedSkill).not.toContain(
       'include it in the same segment as a plain first-party link',
@@ -222,8 +223,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(normalizedSkill).toContain('If no funding URL is returned')
-    expect(skill).toContain('period end when relevant')
-    expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(normalizedSkill).toContain('share only that Murph is sponsored in the chat')
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
@@ -270,7 +270,12 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'Canceling one policy never cancels or replaces another',
     )
-    expect(normalizedSkill).toContain('Treat returned message counts as approximate')
+    expect(normalizedSkill).toContain(
+      'Treat returned reward labels as exact cost-weighted usage-credit labels',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not calculate or translate them into messages or days',
+    )
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
@@ -324,9 +329,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never choose an amount, start')
     expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
-      'never reveal who paid, amounts, or',
+      'never reveal who paid, amounts, caps, purchase status, or refill',
     )
-    expect(skill).toContain('never claim messages were sponsored when they were not')
+    expect(skill).toContain('never claim the room is sponsored when the read says it is not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
   })
@@ -343,7 +348,7 @@ describe('assistant hosted low-usage skill', () => {
             expiresAt: '2026-08-03T18:00:00.000Z',
             policyCode: 'active_group_v1',
             rewardLabel:
-              'about 140 more messages on the model your Murph is using now',
+              '$3.50 of cost-weighted usage credit for your Murph',
             state: 'armed',
           }],
         },
@@ -359,7 +364,7 @@ describe('assistant hosted low-usage skill', () => {
 
     expect(assembledContext).toContain('2026-08-03T18:00:00.000Z')
     expect(assembledContext).toContain(
-      'about 140 more messages on the model your Murph is using now',
+      '$3.50 of cost-weighted usage credit for your Murph',
     )
     expect(JSON.stringify(armedToolResult)).not.toContain('humanMessageCount')
     expect(JSON.stringify(armedToolResult)).not.toContain(
@@ -420,7 +425,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-03T18:00:00.000Z',
                   policyCode: 'new_person_activation_v1',
                   rewardLabel:
-                    'about 100 more messages on the model your Murph is using now',
+                    '$2.00 of cost-weighted usage credit for your Murph',
                   state: 'armed',
                 },
                 {
@@ -428,7 +433,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-04T18:00:00.000Z',
                   policyCode: 'active_group_v1',
                   rewardLabel:
-                    'about 140 more messages on the model your Murph is using now',
+                    '$3.50 of cost-weighted usage credit for your Murph',
                   state: 'armed',
                 },
               ],
@@ -462,7 +467,7 @@ describe('assistant hosted low-usage skill', () => {
                 expiresAt: '2026-08-05T18:00:00.000Z',
                 policyCode: 'new_person_activation_v1',
                 rewardLabel:
-                  'about 100 more messages on the model your Murph is using now',
+                  '$2.00 of cost-weighted usage credit for your Murph',
                 state: 'armed',
               }],
               availablePolicies: [],

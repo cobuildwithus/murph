@@ -388,17 +388,21 @@ credit. Lead with the group name, one concise sentence explaining that the
 credit belongs to the group, and one primary action. Do not add a decorative
 status badge; retain `Open Murph` as the quiet secondary action.
 
-Use `GroupSponsorshipDialog` for amount selection. Present the fixed offers as
-large choice cards, then one primary **Sponsor ~200 messages · $10** action and
-a plain cancel action. Keep the description to the one-time group contribution;
-do not repeat saved-card or verification mechanics there. Do not imply that
-selecting an amount charges the card; only the explicit primary action
-authorizes the contribution. Keep the alias, note, and eligible temporary
-running bit behind one optional disclosure, and state the server-owned bit
-duration beside that field. Optional text fields use the sage focus border
-without an outer glow. Stack amount cards and actions on narrow screens,
-preserve visible focus and selection states, and render the production
-components on both the Components and Sections tabs of `/design` for review.
+Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
+and $20 as monthly maximums, explain that activation is one ordinary $5
+usage-credit purchase, and say that later $5 purchases happen only when the
+group needs capacity. Keep an explicit one-time contribution as the secondary
+action. Dollar amounts are cost-weighted usage credit, never an owned or
+promised number of messages. Do not imply that selecting a maximum charges the
+card; only the explicit sponsor action authorizes activation, and every cap
+increase requires a fresh payer confirmation. Keep the alias, note, and
+eligible temporary running bit behind one optional disclosure and attach them
+only to the activation or one-time purchase, never to automatic refills.
+Optional text fields use the sage focus border without an outer glow. Stack
+maximum cards and actions on narrow screens, preserve visible focus and
+selection states, and render the production activation, active-management,
+near-cap/recovery, paused, and one-time states at desktop and mobile sizes on
+`/design` with controls inert.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono

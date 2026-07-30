@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
+  HostedGroupSponsorshipAuthorizationStatus,
   HostedUsageCreditPurchaseStatus,
   type Prisma,
   type PrismaClient,
@@ -31,6 +32,10 @@ import {
   observeHostedUsageReferralInboundTx,
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "@/src/lib/hosted-growth/usage-referral";
+import {
+  admitHostedGroupSponsorshipRefillTx,
+  hasHostedGroupSponsorshipPaymentAuthorityTx,
+} from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
@@ -2415,7 +2420,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               `usage-referral-reward:${referralId}`,
             deliveryDispatchMode: "queue-only",
             instructions: expect.stringContaining(
-              "about 140 more messages on the model your Murph is using now",
+              "$3.50 of cost-weighted usage credit for your Murph",
             ),
             responsePolicy: { kind: "require_send" },
             route: {
@@ -2844,6 +2849,156 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
       } finally {
         await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("uses beneficiary-first lock order for refill admission and payment authority", async () => {
+      const fixtureId = randomUUID();
+      const beneficiaryMemberId = `member_group_sponsorship_beneficiary_${fixtureId}`;
+      const payerMemberId = `member_group_sponsorship_payer_${fixtureId}`;
+      const authorizationId = `hgsa_group_sponsorship_${fixtureId}`;
+      const activationPurchaseId = `hucp_group_activation_${fixtureId}`;
+      const refillPurchaseId = `hucp_group_refill_${fixtureId}`;
+      const periodStartedAt = new Date("2026-07-30T12:00:00.000Z");
+      const periodEndsAt = new Date("2026-08-30T12:00:00.000Z");
+      const now = new Date("2026-08-01T12:00:00.000Z");
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const releaseBeneficiary = createDeferred();
+      const beneficiaryLocked = createDeferred<number>();
+      const paymentAuthorityStarted = createDeferred<number>();
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            { billingStatus: "active", id: beneficiaryMemberId },
+            { billingStatus: "active", id: payerMemberId },
+          ],
+        });
+        await observer.hostedGroupSponsorshipAuthorization.create({
+          data: {
+            anchorDay: 30,
+            anchorEndOfMonth: false,
+            beneficiaryMemberId,
+            id: authorizationId,
+            monthlyCapMinor: 1_000,
+            payerMemberId,
+            periodEndsAt,
+            periodStartedAt,
+            status: HostedGroupSponsorshipAuthorizationStatus.active,
+          },
+        });
+        const purchaseBase = {
+          beneficiaryMemberId,
+          cashAmountMinor: 500,
+          cashCurrency: "usd",
+          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutExpiresAt: periodEndsAt,
+          checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
+          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          grantUsdMicros: 5_000_000n,
+          groupSponsorshipAuthorizationId: authorizationId,
+          groupSponsorshipPeriodStartedAt: periodStartedAt,
+          offerCode: "usage_5_usd",
+          payerMemberId,
+          stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}`,
+          stripeCustomerLookupKey: `customer-lookup:${fixtureId}`,
+          stripeLiveMode: false,
+          stripePriceIdEncrypted: `encrypted-price:${fixtureId}`,
+          stripePriceLookupKey: `price-lookup:${fixtureId}`,
+        } as const;
+        await observer.hostedUsageCreditPurchase.createMany({
+          data: [
+            {
+              ...purchaseBase,
+              clientRequestKey: `activation:${fixtureId}`,
+              groupSponsorshipChargeOrdinal: 0,
+              id: activationPurchaseId,
+              lastReconciledAt: periodStartedAt,
+              paidAt: periodStartedAt,
+              remainingCreditUsdMicros: 5_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              terminalAt: periodStartedAt,
+            },
+            {
+              ...purchaseBase,
+              clientRequestKey: `refill:${fixtureId}`,
+              groupSponsorshipChargeOrdinal: 1,
+              id: refillPurchaseId,
+              status: HostedUsageCreditPurchaseStatus.created,
+            },
+          ],
+        });
+
+        const admission = firstClient.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_member
+            WHERE id = ${beneficiaryMemberId}
+            FOR UPDATE
+          `;
+          beneficiaryLocked.resolve(await readBackendPid(tx));
+          await releaseBeneficiary.promise;
+          return admitHostedGroupSponsorshipRefillTx({
+            beneficiaryMemberId,
+            capacityState: "exhausted",
+            now,
+            tx,
+          });
+        }, transactionOptions);
+        await beneficiaryLocked.promise;
+
+        const authority = secondClient.$transaction(async (tx) => {
+          const pid = await readBackendPid(tx);
+          paymentAuthorityStarted.resolve(pid);
+          return hasHostedGroupSponsorshipPaymentAuthorityTx({
+            authority: {
+              authorizationId,
+              beneficiaryMemberId,
+              chargeOrdinal: 1,
+              mode: "automatic",
+              periodStartedAt,
+            },
+            now,
+            payerMemberId,
+            purchaseId: refillPurchaseId,
+            tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await paymentAuthorityStarted.promise,
+        });
+        releaseBeneficiary.resolve();
+
+        await expect(Promise.all([admission, authority])).resolves.toEqual([
+          { authorizationId, purchaseId: refillPurchaseId },
+          true,
+        ]);
+        await expect(observer.hostedUsageCreditPurchase.count({
+          where: {
+            groupSponsorshipAuthorizationId: authorizationId,
+            groupSponsorshipChargeOrdinal: 1,
+            groupSponsorshipPeriodStartedAt: periodStartedAt,
+          },
+        })).resolves.toBe(1);
+      } finally {
+        releaseBeneficiary.resolve();
+        await observer.hostedUsageCreditPurchase.deleteMany({
+          where: { groupSponsorshipAuthorizationId: authorizationId },
+        }).catch(() => undefined);
+        await observer.hostedGroupSponsorshipAuthorization.deleteMany({
+          where: { id: authorizationId },
+        }).catch(() => undefined);
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [beneficiaryMemberId, payerMemberId] } },
+        }).catch(() => undefined);
+        await Promise.all([
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+          observer.$disconnect(),
+        ]);
       }
     });
 

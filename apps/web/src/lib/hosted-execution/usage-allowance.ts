@@ -49,6 +49,12 @@ import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
+import {
+  admitHostedGroupSponsorshipRefillTx,
+} from "../hosted-groups/group-sponsorship-authorization";
+import {
+  classifyHostedGroupUsageCapacity,
+} from "../hosted-groups/group-usage-capacity";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
 import {
@@ -1202,6 +1208,25 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
       });
     }
 
+    // Settlement is not the only point at which authorization can change.
+    // A sponsor may raise the cap, resume, or cross a lazy calendar rollover
+    // while the group is already exhausted, so the mutating gate must give the
+    // same deterministic admission owner a chance before returning the denial.
+    // This transaction only creates the exact $5 purchase; the existing sweep
+    // remains the sole provider-work owner.
+    if (period.allowanceSource === "thread_container") {
+      await admitHostedGroupSponsorshipRefillTx({
+        beneficiaryMemberId: input.memberId,
+        capacityState: classifyHostedGroupUsageCapacity({
+          limitUsdMicros: period.limitUsdMicros,
+          remainingUsdMicros:
+            resolveHostedAiUsageAllowanceRemainingUsdMicros(period),
+        }),
+        now,
+        tx,
+      });
+    }
+
     return buildHostedAiUsageGateDecision({
       memberId: input.memberId,
       period,
@@ -1933,6 +1958,25 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
 
   if (updated !== 1) {
     throw new TypeError("Hosted AI usage allowance period spend lost its locked row.");
+  }
+
+  if (input.period.allowanceSource === "thread_container") {
+    const spentAfterUsdMicros =
+      input.period.spentUsdMicros + input.costUsdMicros;
+    const baseRemainingAfterUsdMicros =
+      input.period.limitUsdMicros > spentAfterUsdMicros
+        ? input.period.limitUsdMicros - spentAfterUsdMicros
+        : 0n;
+    await admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: input.memberId,
+      capacityState: classifyHostedGroupUsageCapacity({
+        limitUsdMicros: input.period.limitUsdMicros,
+        remainingUsdMicros:
+          baseRemainingAfterUsdMicros + usageCreditBalanceUsdMicros,
+      }),
+      now: input.now,
+      tx: input.tx,
+    });
   }
 
   if (!noticeEligible) {

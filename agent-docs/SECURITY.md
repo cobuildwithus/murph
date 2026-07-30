@@ -255,9 +255,20 @@ Last verified: 2026-07-30
   frozen v3 purchases retain it for all targets, and v1 retains no saved-card
   path. The browser cannot supply a PaymentMethod. `allow_redisplay` governs
   whether Stripe may present a method again inside Checkout, not whether the
-  attached subscription card can fund the payer's explicit one-time top-up.
+  attached card can fund the payer's explicit purchase or an already-authorized
+  exact-$5 group refill.
   Current-policy Checkout enables Stripe's explicit payment-method save choice;
-  Murph does not upgrade or broadly redisplay historical methods. The server
+  Murph does not upgrade or broadly redisplay historical methods. A monthly
+  group sponsorship binds one authenticated payer to one exact group and a
+  $5/$10/$20 cap. Conversation text, room participation, amount selection, and
+  possession of a funding URL are never financial consent. Activation and every
+  cap increase require an explicit authenticated payer action. Automatic refill
+  authority is rechecked under the beneficiary lock against the exact
+  authorization, anchored period, ordinal, payer, pending-plus-fulfilled cap
+  headroom, and still-unbound purchase before provider confirmation. Only one
+  live authorization per beneficiary is database-enforced. Recovery, cap, payer,
+  and charge details route only to the payer's direct notification destination;
+  the room may learn only that Murph is sponsored. The server
   creates the PaymentIntent
   unconfirmed, then revalidates the exact personal or Family billing Customer,
   Subscription, canonical billing status, suspension state, and last accepted
@@ -294,8 +305,8 @@ Last verified: 2026-07-30
   selected amount differs from the delayed winner, the server returns the
   winner's nonpayable status/cancel projection. Choosing an amount has no
   payment effect, and each
-  explicit **Add usage** or **Add messages** click authorizes only the selected
-  one-time charge. Current-policy Checkout fallback saves the entered card for
+  explicit **Add usage**, one-time contribution, or monthly sponsor action
+  authorizes only the exact server-projected purchase or cap change. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.
 - Direct-purchase cancellation requires only authenticated payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target

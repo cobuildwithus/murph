@@ -115,6 +115,8 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
   const purchases = await prisma.hostedUsageCreditPurchase.findMany({
     select: {
       beneficiaryMemberId: true,
+      groupSponsorshipAuthorizationId: true,
+      groupSponsorshipChargeOrdinal: true,
       id: true,
       lastReconciledAt: true,
       paidAt: true,
@@ -596,6 +598,8 @@ function assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership(input
 
 function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
   HostedUsageCreditPurchase,
+  | "groupSponsorshipAuthorizationId"
+  | "groupSponsorshipChargeOrdinal"
   | "lastReconciledAt"
   | "paidAt"
   | "payerMemberId"
@@ -615,6 +619,20 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
     return false;
   }
 
+  const isTerminalUnboundAutomaticRefillFailure =
+    input.status === HostedUsageCreditPurchaseStatus.payment_failed &&
+    input.groupSponsorshipAuthorizationId !== null &&
+    input.groupSponsorshipChargeOrdinal !== null &&
+    input.groupSponsorshipChargeOrdinal > 0 &&
+    input.paidAt === null &&
+    input.stripeChargeIdEncrypted === null &&
+    input.stripeChargeLookupKey === null &&
+    input.stripeCheckoutSessionIdEncrypted === null &&
+    input.stripeCheckoutSessionLookupKey === null &&
+    input.stripeCheckoutUrlEncrypted === null &&
+    input.stripePaymentIntentIdEncrypted === null &&
+    input.stripePaymentIntentLookupKey === null;
+
   if (input.payerMemberId === null) {
     const privateReferencesCleared =
       input.stripeChargeIdEncrypted === null
@@ -630,7 +648,8 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
       case HostedUsageCreditPurchaseStatus.expired:
         return true;
       case HostedUsageCreditPurchaseStatus.payment_failed:
-        return input.stripeCheckoutSessionLookupKey !== null;
+        return isTerminalUnboundAutomaticRefillFailure ||
+          input.stripeCheckoutSessionLookupKey !== null;
       case HostedUsageCreditPurchaseStatus.fulfilled:
         return Boolean(
           input.paidAt
@@ -659,7 +678,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
     case HostedUsageCreditPurchaseStatus.expired:
       return true;
     case HostedUsageCreditPurchaseStatus.payment_failed:
-      return hasSessionProof;
+      return hasSessionProof || isTerminalUnboundAutomaticRefillFailure;
     case HostedUsageCreditPurchaseStatus.fulfilled:
       return Boolean(
         (hasSessionProof || hasNoSessionProof) &&

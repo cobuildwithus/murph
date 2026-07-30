@@ -85,7 +85,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain('href="/changelog?edition=2026-07-23"');
     expect(markup).toContain(
-      'href="/changelog?edition=2026-07-30#usage-options-together"',
+      'href="/changelog?edition=2026-07-30#capped-monthly-group-sponsorship"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");

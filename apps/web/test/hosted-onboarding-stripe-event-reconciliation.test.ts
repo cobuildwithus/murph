@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedAccountGroupIdByStripeSubscriptionId: vi.fn(),
   cleanupHostedStandardCheckoutLoser: vi.fn(),
   materializeHostedGroupSponsorshipIfApplicable: vi.fn(),
+  materializeHostedGroupSponsorshipNearCapNotification: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   prepareHostedStripeDirectMemberActivationCrypto: vi.fn(),
   prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
@@ -256,6 +257,8 @@ vi.mock(
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-notification", () => ({
   materializeHostedGroupSponsorshipIfApplicable:
     mocks.materializeHostedGroupSponsorshipIfApplicable,
+  materializeHostedGroupSponsorshipNearCapNotification:
+    mocks.materializeHostedGroupSponsorshipNearCapNotification,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -361,6 +364,7 @@ describe("hosted Stripe event reconciliation", () => {
       null,
     );
     mocks.materializeHostedGroupSponsorshipIfApplicable.mockResolvedValue(true);
+    mocks.materializeHostedGroupSponsorshipNearCapNotification.mockResolvedValue(false);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.prepareHostedStripeDirectMemberActivationCrypto.mockResolvedValue(
       new Map(),
@@ -666,6 +670,12 @@ describe("hosted Stripe event reconciliation", () => {
     });
     expect(
       mocks.materializeHostedGroupSponsorshipIfApplicable,
+    ).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      purchaseId: "hucp_purchase_123",
+    });
+    expect(
+      mocks.materializeHostedGroupSponsorshipNearCapNotification,
     ).toHaveBeenCalledWith({
       prisma: prisma.client,
       purchaseId: "hucp_purchase_123",

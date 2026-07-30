@@ -9,6 +9,7 @@ import {
   type HostedUsageTopUpOffer,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
+import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -19,8 +20,11 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
 } from "@/src/components/ui/field";
 import { Input } from "@/src/components/ui/input";
+import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Textarea } from "@/src/components/ui/textarea";
 
 type GroupSponsorshipDialogProps = Omit<
@@ -29,6 +33,9 @@ type GroupSponsorshipDialogProps = Omit<
 > & {
   customizationAllowed: boolean;
   frozenSponsorship?: FrozenGroupSponsorship | null;
+  mode?: "monthly" | "one_time";
+  monthlyCapMinor?: 500 | 1_000 | 2_000;
+  monthlyCapOptions?: readonly GroupSponsorshipMonthlyCapOption[];
   offers: readonly GroupSponsorshipOffer[];
 };
 
@@ -42,9 +49,18 @@ type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
   runningBitDurationLabel: string | null;
 };
 
+type GroupSponsorshipMonthlyCapOption = {
+  amountLabel: string;
+  monthlyCapMinor: 500 | 1_000 | 2_000;
+  runningBitDurationLabel: string | null;
+};
+
 function GroupSponsorshipDialog({
   customizationAllowed,
   frozenSponsorship,
+  mode = "one_time",
+  monthlyCapMinor,
+  monthlyCapOptions = [],
   offers,
   ...props
 }: GroupSponsorshipDialogProps) {
@@ -57,12 +73,16 @@ function GroupSponsorshipDialog({
   const [sponsorMessage, setSponsorMessage] = useState(
     frozenSponsorship?.sponsorMessage ?? "",
   );
+  const [selectedMonthlyCapMinor, setSelectedMonthlyCapMinor] = useState(
+    monthlyCapMinor ?? monthlyCapOptions[0]?.monthlyCapMinor ?? 500,
+  );
   const recoveringFrozenPurchase =
     props.activePurchase != null && frozenSponsorship !== undefined;
 
   return (
     <HostedUsageTopUpDialog
       {...props}
+      groupPaymentMode={mode}
       scope="group"
       offers={offers}
       buildCheckoutPayload={({ clientRequestKey, offerCode }) => {
@@ -70,22 +90,43 @@ function GroupSponsorshipDialog({
           return {
             clientRequestKey,
             offerCode,
+            ...(mode === "monthly"
+              ? {
+                  monthlyCapMinor: selectedMonthlyCapMinor,
+                  sponsorshipKind: "monthly",
+                }
+              : { sponsorshipKind: "one_time" }),
             sponsorship: frozenSponsorship ?? {},
           };
         }
+        const base = {
+          clientRequestKey,
+          offerCode,
+          ...(mode === "monthly"
+            ? {
+                monthlyCapMinor: selectedMonthlyCapMinor,
+                sponsorshipKind: "monthly",
+              }
+            : { sponsorshipKind: "one_time" }),
+        };
         return customizationAllowed
           ? {
-              clientRequestKey,
-              offerCode,
+              ...base,
               sponsorship: {
                 publicAlias,
                 sponsorMessage,
-                ...(offerCode === "usage_5_usd"
-                  ? {}
-                  : { runningBitRequest }),
+                ...(readRunningBitDurationLabel({
+                  monthlyCapOptions,
+                  mode,
+                  offerCode,
+                  offers,
+                  selectedMonthlyCapMinor,
+                })
+                  ? { runningBitRequest }
+                  : {}),
               },
             }
-          : { clientRequestKey, offerCode };
+          : base;
       }}
       renderPurchaseDetails={
         recoveringFrozenPurchase
@@ -93,11 +134,49 @@ function GroupSponsorshipDialog({
           : null
       }
       renderSelectionDetails={({ disabled, selectedOffer }) => {
-        const selectedSponsorshipOffer = offers.find(
-          (offer) => offer.offerCode === selectedOffer?.offerCode,
-        );
-        return customizationAllowed ? (
-          <Collapsible>
+        const runningBitDurationLabel = readRunningBitDurationLabel({
+          monthlyCapOptions,
+          mode,
+          offerCode: selectedOffer?.offerCode ?? null,
+          offers,
+          selectedMonthlyCapMinor,
+        });
+        return (
+          <div className="space-y-4">
+            {mode === "monthly" ? (
+              <FieldSet
+                className="space-y-3"
+                disabled={disabled || recoveringFrozenPurchase}
+              >
+                <FieldLegend>Monthly maximum</FieldLegend>
+                <FieldDescription>
+                  Murph may make ordinary $5 usage-credit purchases only when
+                  this chat needs them, up to the maximum you authorize.
+                </FieldDescription>
+                <RadioGroup
+                  value={String(selectedMonthlyCapMinor)}
+                  onValueChange={(value) => {
+                    const parsed = Number(value);
+                    if (parsed === 500 || parsed === 1_000 || parsed === 2_000) {
+                      setSelectedMonthlyCapMinor(parsed);
+                    }
+                  }}
+                  className="grid gap-3 sm:grid-cols-3"
+                >
+                  {monthlyCapOptions.map((option) => (
+                    <ChoiceCard
+                      key={option.monthlyCapMinor}
+                      id={`group-sponsorship-cap-${option.monthlyCapMinor}`}
+                      value={String(option.monthlyCapMinor)}
+                      disabled={disabled || recoveringFrozenPurchase}
+                      title={option.amountLabel}
+                      description="per month"
+                    />
+                  ))}
+                </RadioGroup>
+              </FieldSet>
+            ) : null}
+            {customizationAllowed ? <Collapsible>
             <CollapsibleTrigger
               render={
                 <Button
@@ -144,7 +223,7 @@ function GroupSponsorshipDialog({
                     placeholder="Please stop inviting Jake to basketball."
                   />
                 </Field>
-                {selectedSponsorshipOffer?.runningBitDurationLabel ? (
+                {runningBitDurationLabel ? (
                   <Field data-disabled={disabled || undefined}>
                     <FieldLabel htmlFor="group-sponsor-bit">
                       Temporary running bit
@@ -161,7 +240,7 @@ function GroupSponsorshipDialog({
                       placeholder="Treat me like Murph’s exhausted CFO."
                     />
                     <FieldDescription>
-                      Lasts for {selectedSponsorshipOffer.runningBitDurationLabel}.
+                      Lasts for {runningBitDurationLabel}.
                       Murph may remix or ignore it. Serious, private, and health
                       conversations always take priority.
                     </FieldDescription>
@@ -169,11 +248,29 @@ function GroupSponsorshipDialog({
                 ) : null}
               </FieldGroup>
             </CollapsibleContent>
-          </Collapsible>
-        ) : null;
+            </Collapsible> : null}
+          </div>
+        );
       }}
     />
   );
+}
+
+function readRunningBitDurationLabel(input: {
+  monthlyCapOptions: readonly GroupSponsorshipMonthlyCapOption[];
+  mode: "monthly" | "one_time";
+  offerCode: string | null;
+  offers: readonly GroupSponsorshipOffer[];
+  selectedMonthlyCapMinor: number;
+}): string | null {
+  if (input.mode === "monthly") {
+    return input.monthlyCapOptions.find(
+      (option) => option.monthlyCapMinor === input.selectedMonthlyCapMinor,
+    )?.runningBitDurationLabel ?? null;
+  }
+  return input.offers.find(
+    (offer) => offer.offerCode === input.offerCode,
+  )?.runningBitDurationLabel ?? null;
 }
 
 function FrozenSponsorshipDetails({
@@ -222,5 +319,6 @@ export { GroupSponsorshipDialog };
 export type {
   FrozenGroupSponsorship,
   GroupSponsorshipDialogProps,
+  GroupSponsorshipMonthlyCapOption,
   GroupSponsorshipOffer,
 };
