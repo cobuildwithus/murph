@@ -135,8 +135,10 @@ Updated: 2026-07-30
   - `@murphai/assistant-engine` typecheck passed; eight focused suites passed
     303 tests.
   - `@murphai/assistant-runtime` typecheck passed; the full workspace phase and
-    hosted Codex configuration suites passed 309 tests with 2 skipped.
+    hosted Codex configuration suites passed 310 tests with 2 skipped.
   - `git diff --check` and added-line identifier/secret scans passed.
+  - The branch rebased cleanly onto the latest `origin/main`; the full focused
+    matrix above passed again on the rebased candidate.
 
 ## Current state
 
