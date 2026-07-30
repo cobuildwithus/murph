@@ -74,13 +74,9 @@ export function HostedAiUsageActivity(props: {
             </ul>
           ) : null}
           {showReferralEmptyState ? (
-            <div className="grid gap-2 border-t border-border/70 py-5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-8">
-              <p className="text-sm font-medium text-foreground">
-                Choose a referral
-              </p>
-              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                Ask Murph what&apos;s available. Complete one before it closes
-                to earn the usage reward.
+            <div className="border-t border-border/70 py-5">
+              <p className="text-sm leading-6 text-muted-foreground">
+                Earn usage by inviting friends or adding Murph to a groupchat
               </p>
             </div>
           ) : null}

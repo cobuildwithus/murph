@@ -586,10 +586,10 @@ describe("HostedAiUsageActivity", () => {
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.match(markup, /Ask Murph/);
-    assert.match(markup, /Choose a referral/);
-    assert.match(markup, /Ask Murph what(?:&#x27;|')s available/);
-    assert.match(markup, /Complete one before it closes/);
-    assert.match(markup, /earn the usage reward/);
+    assert.match(
+      markup,
+      /Earn usage by inviting friends or adding Murph to a groupchat/,
+    );
     assert.doesNotMatch(markup, /No purchased credits yet/);
     assert.doesNotMatch(markup, /<details/);
   });
