@@ -21,6 +21,7 @@ import {
   HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
+  assertHostedBrowserDeviceSyncCallbackHostnameConfiguration,
   buildHostedWebClientEnv,
   buildHostedWebNextConfig,
   buildHostedWebTurbopackConfig,
@@ -537,6 +538,56 @@ test("resolveHostedPrivyOrigin falls back to the Vercel production URL when no h
       VERCEL_PROJECT_PRODUCTION_URL: "www.example.com",
     })),
     "https://privy.example.com",
+  );
+});
+
+test("hosted Web accepts a path-capable device callback on every configured app-session hostname", () => {
+  assert.doesNotThrow(() => {
+    assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.com/custom/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    }));
+  });
+});
+
+test("hosted Web rejects a device callback on a different HOSTED_WEB_BASE_URL hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.com/api/device-sync",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web rejects a callback that cannot return to the configured onboarding session hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.com/api/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_ONBOARDING_PUBLIC_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web rejects an implicit callback derived from a split onboarding hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from HOSTED_ONBOARDING_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web accepts an implicit callback when every browser surface shares one hostname", () => {
+  assert.doesNotThrow(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
   );
 });
 

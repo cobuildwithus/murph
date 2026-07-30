@@ -27,7 +27,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    projection (`projectJunctionSources`), so `last_seen_at` stays fresh even
    when only direct imports are happening. Non-floor completions may move
    `nextReconcileAt` only *earlier* (min-only clamp), never later; a stream of
-   webhooks can never starve or defer the floor.
+   webhooks can never starve or defer the floor. Projection does not own source
+   admission: it rereads the live source rows and does not mutate a
+   `disconnected` source. Pulls retain the complete upstream provider list for
+   provenance resolution, then reread admission immediately before each
+   durable summary or timeseries import and remove records for disconnected
+   sources. While any source is pending admission, unresolved source-reference
+   identities fail closed. A provider with no source row remains admitted for
+   legacy accounts.
 
 2. **Push delivers early; pull guarantees eventually; neither disables the
    other.** A webhook that carries a parseable payload imports inline (early,

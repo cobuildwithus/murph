@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-15
+Last verified against repo layout: 2026-07-27
 
 ## Current split
 
@@ -129,7 +129,7 @@ Recommended durable tables remain:
 
 Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
 
-`device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The provider callback then consumes OAuth state only for that same member. Intent rows must not store raw provider or Junction authorization URLs.
+`device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof and renders confirmation without provider exchange; only a same-origin confirmation POST passes `expectedOwnerId` into shared ingress. A missing proof burns the OAuth state so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
 
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids.
 
@@ -217,7 +217,26 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 - `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET renders the real `HostedDeviceSyncCallbackConfirmation` component and performs no exchange. Its form POST is same-origin, rechecks the proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner.
+
+Junction accounts created for their first Link start remain `pending_link` and
+inert. They cannot admit webhook dirty work, runtime wakes, scheduled or manual
+jobs, provider execution, import, or setup promotion. Callback confirmation is
+the only path to `source_confirmed`. Adding or retrying another Junction-backed
+source on an established shared account preserves the account phase and sibling
+sources. The target `DeviceConnectionSource` remains `disconnected`; target
+webhooks and provider pulls stay inert until the hosted connection-established
+hook commits that source, its signal, and mailbox work in one transaction.
+Shared ingress explicitly selects `preserve_established` for a source addition
+and `replace` for an account reconnect. The hosted Prisma owner and the local or
+tunneled SQLite owner apply the same shared predicate inside persistence, so the
+local adapter cannot re-pend the shared account or change its generation.
+Shared ingress does not independently connect the source. If explicit
+disconnect or a newer connection epoch wins the locked recheck, the callback
+fails and the target remains disconnected. The start path retries provider
+cleanup for that target source only and returns a retryable error rather than
+issuing a new link when cleanup is ambiguous. Whole-account revoke remains the
+explicit connection-wide disconnect path.
 
 ### Hosted settings-authenticated routes
 
@@ -396,6 +415,6 @@ Local responsibilities:
 - `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
 - `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
 
-Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract.
+Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract. Local and tunneled daemon callback URLs remain explicitly configured on the daemon boundary and are not subject to the hosted browser app-session hostname check.
 
 Hosted execution continues to use signed internal web callbacks and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.

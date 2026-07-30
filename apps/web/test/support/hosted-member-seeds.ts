@@ -330,6 +330,7 @@ interface HostedDeviceSyncControlPlaneStore {
       providerConfigKey: "junction";
     };
     displayName: string;
+    existingAccountPolicy: "replace";
     externalAccountId: string;
     metadata?: Record<string, unknown>;
     nextReconcileAt?: string | null;
@@ -1007,6 +1008,7 @@ async function seedHostedJunctionDeviceSyncConnectionWithStore(input: {
     },
     nextReconcileAt: null,
     ownerId: input.input.memberId,
+    existingAccountPolicy: "replace",
     provider: "junction",
     scopes: [],
     setupPhase: "source_confirmed",

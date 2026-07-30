@@ -6,15 +6,19 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
+import { assertHostedDeviceSyncBrowserCallbackHostname } from "./public-base-url";
 import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
+import { buildHostedDeviceSyncCallbackProof } from "./browser-callback-proof";
 import { assertHostedWhoopConnectCapacityAvailable } from "./whoop-connect-capacity";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
+import { readHostedDeviceSyncPublicBaseUrl } from "../hosted-web/public-url";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 
 export interface HostedDeviceSyncConnectResponse {
   authorizationUrl: string;
+  callbackProofCookie: string;
 }
 
 export async function startHostedDeviceSyncConnection(input: {
@@ -32,8 +36,12 @@ export async function startHostedDeviceSyncConnection(input: {
   }
 
   assertHostedOnboardingMutationOrigin(input.request);
-  const prisma = getPrisma();
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
+  assertHostedDeviceSyncBrowserCallbackHostname({
+    appSessionUrl: input.request.url,
+    callbackBaseUrl: readHostedDeviceSyncPublicBaseUrl(),
+  });
+  const prisma = getPrisma();
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,
@@ -44,6 +52,7 @@ export async function startHostedDeviceSyncConnection(input: {
     target: input.target,
   });
   const publicIngress = createHostedDeviceSyncPublicIngressService(input.request);
+  await publicIngress.prepareConnectionStart(auth.member.id, input.target);
   const started = await publicIngress.startConnection(
     auth.member.id,
     input.target.provider,
@@ -54,8 +63,15 @@ export async function startHostedDeviceSyncConnection(input: {
       sourceProviderSlug: input.target.sourceProviderSlug ?? null,
     },
   );
+  const callbackProof = buildHostedDeviceSyncCallbackProof({
+    memberId: auth.member.id,
+    provider: input.target.provider,
+    sessionId: auth.sessionId,
+    state: started.state,
+  });
 
   return {
     authorizationUrl: started.authorizationUrl,
+    callbackProofCookie: callbackProof.cookie,
   };
 }

@@ -499,13 +499,23 @@ export function listHostedDeployEnvironmentInvariantErrors(
     );
   }
 
-  const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;
-  const productionWebBaseUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL")?.normalized;
-  if (hostedWebBaseUrl && productionWebBaseUrl && hostedWebBaseUrl !== productionWebBaseUrl) {
+  const hostedWebUrl = productionUrls.get("HOSTED_WEB_BASE_URL");
+  const productionWebUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL");
+  if (
+    hostedWebUrl
+    && productionWebUrl
+    && hostedWebUrl.normalized !== productionWebUrl.normalized
+  ) {
     errors.push(
       "production deploys must set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
     );
   }
+  appendHostedDeviceSyncCallbackHostnameInvariantError({
+    callbackUrl: productionUrls.get("DEVICE_SYNC_PUBLIC_BASE_URL"),
+    deployContext: "production",
+    errors,
+    hostedWebUrl,
+  });
 
   return errors;
 }
@@ -800,15 +810,29 @@ function appendPreviewDeployInvariantErrors(
       requireOriginOnly: false,
       errors,
     });
-    if (
-      callbackUrl
-      && productionWebUrl
-      && new URL(callbackUrl.normalized).origin === productionWebUrl.normalized
-    ) {
-      errors.push(
-        `${label} must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.`,
-      );
-    }
+    appendHostedDeviceSyncCallbackHostnameInvariantError({
+      callbackUrl: callbackUrl ?? undefined,
+      deployContext: "preview",
+      errors,
+      hostedWebUrl: previewWebUrl,
+    });
+  }
+}
+
+function appendHostedDeviceSyncCallbackHostnameInvariantError(input: {
+  callbackUrl: ProductionDeployUrlValidation | undefined;
+  deployContext: "preview" | "production";
+  errors: string[];
+  hostedWebUrl: ProductionDeployUrlValidation | undefined;
+}): void {
+  if (
+    input.callbackUrl
+    && input.hostedWebUrl
+    && input.callbackUrl.hostname !== input.hostedWebUrl.hostname
+  ) {
+    input.errors.push(
+      `DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname in ${input.deployContext} deploys.`,
+    );
   }
 }
 
