@@ -84,7 +84,7 @@ const MODEL_OPTIONS = [
 
 const PROVIDER_OPTIONS = [
   {
-    description: "We disable response storage.",
+    description: "No chat history saved.",
     logo: {
       height: 180,
       src: "/brand-logos/assistant-providers/openai-light.svg",
@@ -94,7 +94,7 @@ const PROVIDER_OPTIONS = [
     provider: HOSTED_ASSISTANT_OPENAI_PROVIDER,
   },
   {
-    description: "No prompts or replies stored.",
+    description: "Privacy-first inference.",
     logo: {
       height: 356,
       src: "/brand-logos/assistant-providers/venice-light.svg",
@@ -211,7 +211,7 @@ export function AssistantProviderDialog({
             Choose provider
           </DialogTitle>
           <DialogDescription className="max-w-[38ch] text-sm/6">
-            Core replies use this provider after you save.
+            Murph uses this provider after you save.
           </DialogDescription>
         </DialogHeader>
         <RadioGroup

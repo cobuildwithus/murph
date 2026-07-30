@@ -194,7 +194,7 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.container.textContent ?? "", /New core replies use OpenAI\./u);
   assert.doesNotMatch(
     view.container.textContent ?? "",
-    /We disable response storage\./u,
+    /No chat history saved\./u,
   );
   await act(async () => {
     findButton(view.container, "Change").click();
@@ -202,11 +202,15 @@ test("members can switch the provider without changing Terra, Luna, or Sol", asy
   assert.match(view.document.body.textContent ?? "", /Choose provider/u);
   assert.match(
     view.document.body.textContent ?? "",
-    /We disable response storage\./u,
+    /No chat history saved\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
-    /No prompts or replies stored\./u,
+    /Privacy-first inference\./u,
+  );
+  assert.match(
+    view.document.body.textContent ?? "",
+    /Murph uses this provider after you save\./u,
   );
   assert.match(
     view.document.body.textContent ?? "",
