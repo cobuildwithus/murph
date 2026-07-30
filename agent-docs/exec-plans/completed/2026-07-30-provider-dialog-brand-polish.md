@@ -1,6 +1,6 @@
 # Polish the assistant provider dialog
 
-Status: active
+Status: completed
 Created: 2026-07-30
 Updated: 2026-07-30
 
@@ -83,3 +83,23 @@ Updated: 2026-07-30
   specification, or security guide were checked before remediation; their work
   is unrelated billing, group-model, or trust-boundary work rather than a
   duplicate provider-dialog change.
+
+## Completion evidence
+
+- The focused provider-settings suite passes all 18 tests.
+- Web typecheck, scoped ESLint, all 10 frontend design-proof checks,
+  `git diff --check`, and the audit-packager suite all pass; the latter has 40
+  passing tests and one intentional skip.
+- Playwright rendered the real catalog component at 1440×1000 and 390×844.
+  OpenAI is selected on desktop; mobile selection closes the dialog and
+  preserves Venice after reopening. The settled dialogs measure 432×352 and
+  358×388 respectively, with no horizontal overflow.
+- The refreshed screenshots were visually inspected and uploaded through the
+  repository's design-proof path for the PR.
+- The optional Claude/Fable UI double-check was attempted and stopped at
+  explicit usage-credit exhaustion; no result is claimed.
+- Final parent review of the rebased base-to-head diff found no remaining
+  correctness, privacy, product-experience, frontend, coverage, or scope
+  finding. The separate exact-head ReviewGPT gate and GitHub Actions remain the
+  PR merge gates.
+Completed: 2026-07-30
