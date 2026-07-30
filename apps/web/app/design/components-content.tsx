@@ -32,7 +32,7 @@ import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import {
-  AuthDialogHeaderPresentation,
+  resolveAuthDialogHeaderPresentation,
 } from "@/src/components/hosted-onboarding/auth-dialog";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedCodeEntryStep } from "@/src/components/hosted-onboarding/hosted-phone-auth-step-views";
@@ -128,9 +128,26 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
     <div className="flex flex-col gap-3">
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
       <div className="max-w-md rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06] md:p-7">
-        <AuthDialogHeaderPresentation panelView="auth-active" />
+        <DialogPreviewHeader />
         <div className="mt-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function DialogPreviewHeader() {
+  const header = resolveAuthDialogHeaderPresentation({
+    panelView: "auth-active",
+  });
+
+  return (
+    <div className={header.headerClassName}>
+      <h3 className="text-xl font-bold tracking-tight text-foreground">
+        {header.title}
+      </h3>
+      <p className="text-sm text-pretty text-muted-foreground">
+        {header.description}
+      </p>
     </div>
   );
 }

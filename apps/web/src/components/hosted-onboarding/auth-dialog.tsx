@@ -34,17 +34,32 @@ export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
   "Murph helps you build healthier habits that fit your life.";
 
-function resolveAuthDialogHeaderCopy(
-  panelView: HostedAuthPanelView,
-  title: string,
-  description: string,
-) {
-  return panelView === "consent"
+export function resolveAuthDialogHeaderPresentation({
+  description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
+  panelView,
+  title = DEFAULT_AUTH_DIALOG_TITLE,
+}: {
+  description?: string;
+  panelView: HostedAuthPanelView;
+  title?: string;
+}) {
+  const consentPresentation = panelView === "consent";
+  const resolvedCopy = consentPresentation
     ? {
         description: "Review how Murph uses health data before continuing.",
         title: "Use your health data with Murph",
       }
     : { description, title };
+
+  return {
+    consentPresentation,
+    description: resolvedCopy.description,
+    headerClassName: cn({
+      "pr-10": !consentPresentation,
+      "sr-only": consentPresentation,
+    }),
+    title: resolvedCopy.title,
+  };
 }
 
 export function AuthDialogHeaderPresentation({
@@ -56,24 +71,18 @@ export function AuthDialogHeaderPresentation({
   panelView: HostedAuthPanelView;
   title?: string;
 }) {
-  const consentPresentation = panelView === "consent";
-  const resolvedCopy = resolveAuthDialogHeaderCopy(
+  const header = resolveAuthDialogHeaderPresentation({
+    description,
     panelView,
     title,
-    description,
-  );
+  });
 
   return (
-    <DialogHeader
-      className={cn({
-        "pr-10": !consentPresentation,
-        "sr-only": consentPresentation,
-      })}
-    >
+    <DialogHeader className={header.headerClassName}>
       <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-        {resolvedCopy.title}
+        {header.title}
       </DialogTitle>
-      <DialogDescription>{resolvedCopy.description}</DialogDescription>
+      <DialogDescription>{header.description}</DialogDescription>
     </DialogHeader>
   );
 }
