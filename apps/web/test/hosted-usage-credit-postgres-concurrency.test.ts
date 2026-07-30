@@ -22,11 +22,13 @@ import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
+  bindArmedHostedUsageReferralToNewContainerTx,
   handleHostedUsageReferralGroupTool,
   HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
   HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
   HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  observeHostedUsageReferralInboundTx,
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "@/src/lib/hosted-growth/usage-referral";
 import {
@@ -68,6 +70,22 @@ const referralCreditEntryConstraintMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const composableUsageReferralMissionsMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260729190000_composable_usage_referral_missions/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const armedPolicyIndexMigrationSql =
+  composableUsageReferralMissionsMigrationSql.match(
+    /CREATE UNIQUE INDEX "hosted_usage_referral_one_armed_policy_per_referrer"[\s\S]*?;/,
+  )?.[0];
+if (!armedPolicyIndexMigrationSql) {
+  throw new Error(
+    "Composable usage-referral migration is missing the armed-policy index statement.",
+  );
+}
 const purchaseGrantResynchronizationContractMigrationSql = readFileSync(
   new URL(
     "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
@@ -311,6 +329,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await client.query(detachedDirectProofMigrationSql);
         await client.query(referralCreditEntryConstraintMigrationSql);
+        const armedPolicyIndex = await client.query<{ present: boolean }>(`
+          SELECT EXISTS (
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname =
+                'hosted_usage_referral_one_armed_policy_per_referrer'
+          ) AS "present"
+        `);
+        if (armedPolicyIndex.rows[0]?.present !== true) {
+          await client.query(armedPolicyIndexMigrationSql);
+        }
       } finally {
         await client.end();
       }
@@ -1350,6 +1380,398 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("enforces policy-scoped referral uniqueness in PostgreSQL", async () => {
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_usage_referral_policy_${fixtureId}`;
+      const otherBeneficiaryMemberId =
+        `member_usage_referral_policy_destination_${fixtureId}`;
+      const targetContainerMemberId =
+        `member_usage_referral_policy_target_${fixtureId}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000);
+      const activeGroupReferralId =
+        `hur_usage_referral_policy_group_${fixtureId}`;
+      const newPersonReferralId =
+        `hur_usage_referral_policy_person_${fixtureId}`;
+
+      try {
+        await prisma.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              id: referrerMemberId,
+            },
+            {
+              billingStatus: "not_started",
+              id: targetContainerMemberId,
+            },
+            {
+              billingStatus: "active",
+              id: otherBeneficiaryMemberId,
+            },
+          ],
+        });
+        await prisma.hostedThreadContainer.create({
+          data: {
+            memberId: targetContainerMemberId,
+            ownerMemberId: referrerMemberId,
+          },
+        });
+        await prisma.hostedUsageReferral.createMany({
+          data: [
+            {
+              armedAt: now,
+              beneficiaryMemberId: referrerMemberId,
+              expiresAt,
+              id: activeGroupReferralId,
+              policyCode: "active_group_v1",
+              policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+              referrerMemberId,
+              referrerSubjectKey: "authenticated-member",
+              rewardUsdMicros:
+                HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+              status: "armed",
+            },
+            {
+              armedAt: now,
+              beneficiaryMemberId: referrerMemberId,
+              expiresAt,
+              id: newPersonReferralId,
+              policyCode: "new_person_activation_v1",
+              policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+              referrerMemberId,
+              referrerSubjectKey: "authenticated-member",
+              rewardUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+              status: "armed",
+            },
+          ],
+        });
+        await expect(prisma.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: otherBeneficiaryMemberId,
+            expiresAt,
+            id: `hur_usage_referral_policy_duplicate_${fixtureId}`,
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "armed",
+          },
+        })).rejects.toMatchObject({ code: "P2002" });
+
+        await expect(prisma.hostedUsageReferral.updateMany({
+          data: {
+            status: "target_bound",
+            targetBoundAt: now,
+            targetContainerMemberId,
+          },
+          where: {
+            id: {
+              in: [activeGroupReferralId, newPersonReferralId],
+            },
+          },
+        })).resolves.toMatchObject({ count: 2 });
+        await expect(prisma.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: referrerMemberId,
+            expiresAt,
+            id: `hur_usage_referral_target_duplicate_${fixtureId}`,
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt: now,
+            targetContainerMemberId,
+          },
+        })).rejects.toMatchObject({ code: "P2002" });
+        await expect(prisma.hostedUsageReferral.create({
+          data: {
+            armedAt: now,
+            beneficiaryMemberId: otherBeneficiaryMemberId,
+            expiresAt,
+            id: `hur_usage_referral_policy_future_${fixtureId}`,
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "armed",
+          },
+        })).resolves.toMatchObject({
+          beneficiaryMemberId: otherBeneficiaryMemberId,
+          policyCode: "active_group_v1",
+          status: "armed",
+        });
+
+        const indexes = await prisma.$queryRaw<Array<{
+          indexDefinition: string;
+          indexName: string;
+        }>>`
+          SELECT
+            indexdef AS "indexDefinition",
+            indexname AS "indexName"
+          FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'hosted_usage_referral'
+            AND indexname IN (
+              'hosted_usage_referral_one_armed_policy_per_referrer',
+              'hosted_usage_referral_target_policy_key',
+              'hosted_usage_referral_one_armed_per_referrer',
+              'hosted_usage_referral_target_container_key'
+            )
+          ORDER BY indexname
+        `;
+        expect(indexes.map(({ indexName }) => indexName)).toEqual([
+          "hosted_usage_referral_one_armed_policy_per_referrer",
+          "hosted_usage_referral_target_policy_key",
+        ]);
+        expect(indexes[0]?.indexDefinition).toContain(
+          "(referrer_member_id, policy_code)",
+        );
+        expect(indexes[0]?.indexDefinition).toContain(
+          "WHERE (status = 'armed'",
+        );
+        expect(indexes[1]?.indexDefinition).toContain(
+          "(target_container_member_id, policy_code)",
+        );
+      } finally {
+        await prisma.hostedUsageReferral.deleteMany({
+          where: { referrerMemberId },
+        });
+        await prisma.hostedThreadContainer.deleteMany({
+          where: { memberId: targetContainerMemberId },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [
+                referrerMemberId,
+                otherBeneficiaryMemberId,
+                targetContainerMemberId,
+              ],
+            },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("rejects one concurrent same-policy arm across reward destinations", async () => {
+      const fixtureId = randomUUID();
+      const referrerMemberId =
+        `member_usage_referral_policy_race_${fixtureId}`;
+      const beneficiaryMemberIds = [
+        `member_usage_referral_policy_race_a_${fixtureId}`,
+        `member_usage_referral_policy_race_b_${fixtureId}`,
+      ] as const;
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60_000);
+
+      try {
+        await firstClient.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              id: referrerMemberId,
+            },
+            ...beneficiaryMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              id,
+            })),
+          ],
+        });
+
+        const results = await Promise.allSettled(
+          beneficiaryMemberIds.map((beneficiaryMemberId, index) => {
+            const client = index === 0 ? firstClient : secondClient;
+            return client.hostedUsageReferral.create({
+              data: {
+                armedAt: now,
+                beneficiaryMemberId,
+                expiresAt,
+                id: `hur_usage_referral_policy_race_${index}_${fixtureId}`,
+                policyCode: "active_group_v1",
+                policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+                referrerMemberId,
+                referrerSubjectKey: "authenticated-member",
+                rewardUsdMicros:
+                  HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+                status: "armed",
+              },
+            });
+          }),
+        );
+        expect(results.filter(({ status }) => status === "fulfilled"))
+          .toHaveLength(1);
+        const rejected = results.find(({ status }) => status === "rejected");
+        expect(rejected).toMatchObject({
+          reason: { code: "P2002" },
+          status: "rejected",
+        });
+        await expect(firstClient.hostedUsageReferral.count({
+          where: {
+            policyCode: "active_group_v1",
+            referrerMemberId,
+            status: "armed",
+          },
+        })).resolves.toBe(1);
+      } finally {
+        await firstClient.hostedUsageReferral.deleteMany({
+          where: { referrerMemberId },
+        });
+        await firstClient.hostedMember.deleteMany({
+          where: {
+            id: { in: [referrerMemberId, ...beneficiaryMemberIds] },
+          },
+        });
+        await Promise.all([
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+        ]);
+      }
+    });
+
+    it("makes a selected policy set atomic against fresh-group binding", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_referral_arm_bind_${fixtureId}`;
+      const targetContainerMemberId =
+        `member_usage_referral_arm_bind_target_${fixtureId}`;
+      const armClient = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const bindClient = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const now = new Date();
+      const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
+      const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
+      const sourceConversation = {
+        channel: "linq" as const,
+        linqService: "imessage" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: true,
+      };
+
+      try {
+        await armClient.hostedMember.create({
+          data: {
+            billingRef: {
+              create: {
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: "active",
+            hostedAiUsagePeriods: {
+              create: {
+                billingPlanCode: "launch_monthly",
+                limitUsdMicros:
+                  getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"),
+                periodEnd,
+                periodStart,
+                spentUsdMicros: 0n,
+              },
+            },
+            id: memberId,
+          },
+        });
+        await armClient.hostedMember.create({
+          data: {
+            billingStatus: "not_started",
+            id: targetContainerMemberId,
+          },
+        });
+        await armClient.hostedThreadContainer.create({
+          data: {
+            memberId: targetContainerMemberId,
+            ownerMemberId: memberId,
+          },
+        });
+
+        const [armResult, bindResult] = await Promise.all([
+          handleHostedUsageReferralGroupTool({
+            enabled: true,
+            memberId,
+            prisma: armClient,
+            request: {
+              action: "arm_usage_referral",
+              policyCodes: [
+                "new_person_activation_v1",
+                "active_group_v1",
+              ],
+              sourceConversation,
+            },
+          }),
+          bindClient.$transaction((tx) =>
+            bindArmedHostedUsageReferralToNewContainerTx({
+              enabled: true,
+              occurredAt: new Date(now.getTime() + 1_000),
+              ownerMemberId: memberId,
+              targetChannel: "linq",
+              targetContainerMemberId,
+              targetLinqService: "imessage",
+              tx,
+            })
+          ),
+        ]);
+        expect(armResult).toMatchObject({
+          action: "arm_usage_referral",
+          result: { outcome: "armed", status: "ok" },
+        });
+        expect([0, 2]).toContain(bindResult.referralIds.length);
+
+        const referrals = await armClient.hostedUsageReferral.findMany({
+          orderBy: { policyCode: "asc" },
+          select: {
+            policyCode: true,
+            status: true,
+            targetContainerMemberId: true,
+          },
+          where: { referrerMemberId: memberId },
+        });
+        expect(referrals).toHaveLength(2);
+        expect(new Set(referrals.map(({ status }) => status)).size).toBe(1);
+        expect(
+          referrals.every(({ status }) =>
+            status === "armed" || status === "target_bound"
+          ),
+        ).toBe(true);
+        if (referrals[0]?.status === "target_bound") {
+          expect(referrals.every((referral) =>
+            referral.targetContainerMemberId === targetContainerMemberId
+          )).toBe(true);
+        } else {
+          expect(referrals.every((referral) =>
+            referral.targetContainerMemberId === null
+          )).toBe(true);
+        }
+      } finally {
+        await armClient.hostedUsageReferral.deleteMany({
+          where: { referrerMemberId: memberId },
+        });
+        await armClient.hostedThreadContainer.deleteMany({
+          where: { memberId: targetContainerMemberId },
+        });
+        await armClient.hostedMember.deleteMany({
+          where: { id: { in: [memberId, targetContainerMemberId] } },
+        });
+        await Promise.all([
+          armClient.$disconnect(),
+          bindClient.$disconnect(),
+        ]);
+      }
+    });
+
     it("completes the direct-personal referral read-arm-read-cancel flow on one PostgreSQL pool connection", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_usage_referral_direct_${fixtureId}`;
@@ -1358,7 +1780,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const periodStart = new Date(now.getTime() - 24 * 60 * 60_000);
       const periodEnd = new Date(now.getTime() + 31 * 24 * 60 * 60_000);
       const sourceConversation = {
-        channel: "telegram" as const,
+        channel: "linq" as const,
+        linqService: "imessage" as const,
         threadId: `hid_${fixtureId.replaceAll("-", "")}`,
         threadIsDirect: true,
       };
@@ -1395,12 +1818,15 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           enabled: true,
           memberId,
           prisma,
-          request: { action: "read_usage_referral" },
+          request: {
+            action: "read_usage_referral",
+            sourceConversation,
+          },
         })).resolves.toMatchObject({
           result: {
             outcome: "read",
             referral: {
-              active: null,
+              activeMissions: [],
               availablePolicies: expect.arrayContaining([
                 expect.objectContaining({
                   code: "new_person_activation_v1",
@@ -1416,18 +1842,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma,
           request: {
             action: "arm_usage_referral",
-            policyCode: "new_person_activation_v1",
+            policyCodes: ["new_person_activation_v1"],
             sourceConversation,
           },
         })).resolves.toMatchObject({
           result: {
             outcome: "armed",
             referral: {
-              active: {
+              activeMissions: [{
                 destinationKind: "personal",
                 policyCode: "new_person_activation_v1",
                 state: "armed",
-              },
+              }],
             },
             status: "ok",
           },
@@ -1441,11 +1867,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           result: {
             outcome: "read",
             referral: {
-              active: {
+              activeMissions: [{
                 destinationKind: "personal",
                 policyCode: "new_person_activation_v1",
                 state: "armed",
-              },
+              }],
             },
             status: "ok",
           },
@@ -1454,11 +1880,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           enabled: true,
           memberId,
           prisma,
-          request: { action: "cancel_usage_referral" },
+          request: {
+            action: "cancel_usage_referral",
+            policyCode: "new_person_activation_v1",
+          },
         })).resolves.toMatchObject({
           result: {
             outcome: "canceled",
-            referral: { active: null },
+            referral: { activeMissions: [] },
             status: "ok",
           },
         });
@@ -1546,6 +1975,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const now = new Date();
       const armedAt = new Date(now.getTime() - 20 * 60_000);
       const targetBoundAt = new Date(now.getTime() - 15 * 60_000);
+      const preActivationMessageAt = new Date(now.getTime() - 12 * 60_000);
       const activatedAt = new Date(now.getTime() - 10 * 60_000);
       const qualifiedAt = new Date(now.getTime() - 5 * 60_000);
       const celebrationDedupeKey =
@@ -1590,6 +2020,49 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             threadLookupKey: sourceThreadLookupKey,
           },
         });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt,
+            beneficiaryMemberId: sourceContainerMemberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            humanMessageCount: 0,
+            id: referralId,
+            nonReferrerMessageCount: 0,
+            policyCode: "new_person_activation_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt,
+            targetContainerMemberId,
+          },
+        });
+
+        await expect(observer.$transaction((tx) =>
+          observeHostedUsageReferralInboundTx({
+            containerMemberId: targetContainerMemberId,
+            enabled: true,
+            eventKey: "introduced-member-before-activation",
+            occurredAt: preActivationMessageAt,
+            senderMemberId: introducedMemberId,
+            senderSubjectKey: "introduced-member",
+            tx,
+          })
+        )).resolves.toEqual({
+          isBoundReferralTarget: true,
+          qualificationCandidateReferralIds: [],
+        });
+        await expect(observer.hostedUsageReferral.findUniqueOrThrow({
+          select: { introducedMemberId: true, qualifiedAt: true, status: true },
+          where: { id: referralId },
+        })).resolves.toEqual({
+          introducedMemberId: null,
+          qualifiedAt: null,
+          status: "target_bound",
+        });
+
         await observer.hostedMailboxItem.create({
           data: {
             dedupeKey: `member.activated:${introducedMemberId}`,
@@ -1602,30 +2075,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             userId: introducedMemberId,
           },
         });
-        await observer.hostedUsageReferral.create({
-          data: {
-            armedAt,
-            beneficiaryMemberId: sourceContainerMemberId,
-            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
-            firstHumanMessageAt: qualifiedAt,
-            humanMessageCount: 1,
-            id: referralId,
-            introducedMemberId,
-            lastHumanMessageAt: qualifiedAt,
-            nonReferrerMessageCount: 1,
-            observedEventKeysJson: ["introduced-member-first-message"],
-            observedSpeakerKeysJson: ["introduced-member"],
-            policyCode: "new_person_activation_v1",
-            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
-            qualifiedAt,
-            referrerMemberId,
-            referrerSubjectKey: "authenticated-member",
-            rewardUsdMicros:
-              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-            status: "target_bound",
-            targetBoundAt,
-            targetContainerMemberId,
-          },
+        await expect(observer.$transaction((tx) =>
+          observeHostedUsageReferralInboundTx({
+            containerMemberId: targetContainerMemberId,
+            enabled: true,
+            eventKey: "introduced-member-after-activation",
+            occurredAt: qualifiedAt,
+            senderMemberId: introducedMemberId,
+            senderSubjectKey: "introduced-member",
+            tx,
+          })
+        )).resolves.toEqual({
+          isBoundReferralTarget: true,
+          qualificationCandidateReferralIds: [referralId],
         });
 
         const first = await reconcileHostedUsageReferralRewardAfterCommit({
@@ -2047,6 +2509,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 5 });
       const now = new Date();
+      const sourceConversation = {
+        channel: "linq" as const,
+        linqService: "imessage" as const,
+        threadId: `hid_${fixtureId.replaceAll("-", "")}`,
+        threadIsDirect: false,
+      };
 
       try {
         await observer.hostedMember.createMany({
@@ -2137,6 +2605,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             request: {
               action: "read_usage_referral",
               linqSenderHandles: [phoneNumbers[index]!],
+              sourceConversation,
             },
           });
           expect(read).toMatchObject({
@@ -2161,7 +2630,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               request: {
                 action: "arm_usage_referral",
                 linqSenderHandles: [phoneNumbers[index]!],
-                policyCode: "new_person_activation_v1",
+                policyCodes: ["new_person_activation_v1"],
+                sourceConversation,
               },
             })
           ),

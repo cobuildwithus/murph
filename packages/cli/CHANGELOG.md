@@ -2,6 +2,14 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.3.0] - 2026-07-29
+
+### Breaking
+- retire the public experiment progress-card URL codec in favor of private attachment media
+
+### Added
+- publish the current hosted-execution orchestration contract for Murph Cloud
+
 ## [1.2.4] - 2026-07-16
 
 ### Fixed

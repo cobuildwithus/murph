@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXPERIMENT_OUTCOME_SCHEMA_VERSION,
   LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+  experimentAnalysisPlanSchema,
   experimentOutcomeSchema,
 } from "../src/zod.ts";
 
@@ -103,6 +104,56 @@ describe("experiment outcome daily snapshots", () => {
     expect(experimentOutcomeSchema.parse(currentOutcome())).toEqual(currentOutcome());
   });
 
+  it("validates saved summaries against the declared statistic", () => {
+    const latest = currentOutcome();
+    const [metric] = latest.metricResults as Array<Record<string, unknown>>;
+    const baseline = metric?.baseline as Record<string, unknown>;
+    const intervention = metric?.intervention as Record<string, unknown>;
+    if (metric && baseline && intervention) {
+      metric.statistic = "latest";
+      metric.baselineMean = 61;
+      baseline.mean = 61;
+      metric.interventionMean = 57;
+      intervention.mean = 57;
+      metric.deltaAbs = -4;
+      metric.deltaPct = -6.56;
+    }
+
+    expect(experimentOutcomeSchema.safeParse(latest).success).toBe(true);
+
+    if (metric && baseline) {
+      metric.baselineMean = 62;
+      baseline.mean = 62;
+    }
+    expect(experimentOutcomeSchema.safeParse(latest).success).toBe(false);
+  });
+
+  it("supports count summaries without reusing the source metric unit", () => {
+    const counted = currentOutcome();
+    const [metric] = counted.metricResults as Array<Record<string, unknown>>;
+    const baseline = metric?.baseline as Record<string, unknown>;
+    const intervention = metric?.intervention as Record<string, unknown>;
+    const points = metric?.points as Array<Record<string, unknown>>;
+    if (metric && baseline && intervention && points) {
+      metric.statistic = "count";
+      metric.baselineMean = 2;
+      baseline.mean = 2;
+      baseline.unit = "count";
+      metric.interventionMean = 2;
+      intervention.mean = 2;
+      intervention.unit = "count";
+      metric.deltaAbs = 0;
+      metric.deltaPct = 0;
+      metric.unit = "count";
+      for (const point of points) {
+        point.unit = "count";
+        point.value = 1;
+      }
+    }
+
+    expect(experimentOutcomeSchema.safeParse(counted).success).toBe(true);
+  });
+
   it("keeps point-free legacy outcomes readable", () => {
     const outcome = currentOutcome();
     outcome.schema = LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION;
@@ -194,5 +245,87 @@ describe("experiment outcome daily snapshots", () => {
         expect.objectContaining({ code: "too_big" }),
       ]));
     }
+  });
+});
+
+describe("experiment primary outcome contracts", () => {
+  it("keeps configured outcomes as the single primary identity", () => {
+    expect(experimentAnalysisPlanSchema.parse({
+      primaryOutcome: {
+        capture: {
+          fieldId: "repetition_capacity",
+          kind: "session_field",
+          unit: "repetitions",
+        },
+        key: "biomarker:repetition-capacity",
+        kind: "metric",
+        label: "Repetition capacity",
+        statistic: "max",
+      },
+    })).toMatchObject({
+      primaryOutcome: {
+        key: "biomarker:repetition-capacity",
+        kind: "metric",
+      },
+    });
+
+    expect(experimentAnalysisPlanSchema.safeParse({
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      primaryOutcome: {
+        key: "biomarker:repetition-capacity",
+        kind: "metric",
+      },
+    }).success).toBe(false);
+
+    expect(experimentAnalysisPlanSchema.safeParse({
+      primaryOutcome: {
+        key: "biomarker:movement-quality-review",
+        kind: "structured_review",
+      },
+      measurementAnchors: [
+        {
+          biomarkerKeys: ["biomarker:movement-quality-review"],
+          kind: "photo",
+          recordId: "evt_shared_review_evidence",
+          role: "baseline",
+        },
+        {
+          biomarkerKeys: ["biomarker:movement-quality-review"],
+          kind: "photo",
+          recordId: "evt_shared_review_evidence",
+          role: "followup",
+        },
+      ],
+    }).success).toBe(false);
+  });
+
+  it("persists structured review evidence as a self-contained result", () => {
+    const outcome = currentOutcome();
+    outcome.metricResults = [];
+    outcome.structuredReview = {
+      baseline: {
+        kinds: ["document"],
+        recordIds: ["evt_movement_baseline"],
+      },
+      followup: {
+        kinds: ["document"],
+        recordIds: ["evt_movement_followup"],
+      },
+      key: "biomarker:movement-quality-review",
+      kind: "structured_review",
+      label: "Movement quality",
+      status: "ready_for_review",
+    };
+
+    expect(experimentOutcomeSchema.safeParse(outcome).success).toBe(true);
+
+    const invalid = structuredClone(outcome);
+    const structuredReview = invalid.structuredReview as {
+      followup: { recordIds: string[] };
+      status: string;
+    };
+    structuredReview.followup.recordIds = ["evt_movement_baseline"];
+    structuredReview.status = "baseline_only";
+    expect(experimentOutcomeSchema.safeParse(invalid).success).toBe(false);
   });
 });

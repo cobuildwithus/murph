@@ -50,17 +50,24 @@ type ReferralState = {
   rewardUsdMicros: bigint;
   sourceConversationJson?: {
     channel: "linq" | "telegram";
+    linqService?: "imessage" | "rcs" | "sms";
     threadId: string;
     threadIsDirect: boolean;
   } | null;
-  status: "armed" | "canceled" | "superseded";
+  status: "armed" | "canceled" | "superseded" | "target_bound";
   terminalAt?: Date | null;
   terminalReason?: string | null;
 };
 
 const PERSONAL_SOURCE = {
-  channel: "telegram" as const,
+  channel: "linq" as const,
+  linqService: "imessage" as const,
   threadId: `hid_${"1".repeat(32)}`,
+  threadIsDirect: true,
+};
+const TELEGRAM_PERSONAL_SOURCE = {
+  channel: "telegram" as const,
+  threadId: `hid_${"2".repeat(32)}`,
   threadIsDirect: true,
 };
 
@@ -118,7 +125,10 @@ describe("hosted usage referral tool", () => {
     await expect(handleHostedUsageReferralGroupTool({
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toEqual({
       action: "read_usage_referral",
       result: {
@@ -137,16 +147,21 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toMatchObject({
       action: "read_usage_referral",
       result: {
         outcome: "read",
         referral: {
-          active: null,
+          activeMissions: [],
           availablePolicies: [
             {
               code: "new_person_activation_v1",
+              requirementsLabel:
+                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 100 more messages on the model your Murph is using now",
             },
@@ -174,13 +189,18 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "read_usage_referral" },
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
     })).resolves.toMatchObject({
       result: {
         referral: {
           availablePolicies: [
             {
               code: "new_person_activation_v1",
+              requirementsLabel:
+                "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
                 "about 50 more messages on the model your Murph is using now",
             },
@@ -195,7 +215,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("does not arm a personal mission without a trusted source conversation", async () => {
+  it("offers only the provider-neutral mission from Telegram", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -203,8 +223,105 @@ describe("hosted usage referral tool", () => {
       memberId: "member_personal",
       prisma: prisma as never,
       request: {
+        action: "read_usage_referral",
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          availablePolicies: [
+            {
+              code: "active_group_v1",
+            },
+          ],
+        },
+        status: "ok",
+      },
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: ["active_group_v1"],
+        sourceConversation: TELEGRAM_PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "armed",
+        referral: {
+          activeMissions: [{
+            policyCode: "active_group_v1",
+            state: "armed",
+          }],
+        },
+        status: "ok",
+      },
+    });
+  });
+
+  it.each([
+    { linqService: "sms" as const, title: "SMS" },
+    { linqService: "rcs" as const, title: "RCS" },
+    { linqService: null, title: "unknown Linq service" },
+  ])("offers only the provider-neutral mission from $title", async ({
+    linqService,
+  }) => {
+    const { prisma } = buildPrisma();
+    const sourceConversation = {
+      channel: "linq" as const,
+      ...(linqService ? { linqService } : {}),
+      threadId: `hid_${"9".repeat(32)}`,
+      threadIsDirect: true,
+    };
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        referral: {
+          availablePolicies: [{ code: "active_group_v1" }],
+        },
+        status: "ok",
+      },
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: ["new_person_activation_v1"],
+        sourceConversation,
       },
     })).resolves.toEqual({
       action: "arm_usage_referral",
@@ -217,7 +334,29 @@ describe("hosted usage referral tool", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("freezes the personal destination and supersedes only the older unbound mission", async () => {
+  it("does not arm a personal mission without a trusted source conversation", async () => {
+    const { prisma } = buildPrisma();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: ["new_person_activation_v1"],
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("atomically arms and idempotently repeats an exact policy set", async () => {
     const { prisma, referrals } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -226,19 +365,171 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
         sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
-      action: "arm_usage_referral",
       result: {
         outcome: "armed",
         referral: {
-          active: {
-            destinationKind: "personal",
-            policyCode: "new_person_activation_v1",
+          activeMissions: [
+            {
+              destinationKind: "personal",
+              policyCode: "new_person_activation_v1",
+              state: "armed",
+            },
+            {
+              destinationKind: "personal",
+              policyCode: "active_group_v1",
+              state: "armed",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(referrals).toHaveLength(2);
+    expect(referrals[0]).toMatchObject({
+      beneficiaryMemberId: "member_personal",
+      policyCode: "new_person_activation_v1",
+      referrerMemberId: "member_personal",
+      sourceConversationJson: {
+        channel: "linq",
+        threadId: PERSONAL_SOURCE.threadId,
+        threadIsDirect: true,
+      },
+      status: "armed",
+    });
+    expect(referrals[1]).toMatchObject({
+      beneficiaryMemberId: "member_personal",
+      policyCode: "active_group_v1",
+      referrerMemberId: "member_personal",
+      sourceConversationJson: {
+        channel: "linq",
+        threadId: PERSONAL_SOURCE.threadId,
+        threadIsDirect: true,
+      },
+      status: "armed",
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "armed",
+        referral: {
+          activeMissions: [
+            { policyCode: "new_person_activation_v1" },
+            { policyCode: "active_group_v1" },
+          ],
+        },
+        status: "ok",
+      },
+    });
+    expect(referrals).toHaveLength(2);
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "canceled",
+        referral: {
+          activeMissions: [{
+            policyCode: "active_group_v1",
             state: "armed",
-          },
+          }],
+        },
+        status: "ok",
+      },
+    });
+    expect(referrals[0]?.status).toBe("canceled");
+    expect(referrals[1]?.status).toBe("armed");
+  });
+
+  it.each([
+    {
+      buildInput: { referrerRewardTotal: 5_500_000n },
+      label: "combined reward capacity",
+    },
+    {
+      buildInput: { inProgressCount: 2 },
+      label: "the remaining in-progress slot",
+    },
+  ])("leaves both unarmed when $label fits only one", async ({
+    buildInput,
+  }) => {
+    const { prisma, referrals } = buildPrisma(buildInput);
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_selection_requires_one",
+      },
+    });
+    expect(referrals).toHaveLength(0);
+  });
+
+  it("suppresses and rejects a policy already armed for another destination", async () => {
+    const { prisma, referrals } = buildPrisma();
+    referrals.push({
+      armedAt: new Date("2026-07-29T12:00:00.000Z"),
+      beneficiaryMemberId: "member_other_destination",
+      expiresAt: new Date("2030-08-05T12:00:00.000Z"),
+      id: "hur_other_destination",
+      policyCode: "active_group_v1",
+      referrerMemberId: "member_personal",
+      rewardUsdMicros: 3_500_000n,
+      sourceConversationJson: null,
+      status: "armed",
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          activeMissions: [],
+          availablePolicies: [{ code: "new_person_activation_v1" }],
         },
         status: "ok",
       },
@@ -250,36 +541,21 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "active_group_v1",
+        policyCodes: ["active_group_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
-    })).resolves.toMatchObject({
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
       result: {
-        outcome: "armed",
-        referral: {
-          active: {
-            destinationKind: "personal",
-            policyCode: "active_group_v1",
-            state: "armed",
-          },
-        },
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
       },
     });
-
-    expect(referrals).toHaveLength(2);
-    expect(referrals[0]).toMatchObject({
-      beneficiaryMemberId: "member_personal",
-      policyCode: "new_person_activation_v1",
-      referrerMemberId: "member_personal",
-      status: "superseded",
-    });
-    expect(referrals[1]).toMatchObject({
-      beneficiaryMemberId: "member_personal",
-      policyCode: "active_group_v1",
-      referrerMemberId: "member_personal",
-      sourceConversationJson: PERSONAL_SOURCE,
-      status: "armed",
-    });
+    expect(referrals).toHaveLength(1);
+    expect(referrals[0]?.beneficiaryMemberId).toBe(
+      "member_other_destination",
+    );
   });
 
   it("serializes every database query inside the arm transaction", async () => {
@@ -291,7 +567,7 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
@@ -314,7 +590,7 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
@@ -327,7 +603,10 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     })).resolves.toMatchObject({
       result: {
         outcome: "canceled",
@@ -367,7 +646,11 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: { action: "read_usage_referral" },
     })).resolves.toMatchObject({
-      result: { outcome: "read", referral: { active: null }, status: "ok" },
+      result: {
+        outcome: "read",
+        referral: { activeMissions: [] },
+        status: "ok",
+      },
     });
     await expect(handleHostedUsageReferralGroupTool({
       enabled: true,
@@ -375,14 +658,17 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
       result: {
         outcome: "armed",
         referral: {
-          active: { policyCode: "new_person_activation_v1", state: "armed" },
+          activeMissions: [{
+            policyCode: "new_person_activation_v1",
+            state: "armed",
+          }],
         },
         status: "ok",
       },
@@ -396,7 +682,10 @@ describe("hosted usage referral tool", () => {
       result: {
         outcome: "read",
         referral: {
-          active: { policyCode: "new_person_activation_v1", state: "armed" },
+          activeMissions: [{
+            policyCode: "new_person_activation_v1",
+            state: "armed",
+          }],
         },
         status: "ok",
       },
@@ -405,11 +694,14 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     })).resolves.toMatchObject({
       result: {
         outcome: "canceled",
-        referral: { active: null },
+        referral: { activeMissions: [] },
         status: "ok",
       },
     });
@@ -437,7 +729,7 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toEqual({
@@ -471,10 +763,10 @@ describe("hosted usage referral tool", () => {
       result: {
         outcome: "read",
         referral: {
-          active: {
+          activeMissions: [{
             policyCode: "new_person_activation_v1",
             state: "armed",
-          },
+          }],
         },
         status: "ok",
       },
@@ -491,7 +783,7 @@ describe("hosted usage referral tool", () => {
       prisma: prisma as never,
       request: {
         action: "arm_usage_referral",
-        policyCode: "new_person_activation_v1",
+        policyCodes: ["new_person_activation_v1"],
         sourceConversation: PERSONAL_SOURCE,
       },
     });
@@ -504,7 +796,10 @@ describe("hosted usage referral tool", () => {
       enabled: true,
       memberId: "member_personal",
       prisma: prisma as never,
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     })).resolves.toEqual({
       action: "cancel_usage_referral",
       result: {
@@ -535,7 +830,7 @@ describe("hosted usage referral tool", () => {
     })).resolves.toMatchObject({
       result: {
         outcome: "read",
-        referral: { active: null },
+        referral: { activeMissions: [] },
         status: "ok",
       },
     });
@@ -544,7 +839,11 @@ describe("hosted usage referral tool", () => {
   });
 });
 
-function buildPrisma(): {
+function buildPrisma(input: {
+  beneficiaryRewardTotal?: bigint;
+  inProgressCount?: number;
+  referrerRewardTotal?: bigint;
+} = {}): {
   peakTransactionQueries: () => number;
   prisma: Record<string, unknown>;
   referrals: ReferralState[];
@@ -593,20 +892,100 @@ function buildPrisma(): {
     }
   };
 
+  const matchesReferral = (
+    referral: ReferralState,
+    where?: {
+      beneficiaryMemberId?: string;
+      expiresAt?: { gt?: Date };
+      policyCode?:
+        | ReferralState["policyCode"]
+        | { in?: readonly ReferralState["policyCode"][] };
+      referrerMemberId?: string;
+      status?: string | { in?: readonly string[] };
+    },
+  ): boolean => {
+    if (!where) {
+      return true;
+    }
+    if (
+      where.beneficiaryMemberId
+      && referral.beneficiaryMemberId !== where.beneficiaryMemberId
+    ) {
+      return false;
+    }
+    if (where.policyCode) {
+      if (
+        typeof where.policyCode === "string"
+        && referral.policyCode !== where.policyCode
+      ) {
+        return false;
+      }
+      if (
+        typeof where.policyCode === "object"
+        && where.policyCode.in
+        && !where.policyCode.in.includes(referral.policyCode)
+      ) {
+        return false;
+      }
+    }
+    if (
+      where.referrerMemberId
+      && referral.referrerMemberId !== where.referrerMemberId
+    ) {
+      return false;
+    }
+    if (where.expiresAt?.gt && referral.expiresAt <= where.expiresAt.gt) {
+      return false;
+    }
+    if (
+      typeof where.status === "string"
+      && referral.status !== where.status
+    ) {
+      return false;
+    }
+    if (
+      typeof where.status === "object"
+      && where.status.in
+      && !where.status.in.includes(referral.status)
+    ) {
+      return false;
+    }
+    return true;
+  };
   const referralDelegate = {
-    aggregate: vi.fn(async () => runQuery(
-      () => ({ _sum: { rewardUsdMicros: null } }),
-    )),
-    count: vi.fn(async () => runQuery(() => 0)),
+    aggregate: vi.fn(async (query: {
+      where?: {
+        beneficiaryMemberId?: string;
+        referrerMemberId?: string;
+      };
+    }) => runQuery(() => ({
+      _sum: {
+        rewardUsdMicros: query.where?.beneficiaryMemberId
+          ? input.beneficiaryRewardTotal ?? null
+          : input.referrerRewardTotal ?? null,
+      },
+    }))),
+    count: vi.fn(async () =>
+      runQuery(() => input.inProgressCount ?? 0)
+    ),
     create: vi.fn(async (input: { data: ReferralState }) => runQuery(() => {
       referrals.push({ ...input.data });
       return referrals.at(-1);
     })),
-    findFirst: vi.fn(async () => runQuery(() =>
+    findFirst: vi.fn(async (
+      input?: { where?: Parameters<typeof matchesReferral>[1] },
+    ) => runQuery(() =>
       [...referrals]
         .reverse()
-        .find((referral) => referral.status === "armed")
+        .find((referral) => matchesReferral(referral, input?.where))
         ?? null
+    )),
+    findMany: vi.fn(async (
+      input?: { where?: Parameters<typeof matchesReferral>[1] },
+    ) => runQuery(() =>
+      referrals.filter((referral) =>
+        matchesReferral(referral, input?.where)
+      )
     )),
     update: vi.fn(async (input: {
       data: Partial<ReferralState> & { sourceConversationJson?: unknown };

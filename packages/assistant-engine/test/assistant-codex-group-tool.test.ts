@@ -31,6 +31,9 @@ import type {
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from "../src/assistant/group-shared-read-limits.ts";
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from "../src/assistant/message-target-selection.ts";
 import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
@@ -118,6 +121,8 @@ describe("murph.group dynamic tool", () => {
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.policyCode.description)
+      .toContain('state="armed"');
     expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
@@ -171,7 +176,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("authorized direct, group, or scheduled context");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("trusted host binds member, group, sender, route, input, and occurrence");
+      .toContain("trusted host binds member, group, route, input, and occurrence");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("exact server-issued membershipId or grantId");
     expect(MURPH_GROUP_TOOL.description)
@@ -184,7 +189,9 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("a changed question conflicts");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="ok" means provider acceptance, not completion');
+      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
+    expect(MURPH_GROUP_TOOL.description)
+      .not.toContain('. status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.description)
@@ -271,20 +278,34 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "active_group_v1",
+      policyCodes: [
+        "new_person_activation_v1",
+        "active_group_v1",
+      ],
     }))).toEqual({
       kind: "group",
       request: {
         action: "arm_usage_referral",
-        policyCode: "active_group_v1",
+        policyCodes: [
+          "new_person_activation_v1",
+          "active_group_v1",
+        ],
       },
     });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "arm_usage_referral",
+      policyCodes: ["active_group_v1", "active_group_v1"],
+    }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
+      policyCode: "new_person_activation_v1",
     }))).toEqual({
       kind: "group",
-      request: { action: "cancel_usage_referral" },
+      request: {
+        action: "cancel_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -326,9 +347,13 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
     }))).toEqual({
       kind: "group",
-      request: { action: "revoke_own_email_share" },
+      request: {
+        action: "revoke_own_email_share",
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -347,16 +372,192 @@ describe("murph.group dynamic tool", () => {
       chatId: "chat_hijack",
     }))?.kind).toBe("invalid-group-arguments");
 
-    expect(readMurphDynamicToolRequest(groupToolCall({
+    for (const invalid of [
+      { action: "revoke_own_email_share" },
+      {
+        action: "revoke_own_email_share",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+        memberId: "model-supplied",
+      },
+      {
+        action: "revoke_own_email_share",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+        participant: { senderHandle: "+15551110003", source: "linq" },
+      },
+      {
+        action: "revoke_own_email_share",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+        selfOptOut: { senderHandle: "member@example.test", source: "email" },
+      },
+      { action: "revoke_own_email_share", message_ref: "provider-message-id" },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
+        .toBe("invalid-group-arguments");
+    }
+  });
+
+  it("uses one message_ref model contract for exact-message group actions", () => {
+    expect(MURPH_GROUP_TOOL.inputSchema.properties)
+      .not.toHaveProperty("messageRef");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.message_ref)
+      .toMatchObject({ pattern: "^ain_[0-9a-f]{32}$" });
+
+    for (const action of [
+      "ask_current_sender",
+      "revoke_own_email_share",
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+      }))).toEqual({
+        kind: "group",
+        request: {
+          action,
+          messageRef: FRESH_ASSISTANT_INPUT_ID,
+        },
+      });
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        messageRef: FRESH_ASSISTANT_INPUT_ID,
+      }))).toMatchObject({ kind: "invalid-group-arguments" });
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action,
+        memberId: "model-supplied",
+        message_ref: FRESH_ASSISTANT_INPUT_ID,
+      }))).toMatchObject({ kind: "invalid-group-arguments" });
+    }
+  });
+
+  it("selects the request-bearing message_ref from two accepted group senders", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
-      selfOptOut: { senderHandle: "member@example.test", source: "email" },
-    }))?.kind).toBe("invalid-group-arguments");
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const earlierParticipant = {
+      assistantInputId: EARLIER_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110002",
+      source: "linq" as const,
+    };
+    const participant = {
+      assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
+      vi.fn(async ({ messageRef }) => {
+        if (messageRef === EARLIER_ASSISTANT_INPUT_ID) {
+          return {
+            participant: earlierParticipant,
+            targetInputId: EARLIER_ASSISTANT_INPUT_ID,
+          };
+        }
+        if (messageRef === FRESH_ASSISTANT_INPUT_ID) {
+          return {
+            participant,
+            targetInputId: FRESH_ASSISTANT_INPUT_ID,
+          };
+        }
+        return null;
+      });
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 1, status: "revoked" },
+    }));
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [EARLIER_ASSISTANT_INPUT_ID, FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_one", "mailbox_two"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: "participant-effect",
+      deliveryContextOrdinal: 0,
+      messageRef: FRESH_ASSISTANT_INPUT_ID,
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "revoke_own_email_share",
+      participant,
+    });
+  });
+
+  it.each([
+    ["missing authorizer", null],
+    ["invented ref", async () => null],
+    [
+      "cross-message participant",
+      async () => ({
+        participant: {
+          assistantInputId: EARLIER_ASSISTANT_INPUT_ID,
+          senderHandle: "+15551110002",
+          source: "linq" as const,
+        },
+        targetInputId: FRESH_ASSISTANT_INPUT_ID,
+      }),
+    ],
+  ])("fails closed for email-share revocation with %s", async (
+    _case,
+    authorizeAcceptedMessageTarget,
+  ) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "revoke_own_email_share",
+      message_ref: FRESH_ASSISTANT_INPUT_ID,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>();
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group",
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("keeps a committed referral arm recovery result tool-successful", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -403,7 +604,7 @@ describe("murph.group dynamic tool", () => {
     });
     expect(groupRequest).toHaveBeenCalledWith({
       action: "arm_usage_referral",
-      policyCode: "new_person_activation_v1",
+      policyCodes: ["new_person_activation_v1"],
     });
   });
 
@@ -2099,7 +2300,7 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="ok" means provider acceptance, not completion');
+      .toContain('Rename/avatar status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
       .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
@@ -2813,7 +3014,7 @@ describe("murph.newsletter dynamic tool", () => {
       "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "current-week shared facts",
+      "shared facts from the seven completed local days",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
       "exact live email and health-share grants",
@@ -3092,16 +3293,25 @@ describe("murph.newsletter dynamic tool", () => {
                   grantStatus: "granted",
                   projectionScope: { projectionKind: "steps-days.v0" },
                   projectionScopeKey: "steps-days.v0",
-                  records: [{
+                  records: [
+                    "2026-06-30",
+                    "2026-07-01",
+                    "2026-07-02",
+                    "2026-07-03",
+                    "2026-07-04",
+                    "2026-07-05",
+                    "2026-07-06",
+                    "2026-07-07",
+                  ].map((date, index) => ({
                     data: {
-                      date: "2026-07-06",
+                      date,
                       metricKey: "steps",
                       unit: "count",
-                      value: 7_000,
+                      value: (index + 1) * 1_000,
                     },
-                    occurredAt: "2026-07-06T00:00:00.000Z",
-                    recordKey: "2026-07-06",
-                  }],
+                    occurredAt: `${date}T00:00:00.000Z`,
+                    recordKey: date,
+                  })),
                 }],
               },
               {
@@ -3174,9 +3384,17 @@ describe("murph.newsletter dynamic tool", () => {
             displayName: "Ada",
             memberId: "member_a",
             weeklyStats: [{
-              currentWeekAvg: 7_000,
-              observedDayCount: 1,
-              observedDates: ["2026-07-06"],
+              completedDaysAvg: 4_000,
+              observedDayCount: 7,
+              observedDates: [
+                "2026-06-30",
+                "2026-07-01",
+                "2026-07-02",
+                "2026-07-03",
+                "2026-07-04",
+                "2026-07-05",
+                "2026-07-06",
+              ],
               stream: "steps",
               throughDate: "2026-07-06",
               unit: "count",

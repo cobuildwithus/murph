@@ -54,6 +54,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
+    'assistantProviderPreference String? @map("assistant_provider_preference")',
     'assistantPersona String? @map("assistant_persona")',
     'assistantPersonaCausalSeq BigInt? @map("assistant_persona_causal_seq")',
     'assistantReasoningEffortPreference String? @map("assistant_reasoning_effort_preference")',
@@ -638,6 +639,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantProviderPreferenceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260729043000_hosted_member_assistant_provider_preference/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantPersonalityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260710130000_hosted_member_assistant_personality/migration.sql",
@@ -1007,7 +1015,9 @@ describe("hosted Prisma baseline migration", () => {
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "20260728190000_hosted_mailbox_source_message",
       "20260729010000_hosted_account_cleanup_runtime_logs",
+      "20260729043000_hosted_member_assistant_provider_preference",
       "20260729170000_hosted_thread_route_account_lookup_key",
+      "20260729190000_composable_usage_referral_missions",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -1620,6 +1630,18 @@ describe("hosted Prisma baseline migration", () => {
       "NOT NULL",
     );
     expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
+      "DEFAULT",
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ALTER TABLE "hosted_member"',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).toContain(
+      'ADD COLUMN "assistant_provider_preference" TEXT',
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(hostedMemberAssistantProviderPreferenceMigrationSql).not.toContain(
       "DEFAULT",
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
