@@ -57,6 +57,7 @@ const OPTIMIZED_TRANSPARENT_GIF_FIXTURE_BASE64 = [
 ].join("");
 
 async function createAnimatedGifBytes(input: {
+  delaysMs?: readonly number[];
   frameCount?: number;
   height?: number;
   width?: number;
@@ -73,7 +74,10 @@ async function createAnimatedGifBytes(input: {
         height: input.height ?? 320,
         fit: "fill",
       })
-      .gif({ effort: 1 })
+      .gif({
+        effort: 1,
+        ...(input.delaysMs ? { delay: [...input.delaysMs] } : {}),
+      })
       .toBuffer(),
   );
 }
@@ -270,10 +274,15 @@ test("Linq animated GIFs become compact left-to-right WebP filmstrips", async ()
   const vaultRoot = await makeTempDirectory("murph-linq-gif-storyboard");
   await initializeVault({ vaultRoot, createdAt: "2026-07-29T11:59:00.000Z" });
 
-  const gifBytes = await createAnimatedGifBytes();
+  const delaysMs = [40, 40, 40, 5_000, 40, 40, 40];
+  const gifBytes = await createAnimatedGifBytes({
+    delaysMs,
+    frameCount: delaysMs.length,
+  });
   const sharp = (await import("sharp")).default;
   const sourceMetadata = await sharp(gifBytes, { animated: true }).metadata();
   assert.equal(sourceMetadata.hasAlpha, true);
+  assert.deepEqual(sourceMetadata.delay, delaysMs);
   const attachmentUrl = "https://cdn.linqapp.com/media/reaction.gif";
   const capture = await normalizeLinqWebhookEvent({
     event: buildV2026LinqWebhookEvent({
@@ -355,14 +364,9 @@ test("Linq animated GIFs become compact left-to-right WebP filmstrips", async ()
     assert.equal(metadata.pages ?? 1, 1);
     assert.equal(metadata.hasAlpha, false);
 
-    const expectedSampledColors = [
-      ANIMATED_GIF_FRAME_COLORS[0],
-      ANIMATED_GIF_FRAME_COLORS[1],
-      ANIMATED_GIF_FRAME_COLORS[3],
-      ANIMATED_GIF_FRAME_COLORS[4],
-      ANIMATED_GIF_FRAME_COLORS[6],
-      ANIMATED_GIF_FRAME_COLORS[7],
-    ] as const;
+    const expectedSampledColors = [0, 1, 2, 3, 4, 6].map(
+      (page) => ANIMATED_GIF_FRAME_COLORS[page],
+    );
     for (const [index, expectedColor] of expectedSampledColors.entries()) {
       assertRgbNear(
         await readImagePixel({

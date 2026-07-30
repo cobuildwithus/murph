@@ -26,7 +26,11 @@ const GIF_STORYBOARD_GAP_PX = 8;
 const GIF_STORYBOARD_WEBP_QUALITY = 72;
 const GIF_STORYBOARD_MAX_SOURCE_FRAMES = 120;
 const GIF_STORYBOARD_MAX_SOURCE_PIXELS = 16 * 1_000_000;
-const GIF_STORYBOARD_BACKGROUND_CHANNEL = 127;
+const GIF_STORYBOARD_BACKGROUND = {
+  r: 127,
+  g: 127,
+  b: 127,
+} as const;
 const ALLOWED_STATIC_RASTER_INPUT_FORMATS = new Set([
   "gif",
   "heif",
@@ -35,12 +39,6 @@ const ALLOWED_STATIC_RASTER_INPUT_FORMATS = new Set([
   "webp",
 ]);
 type SharpFactory = typeof import("sharp");
-
-interface StoryboardFrame {
-  bytes: Buffer;
-  height: number;
-  width: number;
-}
 
 export async function normalizeAttachmentForStorage(
   input: NormalizeAttachmentForStorageInput,
@@ -76,6 +74,7 @@ export async function normalizeAttachmentForStorage(
 
       const output = await buildGifStoryboard({
         bytes: input.bytes,
+        frameDelaysMs: metadata.delay,
         pageCount,
         sharp,
       });
@@ -122,12 +121,15 @@ export async function normalizeAttachmentForStorage(
 
 async function buildGifStoryboard(input: {
   bytes: Uint8Array;
+  frameDelaysMs: number[] | undefined;
   pageCount: number;
   sharp: SharpFactory;
 }): Promise<Buffer> {
-  const frames: StoryboardFrame[] = [];
-  for (const page of selectStoryboardPages(input.pageCount)) {
-    const { data, info } = await input.sharp(input.bytes, {
+  const frames: Buffer[] = [];
+  for (
+    const page of selectStoryboardPages(input.pageCount, input.frameDelaysMs)
+  ) {
+    const frame = await input.sharp(input.bytes, {
       limitInputPixels: IMAGE_NORMALIZATION_MAX_INPUT_PIXELS,
       page,
       pages: 1,
@@ -139,55 +141,21 @@ async function buildGifStoryboard(input: {
         fit: "inside",
         withoutEnlargement: true,
       })
-      .png({
-        adaptiveFiltering: true,
-        compressionLevel: 9,
-      })
-      .toBuffer({ resolveWithObject: true });
-
-    if (info.width < 1 || info.height < 1) {
-      throw new RangeError("Animated image frame has invalid dimensions.");
-    }
-
-    frames.push({
-      bytes: data,
-      height: info.height,
-      width: info.width,
-    });
+      .png()
+      .toBuffer();
+    frames.push(frame);
   }
 
-  if (frames.length === 0) {
-    throw new RangeError("Animated image did not yield any storyboard frames.");
-  }
-
-  const canvasWidth =
-    frames.reduce((total, frame) => total + frame.width, 0) +
-    (frames.length - 1) * GIF_STORYBOARD_GAP_PX;
-  const canvasHeight = Math.max(...frames.map((frame) => frame.height));
-  let nextLeft = 0;
-  const composites = frames.map((frame) => {
-    const left = nextLeft;
-    nextLeft += frame.width + GIF_STORYBOARD_GAP_PX;
-    return {
-      input: frame.bytes,
-      left,
-      top: Math.floor((canvasHeight - frame.height) / 2),
-    };
-  });
-
-  return await input.sharp({
-    create: {
-      width: canvasWidth,
-      height: canvasHeight,
-      channels: 3,
-      background: {
-        r: GIF_STORYBOARD_BACKGROUND_CHANNEL,
-        g: GIF_STORYBOARD_BACKGROUND_CHANNEL,
-        b: GIF_STORYBOARD_BACKGROUND_CHANNEL,
-      },
+  return await input.sharp(frames, {
+    join: {
+      across: frames.length,
+      shim: GIF_STORYBOARD_GAP_PX,
+      background: GIF_STORYBOARD_BACKGROUND,
     },
   })
-    .composite(composites)
+    .flatten({
+      background: GIF_STORYBOARD_BACKGROUND,
+    })
     .webp({
       quality: GIF_STORYBOARD_WEBP_QUALITY,
       effort: 4,
@@ -220,7 +188,10 @@ function isGifWithinBudget(input: {
   );
 }
 
-function selectStoryboardPages(pageCount: number): number[] {
+function selectStoryboardPages(
+  pageCount: number,
+  frameDelaysMs: readonly number[] | undefined,
+): number[] {
   const frameCount = Math.min(
     pageCount,
     GIF_STORYBOARD_MAX_FRAMES,
@@ -229,9 +200,74 @@ function selectStoryboardPages(pageCount: number): number[] {
     return Array.from({ length: frameCount }, (_, index) => index);
   }
 
-  return Array.from({ length: frameCount }, (_, index) =>
+  const ordinalPages = Array.from({ length: frameCount }, (_, index) =>
     Math.round((index * (pageCount - 1)) / (frameCount - 1))
   );
+  if (
+    frameDelaysMs?.length !== pageCount ||
+    frameDelaysMs.some(
+      (delay) => !Number.isSafeInteger(delay) || delay < 0,
+    )
+  ) {
+    return ordinalPages;
+  }
+
+  const totalDurationMs = frameDelaysMs.reduce(
+    (total, delay) => total + delay,
+    0,
+  );
+  if (!Number.isSafeInteger(totalDurationMs) || totalDurationMs < 1) {
+    return ordinalPages;
+  }
+
+  const selectedPages = new Set([0, pageCount - 1]);
+  for (let index = 1; index < frameCount - 1; index += 1) {
+    const targetTimeMs = (index * totalDurationMs) / (frameCount - 1);
+    const targetPage = findPageAtTime(frameDelaysMs, targetTimeMs);
+    selectedPages.add(
+      findNearestUnselectedPage({
+        pageCount,
+        selectedPages,
+        targetPage,
+      }),
+    );
+  }
+
+  return [...selectedPages].sort((left, right) => left - right);
+}
+
+function findPageAtTime(
+  frameDelaysMs: readonly number[],
+  targetTimeMs: number,
+): number {
+  let elapsedMs = 0;
+  for (const [page, delayMs] of frameDelaysMs.entries()) {
+    elapsedMs += delayMs;
+    if (targetTimeMs < elapsedMs) {
+      return page;
+    }
+  }
+  return frameDelaysMs.length - 1;
+}
+
+function findNearestUnselectedPage(input: {
+  pageCount: number;
+  selectedPages: ReadonlySet<number>;
+  targetPage: number;
+}): number {
+  for (let distance = 0; distance < input.pageCount; distance += 1) {
+    const before = input.targetPage - distance;
+    if (before >= 0 && !input.selectedPages.has(before)) {
+      return before;
+    }
+
+    const after = input.targetPage + distance;
+    if (after < input.pageCount && !input.selectedPages.has(after)) {
+      return after;
+    }
+  }
+
+  throw new RangeError("Animated image did not yield enough storyboard pages.");
 }
 
 function normalizePageCount(value: number | undefined): number {
