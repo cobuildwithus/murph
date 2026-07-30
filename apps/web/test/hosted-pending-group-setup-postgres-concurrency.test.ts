@@ -21,7 +21,9 @@ import {
   readHostedPendingGroupSetup,
 } from "@/src/lib/hosted-groups/pending-group-setup";
 import {
+  claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
+  markHostedLinqDeliveryAcceptedTx,
   readHostedLinqGroupLineRecoveryAuthorityTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -361,12 +363,15 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         throw new Error("Expected recovery line lookup keys.");
       }
       const threadId = `chat-pending-group-recovery-${fixtureId}`;
-      const deliveryId = `hld_pending_group_recovery_${fixtureId}`;
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retryOccurredAt = new Date();
-      const armedAt = new Date(retryOccurredAt.getTime() - 2 * 60_000);
+      const armedAt = new Date(retryOccurredAt.getTime() - 20 * 60_000);
       const recoveryAttemptedAt =
         new Date(retryOccurredAt.getTime() - 60_000);
+      const recoveryReplayedAt =
+        new Date(retryOccurredAt.getTime() + 60_000);
+      let deliveryId: string | null = null;
 
       try {
         await client.hostedLinqLine.createMany({
@@ -437,22 +442,40 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         if (!recoveryIdempotencyLookupKey) {
           throw new Error("Expected a recovery delivery lookup key.");
         }
-        await client.hostedLinqDelivery.create({
-          data: {
-            attemptedAt: recoveryAttemptedAt,
-            id: deliveryId,
-            idempotencyKey: recoveryIdempotencyLookupKey,
-            phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
-            source: "hosted_webhook_side_effect",
-            sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
-              effectId: recoveryEffectId,
-              sourceEventId: `event-pending-group-recovery-${fixtureId}`,
-            }),
-            status: "attempted",
-            targetKind: "participant",
-            template: "group_line_recovery",
-          },
+        const recoverySourceRef = buildHostedLinqGroupLineRecoverySourceRef({
+          effectId: recoveryEffectId,
+          sourceEventId: `event-pending-group-recovery-${fixtureId}`,
         });
+        const initialClaim = await claimHostedLinqDeliveryProviderDispatchTx({
+          attemptedAt: recoveryAttemptedAt,
+          idempotencyKey: recoveryEffectId,
+          phoneNumber: recoveredRecipientPhone,
+          prisma: client,
+          reclaimStalePreProviderAttempt: true,
+          source: "hosted_webhook_side_effect",
+          sourceRef: recoverySourceRef,
+          status: "attempted",
+          targetKind: "participant",
+          template: "group_line_recovery",
+        });
+        expect(initialClaim.claimed).toBe(true);
+        if (!initialClaim.id) {
+          throw new Error("Expected a persisted recovery delivery.");
+        }
+        deliveryId = initialClaim.id;
+        const recoveryDeliveryId = initialClaim.id;
+        await expect(markHostedLinqDeliveryAcceptedTx({
+          acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
+          idempotencyKey: recoveryEffectId,
+          messageId: `provider-message-persistence-failure-${fixtureId}`,
+          prisma: {
+            hostedLinqDelivery: {
+              updateMany: async () => {
+                throw new Error("accepted milestone unavailable");
+              },
+            },
+          } as never,
+        })).rejects.toThrow("accepted milestone unavailable");
 
         await expect(readHostedLinqGroupLineRecoveryAuthorityTx({
           memberId: ownerMemberId,
@@ -482,14 +505,47 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           retryable: true,
         });
 
-        await client.hostedLinqDelivery.update({
-          data: {
-            acceptedAt: new Date(recoveryAttemptedAt.getTime() + 1_000),
-            messageLookupKey:
-              `hbid:linq-message:pending-group-recovery-${fixtureId}`,
-            status: "accepted",
+        const concurrentReplayClients =
+          createSynchronizedRecoveryClaimClients(client, secondClient);
+        const replayClaims = await Promise.all(
+          concurrentReplayClients.map((prisma) =>
+            claimHostedLinqDeliveryProviderDispatchTx({
+              attemptedAt: recoveryReplayedAt,
+              idempotencyKey: recoveryEffectId,
+              phoneNumber: recoveredRecipientPhone,
+              prisma,
+              reclaimStalePreProviderAttempt: true,
+              source: "hosted_webhook_side_effect",
+              sourceRef: recoverySourceRef,
+              status: "attempted",
+              targetKind: "participant",
+              template: "group_line_recovery",
+            })
+          ),
+        );
+        expect(replayClaims.filter((claim) => claim.claimed)).toHaveLength(1);
+        expect(replayClaims.every((claim) =>
+          claim.id === recoveryDeliveryId
+        )).toBe(true);
+
+        await expect(markHostedLinqDeliveryAcceptedTx({
+          acceptedAt: new Date(recoveryReplayedAt.getTime() + 1_000),
+          idempotencyKey: recoveryEffectId,
+          linqChatId: `recovery-chat-${fixtureId}`,
+          messageId: `provider-message-recovery-${fixtureId}`,
+          prisma: client,
+        })).resolves.toMatchObject({
+          deliveryStatus: "accepted",
+        });
+        await expect(client.hostedLinqDelivery.findUniqueOrThrow({
+          select: {
+            attemptedAt: true,
+            idempotencyKey: true,
           },
-          where: { id: deliveryId },
+          where: { id: recoveryDeliveryId },
+        })).resolves.toEqual({
+          attemptedAt: recoveryAttemptedAt,
+          idempotencyKey: recoveryIdempotencyLookupKey,
         });
 
         await expect(hasHostedLinqGroupLineRecoveryAuthorityTx({
@@ -677,9 +733,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           reason: "no_candidates",
         });
       } finally {
-        await client.hostedLinqDelivery.deleteMany({
-          where: { id: deliveryId },
-        });
+        if (deliveryId) {
+          await client.hostedLinqDelivery.deleteMany({
+            where: { id: deliveryId },
+          });
+        }
         await client.hostedMember.deleteMany({
           where: {
             id: {
@@ -698,10 +756,60 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         await client.$disconnect();
+        await secondClient.$disconnect();
       }
     });
   },
 );
+
+function createSynchronizedRecoveryClaimClients(
+  first: PrismaClient,
+  second: PrismaClient,
+): [PrismaClient, PrismaClient] {
+  let arrivalCount = 0;
+  let release: () => void = () => undefined;
+  const bothReadSameVersion = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const synchronizeDeliveryRead = (client: PrismaClient): PrismaClient =>
+    new Proxy(client, {
+      get(target, property, receiver) {
+        if (property !== "hostedLinqDelivery") {
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        const delivery = target.hostedLinqDelivery;
+        return new Proxy(delivery, {
+          get(deliveryTarget, deliveryProperty, deliveryReceiver) {
+            if (deliveryProperty !== "findUnique") {
+              const value = Reflect.get(
+                deliveryTarget,
+                deliveryProperty,
+                deliveryReceiver,
+              );
+              return typeof value === "function"
+                ? value.bind(deliveryTarget)
+                : value;
+            }
+            return async (input: Prisma.HostedLinqDeliveryFindUniqueArgs) => {
+              const row = await delivery.findUnique(input);
+              arrivalCount += 1;
+              if (arrivalCount === 2) {
+                release();
+              }
+              await bothReadSameVersion;
+              return row;
+            };
+          },
+        });
+      },
+    });
+
+  return [
+    synchronizeDeliveryRead(first),
+    synchronizeDeliveryRead(second),
+  ];
+}
 
 function isClearlyLocalPostgresUrl(value: string): boolean {
   try {

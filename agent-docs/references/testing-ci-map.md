@@ -223,15 +223,20 @@ route creation and a completed oversized roster preserves sender-owner
 admission. Transport tests prove group-line recovery persists its accepted
 milestone before returning provider success, retries that write with the stable
 provider idempotency key, and does not misclassify a provider-successful send as
-failed. The opt-in PostgreSQL concurrency
+failed. Delivery-store tests prove the exact pinned replay bypasses the generic
+lease, rejects changed source or target identity, and preserves its original
+authority timestamp. The opt-in PostgreSQL concurrency
 proof verifies one encrypted setup can be claimed at most once, exact restore
 preserves its payload, stale restore cannot overwrite a replacement, corrupt
 payload does not block admission, and member deletion cascades pending state.
 The same real-database proof composes a provider-correlated line-recovery
 delivery with a different roster member's first message: the exact prepared
-owner is selected, an exact uncorrelated attempt retries route-free, foreign
-rosters and threads fail closed, and the encrypted style/context payload
-remains one-use. Prepared-route coverage also keeps a recovery-pinned message
+owner is selected, an accepted-milestone failure leaves the exact attempt
+route-free, one immediate concurrent replay wins on the same delivery row
+without changing its pre-event authority timestamp, foreign rosters and threads
+fail closed, and the encrypted style/context payload remains one-use even with
+less than the generic lease left before setup expiry. Prepared-route coverage
+also keeps a recovery-pinned message
 route-free when its exact claim races or disappears, instead of committing the
 first speaker as a fallback owner.
 

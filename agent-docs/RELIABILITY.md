@@ -281,7 +281,13 @@ Last verified: 2026-07-29
   admission instead of wedging the room. Hard-blocked-line recovery keeps the
   existing delivery attempt as its retry owner, awaits provider-accepted
   correlation before reporting send success, and treats an exact
-  still-uncorrelated attempt as retryable rather than definitive absence. For a
+  still-uncorrelated attempt as retryable rather than definitive absence. An
+  exact pinned recovery retries immediately through the provider's stable
+  idempotency key instead of inheriting the generic fifteen-minute
+  pre-provider lease. Its claim compares and advances the existing `updatedAt`
+  row version while preserving the original `attemptedAt` authority timestamp,
+  so one concurrent replay wins without erasing proof that recovery preceded
+  an earlier replacement-line event. For a
   newly created route, sparse style is committed in the same transaction
   through the existing
   synthetic-member preference owner. Optional room context rides the existing

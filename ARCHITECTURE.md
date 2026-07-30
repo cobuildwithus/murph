@@ -1189,7 +1189,11 @@ fields are not ownership authority. For a hard-blocked-line recovery, the
 existing delivery attempt is the retry owner: transport must durably record its
 provider-accepted milestone before reporting recovery success, and an exact
 uncorrelated attempt makes replacement-line admission retry rather than fall
-through to first-speaker ownership.
+through to first-speaker ownership. That exact pinned recovery alone bypasses
+the generic pre-provider claim lease: it replays immediately with the same
+provider idempotency key, compares and advances the row's existing `updatedAt`
+version, and preserves the original `attemptedAt` as the proof that recovery
+preceded the replacement-line event.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

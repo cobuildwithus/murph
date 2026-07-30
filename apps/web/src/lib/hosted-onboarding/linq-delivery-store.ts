@@ -1910,6 +1910,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   status: true,
   targetKind: true,
   template: true,
+  updatedAt: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
 
 function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
@@ -1934,7 +1935,7 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     messageLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
-    source: string | null;
+    source: string;
     status: string;
   };
 }): { inFlight: boolean; retryAt?: Date } {
@@ -2016,11 +2017,12 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     phoneNumberLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
-    source: string | null;
+    source: string;
     sourceRef: string | null;
     status: string;
     targetKind: string | null;
     template: string | null;
+    updatedAt: Date;
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
@@ -2041,6 +2043,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       && (
         input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
         || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
+        || (
+          input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+          && input.delivery.source !== input.source
+        )
         || input.delivery.sourceRef !== input.data.sourceRef
         || input.delivery.targetKind !== input.data.targetKind
         || input.delivery.template !== input.data.template
@@ -2061,6 +2067,50 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
+    };
+  }
+
+  // Recovery awaits provider correlation before returning, so an uncorrelated
+  // row can mean the provider succeeded but the accepted write failed. Its
+  // pinned provider idempotency key makes immediate exact replay safe.
+  if (
+    input.data.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+    && isHostedLinqDeliveryPreProvider(input.delivery)
+  ) {
+    const updated = await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        acceptedAt: null,
+        attemptedAt: input.delivery.attemptedAt,
+        deliveredAt: null,
+        failedAt: null,
+        id: input.delivery.id,
+        lastReceiptAt: null,
+        linqChatLookupKey: input.delivery.linqChatLookupKey,
+        messageLookupKey: null,
+        phoneNumberLookupKey: input.delivery.phoneNumberLookupKey,
+        skippedAt: null,
+        source: input.delivery.source,
+        sourceRef: input.delivery.sourceRef,
+        status: input.delivery.status,
+        targetKind: input.delivery.targetKind,
+        template: HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
+        updatedAt: input.delivery.updatedAt,
+      },
+      data: {
+        ...input.data,
+        // This is the authority timestamp proving that the recovery instruction
+        // preceded a replacement-line event. Provider-idempotent replay must
+        // advance only the existing row version, never this proof.
+        attemptedAt: input.delivery.attemptedAt,
+        updatedAt: new Date(Math.max(
+          input.attemptedAt.getTime(),
+          input.delivery.updatedAt.getTime() + 1,
+        )),
+      },
+    });
+    return {
+      claimed: updated.count === 1,
+      id: input.delivery.id,
     };
   }
 

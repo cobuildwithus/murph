@@ -2573,9 +2573,11 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("reclaims a stale group-line recovery row only when the pinned target matches", async () => {
+  it("immediately reclaims exact group-line recovery without rewriting its authority time", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const originalAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const originalUpdatedAt = new Date("2026-03-26T12:00:01.000Z");
+    const replayedAt = new Date("2026-03-26T12:01:00.000Z");
     const phoneNumber = "+15550100042";
     const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
     if (!phoneNumberLookupKey) {
@@ -2583,14 +2585,15 @@ describe("hosted Linq observability stores", () => {
     }
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
       buildGroupLineRecoveryDeliveryFixture({
-        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        attemptedAt: originalAttemptedAt,
         phoneNumberLookupKey,
+        updatedAt: originalUpdatedAt,
       }),
     );
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt,
+      attemptedAt: replayedAt,
       idempotencyKey: "linq-group-line-recovery:exact",
       phoneNumber,
       prisma: fixture.prisma as never,
@@ -2607,7 +2610,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          attemptedAt,
+          attemptedAt: originalAttemptedAt,
           phoneNumberLookupKey,
           sourceRef: createHostedLinqDeliverySourceRefLookupKey(
             "event_group_recovery",
@@ -2615,9 +2618,12 @@ describe("hosted Linq observability stores", () => {
           status: "attempted",
           targetKind: "participant",
           template: "group_line_recovery",
+          updatedAt: replayedAt,
         }),
         where: expect.objectContaining({
+          attemptedAt: originalAttemptedAt,
           id: "hld_group_line_recovery",
+          updatedAt: originalUpdatedAt,
         }),
       }),
     );
@@ -2636,6 +2642,12 @@ describe("hosted Linq observability stores", () => {
         sourceRef: createHostedLinqDeliverySourceRefLookupKey(
           "other_event_group_recovery",
         ),
+      },
+    },
+    {
+      label: "delivery source",
+      overrides: {
+        source: "hosted_runtime_linq_delivery",
       },
     },
     {
@@ -4442,6 +4454,7 @@ function buildGroupLineRecoveryDeliveryFixture(overrides: Partial<{
   status: string;
   targetKind: string | null;
   template: string | null;
+  updatedAt: Date;
 }> = {}) {
   return {
     acceptedAt: null,
@@ -4465,6 +4478,7 @@ function buildGroupLineRecoveryDeliveryFixture(overrides: Partial<{
     status: "attempted",
     targetKind: "participant",
     template: "group_line_recovery",
+    updatedAt: new Date("2026-03-26T12:00:01.000Z"),
     ...overrides,
   };
 }
