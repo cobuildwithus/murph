@@ -11,6 +11,41 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+INFERENCE_MODEL_LEGACY = """model HostedInferenceConnection {
+  memberId            String       @id @map("member_id")
+  protocol            String
+  configEncrypted     String       @map("config_encrypted")
+  revision            Int          @default(1)
+  contextWindowTokens Int          @map("context_window_tokens")
+  supportsImages      Boolean      @default(false) @map("supports_images")
+  verificationProfile String       @map("verification_profile")
+  verifiedAt          DateTime     @map("verified_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_inference_connection")
+}
+"""
+
+INFERENCE_MODEL = """model HostedInferenceConnection {
+  memberId            String       @id @map("member_id")
+  protocol            String
+  selected            Boolean      @default(false)
+  configEncrypted     String       @map("config_encrypted")
+  revision            Int          @default(1)
+  contextWindowTokens Int          @map("context_window_tokens")
+  supportsImages      Boolean      @default(false) @map("supports_images")
+  verificationProfile String       @map("verification_profile")
+  verifiedAt          DateTime     @map("verified_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_inference_connection")
+}
+"""
+
 
 def replace_once(path: str, old: str, new: str) -> None:
     target = ROOT / path
@@ -52,46 +87,39 @@ def patch_crypto_lane() -> None:
 
 
 def patch_prisma_schema() -> None:
-    replace_once(
-        "apps/web/prisma/schema.prisma",
-        "  codexAuthConnection            HostedCodexAuthConnection?\n",
-        "  codexAuthConnection            HostedCodexAuthConnection?\n"
-        "  inferenceConnection            HostedInferenceConnection?\n",
-    )
-    replace_once(
-        "apps/web/prisma/schema.prisma",
-        "model HostedProductFeedback {\n",
-        "model HostedInferenceConnection {\n"
-        "  memberId            String       @id @map(\"member_id\")\n"
-        "  protocol            String\n"
-        "  selected            Boolean      @default(false)\n"
-        "  configEncrypted     String       @map(\"config_encrypted\")\n"
-        "  revision            Int          @default(1)\n"
-        "  contextWindowTokens Int          @map(\"context_window_tokens\")\n"
-        "  supportsImages      Boolean      @default(false) @map(\"supports_images\")\n"
-        "  verificationProfile String       @map(\"verification_profile\")\n"
-        "  verifiedAt          DateTime     @map(\"verified_at\")\n"
-        "  createdAt           DateTime     @default(now()) @map(\"created_at\")\n"
-        "  updatedAt           DateTime     @updatedAt @map(\"updated_at\")\n"
-        "  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)\n"
-        "\n"
-        "  @@map(\"hosted_inference_connection\")\n"
-        "}\n"
-        "\n"
-        "model HostedProductFeedback {\n",
-    )
-    replace_once(
-        "apps/web/prisma/schema.prisma",
-        "model HostedInferenceConnection {\n"
-        "  memberId            String       @id @map(\"member_id\")\n"
-        "  protocol            String\n"
-        "  configEncrypted     String       @map(\"config_encrypted\")\n",
-        "model HostedInferenceConnection {\n"
-        "  memberId            String       @id @map(\"member_id\")\n"
-        "  protocol            String\n"
-        "  selected            Boolean      @default(false)\n"
-        "  configEncrypted     String       @map(\"config_encrypted\")\n",
-    )
+    schema_path = ROOT / "apps/web/prisma/schema.prisma"
+    text = schema_path.read_text()
+
+    relation = "  inferenceConnection            HostedInferenceConnection?\n"
+    if relation not in text:
+        anchor = "  codexAuthConnection            HostedCodexAuthConnection?\n"
+        if text.count(anchor) != 1:
+            raise RuntimeError("schema.prisma: inference relation anchor drifted")
+        text = text.replace(anchor, anchor + relation, 1)
+
+    model_count = text.count("model HostedInferenceConnection {")
+    if model_count == 0:
+        marker = "model HostedProductFeedback {\n"
+        if text.count(marker) != 1:
+            raise RuntimeError("schema.prisma: product feedback model anchor drifted")
+        text = text.replace(marker, INFERENCE_MODEL + "\n" + marker, 1)
+    elif model_count == 1:
+        if INFERENCE_MODEL not in text:
+            if INFERENCE_MODEL_LEGACY not in text:
+                raise RuntimeError("schema.prisma: inference model shape drifted")
+            text = text.replace(INFERENCE_MODEL_LEGACY, INFERENCE_MODEL, 1)
+    elif model_count == 2:
+        if text.count(INFERENCE_MODEL_LEGACY) != 1 or text.count(INFERENCE_MODEL) != 1:
+            raise RuntimeError("schema.prisma: unexpected duplicate inference models")
+        text = text.replace(INFERENCE_MODEL_LEGACY + "\n", "", 1)
+    else:
+        raise RuntimeError(
+            f"schema.prisma: expected at most two inference models, found {model_count}"
+        )
+
+    if text.count("model HostedInferenceConnection {") != 1:
+        raise RuntimeError("schema.prisma: inference model did not converge")
+    schema_path.write_text(text)
 
     write_exact(
         "apps/web/prisma/migrations/20260730233000_hosted_inference_connection/migration.sql",
