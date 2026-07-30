@@ -2926,7 +2926,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
         method: 'item/tool/call',
         params: {
           arguments: {
-            action: 'post_join_offer',
+            action: 'offer_access',
             projectionScopes: [
               { projectionKind: 'steps-days.v0' },
               { projectionKind: 'device-sync-status.v0' },
@@ -2937,7 +2937,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
         },
       })
       if (!permissionOfferRequest || permissionOfferRequest.kind !== 'group') {
-        throw new Error('Expected a parsed post_join_offer request.')
+        throw new Error('Expected a parsed offer_access request.')
       }
       const permissionOfferResult = await executeMurphDynamicToolRequest({
         env: {},
