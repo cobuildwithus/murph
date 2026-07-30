@@ -583,6 +583,7 @@ model HostedMember {
   clinicalRecordRetrievalRuns        ClinicalRecordRetrievalRun[]
   clinicalRecordRetrievalRequests    ClinicalRecordRetrievalRequest[]
   codexAuthConnection            HostedCodexAuthConnection?
+  inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   phoneCalls                     HostedPhoneCall[]
@@ -606,6 +607,22 @@ model HostedCodexAuthConnection {
   member          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_codex_auth_connection")
+}
+
+model HostedInferenceConnection {
+  memberId            String       @id @map("member_id")
+  protocol            String
+  configEncrypted     String       @map("config_encrypted")
+  revision            Int          @default(1)
+  contextWindowTokens Int          @map("context_window_tokens")
+  supportsImages      Boolean      @default(false) @map("supports_images")
+  verificationProfile String       @map("verification_profile")
+  verifiedAt          DateTime     @map("verified_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_inference_connection")
 }
 
 model HostedProductFeedback {
