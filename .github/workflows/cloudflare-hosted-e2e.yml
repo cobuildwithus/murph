@@ -270,6 +270,7 @@ jobs:
           apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts
           apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts
           apps/web/test/hosted-linq-rich-link-partial-postgres.test.ts
+          apps/web/test/hosted-onboarding-linq-recent-message-load-postgres.test.ts
           apps/web/test/hosted-onboarding-member-lock-postgres.test.ts
           apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
