@@ -31,6 +31,7 @@ import { ActiveExperimentBanner } from "@/src/components/overview/active-experim
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedResumableAuthState } from "@/src/components/hosted-onboarding/hosted-auth-panel";
+import { HostedPrivyReadinessState } from "@/src/components/hosted-onboarding/hosted-auth-panel-island";
 import {
   resolveAuthDialogHeaderPresentation,
 } from "@/src/components/hosted-onboarding/auth-dialog";
@@ -537,10 +538,40 @@ export function ComponentsContent() {
             data-design-homepage-auth-transitions
           >
             <p className="text-sm text-muted-foreground">
-              Account completion stays on the active production action. Its
-              response carries the consent status into the next view, so there is
-              no separate finishing notice or consent-skeleton flash.
+              Secure sign in exposes its methods only after the provider is
+              ready. Account completion then stays on the active production
+              action, carrying consent status directly into the next view.
             </p>
+            <div
+              className="grid items-start gap-5 lg:grid-cols-2"
+              data-design-homepage-auth-readiness
+              inert
+            >
+              <DialogPreviewFrame label="Provider initialization">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                  timedOut={false}
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="First provider delay">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable={false}
+                  timedOut
+                />
+              </DialogPreviewFrame>
+              <DialogPreviewFrame label="Repeated provider delay">
+                <HostedPrivyReadinessState
+                  onKeepWaiting={() => {}}
+                  onRestart={() => {}}
+                  restartAvailable
+                  timedOut
+                />
+              </DialogPreviewFrame>
+            </div>
             <div className="grid items-start gap-5 lg:grid-cols-2" inert>
               <DialogPreviewFrame label="Telegram completion">
                 <div className="grid grid-cols-2 gap-3">
