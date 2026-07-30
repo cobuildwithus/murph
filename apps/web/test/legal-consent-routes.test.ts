@@ -240,6 +240,39 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
+  it("fails the decline request when authoritative session revocation is unavailable", async () => {
+    mocks.revokeHostedAppSessionFromRequest.mockRejectedValueOnce(
+      new Error("session store unavailable"),
+    );
+    const request = new Request("https://join.example.test/api/legal/consent/decline", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    const response = await consentDeclineRoute.POST(request);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expect(mocks.recordHostedLaunchConsentDecline).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      sessionId: "session_123",
+      source: "homepage-auth-dialog",
+    });
+    expect(mocks.revokeHostedAppSessionFromRequest).toHaveBeenCalledWith({
+      reason: "consent_declined",
+      request,
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+  });
+
   it("rejects launch decline before auth when the hosted origin guard fails", async () => {
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {
       throw hostedOnboardingError({

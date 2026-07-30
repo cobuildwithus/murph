@@ -426,16 +426,14 @@ function PlanUsageBand(props: {
       <>
         <div
           aria-label="Pulse Trial AI usage"
-          className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+          className="flex flex-col gap-3 border-y border-border/80 py-4 sm:flex-row sm:items-center sm:justify-between"
         >
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              AI usage
+            <p className="text-sm font-semibold text-foreground">AI usage</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Pulse Trial · Trial ended
             </p>
-            <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-              Trial ended
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-muted-foreground">
               {hasStartAction
                 ? props.pulseTrialBillingContinuationPending
                   ? "Finishing your Pulse update."
@@ -470,52 +468,23 @@ function PlanUsageBand(props: {
       offers={props.usageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      triggerClassName="shrink-0"
+      triggerSize="sm"
     />
   ) : null;
 
   return (
     <div
       aria-label={`${status.planName} AI usage`}
-      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5"
+      className="border-y border-border/80 py-4"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            AI usage
-          </p>
-          <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-            {status.planName}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">AI usage</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {status.planName} · {periodLabel}
           </p>
         </div>
-        <p className="text-sm text-muted-foreground">{periodLabel}</p>
-      </div>
-
-      <Progress
-        aria-label={`${status.usedPercent}% used, ${status.remainingPercent}% remaining`}
-        value={status.usedPercent}
-      />
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium tabular-nums text-foreground">
-            {status.usedPercent}% used
-            <span className="font-normal text-muted-foreground">
-              {` · ${status.remainingPercent}% remaining`}
-            </span>
-          </p>
-          {status.status === "exhausted" ? (
-            <p className="text-sm text-pretty text-muted-foreground">
-              {status.planCode === "launch_group_monthly"
-                ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
-                : props.usageTopUpOffers.length > 0
-                ? "You've used all available usage. Add usage to continue."
-                : "You've used all available usage. Murph pauses new usage until more capacity is available."}
-            </p>
-          ) : forecast ? (
-            <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
-          ) : null}
-        </div>
-
         {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
           : action?.kind === "start_pulse"
@@ -533,6 +502,28 @@ function PlanUsageBand(props: {
           </UpgradeToEdgeButton>
         ) : null}
       </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <Progress
+          aria-label={`${status.usedPercent}% used, ${status.remainingPercent}% remaining`}
+          className="min-w-0 flex-1"
+          value={status.usedPercent}
+        />
+        <span className="shrink-0 text-xs font-medium tabular-nums text-foreground">
+          {status.usedPercent}% used
+        </span>
+      </div>
+      {status.status === "exhausted" ? (
+        <p className="mt-3 text-sm text-pretty text-muted-foreground">
+          {status.planCode === "launch_group_monthly"
+            ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
+            : props.usageTopUpOffers.length > 0
+              ? "You've used all available usage. Add usage to continue."
+              : "You've used all available usage. Murph pauses new usage until more capacity is available."}
+        </p>
+      ) : forecast ? (
+        <p className="mt-3 text-sm text-pretty text-muted-foreground">{forecast}</p>
+      ) : null}
       {props.usageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&
       (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
