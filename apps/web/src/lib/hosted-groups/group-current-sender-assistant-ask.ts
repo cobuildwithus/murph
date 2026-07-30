@@ -44,10 +44,6 @@ const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
 
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PATTERN =
-  /^(?:yes|yeah|yep|yup|ok|okay|sure|confirm(?:ed)?|approve(?:d)?|go ahead|please do)(?:[\s,:;.!—-]+)ask my private murph (?<subject>.+?) and share (?:the|your) (?:answer|summary) here[.!]?$/u;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_SUBJECT_MAX_CODE_POINTS = 512;
-
 export const HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT =
   "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
 
@@ -144,28 +140,6 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     });
     if (!authority) {
       return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
-    }
-
-    const disclosureIntro = await tx.hostedMember.findUnique({
-      select: { groupPrivateDisclosureIntroAcknowledgedAt: true },
-      where: { id: authority.targetMemberId },
-    });
-    if (!disclosureIntro) {
-      return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
-    }
-    if (disclosureIntro.groupPrivateDisclosureIntroAcknowledgedAt === null) {
-      if (!isHostedGroupCurrentSenderDisclosureConfirmation(authority.question)) {
-        return {
-          mailboxWake: null,
-          result: { status: "confirmation_required" },
-        };
-      }
-      await tx.hostedMember.update({
-        data: {
-          groupPrivateDisclosureIntroAcknowledgedAt: now,
-        },
-        where: { id: authority.targetMemberId },
-      });
     }
 
     const occurredAt = now.toISOString();
@@ -438,28 +412,6 @@ async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {
     }
     throw error;
   }
-}
-
-export function isHostedGroupCurrentSenderDisclosureConfirmation(
-  value: string,
-): boolean {
-  const normalized = value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replaceAll("’", "'")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const subject = HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_PATTERN
-    .exec(normalized)
-    ?.groups?.subject
-    ?.replace(/^about\s+/u, "")
-    .trim();
-  if (!subject) {
-    return false;
-  }
-  return [...subject].length
-      <= HOSTED_GROUP_CURRENT_SENDER_CONFIRMATION_SUBJECT_MAX_CODE_POINTS
-    && /[\p{L}\p{N}]/u.test(subject);
 }
 
 function createHostedGroupCurrentSenderPermissionDigest(): string {

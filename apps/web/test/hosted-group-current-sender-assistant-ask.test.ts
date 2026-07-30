@@ -11,8 +11,6 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
-  hostedMemberFindUnique: vi.fn(),
-  hostedMemberUpdate: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
@@ -27,10 +25,6 @@ const mocks = vi.hoisted(() => ({
 
 const fakeTx = {
   $executeRaw: vi.fn(async () => 0),
-  hostedMember: {
-    findUnique: mocks.hostedMemberFindUnique,
-    update: mocks.hostedMemberUpdate,
-  },
   hostedThreadContainer: {
     findUnique: mocks.hostedThreadContainerFindUnique,
   },
@@ -103,7 +97,6 @@ import {
 import {
   HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
   createHostedGroupCurrentSenderAssistantAskRequestId,
-  isHostedGroupCurrentSenderDisclosureConfirmation,
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 
@@ -228,10 +221,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.hostedThreadContainerFindUnique.mockImplementation(activeContainerLookup);
-    mocks.hostedMemberFindUnique.mockResolvedValue({
-      groupPrivateDisclosureIntroAcknowledgedAt: NOW,
-    });
-    mocks.hostedMemberUpdate.mockResolvedValue({ id: SENDER_MEMBER_ID });
     mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
       createSourceWake(),
     );
@@ -256,106 +245,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
         item: { id: input.itemId },
       }),
     );
-  });
-
-  it("requires one explicit, self-contained privacy confirmation", async () => {
-    for (const [confirmation, expected] of [
-      [
-        "Yes — ask my private Murph about my recent activity and share your summary here.",
-        true,
-      ],
-      [
-        "Yes — ask my private Murph why my sleep is not improving and share the answer here.",
-        true,
-      ],
-      ["Yes, private Murph, share.", false],
-      ["Yes, private Murph, share it here.", false],
-      ["Yes, private Murph, share that with everyone.", false],
-      ["Yes, do not share anything from my private Murph.", false],
-      [
-        "Yes, I understand, but I do not want my private Murph to share my health data here.",
-        false,
-      ],
-      ["Yes, my private Murph cannot share my health data here.", false],
-      [
-        "Yes, I refuse to let my private Murph share my sleep data here.",
-        false,
-      ],
-      ["Yes, my private Murph should share nothing about my sleep here.", false],
-    ] as const) {
-      expect(isHostedGroupCurrentSenderDisclosureConfirmation(
-        confirmation,
-      )).toBe(expected);
-    }
-    expect(isHostedGroupCurrentSenderDisclosureConfirmation(
-      `Yes — ask my private Murph about ${"a".repeat(513)} and share the answer here.`,
-    )).toBe(false);
-
-    for (const [index, denial] of [
-      "Yes, private Murph, share.",
-      "Yes, I understand, but I do not want my private Murph to share my health data here.",
-      "Yes, my private Murph cannot share my health data here.",
-      "Yes, I refuse to let my private Murph share my sleep data here.",
-      "Yes, my private Murph should share nothing about my sleep here.",
-    ].entries()) {
-      mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
-        createSourceWake({ text: denial }),
-      );
-      mocks.hostedMemberFindUnique.mockResolvedValueOnce({
-        groupPrivateDisclosureIntroAcknowledgedAt: null,
-      });
-      await expect(requestHostedGroupCurrentSenderAssistantAsk({
-        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-        now: NOW,
-        origin: {
-          ...CURRENT_SENDER_ORIGIN,
-          assistantInputId: `ain_${index.toString(16).padStart(32, "0")}`,
-        },
-      })).resolves.toEqual({
-        mailboxWake: null,
-        result: { status: "confirmation_required" },
-      });
-    }
-    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
-
-    const confirmationInputId = `ain_${"b".repeat(32)}`;
-    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
-      createSourceWake({
-        text:
-          "Yes — ask my private Murph why my sleep is not improving and share the answer here.",
-      }),
-    );
-    mocks.hostedMemberFindUnique.mockResolvedValueOnce({
-      groupPrivateDisclosureIntroAcknowledgedAt: null,
-    });
-
-    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      now: NOW,
-      origin: {
-        ...CURRENT_SENDER_ORIGIN,
-        assistantInputId: confirmationInputId,
-      },
-    });
-    const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      originAssistantInputId: confirmationInputId,
-    });
-    expect(admission).toEqual({
-      mailboxWake: {
-        expectedUserId: SENDER_MEMBER_ID,
-        mailboxItemId: requestId,
-      },
-      result: { status: "accepted" },
-    });
-    expect(mocks.hostedMemberUpdate).toHaveBeenCalledWith({
-      data: {
-        groupPrivateDisclosureIntroAcknowledgedAt: NOW,
-      },
-      where: { id: SENDER_MEMBER_ID },
-    });
-    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
   });
 
   it("derives sender, exact question, route, and reviewed authority from one stored input", async () => {

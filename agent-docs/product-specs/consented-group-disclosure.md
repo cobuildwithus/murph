@@ -45,13 +45,6 @@ disclosure authority. Linq and Telegram repeat the exact completion and
 one-time sender authority check at provider entry; stale authority durably
 replaces the reviewed answer with fixed non-disclosing text before delivery.
 
-The first use adds only one member-level education acknowledgement. Until that
-timestamp exists, `ask_current_sender` returns `confirmation_required` unless
-the exact current message explicitly confirms a self-contained request naming
-the private Murph and what may be shared. Recording the acknowledgement grants
-no standing access and does not weaken the exact-message authority of any later
-request.
-
 ## Product flow
 
 1. During an authenticated group-chat turn, group Murph calls

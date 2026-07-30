@@ -354,13 +354,6 @@ message: Web reopens the stored input, proves its author and route, and sends
 that exact text to the author's personal Murph under a one-time, self-only
 outgoing disclosure review.
 
-On `confirmation_required`, explain the boundary once, briefly: the private
-Murph will read private data, and this room's Murph will use the reviewed answer
-to reply here; the approval is only for this request and gives the room no
-ongoing access. Ask for one self-contained confirmation such as: `Yes — ask my
-private Murph about my recent activity trend and share your summary here.` Do not
-accept a bare `yes`; the confirmation must repeat what the member wants shared.
-
 After `accepted`, do not invent or preview an answer. The reviewed private
 answer returns as bounded input to this room's Murph, which resolves references
 against the existing group conversation and writes the actual user-facing

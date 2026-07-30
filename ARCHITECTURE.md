@@ -286,14 +286,6 @@ cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
 creates no group, membership, permission, grant, queue, workflow, or table and
 grants no future disclosure authority.
 
-The first accepted current-sender disclosure request records one nullable
-member-level acknowledgement timestamp. Before it exists, Web accepts only a
-self-contained explicit confirmation that names the private Murph and the
-information to be shared; otherwise the tool returns `confirmation_required`
-without creating an Assistant Ask request. The timestamp is product education,
-not disclosure authority, and every later request still derives one-time
-authority from its exact authenticated message.
-
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App

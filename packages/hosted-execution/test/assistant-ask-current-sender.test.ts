@@ -90,13 +90,6 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask_current_sender",
-      result: { status: "confirmation_required" },
-    })).toEqual({
-      action: "ask_current_sender",
-      result: { status: "confirmation_required" },
-    });
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "ask_current_sender",
       result: {
         answer: "Your sleep has been rough this week.",
         outcome: "answered",

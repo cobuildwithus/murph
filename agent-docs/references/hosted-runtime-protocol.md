@@ -613,12 +613,8 @@ is independent.
 
 The one-time `group_sender` adapter instead derives the target and fixed
 self-only permission from one exact authenticated current-sender group input.
-Before the member's education acknowledgement exists, Web returns
-`confirmation_required` unless that same input explicitly names the private
-Murph and the information to share. A valid confirmation records one nullable
-member-level acknowledgement in the request-append transaction. That timestamp
-is education state only; every request still requires a fresh exact-message
-authority and grants no standing access.
+Every request requires fresh exact-message authority and grants no standing
+access.
 
 Prepare revalidates the same authority immediately before private context is
 read and returns the exact immutable permission to the runtime. The personal
