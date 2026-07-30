@@ -16,7 +16,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
-import { HostedFamilyStartButton } from "./hosted-family-settings-actions";
+import { HostedFamilyStartButton } from "./hosted-family-start-button";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";

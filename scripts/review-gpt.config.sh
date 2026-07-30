@@ -205,7 +205,7 @@ review_gpt_register_dir_preset "pr-review" "pr-deep-review.md" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"
 review_gpt_register_dir_preset "completion-specialists" "completion-specialists.md" \
-  "Preliminary combined prompt, frontend, and coverage review for an exact pushed PR head." \
+  "Preliminary combined product-experience, prompt, frontend, and coverage review for an exact pushed PR head." \
   "completion-review" \
   "specialist-review" \
   "prompt-frontend-coverage"
